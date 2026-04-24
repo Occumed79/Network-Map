@@ -2,13 +2,14 @@
 @import 'leaflet/dist/leaflet.css';
 
 :root {
-  --bg: radial-gradient(1200px 600px at 15% 5%, #2b5cff33 0%, transparent 45%),
-    radial-gradient(900px 500px at 90% 0%, #06b6d43a 0%, transparent 44%),
-    linear-gradient(165deg, #040914 0%, #071123 55%, #050b18 100%);
-  --panel: rgba(7, 15, 31, 0.6);
-  --panel2: rgba(9, 20, 40, 0.58);
-  --border: rgba(154, 207, 255, 0.2);
-  --accent: #67e8f9;
+  --bg: radial-gradient(900px 700px at 12% 2%, #7c9bff3d 0%, transparent 56%),
+    radial-gradient(950px 680px at 92% -4%, #4cf4ff2f 0%, transparent 58%),
+    radial-gradient(1300px 900px at 50% 120%, #7d7bff22 0%, transparent 68%),
+    linear-gradient(145deg, #02050d 0%, #060f1f 42%, #050b18 100%);
+  --panel: linear-gradient(145deg, rgba(16, 30, 52, 0.62), rgba(6, 14, 28, 0.52));
+  --panel2: linear-gradient(160deg, rgba(13, 27, 48, 0.65), rgba(8, 18, 35, 0.54));
+  --border: rgba(167, 220, 255, 0.24);
+  --accent: #93f7ff;
   --green: #34d399;
   --text: #cdd9f0;
   --muted: #3d5478;
@@ -77,14 +78,22 @@ html, body, #root {
 .p-req-btn:hover { background: rgba(6,182,212,0.18); }
 
 /* ── LAYOUT ────────────────────────────────────────── */
-.app-wrap { display: flex; flex-direction: column; height: 100%; background: var(--bg); }
+.app-wrap { display: flex; flex-direction: column; height: 100%; background: var(--bg); position: relative; }
+.app-wrap::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(120deg, rgba(255,255,255,0.035), transparent 24%, transparent 74%, rgba(255,255,255,0.03));
+  mix-blend-mode: screen;
+}
 .app-header {
   height: var(--header-h); flex-shrink: 0;
   display: flex; align-items: center; padding: 0 12px; gap: 10px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
-  backdrop-filter: blur(14px) saturate(140%);
-  box-shadow: inset 0 -1px 0 rgba(255,255,255,0.06), 0 6px 28px rgba(0, 13, 35, 0.35);
+  backdrop-filter: blur(18px) saturate(170%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.15), inset 0 -1px 0 rgba(255,255,255,0.08), 0 10px 40px rgba(0, 13, 35, 0.42);
   z-index: 100;
 }
 .app-body { flex: 1; display: flex; overflow: hidden; }
@@ -94,7 +103,7 @@ html, body, #root {
   width: var(--sidebar-w); flex-shrink: 0;
   background: var(--panel2);
   border-right: 1px solid var(--border);
-  backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(20px) saturate(165%);
   overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column;
 }
 .sidebar::-webkit-scrollbar { width: 4px; }
@@ -204,6 +213,8 @@ html, body, #root {
   width: 0; flex-shrink: 0; overflow: hidden;
   background: var(--panel); border-left: 1px solid var(--border);
   transition: width 0.3s ease; display: flex; flex-direction: column;
+  backdrop-filter: blur(20px) saturate(170%);
+  box-shadow: -10px 0 35px rgba(2, 8, 23, 0.5);
 }
 .right-panel.open { width: 272px; }
 .rp-inner { width: 272px; height: 100%; overflow-y: auto; overflow-x: hidden; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
@@ -291,6 +302,8 @@ html, body, #root {
   width: 0; flex-shrink: 0; overflow: hidden;
   background: var(--panel); border-left: 1px solid var(--border);
   transition: width 0.3s ease; display: flex; flex-direction: column;
+  backdrop-filter: blur(20px) saturate(170%);
+  box-shadow: -10px 0 35px rgba(2, 8, 23, 0.5);
 }
 .live-panel.open { width: 310px; }
 .lp-inner { width: 310px; height: 100%; overflow-y: auto; overflow-x: hidden; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
@@ -312,9 +325,9 @@ html, body, #root {
 .lp-act.pri { background: rgba(59,130,246,0.08); border-color: rgba(59,130,246,0.2); color: #93c5fd; }
 .lp-act:hover { background: rgba(99,179,237,0.1); color: var(--text); }
 
-.lp-chip { padding: 3px 8px; border-radius: 3px; font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; background: transparent; border: 1px solid rgba(99,179,237,0.1); color: #3d5478; cursor: pointer; transition: all 0.12s; white-space: nowrap; }
+.lp-chip { padding: 3px 8px; border-radius: 3px; font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; background: transparent; border: 1px solid rgba(99,179,237,0.2); color: #3d5478; cursor: pointer; transition: all 0.12s; white-space: nowrap; }
 .lp-chip:hover { border-color: rgba(99,179,237,0.25); color: #7ab4e4; }
-.lp-chip.on { background: rgba(6,182,212,0.12); color: var(--accent); border-color: rgba(6,182,212,0.3); }
+.lp-chip.on { background: rgba(103,232,249,0.18); color: #d9faff; border-color: rgba(103,232,249,0.48); box-shadow: 0 0 10px rgba(103,232,249,0.2); }
 
 .lp-loading { display: none; }
 .lp-loading.show { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px; text-align: center; }
@@ -322,6 +335,14 @@ html, body, #root {
 .lp-empty { display: none; }
 .lp-empty.show { display: block; text-align: center; padding: 20px 14px; font-size: 10.5px; color: #3d5478; }
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulseRedRadius {
+  0% { filter: drop-shadow(0 0 3px rgba(239,68,68,0.35)); }
+  50% { filter: drop-shadow(0 0 10px rgba(239,68,68,0.75)); }
+  100% { filter: drop-shadow(0 0 3px rgba(239,68,68,0.35)); }
+}
+.drop-radius-ring {
+  animation: pulseRedRadius 1.6s ease-in-out infinite;
+}
 @keyframes clinic-pulse {
   0%, 100% { box-shadow: 0 0 8px var(--cp,#f472b6), 0 0 16px var(--cp,#f472b6)66, 0 0 3px rgba(0,0,0,0.5); transform: scale(1); }
   50% { box-shadow: 0 0 14px var(--cp,#f472b6), 0 0 28px var(--cp,#f472b6)88, 0 0 3px rgba(0,0,0,0.5); transform: scale(1.18); }
@@ -339,10 +360,11 @@ html, body, #root {
   padding: 5px 10px; border-radius: 3px; cursor: pointer; white-space: nowrap;
   font-family: 'IBM Plex Mono', monospace; font-size: 9px; font-weight: 700;
   background: transparent; border: 1px solid rgba(99,179,237,0.15); color: #4a6888;
-  transition: all 0.12s; letter-spacing: 0.5px;
+  transition: all 0.16s; letter-spacing: 0.5px;
+  backdrop-filter: blur(8px) saturate(130%);
 }
-.hdr-btn:hover { background: rgba(99,179,237,0.08); color: #7ab4e4; border-color: rgba(99,179,237,0.25); }
-.hdr-btn.active { background: rgba(6,182,212,0.12); color: var(--accent); border-color: rgba(6,182,212,0.3); }
+.hdr-btn:hover { background: rgba(153,228,255,0.13); color: #c1f6ff; border-color: rgba(153,228,255,0.35); box-shadow: 0 0 16px rgba(56,189,248,0.2); }
+.hdr-btn.active { background: rgba(103,232,249,0.16); color: #d8fbff; border-color: rgba(103,232,249,0.45); box-shadow: 0 0 20px rgba(56,189,248,0.28); }
 .hdr-btn.green { border-color: rgba(16,185,129,0.25); color: #34d399; }
 .hdr-btn.green:hover { background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.4); }
 .badge { display: inline-flex; align-items: center; justify-content: center; background: rgba(16,185,129,0.2); color: #34d399; border-radius: 8px; padding: 0 5px; font-size: 8.5px; min-width: 16px; height: 16px; margin-left: 3px; }

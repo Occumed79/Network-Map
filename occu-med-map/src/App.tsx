@@ -969,7 +969,7 @@ export default function App() {
         state: '',
         distanceMiles: '',
         populationEstimate: '',
-      }]);
+      }], {header:['city','state','distanceMiles','populationEstimate']});
       XLSX.utils.book_append_sheet(wb, wsCities, 'Cities');
       const wsFacilities = XLSX.utils.json_to_sheet(dropIncludeFacilities
         ? (facilities.length ? facilities : [{
@@ -988,7 +988,7 @@ export default function App() {
           phone: '',
           website: '',
         }]
-      );
+      , {header:['name','type','distanceMiles','address','phone','website']});
       XLSX.utils.book_append_sheet(wb, wsFacilities, 'Facilities');
       XLSX.writeFile(wb, `radius_extract_${new Date().toISOString().slice(0,10)}.xlsx`);
       setDropUi(prev=>({...prev, status:`Done: ${cities.length} cities/towns${dropIncludeFacilities?` and ${facilities.length} facilities`:''} exported.`}));

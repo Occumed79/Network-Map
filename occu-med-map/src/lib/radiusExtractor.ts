@@ -80,14 +80,19 @@ out center tags;`;
     try {
       onStatus?.(`Searching facilities (mirror ${i+1}/${endpoints.length})…`);
       const controller=new AbortController();
-      const timer=setTimeout(()=>controller.abort(),9000);
-      const res=await fetch(endpoints[i],{method:'POST',body:'data='+encodeURIComponent(q),signal:controller.signal});
+      const timer=setTimeout(()=>controller.abort(),14000);
+      const res=await fetch(endpoints[i],{
+        method:'POST',
+        body:'data='+encodeURIComponent(q),
+        signal:controller.signal,
+        headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'},
+      });
       clearTimeout(timer);
       if(!res.ok) continue;
       const data=await res.json();
       if(!data||!Array.isArray(data.elements)) continue;
       const seen:Record<string,boolean>={};
-      return data.elements.map((el:any)=>{
+      const rows = data.elements.map((el:any)=>{
         const la=el.lat||(el.center&&el.center.lat);
         const lo=el.lon||(el.center&&el.center.lon);
         if(!la||!lo) return null;
@@ -98,6 +103,7 @@ out center tags;`;
         const ad=[t['addr:housenumber'],t['addr:street'],t['addr:city']].filter(Boolean).join(' ');
         return{id:el.id,lat:la,lng:lo,name:nm,cat:classifyFacility(t),addr:ad,phone:t.phone||t['contact:phone']||'',website:t.website||t['contact:website']||''};
       }).filter(Boolean);
+      if(rows.length>0) return rows;
     } catch {}
   }
   return [];

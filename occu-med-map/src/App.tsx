@@ -10,7 +10,7 @@ import {
   PROCEDURE_RATES, STATE_COST_INDEX, STATE_COST_TIER,
   adjustedPrice, tierColor,
 } from './lib/procedurePrices';
-import { buildCitiesInRadius, buildFacilityRows, queryFacilitiesInRadius } from './lib/radiusExtractor';
+import { buildCitiesInRadius, buildFacilityRows, queryFacilitiesInRadius, type FacilityResult } from './lib/radiusExtractor';
 
 // ── FIPS → state abbreviation lookup ────────────────────────────────────────
 const FIPS2CODE: Record<string,string> = {
@@ -944,9 +944,9 @@ export default function App() {
     try {
       const cities = buildCitiesInRadius(dropCenter, dropRadiusMiles);
 
-      let facilities:any[] = [];
+      let facilities: ReturnType<typeof buildFacilityRows> = [];
       if (dropIncludeFacilities) {
-        const facilitiesRaw = await queryFacilitiesInRadius({
+        const facilitiesRaw: FacilityResult[] = await queryFacilitiesInRadius({
           lat: dropCenter.lat,
           lng: dropCenter.lng,
           radiusMiles: dropRadiusMiles,
@@ -955,12 +955,12 @@ export default function App() {
           onStatus: (msg) => setDropUi(prev=>({...prev, status:msg})),
         });
         if (facilitiesRaw.length) {
-          setLiveResults(facilitiesRaw.map((r:any)=>({
+          setLiveResults(facilitiesRaw.map((r)=>({
             ...r,
             dist: haversine(dropCenter.lat, dropCenter.lng, r.lat, r.lng),
           })));
         }
-        facilities = buildFacilityRows(dropCenter, facilitiesRaw, dropFacilityType, CATS as any);
+        facilities = buildFacilityRows(dropCenter, facilitiesRaw, dropFacilityType, CATS);
       }
 
       const wb = XLSX.utils.book_new();

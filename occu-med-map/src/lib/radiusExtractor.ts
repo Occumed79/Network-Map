@@ -113,7 +113,7 @@ out center tags;`;
         if(seen[key]) return null; seen[key]=true;
         const ad=[t['addr:housenumber'],t['addr:street'],t['addr:city']].filter(Boolean).join(' ');
         return{id:el.id,lat:la,lng:lo,name:nm,cat:classifyFacility(t),addr:ad,phone:t.phone||t['contact:phone']||'',website:t.website||t['contact:website']||''};
-      }).filter((row): row is FacilityResult => Boolean(row));
+      }).filter((row: FacilityResult | null): row is FacilityResult => Boolean(row));
       if(rows.length>0) return rows;
     } catch {}
   }

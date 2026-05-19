@@ -22,6 +22,16 @@ const CLIENT_ORIGINS = (process.env["CLIENT_ORIGIN"] ?? "")
 
 type RateLimitBucket = { count: number; resetAt: number };
 const rateLimitBuckets = new Map<string, RateLimitBucket>();
+const RATE_LIMIT_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, bucket] of rateLimitBuckets.entries()) {
+    if (bucket.resetAt <= now) {
+      rateLimitBuckets.delete(key);
+    }
+  }
+}, RATE_LIMIT_CLEANUP_INTERVAL_MS).unref();
 
 function getResultCount(body: unknown): number {
   if (!body || typeof body !== "object") return 0;

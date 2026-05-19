@@ -15,7 +15,6 @@ const SNAPSHOT_ROUTES = new Set([
   "/api/price-hunt",
   "/api/occ-hunt",
 ]);
-const PUBLIC_API_ROUTES = new Set(["/api/healthz"]);
 const CLIENT_ORIGINS = (process.env["CLIENT_ORIGIN"] ?? "")
   .split(",")
   .map((origin) => origin.trim())
@@ -95,8 +94,8 @@ function rateLimit({ windowMs, max }: { windowMs: number; max: number }): Reques
   };
 }
 
-const optionalTokenAuth: RequestHandler = (req, res, next) => {
-  if (!APP_ACCESS_TOKEN || !req.path.startsWith("/api") || PUBLIC_API_ROUTES.has(req.path)) {
+const protectSearchHistory: RequestHandler = (req, res, next) => {
+  if (!APP_ACCESS_TOKEN || req.path !== "/api/search-history") {
     next();
     return;
   }
@@ -144,7 +143,7 @@ app.use(
 );
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
-app.use(optionalTokenAuth);
+app.use(protectSearchHistory);
 app.use("/api/price-hunt", rateLimit({ windowMs: 10 * 60 * 1000, max: 20 }));
 app.use("/api/occ-hunt", rateLimit({ windowMs: 10 * 60 * 1000, max: 30 }));
 app.use("/api/price-finder", rateLimit({ windowMs: 10 * 60 * 1000, max: 60 }));

@@ -3,7 +3,7 @@ services:
     name: network-map
     runtime: node
     plan: free
-    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @workspace/occu-med-map build && pnpm --filter @workspace/api-server build
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @workspace/db push && pnpm --filter @workspace/occu-med-map build && pnpm --filter @workspace/api-server build
     startCommand: pnpm --filter @workspace/api-server start
     healthCheckPath: /api/healthz
     envVars:
@@ -15,6 +15,10 @@ services:
         fromDatabase:
           name: network-map-db
           property: connectionString
+      - key: CLIENT_ORIGIN
+        sync: false
+      - key: APP_ACCESS_TOKEN
+        generateValue: true
 
 databases:
   - name: network-map-db

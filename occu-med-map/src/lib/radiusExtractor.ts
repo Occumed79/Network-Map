@@ -7,15 +7,14 @@ export function estimateCityPopulationByTier(tier:number, state:string) {
   return Math.round((baseByTier[tier] || 20000) * densityFactor);
 }
 
-function approxMiles(lat1:number,lng1:number,lat2:number,lng2:number):number {
-  const dlat=lat2-lat1,dlng=lng2-lng1;
-  return Math.round(Math.sqrt(dlat*dlat+dlng*dlng)*69);
-}
-
 function haversine(lat1:number,lng1:number,lat2:number,lng2:number):number {
   const R=6371000,dL=(lat2-lat1)*Math.PI/180,dN=(lng2-lng1)*Math.PI/180;
   const a=Math.sin(dL/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dN/2)**2;
   return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+function milesBetween(lat1:number,lng1:number,lat2:number,lng2:number):number {
+  return haversine(lat1, lng1, lat2, lng2) / 1609.34;
 }
 
 export function buildCitiesInRadius(center:{lat:number;lng:number}, radiusMiles:number) {
@@ -23,7 +22,7 @@ export function buildCitiesInRadius(center:{lat:number;lng:number}, radiusMiles:
     .map((l:any)=>({
       city: l[0],
       state: l[1],
-      distanceMiles: Number(approxMiles(center.lat, center.lng, l[2], l[3]).toFixed(2)),
+      distanceMiles: Number(milesBetween(center.lat, center.lng, l[2], l[3]).toFixed(2)),
       populationEstimate: estimateCityPopulationByTier(l[4], l[1]),
     }))
     .filter((c:any)=>c.distanceMiles <= radiusMiles)
@@ -52,7 +51,7 @@ export function buildFacilityRows(
   return filteredFacilities.map((r)=>({
     name: r.name,
     type: catLabels[r.cat]?.lbl || r.cat,
-    distanceMiles: Number((haversine(center.lat, center.lng, r.lat, r.lng) / 1609.34).toFixed(2)),
+    distanceMiles: Number(milesBetween(center.lat, center.lng, r.lat, r.lng).toFixed(2)),
     address: r.addr || '',
     phone: r.phone || '',
     website: r.website || '',

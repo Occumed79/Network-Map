@@ -4,7 +4,7 @@ const router = Router();
 
 type ProviderSource = "NPI" | "OpenStreetMap" | "WebHint";
 
-type ProviderCandidate = {
+export type ProviderCandidate = {
   name: string;
   address: string;
   phone: string;
@@ -210,16 +210,16 @@ function webHints(city: string, state: string, serviceType: string): ProviderCan
   }));
 }
 
-router.get("/providers/search", async (req: Request, res: Response) => {
-  const city = String(req.query.city || "").trim();
-  const state = String(req.query.state || "").trim().toUpperCase();
-  const serviceType = String(req.query.serviceType || "").trim() || "physicalExam";
-  const radiusMiles = Number(req.query.radiusMiles || 35);
-
-  if (!city || !state) {
-    res.status(400).json({ error: "city and state are required" });
-    return;
-  }
+export async function runUnifiedProviderSearch(params: {
+  city: string;
+  state: string;
+  serviceType: string;
+  radiusMiles?: number;
+}) {
+  const city = params.city.trim();
+  const state = params.state.trim().toUpperCase();
+  const serviceType = params.serviceType.trim() || "physicalExam";
+  const radiusMiles = Number(params.radiusMiles || 35);
 
   const [npi, osm] = await Promise.all([
     searchNpi(city, state, serviceType).catch(() => []),
@@ -228,7 +228,7 @@ router.get("/providers/search", async (req: Request, res: Response) => {
   const web = webHints(city, state, serviceType);
   const results = mergeCandidates([...npi, ...osm, ...web]);
 
-  res.json({
+  return {
     location: `${city}, ${state}`,
     serviceType,
     radiusMiles: Number.isFinite(radiusMiles) ? radiusMiles : 35,
@@ -240,7 +240,22 @@ router.get("/providers/search", async (req: Request, res: Response) => {
       { source: "WebHint", count: web.length, ok: true },
     ],
     note: "Unified provider search aggregates active free sources in parallel, merges duplicates, and labels confidence. WebHint rows are search leads, not verified providers.",
-  });
+  };
+}
+
+router.get("/providers/search", async (req: Request, res: Response) => {
+  const city = String(req.query.city || "").trim();
+  const state = String(req.query.state || "").trim().toUpperCase();
+  const serviceType = String(req.query.serviceType || "").trim() || "physicalExam";
+  const radiusMiles = Number(req.query.radiusMiles || 35);
+
+  if (!city || !state) {
+    res.status(400).json({ error: "city and state are required" });
+    return;
+  }
+
+  const result = await runUnifiedProviderSearch({ city, state, serviceType, radiusMiles });
+  res.json(result);
 });
 
 export default router;

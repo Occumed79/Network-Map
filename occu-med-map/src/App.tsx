@@ -1853,12 +1853,76 @@ export default function App() {
   }
 
   // ── Live Finder ──────────────────────────────────────────────────────────
+  type LiveFinderApiProvider = {
+    source?: string;
+    endpoint?: string;
+    ok?: boolean;
+    count?: number;
+    error?: string;
+  };
+
+  type LiveFinderApiResult = {
+    id?: number|string;
+    lat?: number|string;
+    lng?: number|string;
+    name?: string;
+    cat?: string;
+    dist?: number|string;
+    addr?: string;
+    phone?: string;
+    website?: string;
+    hours?: string;
+    op?: string;
+    source?: string;
+    sourceDetail?: string;
+    tags?: any;
+  };
+
+  function normalizeLiveFinderResult(row:LiveFinderApiResult, index:number, centerLat:number, centerLng:number) {
+    const la=Number(row.lat);
+    const lo=Number(row.lng);
+    if(!Number.isFinite(la)||!Number.isFinite(lo)) return null;
+    const tags=row.tags&&typeof row.tags==='object'?row.tags:{};
+    const name=String(row.name||row.op||'Unnamed Facility');
+    const dist=Number(row.dist);
+    return {
+      id:row.id??`${name}-${la}-${lo}-${index}`,
+      lat:la,
+      lng:lo,
+      name,
+      cat:row.cat||classifyFacility(tags),
+      dist:Number.isFinite(dist)?dist:haversine(centerLat,centerLng,la,lo),
+      addr:row.addr||'',
+      phone:row.phone||'',
+      website:row.website||'',
+      hours:row.hours||'',
+      op:row.op||'',
+      source:row.source||'',
+      sourceDetail:row.sourceDetail||'',
+    };
+  }
+
+  type LiveFinderResultRow = NonNullable<ReturnType<typeof normalizeLiveFinderResult>>;
+
+  function isLiveFinderResultRow(row:LiveFinderResultRow|null): row is LiveFinderResultRow {
+    return Boolean(row);
+  }
+
+  function formatLiveProviderStatus(providers:LiveFinderApiProvider[], resultCount:number) {
+    if(!providers.length) return '';
+    const ok=providers.filter(p=>p.ok).length;
+    const total=providers.length;
+    const failed=total-ok;
+    return `Sources: ${ok}/${total} returned${failed?` · ${failed} failed`:''} · ${resultCount} facilit${resultCount===1?'y':'ies'}`;
+  }
+
   async function doLiveSearch(lat:number,lng:number) {
     const map=mapRef.current;
     if(!map) return;
     setLiveLoading(true);
     setLiveResults([]);
     setLiveHint('Searching...');
+    setLiveMirror('Querying provider sources…');
     lastRadiusRef.current={lat,lng};
 
     if(liveCircleRef.current) { try{map.removeLayer(liveCircleRef.current);}catch(e){} }
@@ -1868,64 +1932,29 @@ export default function App() {
 
     try { await revGeo(lat,lng); } catch(e){}
 
-    const r=liveRadius*1000;
-    const q=`[out:json][timeout:30];(
-  node["amenity"="hospital"](around:${r},${lat},${lng});
-  node["amenity"="clinic"](around:${r},${lat},${lng});
-  node["amenity"="doctors"](around:${r},${lat},${lng});
-  node["amenity"="pharmacy"](around:${r},${lat},${lng});
-  node["amenity"="dentist"](around:${r},${lat},${lng});
-  node["amenity"="urgent_care"](around:${r},${lat},${lng});
-  node["amenity"="nursing_home"](around:${r},${lat},${lng});
-  node["healthcare"](around:${r},${lat},${lng});
-  way["healthcare"](around:${r},${lat},${lng});
-  way["amenity"="hospital"](around:${r},${lat},${lng});
-  way["amenity"="clinic"](around:${r},${lat},${lng});
-  node["office"="physician"](around:${r},${lat},${lng});
-  node["office"="medical"](around:${r},${lat},${lng});
-  node["shop"="optician"](around:${r},${lat},${lng});
-  node["shop"="chemist"](around:${r},${lat},${lng});
-);
-out center tags;`;
-
-    let success=false;
-    for(let i=0;i<OVERPASS_ENDPOINTS.length;i++) {
-      const url=OVERPASS_ENDPOINTS[i];
-      setLiveMirror(`Trying mirror ${i+1}/${OVERPASS_ENDPOINTS.length}…`);
-      try {
-        const controller=new AbortController();
-        const timer=setTimeout(()=>controller.abort(),8000);
-        const res=await fetch(url,{method:'POST',body:'data='+encodeURIComponent(q),signal:controller.signal});
-        clearTimeout(timer);
-        if(!res.ok) throw new Error('HTTP '+res.status);
-        const data=await res.json();
-        if(!data||!Array.isArray(data.elements)) throw new Error('Bad response');
-        const seen:Record<string,boolean>={};
-        const results=data.elements.map((el:any)=>{
-          const la=el.lat||(el.center&&el.center.lat);
-          const lo=el.lon||(el.center&&el.center.lon);
-          if(!la||!lo) return null;
-          const t=el.tags||{};
-          const nm=t.name||t['name:en']||t.operator||'Unnamed Facility';
-          const key=nm.toLowerCase()+'|'+Math.round(la*500)+'|'+Math.round(lo*500);
-          if(seen[key]) return null; seen[key]=true;
-          const ad=[t['addr:housenumber'],t['addr:street'],t['addr:city']].filter(Boolean).join(' ');
-          return{id:el.id,lat:la,lng:lo,name:nm,cat:classifyFacility(t),
-            dist:haversine(lat,lng,la,lo),addr:ad,phone:t.phone||t['contact:phone']||'',
-            website:t.website||t['contact:website']||'',hours:t.opening_hours||'',op:t.operator||''};
-        }).filter(Boolean).sort((a:any,b:any)=>a.dist-b.dist);
-        setLiveResults(results);
-        renderLiveMarkers(results);
-        setLiveHint('');
-        setLiveMirror('');
-        setLiveLoading(false);
-        success=true;
-        break;
-      } catch(err) { console.warn('[LiveFinder] Mirror failed',url,err); }
-    }
-    if(!success) {
+    try {
+      const params=new URLSearchParams({
+        lat:String(lat),
+        lng:String(lng),
+        radiusMiles:String(liveRadius/1.60934),
+      });
+      const res=await fetch(`/api/live-finder/search?${params.toString()}`,{signal:AbortSignal.timeout(30000)});
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      const data=await res.json();
+      const rawResults=Array.isArray(data?.results)?data.results:[];
+      const results=rawResults
+        .map((row:LiveFinderApiResult,index:number)=>normalizeLiveFinderResult(row,index,lat,lng))
+        .filter(isLiveFinderResultRow)
+        .sort((a:LiveFinderResultRow,b:LiveFinderResultRow)=>a.dist-b.dist);
+      setLiveResults(results);
+      renderLiveMarkers(results);
+      setLiveHint('');
+      setLiveMirror(formatLiveProviderStatus(Array.isArray(data?.providers)?data.providers:[],results.length));
+    } catch(err) {
+      console.warn('[LiveFinder] Backend search failed',err);
       setLiveHint('⚠ Could not reach OpenStreetMap. Try a different location or larger radius.');
       setLiveMirror('');
+    } finally {
       setLiveLoading(false);
     }
   }
@@ -1986,7 +2015,7 @@ out center tags;`;
 
   useEffect(()=>{
     const filtered=filterAndSortLiveResults(liveResults);
-    renderLiveMarkers(filtered.length?filtered:liveResults);
+    renderLiveMarkers(filtered);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[liveFilter, liveTextFilter, liveResults, liveRegionFilter, liveSort, showGlowPoints]);
 
@@ -2314,7 +2343,7 @@ out center tags;`;
                 </label>
                 {dropCenter&&<div style={{fontSize:9,color:'#fecaca'}}>Center: {dropCenter.lat.toFixed(4)}, {dropCenter.lng.toFixed(4)}</div>}
                 <div style={{display:'flex',gap:6}}>
-                  <button className="drivetime-btn" disabled={!dropCenter} onClick={saveCurrentRadius} style={{background:'rgba(244,114,182,0.14)',borderColor:'rgba(244,114,182,0.35)',color:'#fbcfe8'}}>
+                  <button className="drivetime-btn" disabled={!dropCenter} onClick={()=>saveCurrentRadius()} style={{background:'rgba(244,114,182,0.14)',borderColor:'rgba(244,114,182,0.35)',color:'#fbcfe8'}}>
                     Save ring
                   </button>
                   <button className="drivetime-btn" disabled={!savedRadii.length} onClick={()=>setSavedRadii([])} style={{background:'rgba(148,163,184,0.14)',borderColor:'rgba(148,163,184,0.35)',color:'#cbd5e1'}}>
@@ -2568,7 +2597,7 @@ out center tags;`;
               </div>
               <div className={`lp-loading${liveLoading?' show':''}`}>
                 <div className="lp-spin"/>
-                <div style={{fontSize:10,color:'#3d5478'}}>Querying Overpass API...</div>
+                <div style={{fontSize:10,color:'#3d5478'}}>Querying provider sources...</div>
               </div>
               {!liveLoading&&liveResults.length===0&&!liveHint.startsWith('⚠')&&(
                 <div className="lp-empty show">Click anywhere on the map to search nearby facilities</div>

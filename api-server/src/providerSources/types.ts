@@ -62,6 +62,9 @@ export interface SearchAudit {
   finalMarkerCount: number;
   errorsBySource: Record<string, string>;
   durationMs: number;
+  configuredApiSources: string[];
+  missingApiSources: string[];
+  configuredButNotWired: string[];
 }
 
 export interface UnifiedSearchResponse {

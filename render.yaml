@@ -23,6 +23,52 @@ services:
         sync: false
       - key: GEOCODIO_QUATERNARY_TOKEN
         sync: false
+      - key: BROWSE_AI_API_KEY
+        sync: false
+      - key: CLOD_API_KEY
+        sync: false
+      - key: EXA_API_KEY
+        sync: false
+      - key: FIRECRAWL_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OLOSTEP_API_KEY
+        sync: false
+      - key: OPENROUTER_KEY
+        sync: false
+      - key: SERPER_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: CEREBRAS_API_KEY
+        sync: false
+      - key: LANGSEARCH_API_KEY
+        sync: false
+      - key: HUGGINGFACE_API_KEY
+        sync: false
+      - key: MINIMAX_API_KEY
+        sync: false
+      - key: PINECONE_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: BROWSERBASE_API_KEY
+        sync: false
+      - key: RAPIDAPI_ENABLED
+        sync: false
+      - key: RAPIDAPI_GEOCODING_ENABLED
+        sync: false
+      - key: RAPIDAPI_KEY
+        sync: false
+      - key: RAPIDAPI_LOCATION_LOOKUP_ENABLED
+        sync: false
+      - key: RAPIDAPI_MAP_DISPLAY_ENABLED
+        sync: false
+      - key: RAPIDAPI_PROVIDER_SEARCH_ENABLED
+        sync: false
+      - key: RAPIDAPI_ROUTING_DISTANCE_ENABLED
+        sync: false
 
 databases:
   - name: network-map-db

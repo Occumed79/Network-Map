@@ -13,6 +13,7 @@ import mapInventoryRouter from "./mapInventory";
 import indexingJobsRouter from "./indexingJobs";
 import priceDiscoveryRouter from "./priceDiscovery";
 import npiCustomSearchRouter from "./npiCustomSearch";
+import sourceStatusRouter from "./sourceStatus";
 
 const router: IRouter = Router();
 
@@ -24,6 +25,7 @@ router.use(mapInventoryRouter);
 router.use(indexingJobsRouter);
 router.use(priceDiscoveryRouter);
 router.use(npiCustomSearchRouter);
+router.use(sourceStatusRouter);
 
 // --- Legacy routes (kept as compatibility wrappers until fully migrated) ---
 router.use(providerSearchRouter);

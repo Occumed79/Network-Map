@@ -1,19 +1,49 @@
 import { Router, type Request, type Response } from "express";
-import { getDb, providersTable, providerLocationsTable, providerContactsTable, providerServicesTable, providerSourcesTable } from "@workspace/db";
-import { and, gte, lte, eq, sql, inArray } from "drizzle-orm";
+import { getPool } from "@workspace/db";
 import { isPersistenceConfigured } from "../lib/networkMapPersistence";
 
 const router = Router();
 
-function isUndefinedTableError(error: unknown): boolean {
-  const code = (error as { code?: string; cause?: { code?: string } })?.code;
-  const causeCode = (error as { cause?: { code?: string } })?.cause?.code;
-  return code === "42P01" || causeCode === "42P01";
+type TrustTier = "verified" | "registry" | "directory" | "lead";
+
+type MedicalProviderRow = {
+  id: number;
+  place_id: string;
+  name: string;
+  formatted_address: string | null;
+  lat: number;
+  lng: number;
+  category: string | null;
+  phone: string | null;
+  website: string | null;
+  country_code: string | null;
+  locality: string | null;
+  administrative_area_level_1: string | null;
+  postal_code: string | null;
+  data_source: string | null;
+  source_id: string | null;
+  source_type: string | null;
+  confidence_score: number | null;
+};
+
+function normalizeTrustTier(confidenceScore: number | null): TrustTier {
+  if (confidenceScore !== null && confidenceScore >= 0.85) return "verified";
+  if (confidenceScore !== null && confidenceScore >= 0.7) return "registry";
+  if (confidenceScore !== null && confidenceScore >= 0.5) return "directory";
+  return "lead";
+}
+
+function providerType(row: MedicalProviderRow): string {
+  return row.category || row.source_type || row.data_source || "medical_provider";
+}
+
+function sourceLabel(row: MedicalProviderRow): string {
+  return row.data_source || row.source_type || "medical_providers";
 }
 
 /**
  * GET /api/map-inventory
- * Fetch indexed providers from Neon by map viewport bounds.
+ * Fetch indexed providers from the existing medical_providers table by map viewport bounds.
  * Query params: north, south, east, west (required), serviceType (optional), trustTier (optional)
  */
 router.get("/map-inventory", async (req: Request, res: Response) => {
@@ -23,7 +53,7 @@ router.get("/map-inventory", async (req: Request, res: Response) => {
     const east = Number(req.query.east);
     const west = Number(req.query.west);
     const serviceType = req.query.serviceType as string | undefined;
-    const trustTier = req.query.trustTier as string | undefined;
+    const trustTier = req.query.trustTier as TrustTier | undefined;
     const limit = Math.min(Math.max(Number(req.query.limit) || 500, 1), 2000);
 
     if (!Number.isFinite(north) || !Number.isFinite(south) || !Number.isFinite(east) || !Number.isFinite(west)) {
@@ -36,135 +66,86 @@ router.get("/map-inventory", async (req: Request, res: Response) => {
       return;
     }
 
-    const db = getDb();
-
-    // Query provider locations within bounds — only those with verified coordinates
+    const params: Array<number | string> = [south, north, west, east];
     const conditions = [
-      gte(providerLocationsTable.lat, south),
-      lte(providerLocationsTable.lat, north),
-      gte(providerLocationsTable.lng, west),
-      lte(providerLocationsTable.lng, east),
-      sql`${providerLocationsTable.coordinateStatus} != 'unverified'`,
+      "lat BETWEEN $1 AND $2",
+      "lng BETWEEN $3 AND $4",
+      "lat IS NOT NULL",
+      "lng IS NOT NULL",
     ];
 
-    const locations = await db
-      .select({
-        locationId: providerLocationsTable.id,
-        providerId: providerLocationsTable.providerId,
-        address: providerLocationsTable.address,
-        city: providerLocationsTable.city,
-        state: providerLocationsTable.state,
-        postalCode: providerLocationsTable.postalCode,
-        lat: providerLocationsTable.lat,
-        lng: providerLocationsTable.lng,
-        coordinateStatus: providerLocationsTable.coordinateStatus,
-        providerName: providersTable.name,
-        providerNpi: providersTable.npi,
-        providerType: providersTable.providerType,
-      })
-      .from(providerLocationsTable)
-      .innerJoin(providersTable, eq(providerLocationsTable.providerId, providersTable.id))
-      .where(and(...conditions))
-      .limit(limit);
-
-    if (locations.length === 0) {
-      res.json({ providers: [], total: 0 });
-      return;
-    }
-
-    // Enrich with contacts and services
-    const providerIds = [...new Set(locations.map((l) => l.providerId))];
-    const contacts = await db.select().from(providerContactsTable)
-      .where(inArray(providerContactsTable.providerId, providerIds));
-    const services = await db.select().from(providerServicesTable)
-      .where(inArray(providerServicesTable.providerId, providerIds));
-    const sources = await db.select().from(providerSourcesTable)
-      .where(inArray(providerSourcesTable.providerId, providerIds));
-
-    const contactsByProvider = new Map<number, typeof contacts[0][]>();
-    for (const c of contacts) {
-      if (!contactsByProvider.has(c.providerId)) contactsByProvider.set(c.providerId, []);
-      contactsByProvider.get(c.providerId)!.push(c);
-    }
-
-    const servicesByProvider = new Map<number, typeof services[0][]>();
-    for (const s of services) {
-      if (!servicesByProvider.has(s.providerId)) servicesByProvider.set(s.providerId, []);
-      servicesByProvider.get(s.providerId)!.push(s);
-    }
-
-    const sourcesByProvider = new Map<number, typeof sources[0][]>();
-    for (const s of sources) {
-      if (!sourcesByProvider.has(s.providerId)) sourcesByProvider.set(s.providerId, []);
-      sourcesByProvider.get(s.providerId)!.push(s);
-    }
-
-    // Filter by serviceType if specified
-    let filteredLocations = locations;
     if (serviceType) {
-      const matchingProviderIds = new Set(
-        services
-          .filter((s) => s.serviceType === serviceType)
-          .map((s) => s.providerId),
-      );
-      filteredLocations = locations.filter((l) => matchingProviderIds.has(l.providerId));
+      params.push(serviceType);
+      const index = params.length;
+      conditions.push(`(category = $${index} OR source_type = $${index} OR data_source = $${index})`);
     }
 
-    // Filter by trustTier if specified
-    if (trustTier) {
-      const matchingProviderIds = new Set(
-        sources
-          .filter((s) => s.trustTier === trustTier)
-          .map((s) => s.providerId),
-      );
-      filteredLocations = filteredLocations.filter((l) => matchingProviderIds.has(l.providerId));
-    }
+    params.push(limit);
+    const limitIndex = params.length;
 
-    const providers = filteredLocations.map((loc) => {
-      const pContacts = contactsByProvider.get(loc.providerId) || [];
-      const pServices = servicesByProvider.get(loc.providerId) || [];
-      const pSources = sourcesByProvider.get(loc.providerId) || [];
-      const bestTrust = pSources.reduce((best, s) => {
-        const order = { verified: 0, registry: 1, directory: 2, lead: 3 };
-        return (order[s.trustTier as keyof typeof order] ?? 3) < (order[best as keyof typeof order] ?? 3) ? s.trustTier : best;
-      }, "lead" as string);
+    const query = `
+      SELECT
+        id,
+        place_id,
+        name,
+        formatted_address,
+        lat,
+        lng,
+        category,
+        phone,
+        website,
+        country_code,
+        locality,
+        administrative_area_level_1,
+        postal_code,
+        data_source,
+        source_id,
+        source_type,
+        confidence_score
+      FROM public.medical_providers
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY confidence_score DESC NULLS LAST, name ASC
+      LIMIT $${limitIndex}
+    `;
+
+    const { rows } = await getPool().query<MedicalProviderRow>(query, params);
+    const filteredRows = trustTier
+      ? rows.filter((row) => normalizeTrustTier(row.confidence_score) === trustTier)
+      : rows;
+
+    const providers = filteredRows.map((row) => {
+      const bestTrust = normalizeTrustTier(row.confidence_score);
+      const type = providerType(row);
 
       return {
-        id: loc.providerId,
-        npi: loc.providerNpi,
-        name: loc.providerName,
-        providerType: loc.providerType,
-        address: loc.address,
-        city: loc.city,
-        state: loc.state,
-        postalCode: loc.postalCode,
-        lat: loc.lat,
-        lng: loc.lng,
-        coordinateStatus: loc.coordinateStatus,
-        phone: pContacts[0]?.phone || null,
-        fax: pContacts[0]?.fax || null,
-        website: pContacts[0]?.website || null,
-        services: pServices.map((s) => s.serviceType),
+        id: row.id,
+        npi: null,
+        name: row.name,
+        providerType: type,
+        address: row.formatted_address,
+        city: row.locality,
+        state: row.administrative_area_level_1,
+        postalCode: row.postal_code,
+        lat: row.lat,
+        lng: row.lng,
+        coordinateStatus: "verified",
+        phone: row.phone,
+        fax: null,
+        website: row.website,
+        services: row.category ? [row.category] : [],
         trustTier: bestTrust,
-        sources: pSources.map((s) => ({ sourceId: s.sourceId, sourceLabel: s.sourceLabel, trustTier: s.trustTier })),
+        sources: [
+          {
+            sourceId: row.source_id || row.place_id,
+            sourceLabel: sourceLabel(row),
+            trustTier: bestTrust,
+          },
+        ],
       };
     });
 
     res.json({ providers, total: providers.length });
   } catch (e: any) {
-    if (isUndefinedTableError(e)) {
-      console.warn(
-        "[MapInventory] Provider inventory tables are not initialized — returning empty results.",
-      );
-      res.status(200).json({
-        providers: [],
-        locations: [],
-        items: [],
-        total: 0,
-        warning: "provider inventory tables are not initialized",
-      });
-      return;
-    }
     console.error("[MapInventory] Error:", e);
     res.status(500).json({ error: e.message || "Internal server error" });
   }

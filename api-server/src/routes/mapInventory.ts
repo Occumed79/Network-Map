@@ -26,6 +26,29 @@ type MedicalProviderRow = {
   confidence_score: number | null;
 };
 
+const SERVICE_TERMS: Record<string, string[]> = {
+  primaryCare: ["primary care", "family medicine", "general practice", "general practitioner", "internal medicine", "doctor", "physician", "ffd", "fitness for duty"],
+  specialist: ["specialist", "specialty", "cardiology", "pulmonary", "neurology", "orthopedic", "radiology", "audiology", "dentist"],
+  urgentCare: ["urgent care", "walk-in", "immediate care", "clinic"],
+  dental: ["dental", "dentist", "dd 2813", "dd2813"],
+  pharmacy: ["pharmacy", "rx", "drugstore"],
+  vaccinations: ["vaccination", "vaccine", "immunization", "shot clinic", "travel vaccine"],
+  occMed: ["occupational", "occupational health", "occupational medicine", "workplace health", "industrial medicine", "occ med"],
+  drugTest: ["drug test", "drug screen", "mro", "toxicology", "collection", "urine", "laboratory", "lab"],
+  audiometry: ["audiology", "audiometry", "hearing", "audiogram"],
+  vision: ["vision", "eye", "optometry", "optometrist", "ophthalmology"],
+  urgent: ["urgent care", "walk-in", "immediate care"],
+  occupational: ["occupational", "occupational health", "occupational medicine"],
+  dentist: ["dentist", "dental"],
+  radiology: ["radiology", "imaging", "x-ray", "xray", "mammogram", "ultrasound"],
+  pulmonary: ["pulmonary", "pft", "spirometry", "respiratory"],
+  lab: ["laboratory", "lab", "phlebotomy", "diagnostic", "drug screen"],
+  physio: ["physical therapy", "physiotherapy", "rehab"],
+  chiropractic: ["chiropractic", "chiropractor"],
+  audiology: ["audiology", "audiometry", "hearing"],
+  behavioral: ["behavioral", "mental health", "psychology", "psychiatry"],
+};
+
 function normalizeTrustTier(confidenceScore: number | null): TrustTier {
   if (confidenceScore !== null && confidenceScore >= 0.85) return "verified";
   if (confidenceScore !== null && confidenceScore >= 0.7) return "registry";
@@ -41,6 +64,39 @@ function sourceLabel(row: MedicalProviderRow): string {
   return row.data_source || row.source_type || "medical_providers";
 }
 
+function serviceTerms(serviceType: string | undefined): string[] {
+  if (!serviceType) return [];
+  const clean = serviceType.trim();
+  if (!clean) return [];
+  const mapped = SERVICE_TERMS[clean] || [];
+  return Array.from(new Set([clean, ...mapped].map((term) => term.toLowerCase().trim()).filter(Boolean)));
+}
+
+function addServicePresenceCondition(
+  conditions: string[],
+  params: Array<number | string>,
+  serviceType: string | undefined,
+) {
+  const terms = serviceTerms(serviceType);
+  if (!terms.length) return;
+
+  const clauses = terms.map((term) => {
+    params.push(`%${term}%`);
+    const index = params.length;
+    return `(
+      LOWER(COALESCE(category, '')) LIKE $${index}
+      OR LOWER(COALESCE(source_type, '')) LIKE $${index}
+      OR LOWER(COALESCE(data_source, '')) LIKE $${index}
+      OR LOWER(COALESCE(name, '')) LIKE $${index}
+      OR LOWER(COALESCE(formatted_address, '')) LIKE $${index}
+      OR LOWER(COALESCE(types::text, '')) LIKE $${index}
+      OR LOWER(COALESCE(raw_data::text, '')) LIKE $${index}
+    )`;
+  });
+
+  conditions.push(`(${clauses.join(" OR ")})`);
+}
+
 /**
  * GET /api/map-inventory
  * Fetch indexed providers from the existing medical_providers table by map viewport bounds.
@@ -54,7 +110,7 @@ router.get("/map-inventory", async (req: Request, res: Response) => {
     const west = Number(req.query.west);
     const serviceType = req.query.serviceType as string | undefined;
     const trustTier = req.query.trustTier as TrustTier | undefined;
-    const limit = Math.min(Math.max(Number(req.query.limit) || 500, 1), 2000);
+    const limit = Math.min(Math.max(Number(req.query.limit) || 500, 1), 2500);
 
     if (!Number.isFinite(north) || !Number.isFinite(south) || !Number.isFinite(east) || !Number.isFinite(west)) {
       res.status(400).json({ error: "Missing required bounds: north, south, east, west" });
@@ -66,19 +122,22 @@ router.get("/map-inventory", async (req: Request, res: Response) => {
       return;
     }
 
-    const params: Array<number | string> = [south, north, west, east];
+    const params: Array<number | string> = [south, north];
     const conditions = [
       "lat BETWEEN $1 AND $2",
-      "lng BETWEEN $3 AND $4",
       "lat IS NOT NULL",
       "lng IS NOT NULL",
     ];
 
-    if (serviceType) {
-      params.push(serviceType);
-      const index = params.length;
-      conditions.push(`(category = $${index} OR source_type = $${index} OR data_source = $${index})`);
+    if (west <= east) {
+      params.push(west, east);
+      conditions.push(`lng BETWEEN $${params.length - 1} AND $${params.length}`);
+    } else {
+      params.push(west, east);
+      conditions.push(`(lng >= $${params.length - 1} OR lng <= $${params.length})`);
     }
+
+    addServicePresenceCondition(conditions, params, serviceType);
 
     params.push(limit);
     const limitIndex = params.length;
@@ -132,7 +191,7 @@ router.get("/map-inventory", async (req: Request, res: Response) => {
         phone: row.phone,
         fax: null,
         website: row.website,
-        services: row.category ? [row.category] : [],
+        services: row.category ? [row.category] : serviceType ? [serviceType] : [],
         trustTier: bestTrust,
         sources: [
           {
@@ -144,7 +203,7 @@ router.get("/map-inventory", async (req: Request, res: Response) => {
       };
     });
 
-    res.json({ providers, total: providers.length });
+    res.json({ providers, total: providers.length, serviceType: serviceType || null });
   } catch (e: any) {
     console.error("[MapInventory] Error:", e);
     res.status(500).json({ error: e.message || "Internal server error" });

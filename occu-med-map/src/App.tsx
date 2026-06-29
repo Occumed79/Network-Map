@@ -915,13 +915,13 @@ export default function App() {
 
   // UI State
   const [metric, setMetric] = useState('primaryCare');
-  const [showLabels, setShowLabels] = useState(true);
+  const [showLabels, setShowLabels] = useState(false);
   const [showTZ, setShowTZ] = useState(false);
-  const [showRadius, setShowRadius] = useState(true);
+  const [showRadius, setShowRadius] = useState(false);
   const [showPopDensity, setShowPopDensity] = useState(false);
-  const [showStateColors, setShowStateColors] = useState(true);
+  const [showStateColors, setShowStateColors] = useState(false);
   const [filterDiff, setFilterDiff] = useState<number|null>(null);
-  const [showCityDots, setShowCityDots] = useState(true);
+  const [showCityDots, setShowCityDots] = useState(false);
   // Address search
   const [addrSearch, setAddrSearch] = useState('');
   const [addrLoading, setAddrLoading] = useState(false);
@@ -1005,7 +1005,7 @@ export default function App() {
   const [pendingMarkerColor, setPendingMarkerColor] = useState('#ef4444');
   const [multiDropMode, setMultiDropMode] = useState(false);
   const multiDropLayerRef = useRef<L.LayerGroup|null>(null);
-  const [showGlowPoints, setShowGlowPoints] = useState(true);
+  const [showGlowPoints, setShowGlowPoints] = useState(false);
   const [showBlueHive, setShowBlueHive] = useState(false);
   const [blueHiveData, setBlueHiveData] = useState<any[]>([]);
   const [showInventory, setShowInventory] = useState(true);
@@ -1355,6 +1355,7 @@ export default function App() {
           south: bounds.getSouth(),
           east: bounds.getEast(),
           west: bounds.getWest(),
+          serviceType: metric,
           limit: 1000,
         }).then(data=>{
           if(!ac.signal.aborted) setInventoryData(data.providers||[]);
@@ -1376,7 +1377,7 @@ export default function App() {
       if(inventoryFetchRef.current) inventoryFetchRef.current.abort();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[mapReady]);
+  },[mapReady, metric]);
 
   const activeToolRef = React.useRef(activeTool);
   React.useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
@@ -2709,10 +2710,24 @@ export default function App() {
             </div>
           </div>
           <div className="sb-section">
-            <div className="sb-lbl">SERVICE METRIC</div>
-            {ALL_METRICS.map(m=>(
-              <button key={m} className={`mbtn${metric===m?' active':''}`} onClick={()=>setMetric(m)}>
-                {MLBL[m]}
+            <div className="sb-lbl">SERVICE PRESENCE</div>
+            <div style={{fontSize:'8.5px',color:'var(--muted)',marginBottom:'8px',lineHeight:'1.3'}}>
+              Shows indexed provider locations from the database for the selected service type.
+            </div>
+            {[
+              {key:'primaryCare',label:'Primary Care / FFD'},
+              {key:'specialists',label:'Specialists'},
+              {key:'urgentCare',label:'Urgent Care'},
+              {key:'dental',label:'Dental / DD 2813'},
+              {key:'pharmacy',label:'Pharmacy'},
+              {key:'vaccinations',label:'Vaccinations'},
+              {key:'occMed',label:'Occ. Medicine'},
+              {key:'drugTest',label:'Drug Test / MRO'},
+              {key:'audiometry',label:'Audiometry'},
+              {key:'vision',label:'Vision Screening'},
+            ].map(s=>(
+              <button key={s.key} className={`mbtn${metric===s.key?' active':''}`} onClick={()=>setMetric(s.key)}>
+                {s.label}
               </button>
             ))}
           </div>

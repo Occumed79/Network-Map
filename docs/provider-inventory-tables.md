@@ -1,75 +1,87 @@
-# Provider Inventory Tables
+# Map Inventory Data Source
 
-## Problem
+## Current production source
 
-After deploying the Search Coordinator / API Governor (PR #44), Render reported
-500 errors on `GET /api/map-inventory`:
+The live Network Map database already stores uploaded provider data in:
 
+```text
+public.medical_providers
 ```
-relation "provider_locations" does not exist
+
+`/api/map-inventory` should query this existing table directly. It should not require Neon edits, compatibility views, or a separate `providers` / `provider_locations` schema just to read the uploaded BlueHive/provider data.
+
+## Why this changed
+
+After PR #44, `/api/map-inventory` was querying newer normalized tables:
+
+```text
+public.providers
+public.provider_locations
 ```
 
-This means the connected Neon database has not been initialized with the
-provider inventory tables defined in the Drizzle schema.
+The connected Neon project already had provider data, but under the existing production table name:
 
-## Expected tables
+```text
+public.medical_providers
+```
 
-All provider inventory tables are defined in `lib/db/src/schema/providers.ts`:
+That mismatch caused the route to miss the real data even though the frontend/static map data and DB upload path already existed.
 
-| Table | Purpose |
-|-------|---------|
-| `providers` | Core provider records (one row per unique provider entity) |
-| `provider_locations` | Provider addresses with lat/lng coordinates |
-| `provider_contacts` | Phone, fax, website, email per provider |
-| `provider_services` | Service types / taxonomies per provider |
-| `provider_sources` | Tracks which external sources contributed data |
-| `provider_evidence` | Specific evidence snippets about a provider's services |
-| `geocode_cache` | Cached geocode results to avoid re-geocoding |
+## Expected table
 
-## Current behavior
+The route now reads from `public.medical_providers` and maps the existing columns into the API response shape expected by the frontend.
 
-`/api/map-inventory` now **fails open** when these tables are missing. Instead
-of returning HTTP 500, it returns HTTP 200 with empty results:
+Important columns used by the route:
+
+| Column | API usage |
+|---|---|
+| `id` | Provider id |
+| `place_id` | Source id fallback |
+| `name` | Provider name |
+| `formatted_address` | Address |
+| `lat` | Latitude |
+| `lng` | Longitude |
+| `category` | Provider/service category |
+| `phone` | Phone |
+| `website` | Website |
+| `locality` | City |
+| `administrative_area_level_1` | State |
+| `postal_code` | Postal code |
+| `data_source` | Source label |
+| `source_id` | Source id |
+| `source_type` | Source type fallback |
+| `confidence_score` | Trust-tier approximation |
+
+## Route behavior
+
+`GET /api/map-inventory` queries `public.medical_providers` by viewport bounds:
+
+```text
+north
+south
+east
+west
+```
+
+Optional filters:
+
+```text
+serviceType
+trustTier
+limit
+```
+
+The API returns the same top-level response shape:
 
 ```json
 {
   "providers": [],
-  "locations": [],
-  "items": [],
-  "total": 0,
-  "warning": "provider inventory tables are not initialized"
+  "total": 0
 }
 ```
 
-This allows the frontend map to load without crashing while the database is
-being initialized.
+When matching rows exist, each provider is normalized from `medical_providers` into the frontend provider shape.
 
-## How to initialize tables in Neon
+## Do not edit Neon for this issue
 
-### Prerequisites
-
-- `DATABASE_URL` environment variable set to your Neon connection string
-- `drizzle-kit` installed (included in `@workspace/db` devDependencies)
-
-### Safe initialization (non-destructive)
-
-```bash
-cd lib/db
-DATABASE_URL="postgresql://user:pass@host/db?sslmode=require" pnpm push
-```
-
-This runs `drizzle-kit push`, which reads `drizzle.config.ts` and creates all
-tables defined in the schema. It will not drop existing tables or data.
-
-### Verifying
-
-After running the push, verify the tables exist:
-
-```sql
-SELECT table_name FROM information_schema.tables
-WHERE table_schema = 'public'
-AND table_name LIKE 'provider_%';
-```
-
-Once tables exist, `/api/map-inventory` will query them normally and return
-real provider data instead of the empty fallback.
+The correct fix is in the repo route wiring, not a database mutation. Neon already contains the uploaded provider records in `medical_providers`.

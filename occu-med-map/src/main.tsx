@@ -3,6 +3,5 @@ import App from "./App";
 import "./index.css";
 import "./professional-overrides.css";
 import "./professional-hardening.css";
-import "./tahoe-liquid-glass.css";
 
 createRoot(document.getElementById("root")!).render(<App />);

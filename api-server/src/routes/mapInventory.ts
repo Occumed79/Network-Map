@@ -5,6 +5,12 @@ import { isPersistenceConfigured } from "../lib/networkMapPersistence";
 
 const router = Router();
 
+function isUndefinedTableError(error: unknown): boolean {
+  const code = (error as { code?: string; cause?: { code?: string } })?.code;
+  const causeCode = (error as { cause?: { code?: string } })?.cause?.code;
+  return code === "42P01" || causeCode === "42P01";
+}
+
 /**
  * GET /api/map-inventory
  * Fetch indexed providers from Neon by map viewport bounds.
@@ -146,6 +152,19 @@ router.get("/map-inventory", async (req: Request, res: Response) => {
 
     res.json({ providers, total: providers.length });
   } catch (e: any) {
+    if (isUndefinedTableError(e)) {
+      console.warn(
+        "[MapInventory] Provider inventory tables are not initialized — returning empty results.",
+      );
+      res.status(200).json({
+        providers: [],
+        locations: [],
+        items: [],
+        total: 0,
+        warning: "provider inventory tables are not initialized",
+      });
+      return;
+    }
     console.error("[MapInventory] Error:", e);
     res.status(500).json({ error: e.message || "Internal server error" });
   }

@@ -1,0 +1,122 @@
+:root {
+  --sidebar-w: 360px;
+  --liquid-border: rgba(255,255,255,0.44);
+  --liquid-shadow: rgba(24,42,68,0.20);
+}
+
+.app-wrap {
+  background: radial-gradient(circle at 18% 8%, rgba(216,232,255,0.42), transparent 32%), linear-gradient(180deg, #dfeaf7 0%, #eef5fb 45%, #dfe9f5 100%) !important;
+}
+
+.map-wrap,
+#map,
+.leaflet-container {
+  background: #dfe9f5 !important;
+}
+
+.dark-tiles,
+.global-light-tiles,
+.leaflet-tile-pane {
+  filter: saturate(0.78) contrast(0.90) brightness(1.08) !important;
+  opacity: 0.96 !important;
+}
+
+.sidebar,
+.hero-card,
+.sidebar > .sb-section,
+.map-wrap > div[style*="translateX"] > div,
+.leaflet-popup-content-wrapper,
+.leaflet-tooltip,
+.lp-item,
+.rp-rec,
+.rp-alert,
+.rp-scorecard,
+.local-pop-card,
+.tz-legend {
+  background: linear-gradient(145deg, rgba(255,255,255,0.36), rgba(255,255,255,0.13)), rgba(52,74,104,0.20) !important;
+  border-color: var(--liquid-border) !important;
+  box-shadow: inset 1px 1px 0 rgba(255,255,255,0.74), inset -1px -1px 0 rgba(70,96,130,0.10), 0 22px 62px var(--liquid-shadow) !important;
+  backdrop-filter: blur(42px) saturate(220%) brightness(1.08) !important;
+  -webkit-backdrop-filter: blur(42px) saturate(220%) brightness(1.08) !important;
+}
+
+.sidebar > .sb-section:first-of-type .sb-lbl {
+  font-size: 0 !important;
+  color: transparent !important;
+}
+.sidebar > .sb-section:first-of-type .sb-lbl::after {
+  content: "SERVICE PRESENCE";
+  display: block;
+  color: rgba(248,252,255,0.94);
+  font-size: 10px;
+  line-height: 1.1;
+  letter-spacing: 0.12em;
+  font-weight: 800;
+}
+.sidebar > .sb-section:first-of-type::after {
+  content: "Shows indexed provider locations from the database for the selected service type.";
+  display: block;
+  margin-top: 8px;
+  color: rgba(236,246,255,0.66);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.mbtn,
+.hero-btn,
+.vbtn,
+.fbtn,
+.lp-chip,
+.rp-run-btn,
+.rp-assess-btn,
+.p-req-btn,
+.export-btn {
+  background: linear-gradient(145deg, rgba(255,255,255,0.34), rgba(255,255,255,0.12)), rgba(36,53,78,0.18) !important;
+  border: 1px solid rgba(255,255,255,0.38) !important;
+  color: rgba(248,252,255,0.94) !important;
+  box-shadow: inset 1px 1px 0 rgba(255,255,255,0.64), 0 12px 30px rgba(24,42,68,0.14) !important;
+}
+
+.mbtn.active,
+.hero-btn.active,
+.vbtn.active,
+.fbtn.active,
+.lp-chip.on {
+  background: linear-gradient(145deg, rgba(255,255,255,0.54), rgba(207,226,250,0.24)), rgba(178,205,238,0.24) !important;
+  border-color: rgba(255,255,255,0.62) !important;
+}
+
+.hero-title,
+.sb-lbl,
+.tog-lbl,
+.legend-lbl,
+.pcn,
+.pcs,
+.rp-field label,
+.rp-title {
+  color: rgba(248,252,255,0.94) !important;
+  text-shadow: 0 1px 10px rgba(0,0,0,0.22) !important;
+}
+
+.map-wrap > div[style*="translateX"] input {
+  color: #26384f !important;
+}
+
+.leaflet-overlay-pane .leaflet-interactive {
+  filter: saturate(0.42) brightness(1.06) opacity(0.46) !important;
+}
+
+.leaflet-control-zoom a {
+  background: linear-gradient(145deg, rgba(255,255,255,0.52), rgba(255,255,255,0.18)), rgba(220,234,250,0.38) !important;
+  color: #26384f !important;
+  border: 1px solid rgba(255,255,255,0.55) !important;
+}
+
+.leaflet-marker-icon > div[style*="#10b98155"],
+.leaflet-marker-icon > div[style*="#84cc1655"],
+.leaflet-marker-icon > div[style*="#f59e0b55"],
+.leaflet-marker-icon > div[style*="#f9731655"],
+.leaflet-marker-icon > div[style*="#ef444455"] {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}

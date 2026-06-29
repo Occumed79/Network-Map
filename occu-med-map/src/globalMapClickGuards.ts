@@ -1,23 +1,5 @@
-type MaybeElement = EventTarget | null;
-
 function textOf(el: Element | null): string {
   return (el?.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
-}
-
-function isMapBackgroundClick(target: MaybeElement): boolean {
-  if (!(target instanceof Element)) return false;
-  const map = target.closest('.leaflet-container, #map');
-  if (!map) return false;
-  if (target.closest('button, input, select, textarea, a')) return false;
-  if (target.closest('.leaflet-control, .leaflet-popup, .leaflet-tooltip, .leaflet-marker-icon')) return false;
-  return true;
-}
-
-function blockDefaultMapClick(event: Event): void {
-  if (!isMapBackgroundClick(event.target)) return;
-  event.preventDefault();
-  event.stopPropagation();
-  event.stopImmediatePropagation();
 }
 
 function isUsPoint(lat: number, lng: number): boolean {
@@ -44,7 +26,7 @@ function parseDistanceMiles(text: string): number | null {
   return Number.isFinite(miles) ? miles : null;
 }
 
-function cleanGlobalMapArtifacts(): void {
+function cleanUsOnlyArtifacts(): void {
   document.querySelectorAll('.rp-alert, [role="alert"]').forEach((node) => {
     const text = textOf(node);
     if (text.includes('could not determine city/state') || text.includes('try clicking near a city')) {
@@ -63,20 +45,19 @@ function cleanGlobalMapArtifacts(): void {
   });
 }
 
-function installGlobalMapClickGuards(): void {
-  ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick'].forEach((eventName) => {
-    document.addEventListener(eventName, blockDefaultMapClick, true);
-  });
-
-  cleanGlobalMapArtifacts();
-  new MutationObserver(cleanGlobalMapArtifacts)
+function installGlobalMapCleanup(): void {
+  // Do not intercept map clicks. The global map and live finder need coordinates.
+  // This file only removes legacy U.S.-only UI artifacts when they leak into
+  // international map interactions.
+  cleanUsOnlyArtifacts();
+  new MutationObserver(cleanUsOnlyArtifacts)
     .observe(document.body, { childList: true, subtree: true });
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', installGlobalMapClickGuards, { once: true });
+  document.addEventListener('DOMContentLoaded', installGlobalMapCleanup, { once: true });
 } else {
-  installGlobalMapClickGuards();
+  installGlobalMapCleanup();
 }
 
 export {};

@@ -48,28 +48,28 @@ export const OVERPASS_ENDPOINTS = [
   'https://corsproxy.io/?https://overpass.kumi.systems/api/interpreter'
 ];
 
-export const RADIUS_COLORS = ['#f43f5e','#f97316','#facc15','#22c55e','#06b6d4','#3b82f6','#a855f7','#ec4899'];
+export const RADIUS_COLORS = ['#8fb3d8','#9fb8cc','#b9c7d6','#9fd7b5','#b9d7ff','#c4cdeb','#d8c4ff','#d9b36e'];
 
 export const CATS: Record<string,{ico:string;col:string;lbl:string}> = {
-  hospital:{ico:'🏥',col:'#ef4444',lbl:'Hospital'},
-  clinic:  {ico:'🏨',col:'#f97316',lbl:'Clinic'},
-  urgent:  {ico:'⚡',col:'#f59e0b',lbl:'Urgent Care'},
-  doctor:  {ico:'👨‍⚕️',col:'#84cc16',lbl:'Doctor / GP'},
-  physical:{ico:'🩺',col:'#22d3ee',lbl:'Physical Exam'},
-  faa:     {ico:'✈️',col:'#38bdf8',lbl:'FAA Exam'},
-  dotmd:   {ico:'🚛',col:'#facc15',lbl:'DOT MD/DO/PA/NP'},
-  dotchiro:{ico:'🦴',col:'#fb7185',lbl:'DOT Chiropractor'},
-  mammogram:{ico:'🎀',col:'#f472b6',lbl:'Mammogram'},
-  pharmacy:{ico:'💊',col:'#10b981',lbl:'Pharmacy'},
-  dentist: {ico:'🦷',col:'#06b6d4',lbl:'Dentist'},
-  audiology:{ico:'🎧',col:'#60a5fa',lbl:'Audiology'},
-  stress:  {ico:'🫀',col:'#f97316',lbl:'Stress Test'},
-  drugscreen:{ico:'🧪',col:'#a78bfa',lbl:'Drug Screen'},
-  eye:     {ico:'👁️',col:'#3b82f6',lbl:'Eye Care'},
-  physio:  {ico:'🦴',col:'#8b5cf6',lbl:'Physical Therapy'},
-  lab:     {ico:'🧪',col:'#ec4899',lbl:'Lab / Diagnostics'},
-  blood:   {ico:'🩸',col:'#dc2626',lbl:'Blood Bank'},
-  nursing: {ico:'🏠',col:'#a78bfa',lbl:'Nursing Home'},
+  hospital:{ico:'HOSP',col:'#d99090',lbl:'Hospital'},
+  clinic:  {ico:'CLIN',col:'#d9b36e',lbl:'Clinic'},
+  urgent:  {ico:'UC',col:'#d9b36e',lbl:'Urgent Care'},
+  doctor:  {ico:'DOC',col:'#9fd7b5',lbl:'Doctor / GP'},
+  physical:{ico:'PHY',col:'#b9d7ff',lbl:'Physical Exam'},
+  faa:     {ico:'FAA',col:'#b9d7ff',lbl:'FAA Exam'},
+  dotmd:   {ico:'DOT',col:'#d9b36e',lbl:'DOT MD/DO/PA/NP'},
+  dotchiro:{ico:'CHI',col:'#d99090',lbl:'DOT Chiropractor'},
+  mammogram:{ico:'MAM',col:'#d8c4ff',lbl:'Mammogram'},
+  pharmacy:{ico:'RX',col:'#9fd7b5',lbl:'Pharmacy'},
+  dentist: {ico:'DEN',col:'#b9d7ff',lbl:'Dentist'},
+  audiology:{ico:'AUD',col:'#b9d7ff',lbl:'Audiology'},
+  stress:  {ico:'STR',col:'#d9b36e',lbl:'Stress Test'},
+  drugscreen:{ico:'DS',col:'#d8c4ff',lbl:'Drug Screen'},
+  eye:     {ico:'EYE',col:'#c4cdeb',lbl:'Eye Care'},
+  physio:  {ico:'PT',col:'#c4cdeb',lbl:'Physical Therapy'},
+  lab:     {ico:'LAB',col:'#d8c4ff',lbl:'Lab / Diagnostics'},
+  blood:   {ico:'BLD',col:'#d99090',lbl:'Blood Bank'},
+  nursing: {ico:'NH',col:'#c4cdeb',lbl:'Nursing Home'},
 };
 
 export const PROVIDER_DIRS = [

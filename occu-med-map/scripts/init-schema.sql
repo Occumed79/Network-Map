@@ -35,9 +35,14 @@ CREATE TABLE IF NOT EXISTS medical_providers (
 
 -- Create indexes
 CREATE INDEX IF NOT EXISTS idx_medical_providers_lat_lng ON medical_providers(lat, lng);
+CREATE INDEX IF NOT EXISTS idx_medical_providers_bounds ON medical_providers(lat, lng);
 CREATE INDEX IF NOT EXISTS idx_medical_providers_category ON medical_providers(category);
 CREATE INDEX IF NOT EXISTS idx_medical_providers_source_type ON medical_providers(source_type);
 CREATE INDEX IF NOT EXISTS idx_medical_providers_data_source ON medical_providers(data_source);
+CREATE INDEX IF NOT EXISTS idx_medical_providers_lower_category ON medical_providers(LOWER(category));
+CREATE INDEX IF NOT EXISTS idx_medical_providers_lower_source_type ON medical_providers(LOWER(source_type));
+CREATE INDEX IF NOT EXISTS idx_medical_providers_lower_data_source ON medical_providers(LOWER(data_source));
+CREATE INDEX IF NOT EXISTS idx_medical_providers_country_region ON medical_providers(country_code, administrative_area_level_1, locality);
 
 -- Scraping progress table
 CREATE TABLE IF NOT EXISTS scraping_progress (

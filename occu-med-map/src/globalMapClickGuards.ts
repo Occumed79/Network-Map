@@ -1,39 +1,20 @@
 type MaybeElement = EventTarget | null;
 
-const TOOL_LABELS = {
-  liveFinder: 'live finder',
-  radius: 'radius tool',
-};
-
 function textOf(el: Element | null): string {
   return (el?.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
-}
-
-function isActiveTool(label: string): boolean {
-  return Array.from(document.querySelectorAll('button.active'))
-    .some((button) => textOf(button).includes(label));
-}
-
-function isRadiusOrLiveFinderActive(): boolean {
-  return isActiveTool(TOOL_LABELS.liveFinder) || isActiveTool(TOOL_LABELS.radius);
 }
 
 function isMapBackgroundClick(target: MaybeElement): boolean {
   if (!(target instanceof Element)) return false;
   const map = target.closest('.leaflet-container, #map');
   if (!map) return false;
-
-  // Keep controls, buttons, inputs, existing markers, and popups interactive.
   if (target.closest('button, input, select, textarea, a')) return false;
   if (target.closest('.leaflet-control, .leaflet-popup, .leaflet-tooltip, .leaflet-marker-icon')) return false;
-
   return true;
 }
 
 function blockDefaultMapClick(event: Event): void {
   if (!isMapBackgroundClick(event.target)) return;
-  if (isRadiusOrLiveFinderActive()) return;
-
   event.preventDefault();
   event.stopPropagation();
   event.stopImmediatePropagation();
@@ -63,28 +44,32 @@ function parseDistanceMiles(text: string): number | null {
   return Number.isFinite(miles) ? miles : null;
 }
 
-function removeInvalidPopulationCards(): void {
+function cleanGlobalMapArtifacts(): void {
+  document.querySelectorAll('.rp-alert, [role="alert"]').forEach((node) => {
+    const text = textOf(node);
+    if (text.includes('could not determine city/state') || text.includes('try clicking near a city')) {
+      node.remove();
+    }
+  });
+
   document.querySelectorAll('.local-pop-card').forEach((card) => {
     const text = textOf(card);
     if (!text.includes('local population estimate')) return;
-
     const coords = parseLatLng(card.textContent || '');
     const distanceMiles = parseDistanceMiles(card.textContent || '');
-    const outsideUs = coords ? !isUsPoint(coords.lat, coords.lng) : false;
-    const tooFarFromUsCity = distanceMiles !== null && distanceMiles > 150;
-
-    if (outsideUs || tooFarFromUsCity) {
+    if ((coords && !isUsPoint(coords.lat, coords.lng)) || (distanceMiles !== null && distanceMiles > 150)) {
       card.remove();
     }
   });
 }
 
 function installGlobalMapClickGuards(): void {
-  document.addEventListener('click', blockDefaultMapClick, true);
-  document.addEventListener('pointerup', blockDefaultMapClick, true);
+  ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick'].forEach((eventName) => {
+    document.addEventListener(eventName, blockDefaultMapClick, true);
+  });
 
-  removeInvalidPopulationCards();
-  new MutationObserver(removeInvalidPopulationCards)
+  cleanGlobalMapArtifacts();
+  new MutationObserver(cleanGlobalMapArtifacts)
     .observe(document.body, { childList: true, subtree: true });
 }
 

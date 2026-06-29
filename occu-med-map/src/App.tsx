@@ -17,6 +17,8 @@ import { SOURCE_BADGES } from './lib/providerSources/types';
 import { buildExplanation } from './lib/providerSources/scoring';
 import { fetchMapInventory, type MapInventoryProvider } from './features/providerSearch/providerSearchClient';
 
+type ActiveTool = 'coverage' | 'liveFinder' | 'radius' | 'directories' | 'priceFinder' | 'myClinics' | 'compare' | null;
+
 type NpiCustomSearchParams = {
   city: string;
   state: string;
@@ -938,17 +940,13 @@ export default function App() {
   const [uploadProgress, setUploadProgress] = useState('');
   const [uploadColor, setUploadColor] = useState('#f472b6');
   const [uploadGroupName, setUploadGroupName] = useState('');
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  // Area prices
+    // Area prices
   const [showAreaPrices, setShowAreaPrices] = useState(false);
   const [apState, setApState] = useState('');
   const [apProcedure, setApProcedure] = useState('urgentCareL3');
   const [view, setView] = useState<'world'|'us'|'east'|'central'|'west'>('world');
-  const [rpOpen, setRpOpen] = useState(true);
-  const [liveOpen, setLiveOpen] = useState(false);
-  const [showDir, setShowDir] = useState(false);
-  const [showCompare, setShowCompare] = useState(false);
-  const [showPdf, setShowPdf] = useState(false);
+  const [activeTool, setActiveTool] = useState<ActiveTool>('coverage');
+        const [showPdf, setShowPdf] = useState(false);
   const [pdfHtml, setPdfHtml] = useState('');
   const [pdfDlName, setPdfDlName] = useState('');
 
@@ -1038,8 +1036,7 @@ export default function App() {
   }
 
   // ── Price Finder state ────────────────────────────────────────────────────
-  const [showPriceFinder, setShowPriceFinder] = useState(false);
-  const [pfCity, setPfCity] = useState('');
+    const [pfCity, setPfCity] = useState('');
   const [pfState, setPfState] = useState('');
   const [pfServiceType, setPfServiceType] = useState<'urgentCare'|'dental'|'pharmacy'|'physicalExam'|'faamedical'|'stressTest'|'mammogram'|'dotExam'|'vaccinations'>('urgentCare');
   const [pfLoading, setPfLoading] = useState(false);
@@ -1311,8 +1308,8 @@ export default function App() {
       setDropCenter({lat:e.latlng.lat,lng:e.latlng.lng});
       setDropUi(prev=>({...prev, panelOpen:true, status:''}));
       drawDropRadius(e.latlng.lat, e.latlng.lng, dropRadiusMiles);
-      if(liveOpenRef.current || liveAutoPinRef.current) {
-        if(liveAutoPinRef.current && !liveOpenRef.current) setLiveOpen(true);
+      if(activeToolRef.current === 'liveFinder' || liveAutoPinRef.current) {
+        if(liveAutoPinRef.current && activeToolRef.current !== 'liveFinder') setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder');
         doLiveSearch(e.latlng.lat, e.latlng.lng);
       }
     });
@@ -1381,8 +1378,9 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[mapReady]);
 
-  const liveOpenRef = useRef(false);
-  useEffect(()=>{ liveOpenRef.current = liveOpen; },[liveOpen]);
+  const activeToolRef = React.useRef(activeTool);
+  React.useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
+  
   const liveAutoPinRef = useRef(true);
   useEffect(()=>{ liveAutoPinRef.current = liveAutoPin; },[liveAutoPin]);
   const showStateColorsRef = useRef(showStateColors);
@@ -1647,7 +1645,7 @@ export default function App() {
       });
       mk.bindPopup(`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:170px;">
         <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${c.name}</div>
-        ${c.address?`<div style="font-size:9.5px;color:#4a6888">📍 ${c.address}${c.city?', '+c.city:''}${c.state?' '+c.state:''}${c.zip?' '+c.zip:''}</div>`:''}
+        ${c.address?`<div style="font-size:9.5px;color:#4a6888"> ${c.address}${c.city?', '+c.city:''}${c.state?' '+c.state:''}${c.zip?' '+c.zip:''}</div>`:''}
         ${c.phone?`<div style="font-size:9.5px;color:#67e8f9;margin-top:2px">📞 <a href="tel:${c.phone}" style="color:#67e8f9;text-decoration:none">${c.phone}</a></div>`:''}
         ${c.notes?`<div style="font-size:9px;color:#3d5478;margin-top:3px">${c.notes}</div>`:''}
         <div style="margin-top:6px;display:flex;gap:5px">
@@ -1674,7 +1672,7 @@ export default function App() {
       badgeLabel: 'BlueHive providers',
       buildPopup: (p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
         <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||'Unnamed'}</div>
-        ${p.address_1?`<div style="font-size:9.5px;color:#4a6888">📍 ${p.address_1}${p.city?', '+p.city:''}${p.state?' '+p.state:''}${p.zip?' '+p.zip:''}</div>`:''}
+        ${p.address_1?`<div style="font-size:9.5px;color:#4a6888"> ${p.address_1}${p.city?', '+p.city:''}${p.state?' '+p.state:''}${p.zip?' '+p.zip:''}</div>`:''}
         ${p.phone?`<div style="font-size:9.5px;color:#67e8f9;margin-top:2px">📞 <a href="tel:${p.phone}" style="color:#67e8f9;text-decoration:none">${p.phone}</a></div>`:''}
         ${p.website?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px"><a href="${p.website}" target="_blank" style="color:#93c5fd">${p.website}</a></div>`:''}
         ${p.services?`<div style="font-size:8px;color:#3d5478;margin-top:3px">${p.services}</div>`:''}
@@ -1700,7 +1698,7 @@ export default function App() {
       badgeLabel: 'dentists',
       buildPopup: (p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
         <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||'Unnamed'}</div>
-        ${p.address_1?`<div style="font-size:9.5px;color:#4a6888">📍 ${p.address_1}${p.city?', '+p.city:''}${p.state?' '+p.state:''}${p.zip?' '+p.zip:''}</div>`:''}
+        ${p.address_1?`<div style="font-size:9.5px;color:#4a6888"> ${p.address_1}${p.city?', '+p.city:''}${p.state?' '+p.state:''}${p.zip?' '+p.zip:''}</div>`:''}
         ${p.phone?`<div style="font-size:9.5px;color:#67e8f9;margin-top:2px">📞 <a href="tel:${p.phone}" style="color:#67e8f9;text-decoration:none">${p.phone}</a></div>`:''}
         ${p.npi?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px">NPI: <a href="${p.source_url}" target="_blank" style="color:#93c5fd">${p.npi}</a></div>`:''}
         ${p.taxonomy_description?`<div style="font-size:8px;color:#3d5478;margin-top:3px">${p.taxonomy_description}</div>`:''}
@@ -1729,7 +1727,7 @@ export default function App() {
         const tc = trustColor(p.trustTier);
         return `<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:210px;max-width:280px;">
         <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.name||'Unnamed'}</div>
-        ${p.address?`<div style="font-size:9.5px;color:#4a6888">📍 ${p.address}${p.city?', '+p.city:''}${p.state?' '+p.state:''}</div>`:''}
+        ${p.address?`<div style="font-size:9.5px;color:#4a6888"> ${p.address}${p.city?', '+p.city:''}${p.state?' '+p.state:''}</div>`:''}
         ${p.phone?`<div style="font-size:9.5px;color:#67e8f9;margin-top:2px">📞 <a href="tel:${p.phone}" style="color:#67e8f9;text-decoration:none">${p.phone}</a></div>`:''}
         ${p.website?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px"><a href="${p.website}" target="_blank" style="color:#93c5fd">${p.website}</a></div>`:''}
         ${p.npi?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px">NPI: <a href="https://npiregistry.cms.hhs.gov/provider-view/${p.npi}" target="_blank" style="color:#93c5fd">${p.npi}</a></div>`:''}
@@ -2151,7 +2149,7 @@ export default function App() {
           built from U.S.-only datasets and are not shown outside the United States.
           Use Live Finder below to search real facilities here via OpenStreetMap.
         </div>
-        <button className="export-btn" style={{marginBottom:8}} onClick={()=>{ setLiveOpen(true); doLiveSearch(lat,lng); }}>SEARCH LIVE PROVIDERS</button>
+        <button className="export-btn" style={{marginBottom:8}} onClick={()=>{ setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder'); doLiveSearch(lat,lng); }}>SEARCH LIVE PROVIDERS</button>
         <DriveTimeBox fromLat={lat} fromLng={lng} fromName={label} locB={null}/>
         <button className="export-btn" onClick={()=>doExportReport(rd)}>↓ EXPORT LOCATION REPORT</button>
       </div>
@@ -2362,7 +2360,7 @@ export default function App() {
       setLiveMirror(formatLiveProviderStatus(Array.isArray(data?.providers)?data.providers:[],results.length));
     } catch(err) {
       console.warn('[LiveFinder] Backend search failed',err);
-      setLiveHint('⚠ Could not reach OpenStreetMap. Try a different location or larger radius.');
+      setLiveHint(' Could not reach OpenStreetMap. Try a different location or larger radius.');
       setLiveMirror('');
     } finally {
       setLiveLoading(false);
@@ -2567,7 +2565,7 @@ export default function App() {
         <div style="display:flex;gap:7px;align-items:flex-start;margin-bottom:6px;"><span style="font-size:16px">${c.ico}</span>
         <div><div style="font-size:12.5px;font-weight:700;color:#e2f0ff;line-height:1.3">${r.name}</div>
         <div style="font-size:8.5px;font-weight:700;font-family:'IBM Plex Mono',monospace;color:${c.col};letter-spacing:1px;text-transform:uppercase;margin-top:2px">${c.lbl}</div></div></div>
-        ${r.addr?`<div style="font-size:9.5px;color:#4a6888;margin-bottom:3px;">📍 ${r.addr}</div>`:''}
+        ${r.addr?`<div style="font-size:9.5px;color:#4a6888;margin-bottom:3px;"> ${r.addr}</div>`:''}
         ${r.phone?`<div style="font-size:9.5px;color:#4a6888;margin-bottom:3px;">📞 <a href="tel:${r.phone}" style="color:#67e8f9;text-decoration:none">${r.phone}</a></div>`:''}
         ${r.hours?`<div style="font-size:9px;color:#3d5478;margin-bottom:5px;">🕐 ${r.hours}</div>`:''}
         <div style="font-size:8.5px;color:#2d3f55;margin-bottom:7px;">~${fmtDist(r.dist)} away</div>
@@ -2682,32 +2680,7 @@ export default function App() {
     <div className="app-wrap">
       <div className="cursor-light" />
 
-      {/* ── HEADER ── */}
-      <header className="app-header">
-        <div className="hdr-brand">
-          <div className="hdr-brand-dot"/>
-          <span>OCCU-MED</span>
-        </div>
-        <div className="hdr-sep"/>
-        <div className="hdr-stat"><div className="hdr-stat-v">{totalCities}</div><div className="hdr-stat-l">Cities</div></div>
-        <div className="hdr-sep"/>
-        <div className="hdr-stat"><div className="hdr-stat-v">{statesCount}</div><div className="hdr-stat-l">States</div></div>
-        <div className="hdr-sep"/>
-        <div className="hdr-stat"><div className="hdr-stat-v" style={{color:'#f97316'}}>{criticalCount}</div><div className="hdr-stat-l">Difficult+</div></div>
-        <div className="hdr-actions">
-          <button className={`hdr-btn${rpOpen?' active':''}`} onClick={()=>setRpOpen(o=>!o)}>◎ COVERAGE</button>
-          <button className={`hdr-btn${liveOpen?' active':''}`} onClick={()=>setLiveOpen(o=>!o)}>📡 LIVE FINDER</button>
-          <button className={`hdr-btn${dropUi.panelOpen?' active':''}`} style={{color:'#fca5a5'}} onClick={()=>setDropUi(prev=>({...prev, panelOpen:!prev.panelOpen}))}>⭕ RADIUS TOOL</button>
-          <button className="hdr-btn" onClick={()=>setShowDir(true)}>📁 DIRECTORIES</button>
-          <button className={`hdr-btn${showPriceFinder?' active':''}`} style={{color:'#34d399'}} onClick={()=>setShowPriceFinder(o=>!o)}>💲 PRICE FINDER</button>
-          <button className="hdr-btn" style={{color:'#f472b6'}} onClick={()=>setShowUploadModal(true)}>
-            📤 MY CLINICS{uploadedClinics.length>0&&<span className="badge" style={{background:'rgba(244,114,182,0.25)',color:'#f472b6'}}>{uploadedClinics.length}</span>}
-          </button>
-          <button className={`hdr-btn green`} onClick={()=>setShowCompare(true)}>
-            ⊞ COMPARE{pinnedCities.length>0&&<span className="badge">{pinnedCities.length}</span>}
-          </button>
-        </div>
-      </header>
+      
 
       {/* ── BODY ── */}
       <div className="app-body">
@@ -2715,18 +2688,31 @@ export default function App() {
         <aside className="sidebar">
           <div className="hero-card">
             <div className="hero-title">Occu-Med Network Command</div>
+
+          <div className="sb-section">
+            <div className="sb-lbl">NETWORK TOOLS</div>
+            <button className={`mbtn${activeTool === 'coverage' ? ' active' : ''}`} onClick={() => setActiveTool(activeTool === 'coverage' ? null : 'coverage')}>Coverage</button>
+            <button className={`mbtn${activeTool === 'liveFinder' ? ' active' : ''}`} onClick={() => setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder')}>Live Finder</button>
+            <button className={`mbtn${activeTool === 'radius' ? ' active' : ''}`} onClick={() => setActiveTool(activeTool === 'radius' ? null : 'radius')}>Radius Tool</button>
+            <button className={`mbtn${activeTool === 'directories' ? ' active' : ''}`} onClick={() => setActiveTool(activeTool === 'directories' ? null : 'directories')}>Directories</button>
+            <button className={`mbtn${activeTool === 'priceFinder' ? ' active' : ''}`} onClick={() => setActiveTool(activeTool === 'priceFinder' ? null : 'priceFinder')}>Price Finder</button>
+            <button className={`mbtn${activeTool === 'myClinics' ? ' active' : ''}`} onClick={() => setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>My Clinics</button>
+            <button className={`mbtn${activeTool === 'compare' ? ' active' : ''}`} onClick={() => setActiveTool(activeTool === 'compare' ? null : 'compare')}>Compare</button>
+          </div>
+          <div className="sb-divider"/>
+
             <div className="hero-sub">Find occupational providers, compare prices, and build smarter coverage faster.</div>
             <div className="hero-actions">
-              <button className="hero-btn" onClick={()=>setShowPriceFinder(true)}>Area Prices</button>
+              <button className="hero-btn" onClick={()=>setActiveTool(activeTool === 'priceFinder' ? null : 'priceFinder')}>Area Prices</button>
               <button className="hero-btn" onClick={()=>setShowPopDensity(v=>!v)}>Population Overlay</button>
-              <button className="hero-btn" onClick={()=>setShowUploadModal(true)}>My Clinics</button>
+              <button className="hero-btn" onClick={()=>setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>My Clinics</button>
             </div>
           </div>
           <div className="sb-section">
             <div className="sb-lbl">SERVICE METRIC</div>
             {ALL_METRICS.map(m=>(
               <button key={m} className={`mbtn${metric===m?' active':''}`} onClick={()=>setMetric(m)}>
-                <span className="mico">{MICONS[m]}</span>{MLBL[m]}
+                {MLBL[m]}
               </button>
             ))}
           </div>
@@ -2834,6 +2820,65 @@ export default function App() {
               </div>
             ))}
           </div>
+        
+          {activeTool === 'coverage' && (
+            <div className="sb-divider"/>
+          )}
+          {activeTool === 'coverage' && (
+            <div className="sb-section" style={{paddingBottom: 20}}>
+              
+              <div className="rp-header">
+                <span className="rp-title"> Coverage Request</span>
+                <button className="rp-close" onClick={()=>setActiveTool(activeTool === 'coverage' ? null : 'coverage')}>Close</button>
+              </div>
+              <div className="rp-field" style={{position:'relative'}}>
+                <label>CITY / ADDRESS / ZIP</label>
+                <input
+                  className="rp-input"
+                  placeholder="e.g. Birmingham AL"
+                  value={rpCity}
+                  onChange={e=>handleCityInput(e.target.value)}
+                  onKeyDown={e=>e.key==='Enter'&&runLookup()}
+                />
+                {rpSuggestions.length>0&&(
+                  <div className="rp-suggestions">
+                    {rpSuggestions.map((loc,i)=>(
+                      <div key={i} className="rp-sug-item" onClick={()=>selectSuggestion(loc)}>
+                        <div className="rp-sug-main">{loc[0]}, {loc[1]}</div>
+                        <div className="rp-sug-sub">{loc[4]===1?'Major Metro':loc[4]===2?'Mid-Size City':loc[4]===3?'Small City':'Rural'} · {DLBL[getVal(loc,metric)]}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="rp-field">
+                <label>EXAM / SERVICE TYPE</label>
+                <select className="rp-select" value={rpExam} onChange={e=>setRpExam(e.target.value)}>
+                  {ALL_METRICS.map(m=><option key={m} value={m}>{MLBL[m]}</option>)}
+                </select>
+              </div>
+              <button className="rp-run-btn" onClick={runLookup}>▶ ASSESS COVERAGE</button>
+              {rpResult}
+            </div>
+          )}
+          {activeTool === 'liveFinder' && (
+            <div className="sb-divider"/>
+          )}
+          {activeTool === 'liveFinder' && (
+            <div className="sb-section" style={{paddingBottom: 20}}>
+              
+            </div>
+          )}
+          {activeTool === 'radius' && (
+            <div className="sb-divider"/>
+          )}
+          {activeTool === 'radius' && (
+            <div className="sb-section" style={{paddingBottom: 20}}>
+              <span className="sb-lbl">RADIUS TOOL</span>
+              <div style={{fontSize: 11, color: 'var(--muted)', marginBottom: 10}}>Click anywhere on the map to set a radius search center.</div>
+            </div>
+          )}
+
         </aside>
 
         {/* ── MAP ── */}
@@ -2855,7 +2900,7 @@ export default function App() {
               display:'flex', alignItems:'center', gap:8, padding:'0 14px',
               pointerEvents:'auto',
             }}>
-              <span style={{fontSize:14, opacity:0.6, flexShrink:0}}>🔍</span>
+              <span style={{fontSize:14, opacity:0.6, flexShrink:0}}></span>
               <input
                 value={addrSearch}
                 onChange={e=>handleAddrInput(e.target.value)}
@@ -2869,7 +2914,7 @@ export default function App() {
               />
               {addrLoading && <div className="lp-spin" style={{width:14,height:14,flexShrink:0}}/>}
               {addrSearch && !addrLoading && (
-                <button onClick={()=>{setAddrSearch('');setAddrSuggestions([]);}} style={{background:'transparent',border:'none',color:'rgba(180,215,255,0.5)',cursor:'pointer',fontSize:16,flexShrink:0,padding:0,lineHeight:1,pointerEvents:'auto'}}>✕</button>
+                <button onClick={()=>{setAddrSearch('');setAddrSuggestions([]);}} style={{background:'transparent',border:'none',color:'rgba(180,215,255,0.5)',cursor:'pointer',fontSize:16,flexShrink:0,padding:0,lineHeight:1,pointerEvents:'auto'}}>Close</button>
               )}
             </div>
             {addrSuggestions.length>0 && (
@@ -2913,7 +2958,7 @@ export default function App() {
               <div className="local-pop-meta">{localPopInfo.lat.toFixed(4)}, {localPopInfo.lng.toFixed(4)}</div>
             </div>
           )}
-          {dropUi.panelOpen&&(
+          {(activeTool === 'radius')&&(
             <div className="local-pop-card" style={{top: dropCenter ? 184 : 96, borderColor:'rgba(252,165,165,0.35)', boxShadow:'0 10px 30px rgba(239,68,68,0.16)'}}>
               <div className="local-pop-title" style={{color:'#fecaca'}}>Radius extractor</div>
               <div className="local-pop-meta" style={{marginBottom:8,color:'#fca5a5'}}>Click map to move the center point</div>
@@ -2995,52 +3040,14 @@ export default function App() {
           )}
         </div>
 
-        {/* ── RIGHT PANEL ── */}
-        <div className={`right-panel${rpOpen?' open':''}`}>
-          {rpOpen&&(
-            <div className="rp-inner">
-              <div className="rp-header">
-                <span className="rp-title">◎ Coverage Request</span>
-                <button className="rp-close" onClick={()=>setRpOpen(false)}>✕</button>
-              </div>
-              <div className="rp-field" style={{position:'relative'}}>
-                <label>CITY / ADDRESS / ZIP</label>
-                <input
-                  className="rp-input"
-                  placeholder="e.g. Birmingham AL"
-                  value={rpCity}
-                  onChange={e=>handleCityInput(e.target.value)}
-                  onKeyDown={e=>e.key==='Enter'&&runLookup()}
-                />
-                {rpSuggestions.length>0&&(
-                  <div className="rp-suggestions">
-                    {rpSuggestions.map((loc,i)=>(
-                      <div key={i} className="rp-sug-item" onClick={()=>selectSuggestion(loc)}>
-                        <div className="rp-sug-main">{loc[0]}, {loc[1]}</div>
-                        <div className="rp-sug-sub">{loc[4]===1?'Major Metro':loc[4]===2?'Mid-Size City':loc[4]===3?'Small City':'Rural'} · {DLBL[getVal(loc,metric)]}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div className="rp-field">
-                <label>EXAM / SERVICE TYPE</label>
-                <select className="rp-select" value={rpExam} onChange={e=>setRpExam(e.target.value)}>
-                  {ALL_METRICS.map(m=><option key={m} value={m}>{MLBL[m]}</option>)}
-                </select>
-              </div>
-              <button className="rp-run-btn" onClick={runLookup}>▶ ASSESS COVERAGE</button>
-              {rpResult}
-            </div>
-          )}
-        </div>
+        
 
         {/* ── LIVE PANEL ── */}
-        <div className={`live-panel${liveOpen?' open':''}`}>
-          {liveOpen&&(
+        <div className={`live-panel${activeTool === 'liveFinder' ? ' open' : ''}`}>
+          {(activeTool === 'liveFinder')&&(
             <div className="lp-inner">
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                <span className="lp-title">📡 LIVE HEALTHCARE FINDER</span>
+                <span className="lp-title"> LIVE HEALTHCARE FINDER</span>
                 <div style={{display:'flex',gap:6,alignItems:'center'}}>
                   <button
                     onClick={exportOutreachCsv}
@@ -3048,7 +3055,7 @@ export default function App() {
                   >
                     EXPORT CSV
                   </button>
-                  <button className="rp-close" onClick={()=>setLiveOpen(false)}>✕</button>
+                  <button className="rp-close" onClick={()=>setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder')}>Close</button>
                 </div>
               </div>
               <div style={{display:'flex',gap:6}}>
@@ -3086,7 +3093,7 @@ export default function App() {
                 </div>
                 {/* ── Multi-marker drop ── */}
                 <div style={{borderTop:'1px solid rgba(252,165,165,0.15)',paddingTop:6,display:'grid',gap:5}}>
-                  <div style={{fontSize:8,color:'#fecaca',letterSpacing:'0.08em',fontFamily:"'IBM Plex Mono',monospace"}}>📍 SAVE AS NAMED MARKER</div>
+                  <div style={{fontSize:8,color:'#fecaca',letterSpacing:'0.08em',fontFamily:"'IBM Plex Mono',monospace"}}> SAVE AS NAMED MARKER</div>
                   <div style={{display:'grid',gridTemplateColumns:'1fr auto',gap:6,alignItems:'center'}}>
                     <input
                       className="drivetime-input"
@@ -3126,7 +3133,7 @@ export default function App() {
                           style={{width:48,background:'rgba(255,255,255,0.07)',border:`1px solid ${r.color}44`,borderRadius:4,color:'#eef4ff',fontSize:9,padding:'2px 4px',fontFamily:"'IBM Plex Mono',monospace",outline:'none'}}
                         />
                         <button onClick={()=>setSavedRadii(prev=>prev.filter(x=>x.id!==r.id))}
-                          style={{background:'transparent',border:'1px solid rgba(255,255,255,0.06)',borderRadius:3,color:'#3d5478',fontSize:9,padding:'2px 6px',cursor:'pointer',flexShrink:0}}>✕</button>
+                          style={{background:'transparent',border:'1px solid rgba(255,255,255,0.06)',borderRadius:3,color:'#3d5478',fontSize:9,padding:'2px 6px',cursor:'pointer',flexShrink:0}}>Close</button>
                       </div>
                     ))}
                     <button onClick={()=>setSavedRadii([])}
@@ -3205,7 +3212,7 @@ export default function App() {
                     <button key={cat} className={`lp-chip${npiCategory===cat?' on':''}`} onClick={()=>{setLiveFilter(cat);doNpiCategorySearch(cat);setShowCustomSearch(false);}}>{c.icon} {c.label}</button>
                   );
                 })}
-                <button className={`lp-chip${npiCategory==='custom'?' on':''}`} onClick={()=>{setShowCustomSearch(!showCustomSearch);setNpiCategory(null);setNpiResults([]);setNpiError('');}}>🔍 Custom</button>
+                <button className={`lp-chip${npiCategory==='custom'?' on':''}`} onClick={()=>{setShowCustomSearch(!showCustomSearch);setNpiCategory(null);setNpiResults([]);setNpiError('');}}> Custom</button>
               </div>
               
               {/* Custom NPI Search Form */}
@@ -3283,7 +3290,7 @@ export default function App() {
                     onClick={doCustomNpiSearch}
                     disabled={npiLoading}
                   >
-                    {npiLoading ? '⏳ SEARCHING...' : '🔍 SEARCH NPI REGISTRY'}
+                    {npiLoading ? '⏳ SEARCHING...' : ' SEARCH NPI REGISTRY'}
                   </button>
                 </div>
               )}
@@ -3294,7 +3301,7 @@ export default function App() {
               )}
               {npiError&&!npiLoading&&(
                 <div style={{fontSize:9,color:'#fca5a5',padding:'6px 8px',background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.25)',borderRadius:5,lineHeight:1.5}}>
-                  ⚠ {npiError}
+                   {npiError}
                 </div>
               )}
               {npiSearchMeta&&!npiLoading&&(
@@ -3318,7 +3325,7 @@ export default function App() {
               <div style={{fontSize:9,color:'#8fb3d8'}}>
                 {npiCategory
                   ? `Showing ${npiResults.length} verified candidates`
-                  : `Showing ${filterAndSortLiveResults(liveResults).length} of ${liveResults.length} OSM facilities`}
+                  : `Showing ${filterAndSortLiveResults(liveResults).length} of ${liveResults.length} Provider results`}
               </div>
               <div className={`lp-loading${(liveLoading||npiLoading)?' show':''}`}>
                 <div className="lp-spin"/>
@@ -3326,13 +3333,13 @@ export default function App() {
                   {npiLoading ? 'Querying NPI Registry...' : 'Querying provider sources...'}
                 </div>
               </div>
-              {!npiLoading&&!npiCategory&&liveResults.length===0&&!liveHint.startsWith('⚠')&&(
+              {!npiLoading&&!npiCategory&&liveResults.length===0&&!liveHint.startsWith('')&&(
                 <div className="lp-empty show">Click anywhere on the map to search nearby facilities</div>
               )}
               {!npiLoading&&npiCategory&&npiResults.length===0&&!npiError&&(
                 <div className="lp-empty show">No NPI providers found for {NPI_CATEGORY_MAP[npiCategory]?.label} in this area. Try a larger city or different category.</div>
               )}
-              {!liveLoading&&liveHint.startsWith('⚠')&&(
+              {!liveLoading&&liveHint.startsWith('')&&(
                 <div style={{padding:14,textAlign:'center',fontSize:10.5,color:'#ef4444',lineHeight:1.9}}>
                   {liveHint}
                   <br/><button style={{marginTop:8,padding:'4px 12px',borderRadius:3,background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',color:'#ef4444',fontFamily:"'IBM Plex Mono',monospace",fontSize:9,cursor:'pointer'}} onClick={()=>{if(lastRadiusRef.current)doLiveSearch(lastRadiusRef.current.lat,lastRadiusRef.current.lng);}}>↺ RETRY</button>
@@ -3351,7 +3358,7 @@ export default function App() {
                         </div>
                         <div className="lp-addr" style={{fontSize:9,color:'#4a6888'}}>{p.city ? `${p.city}, ${p.state} ${p.postalCode}` : p.address}</div>
                         {p.distanceMiles !== undefined && (
-                          <div style={{fontSize:8.5,color:'#3d5478',marginTop:2}}>📍 {p.distanceMiles.toFixed(1)} mi</div>
+                          <div style={{fontSize:8.5,color:'#3d5478',marginTop:2}}> {p.distanceMiles.toFixed(1)} mi</div>
                         )}
                         <div className="lp-tags" style={{marginTop:4,flexWrap:'wrap'}}>
                           <span className="lp-tag" style={{color:c?.color,borderColor:(c?.color||'')+'30',background:(c?.color||'')+'0d'}}>{c?.label}</span>
@@ -3430,11 +3437,11 @@ export default function App() {
       </div>
 
       {/* ── DIRECTORIES MODAL ── */}
-      <div className={`modal-backdrop${showDir?' open':''}`} onClick={()=>setShowDir(false)}>
+      <div className={`modal-backdrop${activeTool==='directories'?' open':''}`} onClick={()=>setActiveTool(activeTool === 'directories' ? null : 'directories')}>
         <div className="modal-box" style={{width:640}} onClick={e=>e.stopPropagation()}>
           <div className="modal-header">
-            <span className="modal-title">📁 PROVIDER DIRECTORIES</span>
-            <button className="modal-close" onClick={()=>setShowDir(false)}>✕</button>
+            <span className="modal-title"> PROVIDER DIRECTORIES</span>
+            <button className="modal-close" onClick={()=>setActiveTool(activeTool === 'directories' ? null : 'directories')}>Close</button>
           </div>
           <div className="modal-body">
             <div className="dir-section-lbl">OCCUPATIONAL HEALTH RESOURCES</div>
@@ -3452,12 +3459,12 @@ export default function App() {
       </div>
 
       {/* ── PRICE FINDER MODAL ── */}
-      {showPriceFinder && (
-        <div className="modal-backdrop open" onClick={()=>setShowPriceFinder(false)}>
+      {activeTool === 'priceFinder' && (
+        <div className="modal-backdrop open" onClick={()=>setActiveTool(activeTool === 'priceFinder' ? null : 'priceFinder')}>
           <div className="modal-box" style={{width:760,maxHeight:'88vh',display:'flex',flexDirection:'column'}} onClick={e=>e.stopPropagation()}>
             <div className="modal-header">
-              <span className="modal-title" style={{color:'#34d399'}}>💲 PROVIDER PRICE FINDER</span>
-              <button className="modal-close" onClick={()=>setShowPriceFinder(false)}>✕</button>
+              <span className="modal-title" style={{color:'#34d399'}}> PROVIDER PRICE FINDER</span>
+              <button className="modal-close" onClick={()=>setActiveTool(activeTool === 'priceFinder' ? null : 'priceFinder')}>Close</button>
             </div>
             <div className="modal-body" style={{flex:1,overflowY:'auto',padding:'16px 20px'}}>
 
@@ -3495,7 +3502,7 @@ export default function App() {
                 <div style={{display:'flex',alignItems:'flex-end'}}>
                   <button className="rp-assess-btn" style={{padding:'8px 18px',minWidth:90,opacity:pfLoading?0.6:1}}
                     onClick={runPriceSearch} disabled={pfLoading||!pfCity.trim()}>
-                    {pfLoading ? '⏳ SEARCHING...' : '🔍 SEARCH'}
+                    {pfLoading ? '⏳ SEARCHING...' : ' SEARCH'}
                   </button>
                 </div>
               </div>
@@ -3513,7 +3520,7 @@ export default function App() {
 
               {/* Tab bar */}
                   <div style={{display:'flex',gap:0,marginBottom:14,borderBottom:'1px solid rgba(20,50,100,0.5)',flexWrap:'wrap'}}>
-                {([['providers','📋 PROVIDERS','#67e8f9'],['compare','💰 COMPARE PRICES','#34d399'],['areaPrices','📊 AREA PRICES','#a78bfa'],['priceHunt','🎯 PRICE HUNT','#f97316'],['occHunt','🩺 OCC HUNT','#38bdf8'],['report','⭐ REPORT A PRICE','#fbbf24']] as const).map(([tab,label,col])=>(
+                {([['providers','📋 PROVIDERS','#67e8f9'],['compare','💰 COMPARE PRICES','#34d399'],['areaPrices',' AREA PRICES','#a78bfa'],['priceHunt','🎯 PRICE HUNT','#f97316'],['occHunt','🩺 OCC HUNT','#38bdf8'],['report','⭐ REPORT A PRICE','#fbbf24']] as const).map(([tab,label,col])=>(
                   <button key={tab} onClick={()=>setPfTab(tab)} style={{
                     padding:'7px 16px',background:'transparent',border:'none',
                     borderBottom:`2px solid ${pfTab===tab?col:'transparent'}`,
@@ -3538,7 +3545,7 @@ export default function App() {
               {/* Error */}
               {pfError && !pfLoading && (
                 <div style={{background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:6,padding:'10px 14px',color:'#fca5a5',fontSize:11,marginBottom:12}}>
-                  ⚠ {pfError}
+                   {pfError}
                 </div>
               )}
 
@@ -3571,7 +3578,7 @@ export default function App() {
                             <div style={{flex:1}}>
                               <div style={{fontSize:11,fontWeight:600,color:'#eef4ff',marginBottom:1}}>{c.name}</div>
                               <div style={{fontSize:8.5,color:'#4a5a7a',fontFamily:"'IBM Plex Mono',monospace",marginBottom:2}}>{c.taxonomy}</div>
-                              {c.address && <div style={{fontSize:9,color:'#5d7a9e'}}>📍 {c.address}</div>}
+                              {c.address && <div style={{fontSize:9,color:'#5d7a9e'}}> {c.address}</div>}
                               {c.phone && <div style={{fontSize:9,color:'#3d8bcd',fontFamily:"'IBM Plex Mono',monospace",marginTop:1}}>
                                 📞 <a href={`tel:${c.phone}`} style={{color:'#89d4fe',textDecoration:'none'}}>{c.phone}</a>
                               </div>}
@@ -3593,7 +3600,7 @@ export default function App() {
                   </>
                 ) : (
                   <div style={{textAlign:'center',padding:'24px 0',color:'#2a3f5e',fontSize:11,lineHeight:1.8}}>
-                    <div style={{fontSize:28,marginBottom:10}}>💲</div>
+                    <div style={{fontSize:28,marginBottom:10}}></div>
                     <div style={{color:'#3d5478',marginBottom:6}}>Enter a city above to find:</div>
                     <div style={{fontSize:10,color:'#2a3f5e'}}>
                       • Licensed providers from the federal NPI Registry<br/>
@@ -3965,7 +3972,7 @@ export default function App() {
                               <div style={{fontSize:8.5,color:'#3d5478',fontFamily:"'IBM Plex Mono',monospace"}}>{r.service} · {r.city} · {r.date}</div>
                             </div>
                             <button onClick={()=>{const n=pfReports.filter((_,j)=>j!==i);setPfReports(n);localStorage.setItem('occumed_price_reports',JSON.stringify(n));}}
-                              style={{background:'transparent',border:'1px solid rgba(255,255,255,0.06)',borderRadius:3,color:'#3d5478',fontSize:9,padding:'2px 7px',cursor:'pointer'}}>✕</button>
+                              style={{background:'transparent',border:'1px solid rgba(255,255,255,0.06)',borderRadius:3,color:'#3d5478',fontSize:9,padding:'2px 7px',cursor:'pointer'}}>Close</button>
                           </div>
                         ))}
                       </div>
@@ -3980,12 +3987,12 @@ export default function App() {
       )}
 
       {/* ── MY CLINICS / UPLOAD MODAL ── */}
-      {showUploadModal && (
-        <div className="modal-backdrop open" onClick={()=>setShowUploadModal(false)}>
+      {activeTool === 'myClinics' && (
+        <div className="modal-backdrop open" onClick={()=>setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>
           <div className="modal-box" style={{width:680,maxHeight:'85vh',display:'flex',flexDirection:'column'}} onClick={e=>e.stopPropagation()}>
             <div className="modal-header">
-              <span className="modal-title" style={{color:'#f472b6'}}>📤 MY CLINICS</span>
-              <button className="modal-close" onClick={()=>setShowUploadModal(false)}>✕</button>
+              <span className="modal-title" style={{color:'#f472b6'}}> MY CLINICS</span>
+              <button className="modal-close" onClick={()=>setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>Close</button>
             </div>
             <div className="modal-body" style={{flex:1,overflowY:'auto',padding:'16px 20px'}}>
 
@@ -4018,7 +4025,7 @@ export default function App() {
                       style={{padding:'8px 18px',background:'rgba(244,114,182,0.12)',borderColor:'rgba(244,114,182,0.3)',color:'#f472b6',opacity:uploadLoading?0.6:1}}
                       disabled={uploadLoading}
                       onClick={()=>clinicFileInputRef.current?.click()}>
-                      {uploadLoading ? '⏳ PROCESSING...' : '📁 CHOOSE FILE (.xlsx / .csv)'}
+                      {uploadLoading ? '⏳ PROCESSING...' : ' CHOOSE FILE (.xlsx / .csv)'}
                     </button>
                     <input ref={clinicFileInputRef} type="file" accept=".xlsx,.xls,.csv" style={{display:'none'}}
                       onChange={handleClinicUpload} />
@@ -4047,7 +4054,7 @@ export default function App() {
               {/* Clinic Groups list */}
               {clinicGroups.length===0 ? (
                 <div style={{textAlign:'center',padding:'24px 0',color:'#2a3f5e',fontSize:10,lineHeight:1.8}}>
-                  <div style={{fontSize:28,marginBottom:10}}>📍</div>
+                  <div style={{fontSize:28,marginBottom:10}}></div>
                   No clinics uploaded yet.<br/>
                   Upload a spreadsheet to see glowing pins on the map.
                 </div>
@@ -4073,7 +4080,7 @@ export default function App() {
                         </label>
                         {/* Delete group */}
                         <button onClick={()=>setClinicGroups(prev=>{const n=prev.filter(g=>g.id!==grp.id);localStorage.setItem('clinic_groups',JSON.stringify(n));return n;})}
-                          style={{background:'transparent',border:'1px solid rgba(255,255,255,0.06)',borderRadius:3,color:'#3d5478',fontSize:9,padding:'2px 7px',cursor:'pointer',flexShrink:0}}>✕</button>
+                          style={{background:'transparent',border:'1px solid rgba(255,255,255,0.06)',borderRadius:3,color:'#3d5478',fontSize:9,padding:'2px 7px',cursor:'pointer',flexShrink:0}}>Close</button>
                       </div>
                       {/* Clinic rows (collapsible - show first 5) */}
                       <div style={{maxHeight:180,overflowY:'auto',padding:'6px 10px',display:'flex',flexDirection:'column',gap:3}}>
@@ -4084,7 +4091,7 @@ export default function App() {
                               <div style={{fontSize:10,fontWeight:600,color:'#eef4ff',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.name}</div>
                               <div style={{fontSize:8.5,color:'#3d5478',fontFamily:"'IBM Plex Mono',monospace",overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
                                 {[c.city,c.state].filter(Boolean).join(', ')||c.address||'No address'}
-                                {c.lat!==null?<span style={{color:'#34d399',marginLeft:4}}>✓</span>:<span style={{color:'#f97316',marginLeft:4}}>⚠</span>}
+                                {c.lat!==null?<span style={{color:'#34d399',marginLeft:4}}>✓</span>:<span style={{color:'#f97316',marginLeft:4}}></span>}
                               </div>
                             </div>
                           </div>
@@ -4101,12 +4108,12 @@ export default function App() {
       )}
 
       {/* ── COMPARE MODAL ── */}
-      <div className={`modal-backdrop${showCompare?' open':''}`} onClick={()=>setShowCompare(false)}>
+      <div className={`modal-backdrop${activeTool === 'compare' ? ' open' : ''}`} onClick={()=>setActiveTool(activeTool === 'compare' ? null : 'compare')}>
         <div className="modal-box" style={{width:Math.min(900,pinnedCities.length*160+200)}} onClick={e=>e.stopPropagation()}>
           <div className="modal-header">
-            <span className="modal-title">⊞ CITY COMPARISON</span>
+            <span className="modal-title"> CITY COMPARISON</span>
             <span style={{fontSize:10,color:'#3d5478',marginLeft:10}}>{pinnedCities.length} of 5 cities pinned</span>
-            <button className="modal-close" onClick={()=>setShowCompare(false)}>✕</button>
+            <button className="modal-close" onClick={()=>setActiveTool(activeTool === 'compare' ? null : 'compare')}>Close</button>
           </div>
           <div className="modal-body">
             {pinnedCities.length===0?(
@@ -4119,7 +4126,7 @@ export default function App() {
                       <div className="cmp-pin-dot" style={{background:DCOL[getVal(p,metric)]}}/>
                       <span className="cmp-pin-name">{p[0]}, {p[1]}</span>
                       <span style={{fontSize:9,color:DCOL[getVal(p,metric)],fontFamily:'IBM Plex Mono,monospace'}}>{DLBL[getVal(p,metric)]}</span>
-                      <button className="cmp-pin-rm" onClick={()=>setPinnedCities(prev=>prev.filter((_,j)=>j!==i))}>✕</button>
+                      <button className="cmp-pin-rm" onClick={()=>setPinnedCities(prev=>prev.filter((_,j)=>j!==i))}>Close</button>
                     </div>
                   ))}
                 </div>
@@ -4180,7 +4187,7 @@ export default function App() {
             <div style={{display:'flex',gap:10}}>
               <button style={{padding:'7px 18px',borderRadius:3,fontFamily:"'IBM Plex Mono',monospace",fontSize:9,fontWeight:700,cursor:'pointer',letterSpacing:1.5,textTransform:'uppercase',border:'1px solid rgba(6,182,212,0.4)',background:'rgba(6,182,212,0.15)',color:'#89d4fe'}} onClick={()=>{const b=new Blob([pdfHtml],{type:'text/html'});const u=URL.createObjectURL(b);window.open(u,'_blank');}}>↗ OPEN IN NEW TAB</button>
               <button style={{padding:'7px 18px',borderRadius:3,fontFamily:"'IBM Plex Mono',monospace",fontSize:9,fontWeight:700,cursor:'pointer',letterSpacing:1.5,textTransform:'uppercase',border:'1px solid rgba(59,130,246,0.4)',background:'rgba(59,130,246,0.15)',color:'#93c5fd'}} onClick={()=>{const b=new Blob([pdfHtml],{type:'text/html'});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=pdfDlName;document.body.appendChild(a);a.click();setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(u);},1000);}}>↓ DOWNLOAD HTML</button>
-              <button style={{padding:'7px 14px',background:'transparent',color:'#4a6888',border:'1px solid rgba(255,255,255,0.08)',borderRadius:3,fontFamily:"'IBM Plex Mono',monospace",fontSize:9,cursor:'pointer'}} onClick={()=>setShowPdf(false)}>✕ Close</button>
+              <button style={{padding:'7px 14px',background:'transparent',color:'#4a6888',border:'1px solid rgba(255,255,255,0.08)',borderRadius:3,fontFamily:"'IBM Plex Mono',monospace",fontSize:9,cursor:'pointer'}} onClick={()=>setShowPdf(false)}>Close</button>
             </div>
           </div>
           <div className="pdf-tip" onClick={e=>e.stopPropagation()}><strong style={{color:'#93c5fd'}}>To save as PDF:</strong> Click "Open in New Tab" → then Ctrl+P / ⌘+P → Save as PDF. Or use "Download HTML" to save the file.</div>
@@ -4295,7 +4302,7 @@ function NearestEasier({items,onFly}:{items:any[];onFly:(lat:number,lng:number,n
       <div style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:8.5,color:'#3d5478',letterSpacing:1.5,marginBottom:7}}>NEAREST EASIER CITIES</div>
       {items.map((r,i)=>{
         const col=DCOL[r.v];
-        const tierIcon=r.tier===1?'◉':r.tier===2?'◎':'○';
+        const tierIcon=r.tier===1?'◉':r.tier===2?'':'○';
         return (
           <div key={i} className="nearer-row" onClick={()=>onFly(r.lat,r.lng,r.name,r.state,r.v,'primaryCare')}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>

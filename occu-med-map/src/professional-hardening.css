@@ -158,6 +158,67 @@ body.professional-network-map [data-emoji] {
   display: none !important;
 }
 
+/* Emergency production correction: no washed-out UI, no default legacy difficulty grid. */
+.app-wrap {
+  background: linear-gradient(180deg, #172334 0%, #101a29 100%) !important;
+}
+
+.map-wrap,
+#map,
+.leaflet-container {
+  background: #182635 !important;
+}
+
+.dark-tiles,
+.leaflet-tile-pane {
+  filter: saturate(0.72) contrast(0.90) brightness(0.76) !important;
+  opacity: 0.95 !important;
+}
+
+.sidebar,
+.hero-card,
+.sidebar > .sb-section {
+  background: linear-gradient(145deg, rgba(255,255,255,0.14), rgba(255,255,255,0.045)), rgba(15, 24, 38, 0.72) !important;
+  border-color: rgba(232,244,255,0.28) !important;
+  box-shadow: inset 1px 1px 0 rgba(255,255,255,0.22), 0 22px 58px rgba(0,0,0,0.28) !important;
+  backdrop-filter: blur(28px) saturate(160%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(160%) !important;
+}
+
+.sidebar > .sb-section:first-of-type .sb-lbl {
+  font-size: 0 !important;
+  color: transparent !important;
+}
+.sidebar > .sb-section:first-of-type .sb-lbl::after {
+  content: "SERVICE PRESENCE";
+  display: block;
+  color: rgba(246,250,255,0.94);
+  font-size: 10px;
+  line-height: 1.1;
+  letter-spacing: 0.12em;
+  font-weight: 800;
+}
+.sidebar > .sb-section:first-of-type::after {
+  content: "Indexed provider locations from the database by selected service type.";
+  display: block;
+  margin-top: 8px;
+  color: rgba(226,238,252,0.66);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.leaflet-marker-icon > div[style*="font-family:'IBM Plex Mono'"] {
+  display: none !important;
+}
+
+.leaflet-marker-icon > div[style*="#10b981"],
+.leaflet-marker-icon > div[style*="#84cc16"],
+.leaflet-marker-icon > div[style*="#f59e0b"],
+.leaflet-marker-icon > div[style*="#f97316"],
+.leaflet-marker-icon > div[style*="#ef4444"] {
+  display: none !important;
+}
+
 @media (max-width: 900px) {
   .sidebar {
     flex: 0 0 310px !important;

@@ -1,4 +1,4 @@
-/* Final production hardening layer: clean layout, restrained map evidence, readable sidebar. */
+/* Production hardening layer: readable command layout without map color noise. */
 
 .sidebar {
   display: flex !important;
@@ -121,14 +121,20 @@
   filter: saturate(0.52) brightness(1.02) !important;
 }
 
-.leaflet-overlay-pane .leaflet-interactive {
-  filter: saturate(0.58) brightness(0.95) !important;
+/* The default map must not look like a U.S. difficulty/risk map. */
+.leaflet-overlay-pane path.leaflet-interactive {
+  fill: transparent !important;
+  fill-opacity: 0 !important;
+  stroke: rgba(184, 203, 226, 0.18) !important;
+  stroke-opacity: 0.34 !important;
+  stroke-width: 0.8 !important;
+  filter: none !important;
 }
 
 .leaflet-overlay-pane svg circle,
 .leaflet-overlay-pane svg path[stroke="#22d3ee"],
 .leaflet-overlay-pane svg path[stroke="#06b6d4"] {
-  opacity: 0.32 !important;
+  opacity: 0.16 !important;
 }
 
 .leaflet-tooltip,
@@ -156,6 +162,13 @@
 body.professional-network-map .emoji,
 body.professional-network-map [data-emoji] {
   display: none !important;
+}
+
+/* Keep accidental right-side tool panes from owning the default map. */
+.live-panel.open,
+.right-panel.open {
+  max-width: 310px !important;
+  opacity: 0.94 !important;
 }
 
 @media (max-width: 900px) {

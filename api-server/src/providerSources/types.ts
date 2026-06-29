@@ -1,3 +1,5 @@
+import type { SearchMode, SearchCoordinatorAudit } from "./searchCoordinator";
+
 export type CoordinateStatus = "imported" | "geocoded" | "unverified";
 export type TrustTier = "verified" | "registry" | "directory" | "lead";
 
@@ -46,6 +48,7 @@ export interface SearchParams {
   serviceType: string;
   centerLat: number;
   centerLng: number;
+  mode?: SearchMode;
 }
 
 export interface SourceResult {
@@ -70,6 +73,7 @@ export interface SearchAudit {
   configuredApiSources: string[];
   missingApiSources: string[];
   configuredButNotWired: string[];
+  searchCoordinator?: SearchCoordinatorAudit;
 }
 
 export interface UnifiedSearchResponse {

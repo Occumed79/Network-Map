@@ -234,6 +234,12 @@ const WEB_EVIDENCE_SOURCES: WebEvidenceSource[] = [
   { name: "Firecrawl", envVar: "FIRECRAWL_API_KEY", search: searchFirecrawl },
 ];
 
+export interface WebEvidenceOptions {
+  maxSources?: number;
+  maxAiEnrichments?: number;
+  allowAiEnrichment?: boolean;
+}
+
 export function hasConfiguredWebEvidenceSource(): boolean {
   return WEB_EVIDENCE_SOURCES.some((source) => isConfigured(source.envVar));
 }
@@ -277,10 +283,12 @@ function makeCandidate(sourceName: string, result: WebSearchResult, city: string
   };
 }
 
-async function enrichCandidatesWithAi(candidates: ProviderCandidate[], serviceType: string): Promise<ProviderCandidate[]> {
+async function enrichCandidatesWithAi(candidates: ProviderCandidate[], serviceType: string, overrideLimit?: number): Promise<ProviderCandidate[]> {
   if (process.env.WEB_EVIDENCE_AI_EXTRACTION === "false" || !hasConfiguredAiExtractionSource()) return candidates;
 
-  const limit = Math.min(Math.max(Number(process.env.WEB_EVIDENCE_AI_EXTRACTION_LIMIT || 3), 0), 10);
+  const limit = overrideLimit !== undefined
+    ? Math.min(Math.max(overrideLimit, 0), 10)
+    : Math.min(Math.max(Number(process.env.WEB_EVIDENCE_AI_EXTRACTION_LIMIT || 3), 0), 10);
   if (limit === 0) return candidates;
 
   const enriched: ProviderCandidate[] = [];
@@ -344,12 +352,21 @@ async function enrichCandidatesWithAi(candidates: ProviderCandidate[], serviceTy
  * Unified web evidence adapter that tries multiple configured search APIs.
  * Returns low-trust provider candidates extracted from web search results.
  */
-export async function searchWebEvidence(city: string, state: string, serviceType: string, _params: SearchParams): Promise<ProviderCandidate[]> {
+export async function searchWebEvidence(
+  city: string,
+  state: string,
+  serviceType: string,
+  _params: SearchParams,
+  options?: WebEvidenceOptions,
+): Promise<ProviderCandidate[]> {
   const query = buildEvidenceQuery(city, state, serviceType);
   const allCandidates: ProviderCandidate[] = [];
   const configuredSources = WEB_EVIDENCE_SOURCES.filter((source) => isConfigured(source.envVar));
 
-  for (const source of configuredSources) {
+  const maxSources = options?.maxSources ?? configuredSources.length;
+  const sourcesToRun = configuredSources.slice(0, maxSources);
+
+  for (const source of sourcesToRun) {
     const result = await source.search(query);
 
     if (result.error) {
@@ -363,6 +380,15 @@ export async function searchWebEvidence(city: string, state: string, serviceType
   }
 
   const deduped = dedupeWebCandidates(allCandidates);
+
+  const allowAi = options?.allowAiEnrichment !== false;
+  if (!allowAi) return deduped;
+
+  const aiLimit = options?.maxAiEnrichments;
+  if (aiLimit !== undefined) {
+    return enrichCandidatesWithAi(deduped, serviceType, aiLimit);
+  }
+
   return enrichCandidatesWithAi(deduped, serviceType);
 }
 

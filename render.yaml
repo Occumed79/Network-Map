@@ -111,6 +111,34 @@ services:
         sync: false
       - key: WEB_EVIDENCE_AI_EXTRACTION_LIMIT
         sync: false
+      - key: SEARCH_COORDINATOR_ENABLED
+        sync: false
+      - key: SEARCH_DEFAULT_MODE
+        sync: false
+      - key: SEARCH_MIN_TOTAL_RESULTS
+        sync: false
+      - key: SEARCH_MIN_VERIFIED_COORDINATES
+        sync: false
+      - key: SEARCH_MIN_HIGH_TRUST_RESULTS
+        sync: false
+      - key: SEARCH_MIN_ADDRESS_COVERAGE_PCT
+        sync: false
+      - key: SEARCH_MIN_PHONE_COVERAGE_PCT
+        sync: false
+      - key: SEARCH_MAX_DUPLICATE_RATE_PCT
+        sync: false
+      - key: SEARCH_MIN_AVG_SCORE
+        sync: false
+      - key: SEARCH_MAX_WEB_EVIDENCE_SOURCES
+        sync: false
+      - key: SEARCH_MAX_AI_ENRICHMENTS
+        sync: false
+      - key: SEARCH_ALLOW_BROWSER_EXTRACTION
+        sync: false
+      - key: SEARCH_ALLOW_VECTOR_QUERY
+        sync: false
+      - key: SEARCH_MAX_TOTAL_EXTERNAL_CALLS
+        sync: false
 
 databases:
   - name: network-map-db

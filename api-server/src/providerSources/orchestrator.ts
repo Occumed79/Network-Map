@@ -1,13 +1,19 @@
-import type { ProviderCandidate, SearchParams, SourceResult, SearchAudit, UnifiedSearchResponse, TrustTier } from "./types";
+import type { ProviderCandidate, SearchParams, SourceResult, UnifiedSearchResponse, TrustTier } from "./types";
 import { searchNpi } from "./adapters/npi";
 import { searchFmcsa } from "./adapters/fmcsa";
 import { searchClinicImports } from "./adapters/clinicImportsDb";
-import { searchWebEvidence, hasConfiguredWebEvidenceSource } from "./adapters/webEvidence";
+import { searchWebEvidence, type WebEvidenceOptions } from "./adapters/webEvidence";
 import { dedupeCandidates } from "./dedupe";
 import { geocodeProviders } from "./geocode";
 import { scoreProvider, assignTrustTier } from "./scoring";
 import { searchProviders as searchRapidApiProviders } from "../services/rapidApi/adapters/providerSearchAdapter.js";
-import { getSourceStatusReport, isRapidApiProviderSearchConfigured } from "../lib/apiSourceRegistry";
+import { getSourceStatusReport } from "../lib/apiSourceRegistry";
+import {
+  buildSearchPlan,
+  calculateSearchQuality,
+  type SearchMode,
+  type SearchCoordinatorAudit,
+} from "./searchCoordinator";
 
 const SERVICE_ROUTING: Record<string, string[]> = {
   dotExam: ["npi", "fmcsa", "clinicimports"],
@@ -44,10 +50,6 @@ const SOURCE_LABELS: Record<string, string> = {
   rapidapi: "RapidAPI Provider Search",
   webevidence: "Unified Web Evidence",
 };
-
-function isTruthyFlag(value: string | undefined): boolean {
-  return ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
-}
 
 async function searchRapidApiFromOrchestrator(params: SearchParams): Promise<ProviderCandidate[]> {
   const { city, state, radiusMiles, serviceType, centerLat, centerLng } = params;
@@ -94,28 +96,6 @@ async function searchRapidApiFromOrchestrator(params: SearchParams): Promise<Pro
   }));
 }
 
-function activeAdapterIds(serviceType: string): string[] {
-  const adapterIds = [...(SERVICE_ROUTING[serviceType] || ["npi"] )];
-
-  if (
-    process.env.WEB_EVIDENCE_PROVIDER_DISCOVERY !== "false" &&
-    hasConfiguredWebEvidenceSource() &&
-    !adapterIds.includes("webevidence")
-  ) {
-    adapterIds.push("webevidence");
-  }
-
-  if (
-    process.env.RAPIDAPI_PROVIDER_DISCOVERY !== "false" &&
-    isRapidApiProviderSearchConfigured() &&
-    !adapterIds.includes("rapidapi")
-  ) {
-    adapterIds.push("rapidapi");
-  }
-
-  return adapterIds;
-}
-
 export function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 3958.8;
   const dLat = (lat2 - lat1) * (Math.PI / 180);
@@ -127,30 +107,33 @@ export function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: n
 export async function runUnifiedSearch(params: SearchParams): Promise<UnifiedSearchResponse> {
   const startMs = performance.now();
   const { city, state, radiusMiles, serviceType, centerLat, centerLng } = params;
-  const adapterIds = activeAdapterIds(serviceType);
-  const adapters = adapterIds
-    .map((id) => ({ id, fn: ADAPTER_REGISTRY[id] }))
-    .filter((a): a is { id: string; fn: (c: string, s: string, st: string, p: SearchParams) => Promise<ProviderCandidate[]> } => Boolean(a.fn));
-
-  const sourceResults: SourceResult[] = [];
-  const allCandidates: ProviderCandidate[] = [];
-  const errorsBySource: Record<string, string> = {};
-  const rawResultCounts: Record<string, number> = {};
+  const mode: SearchMode = params.mode || (process.env.SEARCH_DEFAULT_MODE as SearchMode) || "balanced";
 
   const sourceStatus = getSourceStatusReport();
   const configuredApiSources = sourceStatus.filter((s) => s.configured).map((s) => s.sourceName);
   const missingApiSources = sourceStatus.filter((s) => !s.configured).map((s) => s.sourceName);
   const configuredButNotWired = sourceStatus.filter((s) => s.configured && s.adapterStatus === "configured_not_wired").map((s) => s.sourceName);
 
-  const settled = await Promise.allSettled(
-    adapters.map(async ({ id, fn }) => {
+  const sourceResults: SourceResult[] = [];
+  const allCandidates: ProviderCandidate[] = [];
+  const errorsBySource: Record<string, string> = {};
+  const rawResultCounts: Record<string, number> = {};
+
+  // ── Stage A: Run internal/free baseline adapters ──
+  const baselineAdapterIds = SERVICE_ROUTING[serviceType] || ["npi", "clinicimports"];
+  const baselineAdapters = baselineAdapterIds
+    .map((id) => ({ id, fn: ADAPTER_REGISTRY[id] }))
+    .filter((a): a is { id: string; fn: (c: string, s: string, st: string, p: SearchParams) => Promise<ProviderCandidate[]> } => Boolean(a.fn));
+
+  const baselineSettled = await Promise.allSettled(
+    baselineAdapters.map(async ({ id, fn }) => {
       const results = await fn(city, state, serviceType, params);
       return { id, results };
     }),
   );
 
-  settled.forEach((outcome, i) => {
-    const { id } = adapters[i];
+  baselineSettled.forEach((outcome, i) => {
+    const { id } = baselineAdapters[i];
     if (outcome.status === "fulfilled") {
       rawResultCounts[id] = outcome.value.results.length;
       allCandidates.push(...outcome.value.results);
@@ -162,6 +145,69 @@ export async function runUnifiedSearch(params: SearchParams): Promise<UnifiedSea
     }
   });
 
+  // ── Stage B: Calculate baseline quality ──
+  const baselineDeduped = dedupeCandidates(allCandidates);
+  const baselineScored = baselineDeduped.map((c) => ({
+    ...c,
+    score: scoreProvider(c),
+    trustTier: assignTrustTier(c) as TrustTier,
+  }));
+  const baselineQuality = calculateSearchQuality(baselineScored);
+
+  // ── Stage C: Build search plan ──
+  const plan = buildSearchPlan({
+    mode,
+    serviceType,
+    baselineQuality,
+    configuredSources: sourceStatus,
+  });
+
+  // ── Stage D: Run external APIs only if plan says to ──
+  const externalAdapters: { id: string; fn: (c: string, s: string, st: string, p: SearchParams) => Promise<ProviderCandidate[]> }[] = [];
+
+  const webDecision = plan.sourceDecisions.find((d) => d.sourceId === "webevidence");
+  if (webDecision?.run && ADAPTER_REGISTRY.webevidence) {
+    externalAdapters.push({ id: "webevidence", fn: ADAPTER_REGISTRY.webevidence });
+  }
+
+  const rapidDecision = plan.sourceDecisions.find((d) => d.sourceId === "rapidapi");
+  if (rapidDecision?.run && ADAPTER_REGISTRY.rapidapi) {
+    externalAdapters.push({ id: "rapidapi", fn: ADAPTER_REGISTRY.rapidapi });
+  }
+
+  if (externalAdapters.length > 0) {
+    const externalSettled = await Promise.allSettled(
+      externalAdapters.map(async ({ id, fn }) => {
+        let results: ProviderCandidate[];
+        if (id === "webevidence") {
+          const webOpts: WebEvidenceOptions = {
+            maxSources: plan.budget.maxWebEvidenceSources,
+            maxAiEnrichments: plan.budget.maxAiEnrichments,
+            allowAiEnrichment: plan.sourceDecisions.find((d) => d.sourceId === "ai_enrichment")?.run === true,
+          };
+          results = await searchWebEvidence(city, state, serviceType, params, webOpts);
+        } else {
+          results = await fn(city, state, serviceType, params);
+        }
+        return { id, results };
+      }),
+    );
+
+    externalSettled.forEach((outcome, i) => {
+      const { id } = externalAdapters[i];
+      if (outcome.status === "fulfilled") {
+        rawResultCounts[id] = outcome.value.results.length;
+        allCandidates.push(...outcome.value.results);
+        sourceResults.push({ sourceId: id, sourceLabel: SOURCE_LABELS[id] || id, ok: true, count: outcome.value.results.length });
+      } else {
+        const err = String(outcome.reason?.message || outcome.reason || "failed");
+        errorsBySource[id] = err;
+        sourceResults.push({ sourceId: id, sourceLabel: SOURCE_LABELS[id] || id, ok: false, count: 0, error: err });
+      }
+    });
+  }
+
+  // ── Stage E: Merge/dedupe/score/geocode ──
   const normalizedCount = allCandidates.length;
   const deduped = dedupeCandidates(allCandidates);
   const dedupedCount = deduped.length;
@@ -201,13 +247,30 @@ export async function runUnifiedSearch(params: SearchParams): Promise<UnifiedSea
   const finalMarkerCount = sorted.filter((p) => p.coordinateStatus !== "unverified").length;
   const durationMs = Math.round(performance.now() - startMs);
 
+  // ── Stage F: Build coordinator audit ──
+  const finalQuality = calculateSearchQuality(scored);
+  const coordinatorAudit: SearchCoordinatorAudit = {
+    mode,
+    qualityBeforeEscalation: baselineQuality,
+    qualityAfterEscalation: finalQuality,
+    thresholds: plan.thresholds,
+    budget: plan.budget,
+    sourceDecisions: plan.sourceDecisions,
+    escalationReasons: plan.escalationReasons,
+    skippedSources: plan.sourceDecisions
+      .filter((d) => !d.run)
+      .map((d) => ({ sourceId: d.sourceId, reason: d.reason })),
+  };
+
+  const activeAdapters = sourceResults.map((s) => s.sourceId);
+
   return {
     params,
     results: sorted,
     sourceResults,
     audit: {
       serviceType,
-      activeAdapters: adapters.map((a) => a.id),
+      activeAdapters,
       urlsRequested: [],
       rawResultCounts,
       normalizedCount,
@@ -219,6 +282,7 @@ export async function runUnifiedSearch(params: SearchParams): Promise<UnifiedSea
       configuredApiSources,
       missingApiSources,
       configuredButNotWired,
+      searchCoordinator: coordinatorAudit,
     },
   };
 }

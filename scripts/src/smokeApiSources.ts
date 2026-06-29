@@ -1,3 +1,5 @@
+export {};
+
 function isEnvConfigured(envVar: string): boolean {
   const value = process.env[envVar];
   return value !== undefined && value !== null && value.trim() !== "";

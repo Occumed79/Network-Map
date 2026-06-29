@@ -19,6 +19,19 @@ import { fetchMapInventory, type MapInventoryProvider } from './features/provide
 
 type ActiveTool = 'coverage' | 'liveFinder' | 'radius' | 'directories' | 'priceFinder' | 'myClinics' | 'compare' | null;
 
+/**
+ * Source-level guard for whether a coordinate falls inside the United States
+ * (continental, Alaska, or Hawaii). U.S.-only intelligence — population density,
+ * difficulty scoring, state baselines, and NPI registry searches — must be gated
+ * behind this so the global map never leaks U.S. artifacts onto international clicks.
+ */
+function isUsPoint(lat: number, lng: number): boolean {
+  const continental = lat >= 24.3 && lat <= 49.6 && lng >= -125 && lng <= -66.7;
+  const alaska = lat >= 51.2 && lat <= 71.6 && lng >= -170 && lng <= -129.5;
+  const hawaii = lat >= 18.8 && lat <= 22.5 && lng >= -160.8 && lng <= -154.6;
+  return continental || alaska || hawaii;
+}
+
 type NpiCustomSearchParams = {
   city: string;
   state: string;
@@ -945,7 +958,11 @@ export default function App() {
   const [apState, setApState] = useState('');
   const [apProcedure, setApProcedure] = useState('urgentCareL3');
   const [view, setView] = useState<'world'|'us'|'east'|'central'|'west'>('world');
-  const [activeTool, setActiveTool] = useState<ActiveTool>('coverage');
+  const [activeTool, setActiveTool] = useState<ActiveTool>(null);
+  // U.S.-only coverage diagnostics (population density, state fill, difficulty
+  // legend/filter/distribution, 70mi ring). Off by default so the global map
+  // stays a clean world viewer. Only shown when explicitly enabled.
+  const [showUsDiagnostics, setShowUsDiagnostics] = useState(false);
         const [showPdf, setShowPdf] = useState(false);
   const [pdfHtml, setPdfHtml] = useState('');
   const [pdfDlName, setPdfDlName] = useState('');
@@ -973,9 +990,11 @@ export default function App() {
   const [liveSort, setLiveSort] = useState<'distance'|'name'>('distance');
   const [liveLocation, setLiveLocation] = useState('');
   const [liveRadius, setLiveRadius] = useState(10);
-  const [liveAutoPin, setLiveAutoPin] = useState(true);
+  const [liveAutoPin, setLiveAutoPin] = useState(false);
   const [liveHighlightId, setLiveHighlightId] = useState<any>(null);
   const [liveHint, setLiveHint] = useState('Click anywhere on the map to search for facilities');
+  const [liveError, setLiveError] = useState('');
+  const [liveSearched, setLiveSearched] = useState(false);
   const [liveMirror, setLiveMirror] = useState('');
 
   // Unified provider search state
@@ -1149,6 +1168,13 @@ export default function App() {
     a.remove();
   }
 
+  function clearDropRadius() {
+    const map = mapRef.current;
+    if (!map) return;
+    if (dropCircleRef.current) { try { map.removeLayer(dropCircleRef.current); } catch {} dropCircleRef.current = null; }
+    if (dropPinRef.current) { try { map.removeLayer(dropPinRef.current); } catch {} dropPinRef.current = null; }
+  }
+
   function drawDropRadius(lat:number,lng:number,radiusMiles:number) {
     const map = mapRef.current;
     if (!map) return;
@@ -1301,17 +1327,40 @@ export default function App() {
     // Load GeoJSON
     loadStateGeo(map);
 
-    // Map click for live finder + local population estimate
+    // Tool-aware, globally-safe map click. A normal click on a clean global map
+    // does nothing beyond optionally tracking a lightweight selected coordinate.
+    // U.S.-only logic only runs when a U.S. coverage tool is active AND the click
+    // is inside the U.S.
     map.on('click',(e:L.LeafletMouseEvent)=>{
-      const est = estimateLocalPopulationDensity(e.latlng.lat, e.latlng.lng);
-      if (est) setLocalPopInfo(est);
-      setDropCenter({lat:e.latlng.lat,lng:e.latlng.lng});
-      setDropUi(prev=>({...prev, panelOpen:true, status:''}));
-      drawDropRadius(e.latlng.lat, e.latlng.lng, dropRadiusMiles);
-      if(activeToolRef.current === 'liveFinder' || liveAutoPinRef.current) {
-        if(liveAutoPinRef.current && activeToolRef.current !== 'liveFinder') setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder');
-        doLiveSearch(e.latlng.lat, e.latlng.lng);
+      const { lat, lng } = e.latlng;
+      const tool = activeToolRef.current;
+
+      if (tool === 'liveFinder') {
+        // Coordinate-first global live search.
+        setDropCenter({ lat, lng });
+        doLiveSearch(lat, lng);
+        return;
       }
+
+      if (tool === 'radius') {
+        // Radius tool is explicit and separate: set center, open UI, draw ring.
+        setDropCenter({ lat, lng });
+        setDropUi(prev=>({ ...prev, panelOpen:true, status:'' }));
+        drawDropRadius(lat, lng, dropRadiusMiles);
+        return;
+      }
+
+      if (tool === 'coverage' && isUsPoint(lat, lng)) {
+        // U.S. coverage diagnostics only inside the U.S.
+        const est = estimateLocalPopulationDensity(lat, lng);
+        setLocalPopInfo(est ?? null);
+        return;
+      }
+
+      // Normal global map behavior: track a lightweight selected coordinate only.
+      // No panels, no radius ring, no U.S. population/difficulty artifacts.
+      setLocalPopInfo(null);
+      setDropCenter({ lat, lng });
     });
 
     setMapReady(true);
@@ -1382,15 +1431,25 @@ export default function App() {
   const activeToolRef = React.useRef(activeTool);
   React.useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
   
-  const liveAutoPinRef = useRef(true);
+  const liveAutoPinRef = useRef(false);
   useEffect(()=>{ liveAutoPinRef.current = liveAutoPin; },[liveAutoPin]);
   const showStateColorsRef = useRef(showStateColors);
   useEffect(()=>{ showStateColorsRef.current = showStateColors; },[showStateColors]);
   useEffect(()=>{
-    if(!dropCenter) return;
+    // Only the Radius Tool draws a ring. A selected coordinate from a normal
+    // global click must never render the red radius circle.
+    if(activeTool !== 'radius' || !dropCenter) return;
     drawDropRadius(dropCenter.lat, dropCenter.lng, dropRadiusMiles);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[dropCenter, dropRadiusMiles]);
+  },[dropCenter, dropRadiusMiles, activeTool]);
+
+  useEffect(()=>{
+    // Tearing down U.S./radius artifacts when their tool is deactivated so they
+    // never linger over the default global map.
+    if(activeTool !== 'radius') clearDropRadius();
+    if(activeTool !== 'coverage') setLocalPopInfo(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[activeTool]);
 
   const labelLayerRef = useRef<L.LayerGroup|null>(null);
 
@@ -1461,6 +1520,9 @@ export default function App() {
   },[showStateColors]);
 
   function estimateLocalPopulationDensity(lat:number,lng:number) {
+    // U.S.-only intelligence: LOCS/STATE_POP are U.S. cities/states. Never run
+    // for international coordinates.
+    if(!isUsPoint(lat,lng)) return null;
     const nearest = LOCS
       .map((l:any)=>({name:l[0],state:l[1],dist:Math.max(approxMiles(lat,lng,l[2],l[3]),1)}))
       .sort((a,b)=>a.dist-b.dist)
@@ -2331,6 +2393,8 @@ export default function App() {
     setLiveLoading(true);
     setLiveResults([]);
     setLiveHint('Searching...');
+    setLiveError('');
+    setLiveSearched(true);
     setLiveMirror('Querying provider sources…');
     lastRadiusRef.current={lat,lng};
 
@@ -2358,10 +2422,12 @@ export default function App() {
       setLiveResults(results);
       renderLiveMarkers(results);
       setLiveHint('');
+      setLiveError('');
       setLiveMirror(formatLiveProviderStatus(Array.isArray(data?.providers)?data.providers:[],results.length));
     } catch(err) {
       console.warn('[LiveFinder] Backend search failed',err);
-      setLiveHint(' Could not reach OpenStreetMap. Try a different location or larger radius.');
+      setLiveHint('');
+      setLiveError('Could not reach a live source for this location. Try a larger radius or a different spot.');
       setLiveMirror('');
     } finally {
       setLiveLoading(false);
@@ -2402,9 +2468,13 @@ export default function App() {
       return;
     }
     const{centerLat,centerLng}={centerLat:lastRadiusRef.current.lat,centerLng:lastRadiusRef.current.lng};
+    if(!isUsPoint(centerLat,centerLng)){
+      setNpiError('The NPI Registry is a U.S.-only data source. Select a location inside the United States to search it.');
+      return;
+    }
     const loc=await reverseGeocodeCityState(centerLat,centerLng);
     if(!loc){
-      setNpiError('Could not determine city/state from map location. Try clicking near a city.');
+      setNpiError('Could not resolve a U.S. city/state for this location. Try clicking nearer a city.');
       return;
     }
     setNpiLoading(true);
@@ -2442,9 +2512,13 @@ export default function App() {
       return;
     }
     const{centerLat,centerLng}={centerLat:lastRadiusRef.current.lat,centerLng:lastRadiusRef.current.lng};
+    if(!isUsPoint(centerLat,centerLng)){
+      setNpiError('The NPI Registry is a U.S.-only data source. Select a location inside the United States to search it.');
+      return;
+    }
     const loc=await reverseGeocodeCityState(centerLat,centerLng);
     if(!loc){
-      setNpiError('Could not determine city/state from map location. Try clicking near a city.');
+      setNpiError('Could not resolve a U.S. city/state for this location. Try clicking nearer a city.');
       return;
     }
     
@@ -2705,7 +2779,7 @@ export default function App() {
             <div className="hero-sub">Find occupational providers, compare prices, and build smarter coverage faster.</div>
             <div className="hero-actions">
               <button className="hero-btn" onClick={()=>setActiveTool(activeTool === 'priceFinder' ? null : 'priceFinder')}>Area Prices</button>
-              <button className="hero-btn" onClick={()=>setShowPopDensity(v=>!v)}>Population Overlay</button>
+              <button className={`hero-btn${showUsDiagnostics?' active':''}`} onClick={()=>setShowUsDiagnostics(v=>!v)}>U.S. Diagnostics</button>
               <button className="hero-btn" onClick={()=>setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>My Clinics</button>
             </div>
           </div>
@@ -2743,34 +2817,36 @@ export default function App() {
           <div className="sb-divider"/>
           <div className="sb-section">
             <div className="sb-lbl">LAYERS</div>
-            <div className="tog-row">
-              <span className="tog-lbl">State labels</span>
-              <label className="tog-switch"><input type="checkbox" checked={showLabels} onChange={e=>setShowLabels(e.target.checked)}/><span className="tog-slider"/></label>
-            </div>
-            <div className="tog-row">
-              <span className="tog-lbl">Timezone overlay</span>
-              <label className="tog-switch"><input type="checkbox" checked={showTZ} onChange={e=>setShowTZ(e.target.checked)}/><span className="tog-slider"/></label>
-            </div>
-            <div className="tog-row">
-              <span className="tog-lbl">Population density</span>
-              <label className="tog-switch"><input type="checkbox" checked={showPopDensity} onChange={e=>setShowPopDensity(e.target.checked)}/><span className="tog-slider"/></label>
-            </div>
-            <div className="tog-row">
-              <span className="tog-lbl">State color fill</span>
-              <label className="tog-switch"><input type="checkbox" checked={showStateColors} onChange={e=>setShowStateColors(e.target.checked)}/><span className="tog-slider"/></label>
-            </div>
-            <div className="tog-row">
-              <span className="tog-lbl">70mi radius ring</span>
-              <label className="tog-switch"><input type="checkbox" checked={showRadius} onChange={e=>setShowRadius(e.target.checked)}/><span className="tog-slider"/></label>
-            </div>
-            <div className="tog-row">
-              <span className="tog-lbl">Glow effects</span>
-              <label className="tog-switch"><input type="checkbox" checked={showGlowPoints} onChange={e=>setShowGlowPoints(e.target.checked)}/><span className="tog-slider"/></label>
-            </div>
-            <div className="tog-row">
-              <span className="tog-lbl" style={{color: showCityDots ? 'inherit' : '#7bd7ff'}}>City dots {showCityDots ? '' : '(hidden)'}</span>
-              <label className="tog-switch"><input type="checkbox" checked={showCityDots} onChange={e=>setShowCityDots(e.target.checked)}/><span className="tog-slider"/></label>
-            </div>
+            {showUsDiagnostics && (<>
+              <div className="tog-row">
+                <span className="tog-lbl">State labels (U.S.)</span>
+                <label className="tog-switch"><input type="checkbox" checked={showLabels} onChange={e=>setShowLabels(e.target.checked)}/><span className="tog-slider"/></label>
+              </div>
+              <div className="tog-row">
+                <span className="tog-lbl">Timezone overlay (U.S.)</span>
+                <label className="tog-switch"><input type="checkbox" checked={showTZ} onChange={e=>setShowTZ(e.target.checked)}/><span className="tog-slider"/></label>
+              </div>
+              <div className="tog-row">
+                <span className="tog-lbl">Population density (U.S.)</span>
+                <label className="tog-switch"><input type="checkbox" checked={showPopDensity} onChange={e=>setShowPopDensity(e.target.checked)}/><span className="tog-slider"/></label>
+              </div>
+              <div className="tog-row">
+                <span className="tog-lbl">State color fill (U.S.)</span>
+                <label className="tog-switch"><input type="checkbox" checked={showStateColors} onChange={e=>setShowStateColors(e.target.checked)}/><span className="tog-slider"/></label>
+              </div>
+              <div className="tog-row">
+                <span className="tog-lbl">70mi radius ring (U.S.)</span>
+                <label className="tog-switch"><input type="checkbox" checked={showRadius} onChange={e=>setShowRadius(e.target.checked)}/><span className="tog-slider"/></label>
+              </div>
+              <div className="tog-row">
+                <span className="tog-lbl">Glow effects (U.S.)</span>
+                <label className="tog-switch"><input type="checkbox" checked={showGlowPoints} onChange={e=>setShowGlowPoints(e.target.checked)}/><span className="tog-slider"/></label>
+              </div>
+              <div className="tog-row">
+                <span className="tog-lbl" style={{color: showCityDots ? 'inherit' : '#7bd7ff'}}>City dots (U.S.) {showCityDots ? '' : '(hidden)'}</span>
+                <label className="tog-switch"><input type="checkbox" checked={showCityDots} onChange={e=>setShowCityDots(e.target.checked)}/><span className="tog-slider"/></label>
+              </div>
+            </>)}
             <div className="tog-row">
               <span className="tog-lbl" style={{color:'#10b981',display:'flex',alignItems:'center',gap:4}}>
                 <span style={{width:7,height:7,borderRadius:'50%',background:'#10b981',display:'inline-block',boxShadow:'0 0 6px #10b981',flexShrink:0}}/>
@@ -2802,9 +2878,10 @@ export default function App() {
               </div>
             ))}
           </div>
+          {showUsDiagnostics && (<>
           <div className="sb-divider"/>
           <div className="sb-section">
-            <div className="sb-lbl">FILTER CITIES</div>
+            <div className="sb-lbl">FILTER CITIES (U.S.)</div>
             <div style={{display:'flex',gap:3,flexWrap:'wrap',marginBottom:8}}>
               <button className={`fbtn${filterDiff===null?' active':''}`} onClick={()=>setFilterDiff(null)}>ALL</button>
               {[1,2,3,4,5].map(v=>(
@@ -2814,7 +2891,7 @@ export default function App() {
           </div>
           <div className="sb-divider"/>
           <div className="sb-section" style={{paddingBottom:10}}>
-            <div className="sb-lbl">DISTRIBUTION</div>
+            <div className="sb-lbl">DISTRIBUTION (U.S.)</div>
             {dist.map(d=>(
               <div key={d.v} className="br">
                 <div className="br-hdr">
@@ -2827,7 +2904,7 @@ export default function App() {
           </div>
           <div className="sb-divider"/>
           <div className="sb-section" style={{paddingBottom:12}}>
-            <div className="sb-lbl">LEGEND</div>
+            <div className="sb-lbl">LEGEND (U.S. DIFFICULTY)</div>
             {[1,2,3,4,5].map(v=>(
               <div key={v} className="legend-row">
                 <div className="legend-dot" style={{background:DCOL[v]}}/>
@@ -2835,6 +2912,7 @@ export default function App() {
               </div>
             ))}
           </div>
+          </>)}
         
           {activeTool === 'coverage' && (
             <div className="sb-divider"/>
@@ -2962,7 +3040,7 @@ export default function App() {
             )}
           </div>
 
-          {localPopInfo&&(
+          {localPopInfo&&isUsPoint(localPopInfo.lat,localPopInfo.lng)&&(
             <div className="local-pop-card">
               <div className="local-pop-title">Local population estimate</div>
               <div className="local-pop-row"><span>Density</span><strong>{Math.round(localPopInfo.density).toLocaleString()}/mi²</strong></div>
@@ -3081,101 +3159,15 @@ export default function App() {
                   LEADERSHIP EXPORT
                 </button>
               </div>
-              <div style={{padding:'8px 9px',border:'1px solid rgba(239,68,68,0.3)',borderRadius:6,background:'rgba(239,68,68,0.08)',display:'grid',gap:6}}>
-                <div style={{fontSize:8.5,color:'#fca5a5',fontFamily:"'IBM Plex Mono',monospace",letterSpacing:'0.08em'}}>RADIUS EXTRACTOR</div>
-                <div style={{fontSize:9.5,color:'#fca5a5'}}>Drop-click anywhere on the map to place a center + glowing radius.</div>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}}>
-                  <div>
-                    <div style={{fontSize:8,color:'#fecaca',marginBottom:3}}>Radius (miles)</div>
-                    <input
-                      type="number"
-                      min={0.1}
-                      step={0.1}
-                      value={dropRadiusMiles}
-                      onChange={e=>setDropRadiusMiles(Math.max(0.1, Number(e.target.value)||0.1))}
-                      className="drivetime-input"
-                    />
-                  </div>
-                  <div>
-                    <div style={{fontSize:8,color:'#fecaca',marginBottom:3}}>Facility type</div>
-                    <select className="rp-select" value={dropFacilityType} onChange={e=>setDropFacilityType(e.target.value)}>
-                      <option value="all">All Facilities</option>
-                      {Object.entries(CATS).map(([cat,c])=>(
-                        <option key={cat} value={cat}>{c.lbl}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                {/* ── Multi-marker drop ── */}
-                <div style={{borderTop:'1px solid rgba(252,165,165,0.15)',paddingTop:6,display:'grid',gap:5}}>
-                  <div style={{fontSize:8,color:'#fecaca',letterSpacing:'0.08em',fontFamily:"'IBM Plex Mono',monospace"}}> SAVE AS NAMED MARKER</div>
-                  <div style={{display:'grid',gridTemplateColumns:'1fr auto',gap:6,alignItems:'center'}}>
-                    <input
-                      className="drivetime-input"
-                      placeholder="Marker label (e.g. Houston HQ)"
-                      value={pendingMarkerLabel}
-                      onChange={e=>setPendingMarkerLabel(e.target.value)}
-                      style={{marginBottom:0}}
-                    />
-                    <input type="color" value={pendingMarkerColor} onChange={e=>setPendingMarkerColor(e.target.value)}
-                      style={{width:34,height:30,border:'1px solid rgba(255,255,255,0.18)',borderRadius:6,background:'transparent',cursor:'pointer',padding:2,flexShrink:0}} />
-                  </div>
-                  <button
-                    onClick={()=>saveCurrentRadius(pendingMarkerLabel, pendingMarkerColor)}
-                    disabled={!dropCenter}
-                    style={{fontSize:9,padding:'6px 9px',borderRadius:4,border:`1px solid ${pendingMarkerColor}66`,background:`${pendingMarkerColor}22`,color:pendingMarkerColor,fontFamily:"'IBM Plex Mono',monospace",cursor:'pointer',fontWeight:700,opacity:dropCenter?1:0.45}}
-                  >
-                    💾 SAVE MARKER + RADIUS
-                  </button>
-                </div>
-                {savedRadii.length>0 && (
-                  <div style={{borderTop:'1px solid rgba(252,165,165,0.15)',paddingTop:6,display:'grid',gap:4}}>
-                    <div style={{fontSize:8,color:'#fca5a5',fontFamily:"'IBM Plex Mono',monospace",letterSpacing:'0.08em'}}>SAVED MARKERS ({savedRadii.length})</div>
-                    {savedRadii.map((r,i)=>(
-                      <div key={r.id} style={{display:'flex',alignItems:'center',gap:6,background:'rgba(255,255,255,0.06)',border:`1px solid ${r.color}44`,borderRadius:6,padding:'5px 8px'}}>
-                        <div style={{width:10,height:10,borderRadius:'50%',background:r.color,boxShadow:`0 0 8px ${r.color}`,flexShrink:0}}/>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:9.5,color:'#eef4ff',fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.label||`Marker ${i+1}`}</div>
-                          <div style={{fontSize:8,color:'#3d5478'}}>{r.radiusMiles} mi</div>
-                        </div>
-                        <input
-                          type="number" min={0.1} step={0.5}
-                          value={r.radiusMiles}
-                          onChange={e=>{
-                            const v=Math.max(0.1,Number(e.target.value)||0.1);
-                            setSavedRadii(prev=>prev.map(x=>x.id===r.id?{...x,radiusMiles:v}:x));
-                          }}
-                          style={{width:48,background:'rgba(255,255,255,0.07)',border:`1px solid ${r.color}44`,borderRadius:4,color:'#eef4ff',fontSize:9,padding:'2px 4px',fontFamily:"'IBM Plex Mono',monospace",outline:'none'}}
-                        />
-                        <button onClick={()=>setSavedRadii(prev=>prev.filter(x=>x.id!==r.id))}
-                          style={{background:'transparent',border:'1px solid rgba(255,255,255,0.06)',borderRadius:3,color:'#3d5478',fontSize:9,padding:'2px 6px',cursor:'pointer',flexShrink:0}}>Close</button>
-                      </div>
-                    ))}
-                    <button onClick={()=>setSavedRadii([])}
-                      style={{fontSize:8,fontFamily:"'IBM Plex Mono',monospace",padding:'3px 8px',background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.2)',borderRadius:3,color:'#fca5a5',cursor:'pointer'}}>
-                      CLEAR ALL MARKERS
-                    </button>
-                  </div>
-                )}
-                <div style={{fontSize:9,color:'#fecaca'}}>
-                  {dropCenter ? `Active center: ${dropCenter.lat.toFixed(4)}, ${dropCenter.lng.toFixed(4)}` : 'Click the map to set a center.'}
-                </div>
-                <button
-                  onClick={exportRadiusWorkbook}
-                  style={{fontSize:9,padding:'6px 9px',borderRadius:4,border:'1px solid rgba(252,165,165,0.45)',background:'rgba(239,68,68,0.18)',color:'#fecaca',fontFamily:"'IBM Plex Mono',monospace",cursor:'pointer',fontWeight:700}}
-                >
-                  EXPORT CITIES + POPULATION + FACILITIES (XLSX)
-                </button>
-              </div>
               <div style={{fontSize:10,color:'#3d5478',lineHeight:1.5}}>
-                {liveHint||`${liveResults.length} facilit${liveResults.length===1?'y':'ies'}${liveLocation?' · '+liveLocation:''}`}
+                {liveLocation?`Center · ${liveLocation}`:'Coordinate-first live search · click the map or search an address.'}
                 {liveMirror&&<div style={{fontSize:9,color:'#2d4060',marginTop:3}}>{liveMirror}</div>}
               </div>
-              {(() => {
+              {showUsDiagnostics && (() => {
                 const gap = territoryGapSummary();
                 return (
                   <div style={{padding:'7px 9px',borderRadius:6,background:'rgba(15,33,63,0.45)',border:'1px solid rgba(103,232,249,0.16)'}}>
-                    <div style={{fontSize:8.5,fontFamily:"'IBM Plex Mono',monospace",letterSpacing:'0.08em',color:'#89d4fe',marginBottom:4}}>TERRITORY GAP ANALYSIS</div>
+                    <div style={{fontSize:8.5,fontFamily:"'IBM Plex Mono',monospace",letterSpacing:'0.08em',color:'#89d4fe',marginBottom:4}}>TERRITORY GAP ANALYSIS (U.S.)</div>
                     <div style={{fontSize:9,color:'#8fb3d8',marginBottom:4}}>Coverage: <strong style={{color:'#cfe9ff'}}>{gap.covered}/{gap.total}</strong> required categories in current map radius.</div>
                     {gap.missing.length>0 ? (
                       <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
@@ -3348,15 +3340,18 @@ export default function App() {
                   {npiLoading ? 'Querying NPI Registry...' : 'Querying provider sources...'}
                 </div>
               </div>
-              {!npiLoading&&!npiCategory&&liveResults.length===0&&!liveHint.startsWith('')&&(
-                <div className="lp-empty show">Click anywhere on the map to search nearby facilities</div>
+              {!npiLoading&&!npiCategory&&!liveLoading&&!liveError&&liveResults.length===0&&!liveSearched&&(
+                <div className="lp-empty show">Click anywhere on the map to search nearby facilities.</div>
+              )}
+              {!liveLoading&&!liveError&&!npiCategory&&liveSearched&&liveResults.length===0&&(
+                <div className="lp-empty show">No live facilities found within {Math.round(liveRadius/1.60934)} mi of this location. Try a larger radius or a different spot.</div>
               )}
               {!npiLoading&&npiCategory&&npiResults.length===0&&!npiError&&(
                 <div className="lp-empty show">No NPI providers found for {NPI_CATEGORY_MAP[npiCategory]?.label} in this area. Try a larger city or different category.</div>
               )}
-              {!liveLoading&&liveHint.startsWith('')&&(
+              {!liveLoading&&liveError&&(
                 <div style={{padding:14,textAlign:'center',fontSize:10.5,color:'#ef4444',lineHeight:1.9}}>
-                  {liveHint}
+                  {liveError}
                   <br/><button style={{marginTop:8,padding:'4px 12px',borderRadius:3,background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',color:'#ef4444',fontFamily:"'IBM Plex Mono',monospace",fontSize:9,cursor:'pointer'}} onClick={()=>{if(lastRadiusRef.current)doLiveSearch(lastRadiusRef.current.lat,lastRadiusRef.current.lng);}}>↺ RETRY</button>
                 </div>
               )}

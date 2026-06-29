@@ -1,0 +1,231 @@
+/*
+ * Occu-Med Network Map — single final design stylesheet.
+ *
+ * Replaces the three previously-stacked, conflicting glass themes
+ * (google-map-liquid-glass.css, liquid-glass-final.css, light-liquid-glass.css).
+ *
+ * Direction:
+ *   - the map reads like a clean light road map (Google Maps / OpenStreetMap),
+ *     never a U.S. risk/difficulty tint;
+ *   - the application chrome carries a light Apple / macOS Tahoe luminous-glass
+ *     treatment over a light backdrop.
+ *
+ * Layout/structure still comes from professional-overrides.css +
+ * professional-hardening.css; this file owns the final color + glass theme only.
+ */
+
+:root {
+  --glass-text: #102129;
+  --glass-muted: rgba(35, 55, 64, 0.72);
+  --glass-panel: rgba(238, 250, 252, 0.52);
+  --glass-border: rgba(255, 255, 255, 0.76);
+}
+
+/* Light app backdrop so luminous glass panels read light, not dark. */
+html, body, #root {
+  background: #eef2f6 !important;
+}
+
+.app-wrap {
+  background:
+    radial-gradient(circle at 18% 0%, rgba(180, 205, 230, 0.22), transparent 36%),
+    linear-gradient(180deg, #eef2f6 0%, #e3e9f0 100%) !important;
+}
+
+/* ── Light road-map base ── */
+.map-wrap,
+#map,
+.leaflet-container {
+  background: #e8edf2 !important;
+}
+
+.dark-tiles,
+.network-map-tiles,
+.global-light-tiles,
+.leaflet-tile-pane {
+  filter: none !important;
+  opacity: 1 !important;
+  mix-blend-mode: normal !important;
+}
+
+.leaflet-tile {
+  filter: saturate(0.94) contrast(0.99) brightness(1.02) !important;
+}
+
+/* Default map must not read as a filled U.S. risk layer. */
+.leaflet-overlay-pane path.leaflet-interactive {
+  fill: transparent !important;
+  fill-opacity: 0 !important;
+  stroke: rgba(62, 78, 96, 0.20) !important;
+  stroke-opacity: 0.30 !important;
+  stroke-width: 0.7 !important;
+  filter: none !important;
+}
+
+/* ── Luminous glass panels (app chrome only) ── */
+.sidebar,
+.hero-card,
+.sidebar > .sb-section,
+.right-panel.open,
+.live-panel.open,
+.modal-card,
+.local-pop-card,
+.tz-legend,
+.leaflet-popup-content-wrapper,
+.leaflet-tooltip,
+.rp-suggestions,
+.lp-item,
+.rp-rec,
+.rp-alert,
+.rp-scorecard {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(230, 250, 252, 0.38) 42%, rgba(255, 255, 255, 0.25)),
+    var(--glass-panel) !important;
+  border: 1px solid var(--glass-border) !important;
+  color: var(--glass-text) !important;
+  border-radius: 20px !important;
+  box-shadow:
+    0 22px 60px rgba(70, 95, 110, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    inset 0 -1px 0 rgba(150, 170, 182, 0.14) !important;
+  backdrop-filter: blur(34px) saturate(185%) brightness(1.04) !important;
+  -webkit-backdrop-filter: blur(34px) saturate(185%) brightness(1.04) !important;
+}
+
+.sidebar {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.68), rgba(229, 251, 252, 0.42), rgba(255, 255, 255, 0.25)),
+    rgba(239, 251, 252, 0.46) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.82) !important;
+}
+
+/* Double-framed / inner outline cards. */
+.hero-card,
+.sidebar > .sb-section,
+.right-panel.open,
+.live-panel.open,
+.modal-card,
+.local-pop-card {
+  outline: 1px solid rgba(255, 255, 255, 0.58) !important;
+  outline-offset: -6px !important;
+}
+
+/* ── Dark readable text ── */
+.hero-title,
+.sb-lbl,
+.rp-title,
+.lp-title,
+.modal-title,
+.local-pop-title,
+.rp-field label,
+.pcl,
+.psl {
+  color: var(--glass-text) !important;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.55) !important;
+}
+
+.hero-sub,
+.tog-lbl,
+.legend-lbl,
+.local-pop-row span,
+.local-pop-meta,
+.rp-rec,
+.lp-addr,
+.lp-name,
+.pcs,
+.ps {
+  color: var(--glass-muted) !important;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.42) !important;
+}
+
+/* ── Buttons / inputs ── */
+.mbtn,
+.hero-btn,
+.vbtn,
+.fbtn,
+.lp-chip,
+.rp-run-btn,
+.rp-assess-btn,
+.p-req-btn,
+.export-btn,
+.drivetime-btn,
+.tab-btn,
+.rp-close,
+.modal-close,
+.rp-input,
+.rp-select,
+.drivetime-input {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.56), rgba(230, 247, 250, 0.26)),
+    rgba(255, 255, 255, 0.24) !important;
+  border: 1px solid rgba(255, 255, 255, 0.68) !important;
+  color: var(--glass-text) !important;
+  border-radius: 13px !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.88),
+    inset 0 -1px 0 rgba(135, 158, 170, 0.12),
+    0 6px 16px rgba(70, 95, 110, 0.10) !important;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45) !important;
+}
+
+.mbtn.active,
+.hero-btn.active,
+.vbtn.active,
+.fbtn.active,
+.lp-chip.on,
+.tab-btn.active {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(220, 244, 250, 0.44)),
+    rgba(255, 255, 255, 0.42) !important;
+  border-color: rgba(255, 255, 255, 0.92) !important;
+  color: #102129 !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.96),
+    0 8px 22px rgba(70, 95, 110, 0.14) !important;
+}
+
+.rp-input::placeholder,
+.rp-select::placeholder,
+.drivetime-input::placeholder {
+  color: rgba(35, 55, 64, 0.48) !important;
+}
+
+/* ── Floating address search ── */
+.map-wrap > div[style*="translateX"] > div {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.70), rgba(230, 248, 251, 0.38)),
+    rgba(239, 251, 252, 0.42) !important;
+  border: 1px solid rgba(255, 255, 255, 0.78) !important;
+  border-radius: 18px !important;
+  box-shadow:
+    0 16px 40px rgba(70, 95, 110, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92) !important;
+  backdrop-filter: blur(30px) saturate(180%) brightness(1.04) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(180%) brightness(1.04) !important;
+}
+
+.map-wrap > div[style*="translateX"] input {
+  color: var(--glass-text) !important;
+}
+
+.map-wrap > div[style*="translateX"] input::placeholder {
+  color: rgba(35, 55, 64, 0.48) !important;
+}
+
+/* ── Map controls + markers ── */
+.leaflet-control-zoom a {
+  background: rgba(255, 255, 255, 0.78) !important;
+  color: #102129 !important;
+  border: 1px solid rgba(255, 255, 255, 0.82) !important;
+  backdrop-filter: blur(18px) saturate(160%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(160%) !important;
+}
+
+.leaflet-marker-icon {
+  filter: saturate(0.82) brightness(1.0) !important;
+}
+
+.live-panel.open,
+.right-panel.open {
+  max-width: 335px !important;
+}

@@ -6,5 +6,6 @@ import "./professional-hardening.css";
 import "./google-map-liquid-glass.css";
 import "./liquid-glass-final.css";
 import "./light-liquid-glass.css";
+import "./globalMapClickGuards";
 
 createRoot(document.getElementById("root")!).render(<App />);

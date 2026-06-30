@@ -1,8 +1,6 @@
 import { createRoot } from "react-dom/client";
 import "./mapboxLeafletRuntime";
-import "./mapboxAdvancedControls";
-import "./mapboxProviderRanking";
-import "./providerDensityField";
+import "./mapToolsCommandPanel";
 import "./rightPanelCompactor";
 import App from "./App";
 import "./index.css";

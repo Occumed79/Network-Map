@@ -169,14 +169,23 @@ router.get("/live-finder/search", async (req: Request, res: Response) => {
     error: result.status === "rejected" ? String(result.reason?.message || result.reason || "failed") : undefined,
   }));
 
-  const results = dedupe(settled.flatMap((result) => result.status === "fulfilled" ? result.value : [])).sort((a, b) => a.dist - b.dist);
+  const allResults = dedupe(
+    settled.flatMap((result) => result.status === "fulfilled" ? result.value : [])
+  ).sort((a, b) => a.dist - b.dist);
+
+  const returnLimit = 750;
+  const results = allResults.slice(0, returnLimit);
   res.json({
     location: { lat, lng },
     radiusMiles: Number.isFinite(radiusMiles) ? radiusMiles : 10,
     count: results.length,
+    rawCount: allResults.length,
+    returnedCount: results.length,
+    truncated: allResults.length > results.length,
+    returnLimit,
     results,
     providers: providerStatus,
-    note: "Live Finder now queries all configured Overpass mirrors in parallel and merges/deduplicates results instead of stopping after the first successful mirror.",
+    note: "Live Finder queries configured Overpass mirrors in parallel, merges/deduplicates results, sorts by distance, and caps returned records for browser performance.",
   });
 });
 

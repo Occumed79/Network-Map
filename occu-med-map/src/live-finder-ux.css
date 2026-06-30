@@ -3,3 +3,27 @@
   width: 100% !important;
   box-sizing: border-box !important;
 }
+
+.live-panel .lp-name,
+.live-panel .lp-addr {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  overflow-wrap: anywhere !important;
+}
+
+.live-panel .lp-row1 {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  gap: 8px !important;
+  align-items: start !important;
+}
+
+.live-panel .lp-acts {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+}
+
+.live-panel .lp-act {
+  text-align: center !important;
+}

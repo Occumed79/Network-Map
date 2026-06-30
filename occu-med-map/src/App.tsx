@@ -990,6 +990,9 @@ export default function App() {
   const [liveSort, setLiveSort] = useState<'distance'|'name'>('distance');
   const [liveLocation, setLiveLocation] = useState('');
   const [liveRadius, setLiveRadius] = useState(10);
+  const [liveBackendCategory, setLiveBackendCategory] = useState<'all'|'clinical'|'occMed'|'hospital'|'clinic'|'doctor'|'urgent'|'lab'|'pharmacy'|'dentist'|'eye'>('clinical');
+  const [liveFacets, setLiveFacets] = useState<Record<string, number>>({});
+  const [livePriorityCounts, setLivePriorityCounts] = useState<any>(null);
   const [liveHighlightId, setLiveHighlightId] = useState<any>(null);
   const [liveHint, setLiveHint] = useState('Click anywhere on the map to search for facilities');
   const [liveError, setLiveError] = useState('');
@@ -1037,6 +1040,8 @@ export default function App() {
   const [outreachStatus, setOutreachStatus] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_status')||'{}'); } catch { return {}; } });
   const [dropUi, setDropUi] = useState({panelOpen:false, exportLoading:false, status:''});
   const lastRadiusRef = useRef<{lat:number;lng:number}|null>(null);
+  const liveBackendCategoryRef = useRef(liveBackendCategory);
+  useEffect(()=>{ liveBackendCategoryRef.current = liveBackendCategory; },[liveBackendCategory]);
 
   function updateOutreachNote(id:any, value:string) {
     setOutreachNotes(prev=>{
@@ -2386,7 +2391,8 @@ export default function App() {
     return `Sources: ${ok}/${total} returned${failed?` · ${failed} failed`:''} · ${resultCount} facilit${resultCount===1?'y':'ies'}`;
   }
 
-  async function doLiveSearch(lat:number,lng:number) {
+  async function doLiveSearch(lat:number,lng:number, categoryOverride?: string) {
+    const categoryForSearch = categoryOverride || liveBackendCategoryRef.current;
     const map=mapRef.current;
     if(!map) return;
     setLiveLoading(true);
@@ -2409,6 +2415,7 @@ export default function App() {
         lat:String(lat),
         lng:String(lng),
         radiusMiles:String(liveRadius/1.60934),
+        category:categoryForSearch,
       });
       const res=await fetch(`/api/live-finder/search?${params.toString()}`,{signal:AbortSignal.timeout(30000)});
       if(!res.ok) throw new Error('HTTP '+res.status);
@@ -2422,14 +2429,19 @@ export default function App() {
       renderLiveMarkers(results);
       setLiveHint('');
       setLiveError('');
+      setLiveFacets(data?.facets && typeof data.facets === 'object' ? data.facets : {});
+      setLivePriorityCounts(data?.priorityCounts || null);
       const rawCount = Number(data?.rawCount);
+      const filteredRawCount = Number(data?.filteredRawCount);
       const returnedCount = Number(data?.returnedCount);
       const truncated = Boolean(data?.truncated);
+      const totalForDisplay = Number.isFinite(filteredRawCount) ? filteredRawCount : rawCount;
       const providerText = formatLiveProviderStatus(Array.isArray(data?.providers)?data.providers:[],results.length);
-      const capText = truncated && Number.isFinite(rawCount) && Number.isFinite(returnedCount)
-        ? ` · Showing nearest ${returnedCount.toLocaleString()} of ${rawCount.toLocaleString()} matches`
+      const categoryText = categoryForSearch !== 'all' ? ` · Filter: ${categoryForSearch}` : '';
+      const capText = truncated && Number.isFinite(totalForDisplay) && Number.isFinite(returnedCount)
+        ? ` · Showing nearest ${returnedCount.toLocaleString()} of ${totalForDisplay.toLocaleString()} matching facilities`
         : '';
-      setLiveMirror(`${providerText}${capText}`);
+      setLiveMirror(`${providerText}${capText}${categoryText}`);
     } catch(err) {
       console.warn('[LiveFinder] Backend search failed',err);
       setLiveHint('');
@@ -3200,6 +3212,42 @@ export default function App() {
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'6px 8px',borderRadius:8,background:'rgba(125,211,252,0.06)',border:'1px solid rgba(125,211,252,0.18)'}}>
                 <span style={{fontSize:9.5,color:'#9cc7eb'}}>Map clicks run coordinate-first live search</span>
                 <span style={{fontSize:9,color:'#89d4fe',fontFamily:"'IBM Plex Mono',monospace"}}>Global</span>
+              </div>
+              <div style={{fontSize:8.5,color:'#64748b',fontFamily:"'IBM Plex Mono',monospace",letterSpacing:'0.08em',marginBottom:4}}>
+                LIVE SOURCE FILTERS
+              </div>
+              <div style={{display:'flex',flexWrap:'wrap',gap:3,marginBottom:6}}>
+                {([
+                  {key:'clinical',label:'Clinical',count:livePriorityCounts?.clinical},
+                  {key:'occMed',label:'Occ-Med',count:livePriorityCounts?.occMed},
+                  {key:'hospital',label:'Hospitals',count:liveFacets?.hospital},
+                  {key:'clinic',label:'Clinics',count:liveFacets?.clinic},
+                  {key:'doctor',label:'Doctors',count:liveFacets?.doctor},
+                  {key:'urgent',label:'Urgent',count:liveFacets?.urgent},
+                  {key:'lab',label:'Labs',count:liveFacets?.lab},
+                  {key:'pharmacy',label:'Pharmacy',count:livePriorityCounts?.pharmacy},
+                  {key:'dentist',label:'Dental',count:livePriorityCounts?.dental},
+                  {key:'eye',label:'Eye',count:livePriorityCounts?.eye},
+                  {key:'all',label:'All',count:undefined},
+                ] as const).map(btn => {
+                  const count = btn.count;
+                  const countStr = (typeof count === 'number' && count > 0) ? count.toLocaleString() : '';
+                  return (
+                    <button
+                      key={btn.key}
+                      className={`lp-chip${liveBackendCategory===btn.key?' on':''}`}
+                      onClick={()=>{
+                        setLiveBackendCategory(btn.key);
+                        setNpiCategory(null);
+                        setNpiResults([]);
+                        setNpiError('');
+                        setNpiSearchMeta(null);
+                        setShowCustomSearch(false);
+                        if(lastRadiusRef.current) doLiveSearch(lastRadiusRef.current.lat,lastRadiusRef.current.lng, btn.key);
+                      }}
+                    >{btn.label}{countStr?` ${countStr}`:''}</button>
+                  );
+                })}
               </div>
               <input
                 className="rp-input"

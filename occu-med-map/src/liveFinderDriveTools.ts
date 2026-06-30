@@ -1,0 +1,80 @@
+let installed = false;
+let latestCount = 0;
+
+function clickMapTool(labelIncludes: string): void {
+  const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>(".occumed-map-tools-panel button"));
+  const target = buttons.find((button) => (button.textContent || "").toLowerCase().includes(labelIncludes.toLowerCase()));
+  target?.click();
+}
+
+function button(label: string, action: () => void): HTMLButtonElement {
+  const node = document.createElement("button");
+  node.type = "button";
+  node.textContent = label;
+  node.addEventListener("click", (event) => {
+    event.stopPropagation();
+    action();
+  });
+  return node;
+}
+
+function ensureDriveTools(inner: Element): void {
+  if (inner.querySelector(".occumed-live-drive-tools")) return;
+
+  const strip = document.createElement("div");
+  strip.className = "occumed-live-drive-tools";
+
+  const copy = document.createElement("div");
+  copy.className = "occumed-live-drive-copy";
+  const title = document.createElement("strong");
+  title.textContent = "Drive-time tools";
+  const subtitle = document.createElement("span");
+  subtitle.textContent = "Set origin on map, rank visible pins, then route from result cards.";
+  copy.appendChild(title);
+  copy.appendChild(subtitle);
+
+  const actions = document.createElement("div");
+  actions.className = "occumed-live-drive-actions";
+  actions.appendChild(button("Rank by Drive Time", () => clickMapTool("Rank Visible")));
+  actions.appendChild(button("Apply ETA", () => clickMapTool("Apply to Results")));
+  actions.appendChild(button("Copy ETA", () => clickMapTool("Copy ETA")));
+  actions.appendChild(button("Clear", () => clickMapTool("Clear")));
+
+  const status = document.createElement("div");
+  status.className = "occumed-live-drive-status";
+  status.textContent = latestCount > 0 ? `${latestCount} provider ETA rows ready.` : "No ETA ranking applied yet.";
+
+  strip.appendChild(copy);
+  strip.appendChild(actions);
+  strip.appendChild(status);
+
+  const titleRow = inner.firstElementChild;
+  if (titleRow?.nextSibling) inner.insertBefore(strip, titleRow.nextSibling);
+  else inner.insertBefore(strip, inner.firstChild);
+}
+
+function updateDriveToolsStatus(): void {
+  document.querySelectorAll<HTMLElement>(".occumed-live-drive-status").forEach((node) => {
+    node.textContent = latestCount > 0 ? `${latestCount} provider ETA rows ready. Route buttons are applied to matched cards.` : "No ETA ranking applied yet.";
+  });
+}
+
+function scanPanels(): void {
+  document.querySelectorAll(".live-panel.open .lp-inner").forEach(ensureDriveTools);
+  updateDriveToolsStatus();
+}
+
+export function installLiveFinderDriveTools(): void {
+  if (installed) return;
+  installed = true;
+  window.setTimeout(scanPanels, 250);
+  const observer = new MutationObserver(() => scanPanels());
+  observer.observe(document.body, { childList: true, subtree: true });
+  window.addEventListener("occumed:provider-eta-rankings", ((event: Event) => {
+    const rows = (event as CustomEvent<unknown[]>).detail;
+    latestCount = Array.isArray(rows) ? rows.length : 0;
+    scanPanels();
+  }) as EventListener);
+}
+
+installLiveFinderDriveTools();

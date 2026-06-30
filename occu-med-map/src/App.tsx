@@ -990,7 +990,6 @@ export default function App() {
   const [liveSort, setLiveSort] = useState<'distance'|'name'>('distance');
   const [liveLocation, setLiveLocation] = useState('');
   const [liveRadius, setLiveRadius] = useState(10);
-  const [liveAutoPin, setLiveAutoPin] = useState(false);
   const [liveHighlightId, setLiveHighlightId] = useState<any>(null);
   const [liveHint, setLiveHint] = useState('Click anywhere on the map to search for facilities');
   const [liveError, setLiveError] = useState('');
@@ -1433,8 +1432,6 @@ export default function App() {
   const activeToolRef = React.useRef(activeTool);
   React.useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
   
-  const liveAutoPinRef = useRef(false);
-  useEffect(()=>{ liveAutoPinRef.current = liveAutoPin; },[liveAutoPin]);
   const showStateColorsRef = useRef(showStateColors);
   useEffect(()=>{ showStateColorsRef.current = showStateColors; },[showStateColors]);
   useEffect(()=>{
@@ -2733,6 +2730,10 @@ export default function App() {
       zIndexOffset: 5000,
     }).addTo(map);
     customPinRef.current.bindPopup(`<div class="pi"><div class="pt">${name.split(',')[0]}</div><div class="ps">Address Search Result</div></div>`,{maxWidth:260}).openPopup();
+    setLocalPopInfo(null);
+    setDropCenter({ lat: lLat, lng: lLng });
+    setActiveTool('liveFinder');
+    doLiveSearch(lLat, lLng);
   }
 
   // ── Cursor light (Liquid Glass) ──────────────────────────────────────────
@@ -3189,10 +3190,7 @@ export default function App() {
                 <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:'#89d4fe',whiteSpace:'nowrap'}}>{liveRadius} km</span>
               </div>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'6px 8px',borderRadius:8,background:'rgba(125,211,252,0.06)',border:'1px solid rgba(125,211,252,0.18)'}}>
-                <label style={{display:'flex',alignItems:'center',gap:6,fontSize:9.5,color:'#9cc7eb',cursor:'pointer'}}>
-                  <input type="checkbox" checked={liveAutoPin} onChange={e=>setLiveAutoPin(e.target.checked)} />
-                  Auto search on pin drop
-                </label>
+                <span style={{fontSize:9.5,color:'#9cc7eb'}}>Map clicks run coordinate-first live search</span>
                 <span style={{fontSize:9,color:'#89d4fe',fontFamily:"'IBM Plex Mono',monospace"}}>Global</span>
               </div>
               <input
@@ -3213,6 +3211,9 @@ export default function App() {
                 </select>
               </div>
               {/* Filter chips — now wired to NPI Registry category search */}
+              <div style={{fontSize:8.5,color:'#64748b',fontFamily:"'IBM Plex Mono',monospace",letterSpacing:'0.08em'}}>
+                U.S. NPI FILTERS
+              </div>
               <div style={{display:'flex',flexWrap:'wrap',gap:3}}>
                 <button className={`lp-chip${!npiCategory?' on':''}`} onClick={()=>{setLiveFilter('all');setNpiCategory(null);setNpiResults([]);setNpiError('');setNpiSearchMeta(null);setShowCustomSearch(false);}}>All</button>
                 {NPI_CATEGORY_KEYS.map((cat)=>{
@@ -3221,7 +3222,7 @@ export default function App() {
                     <button key={cat} className={`lp-chip${npiCategory===cat?' on':''}`} onClick={()=>{setLiveFilter(cat);doNpiCategorySearch(cat);setShowCustomSearch(false);}}>{c.icon} {c.label}</button>
                   );
                 })}
-                <button className={`lp-chip${npiCategory==='custom'?' on':''}`} onClick={()=>{setShowCustomSearch(!showCustomSearch);setNpiCategory(null);setNpiResults([]);setNpiError('');}}> Custom</button>
+                <button className={`lp-chip${npiCategory==='custom'?' on':''}`} onClick={()=>{setShowCustomSearch(!showCustomSearch);setNpiCategory(null);setNpiResults([]);setNpiError('');}}> Custom NPI</button>
               </div>
               
               {/* Custom NPI Search Form */}

@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import "./mapboxLeafletRuntime";
 import "./mapToolsCommandPanel";
 import "./rightPanelCompactor";
+import "./liveFinderDriveTools";
 import App from "./App";
 import "./index.css";
 import "./professional-overrides.css";

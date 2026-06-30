@@ -45,7 +45,7 @@ function classifyFacility(tags: any): string {
   if (n.includes("dot") && n.includes("chiro")) return "dotchiro";
   if (n.includes("dot") && (n.includes("md") || n.includes("np") || n.includes("do") || n.includes("pa") || n.includes("medical"))) return "dotmd";
   if (n.includes("mammogram") || n.includes("breast imaging")) return "mammogram";
-  if (n.includes("audiology") || n.includes("audiogram") || n.includes("hearing")) return "audiology";
+  if (n.includes("audiology") || n.includes("audiogram") || n.includes("hearing") || s === "hearing_aids") return "audiology";
   if (n.includes("drug screen") || n.includes("toxicology") || n.includes("urine test")) return "drugscreen";
   if (n.includes("stress test") || n.includes("cardiology")) return "stress";
   if (n.includes("physical exam") || n.includes("occupational health")) return "physical";
@@ -65,25 +65,17 @@ function classifyFacility(tags: any): string {
 }
 
 function buildOverpassQuery(lat: number, lng: number, radiusMiles: number): string {
-  const r = Math.max(radiusMiles, 0.1) * 1609.34;
-  return `[out:json][timeout:30];(
-node["amenity"="hospital"](around:${r},${lat},${lng});
-node["amenity"="clinic"](around:${r},${lat},${lng});
-node["amenity"="doctors"](around:${r},${lat},${lng});
-node["amenity"="pharmacy"](around:${r},${lat},${lng});
-node["amenity"="dentist"](around:${r},${lat},${lng});
-node["amenity"="urgent_care"](around:${r},${lat},${lng});
-node["amenity"="nursing_home"](around:${r},${lat},${lng});
-node["healthcare"](around:${r},${lat},${lng});
-way["healthcare"](around:${r},${lat},${lng});
-way["amenity"="hospital"](around:${r},${lat},${lng});
-way["amenity"="clinic"](around:${r},${lat},${lng});
-node["office"="physician"](around:${r},${lat},${lng});
-node["office"="medical"](around:${r},${lat},${lng});
-node["shop"="optician"](around:${r},${lat},${lng});
-node["shop"="chemist"](around:${r},${lat},${lng});
+  const clampedMiles = Math.min(Math.max(radiusMiles, 0.1), 75);
+  const r = clampedMiles * 1609.34;
+
+  return `[out:json][timeout:35];(
+nwr["amenity"~"hospital|clinic|doctors|pharmacy|dentist|urgent_care|nursing_home|laboratory"](around:${r},${lat},${lng});
+nwr["healthcare"](around:${r},${lat},${lng});
+nwr["healthcare"~"hospital|clinic|doctor|doctors|pharmacy|dentist|laboratory|sample_collection|rehabilitation|physiotherapist|optometrist|blood_bank"](around:${r},${lat},${lng});
+nwr["office"~"physician|medical|therapist"](around:${r},${lat},${lng});
+nwr["shop"~"chemist|optician|medical_supply|hearing_aids"](around:${r},${lat},${lng});
 );
-out center tags;`;
+out center tags 150;`;
 }
 
 function normalizeElement(el: any, centerLat: number, centerLng: number, endpoint: string): LiveFinderResult | null {
@@ -92,8 +84,25 @@ function normalizeElement(el: any, centerLat: number, centerLng: number, endpoin
   if (!Number.isFinite(la) || !Number.isFinite(lo)) return null;
 
   const t = el.tags || {};
-  const name = t.name || t["name:en"] || t.operator || "Unnamed Facility";
-  const addr = [t["addr:housenumber"], t["addr:street"], t["addr:city"]].filter(Boolean).join(" ");
+  const name =
+    t.name ||
+    t["name:en"] ||
+    t.operator ||
+    t.brand ||
+    t["official_name"] ||
+    t["healthcare:speciality"] ||
+    t.healthcare ||
+    t.amenity ||
+    "Unnamed Facility";
+  const addr = [
+    t["addr:housenumber"],
+    t["addr:street"],
+    t["addr:suburb"],
+    t["addr:city"] || t["addr:town"] || t["addr:village"],
+    t["addr:state"],
+    t["addr:postcode"],
+    t["addr:country"],
+  ].filter(Boolean).join(", ");
 
   return {
     id: el.id,

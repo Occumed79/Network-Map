@@ -12,12 +12,29 @@
   background: #b7dbe5 !important;
 }
 
+.app-body {
+  position: relative !important;
+}
+
+.map-wrap {
+  flex: 1 1 auto !important;
+  width: 100vw !important;
+  height: 100vh !important;
+}
+
 .sidebar {
-  flex: 0 0 300px !important;
-  width: 300px !important;
-  padding: 12px !important;
+  position: absolute !important;
+  left: 12px !important;
+  top: 12px !important;
+  bottom: 12px !important;
+  z-index: 1700 !important;
+  flex: none !important;
+  width: 260px !important;
+  padding: 10px !important;
+  border-radius: 22px !important;
+  overflow-y: auto !important;
   background: linear-gradient(180deg, rgba(246, 252, 255, 0.94), rgba(226, 244, 250, 0.88)) !important;
-  border-right: 1px solid rgba(84, 116, 142, 0.16) !important;
+  border: 1px solid rgba(84, 116, 142, 0.16) !important;
   box-shadow: 18px 0 42px rgba(30, 58, 82, 0.12), inset -1px 0 0 rgba(255,255,255,0.72) !important;
   color: #172033 !important;
 }
@@ -66,7 +83,7 @@
 
 .map-wrap > div[style*="translateX"] {
   top: 14px !important;
-  width: min(520px, calc(100vw - 360px)) !important;
+  width: min(560px, calc(100vw - 620px)) !important;
 }
 
 .map-wrap > div[style*="translateX"] > div {
@@ -85,7 +102,7 @@
 }
 
 .leaflet-control-zoom {
-  margin-left: 14px !important;
+  margin-left: 278px !important;
   margin-top: 12px !important;
 }
 
@@ -97,18 +114,25 @@
 }
 
 .dark-tiles {
-  filter: saturate(0.72) contrast(0.92) brightness(1.07) !important;
+  filter: saturate(0.92) contrast(1.02) brightness(1.03) !important;
 }
 
 .leaflet-tile-pane {
-  opacity: 0.94 !important;
+  opacity: 1 !important;
 }
 
 .live-panel.open {
-  width: min(420px, calc(100vw - var(--sidebar-w) - 24px)) !important;
-  max-width: 420px !important;
+  position: absolute !important;
+  right: 12px !important;
+  top: 12px !important;
+  bottom: 12px !important;
+  z-index: 1700 !important;
+  flex: none !important;
+  width: min(390px, calc(100vw - 304px)) !important;
+  max-width: 390px !important;
+  border-radius: 22px !important;
   background: linear-gradient(180deg, rgba(235, 250, 255, 0.94), rgba(205, 239, 248, 0.91)) !important;
-  border-left: 1px solid rgba(76, 110, 137, 0.18) !important;
+  border: 1px solid rgba(76, 110, 137, 0.18) !important;
   box-shadow: -18px 0 42px rgba(44, 82, 108, 0.16), inset 1px 0 0 rgba(255,255,255,0.65) !important;
   opacity: 1 !important;
 }

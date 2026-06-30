@@ -23,6 +23,7 @@ The token must not be committed to the repository.
 - Drive/service-zone isochrone polygons
 - Route profile controls: Traffic, Drive, Walk
 - Zone presets: 15/30, 15/30/45, 15/30/45/60
+- Provider ETA Ranking: ranks visible pins by Mapbox drive-time and draws a selected route
 
 ## Deploy constraint
 

@@ -4,5 +4,6 @@ import "./index.css";
 import "./professional-overrides.css";
 import "./professional-hardening.css";
 import "./liquid-glass-theme.css";
+import "./live-finder-ux.css";
 
 createRoot(document.getElementById("root")!).render(<App />);

@@ -1357,10 +1357,12 @@ export default function App() {
         return;
       }
 
-      // Normal global map behavior: track a lightweight selected coordinate only.
-      // No panels, no radius ring, no U.S. population/difficulty artifacts.
+      // Normal global map behavior:
+      // run coordinate-first live provider discovery without U.S. diagnostics.
       setLocalPopInfo(null);
       setDropCenter({ lat, lng });
+      setActiveTool('liveFinder');
+      doLiveSearch(lat, lng);
     });
 
     setMapReady(true);

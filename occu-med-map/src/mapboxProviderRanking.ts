@@ -11,6 +11,7 @@ let origin: Point | null = null;
 let rankLayer: L.LayerGroup | null = null;
 let statusNode: HTMLDivElement | null = null;
 let resultsNode: HTMLDivElement | null = null;
+let latestRankings: RankedCandidate[] = [];
 
 function milesBetween(a: Point, b: Point): number {
   const radiusMiles = 3958.7613;
@@ -53,6 +54,7 @@ function collectVisibleCandidates(map: L.Map, currentOrigin: Point): Candidate[]
 }
 
 function clearRanking(map: L.Map): void {
+  latestRankings = [];
   if (rankLayer) {
     map.removeLayer(rankLayer);
     rankLayer = null;
@@ -70,6 +72,26 @@ function drawRankedRoute(map: L.Map, row: RankedCandidate): void {
   setStatus(`${row.name}: ${Math.round(row.driveMinutes)} min / ${row.driveMiles.toFixed(1)} mi`);
 }
 
+function rankingText(): string {
+  if (latestRankings.length === 0) return "No ETA rankings available.";
+  const originLabel = origin?.label || (origin ? `${origin.lat.toFixed(4)}, ${origin.lng.toFixed(4)}` : "selected origin");
+  const lines = [`Provider ETA ranking from ${originLabel}`];
+  latestRankings.forEach((row, index) => {
+    lines.push(`${index + 1}. ${row.name} — ${Math.round(row.driveMinutes)} min / ${row.driveMiles.toFixed(1)} mi`);
+  });
+  return lines.join("\n");
+}
+
+async function copyRanking(): Promise<void> {
+  const text = rankingText();
+  try {
+    await navigator.clipboard.writeText(text);
+    setStatus("ETA ranking copied to clipboard.");
+  } catch {
+    setStatus(text);
+  }
+}
+
 function renderRankings(map: L.Map, rankings: RankedCandidate[]): void {
   if (!resultsNode) return;
   resultsNode.innerHTML = "";
@@ -77,7 +99,15 @@ function renderRankings(map: L.Map, rankings: RankedCandidate[]): void {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "occumed-eta-row";
-    button.innerHTML = `<span>${index + 1}. ${row.name}</span><strong>${Math.round(row.driveMinutes)} min</strong><em>${row.driveMiles.toFixed(1)} mi</em>`;
+    const name = document.createElement("span");
+    name.textContent = `${index + 1}. ${row.name}`;
+    const mins = document.createElement("strong");
+    mins.textContent = `${Math.round(row.driveMinutes)} min`;
+    const miles = document.createElement("em");
+    miles.textContent = `${row.driveMiles.toFixed(1)} mi`;
+    button.appendChild(name);
+    button.appendChild(mins);
+    button.appendChild(miles);
     button.addEventListener("click", () => drawRankedRoute(map, row));
     resultsNode?.appendChild(button);
   });
@@ -109,7 +139,8 @@ async function rankVisibleProviders(map: L.Map): Promise<void> {
     return;
   }
   ranked.sort((a, b) => a.driveMinutes - b.driveMinutes);
-  renderRankings(map, ranked.slice(0, 6));
+  latestRankings = ranked.slice(0, 6);
+  renderRankings(map, latestRankings);
   setStatus(`Ranked ${ranked.length} routed pins. Click a row to draw the route.`);
 }
 
@@ -131,11 +162,16 @@ function addRankingControl(map: L.Map): void {
     rankButton.type = "button";
     rankButton.textContent = "Rank Visible Pins";
     rankButton.addEventListener("click", () => rankVisibleProviders(map));
+    const copyButton = document.createElement("button");
+    copyButton.type = "button";
+    copyButton.textContent = "Copy ETA";
+    copyButton.addEventListener("click", () => copyRanking());
     const clearButton = document.createElement("button");
     clearButton.type = "button";
     clearButton.textContent = "Clear ETA";
     clearButton.addEventListener("click", () => clearRanking(map));
     actions.appendChild(rankButton);
+    actions.appendChild(copyButton);
     actions.appendChild(clearButton);
     box.appendChild(actions);
 

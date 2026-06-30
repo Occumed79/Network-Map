@@ -75,7 +75,7 @@ nwr["healthcare"~"hospital|clinic|doctor|doctors|pharmacy|dentist|laboratory|sam
 nwr["office"~"physician|medical|therapist"](around:${r},${lat},${lng});
 nwr["shop"~"chemist|optician|medical_supply|hearing_aids"](around:${r},${lat},${lng});
 );
-out center tags 150;`;
+out center tags;`;
 }
 
 function normalizeElement(el: any, centerLat: number, centerLng: number, endpoint: string): LiveFinderResult | null {

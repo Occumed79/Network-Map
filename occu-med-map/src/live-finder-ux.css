@@ -191,3 +191,30 @@
   color: rgba(37, 51, 71, 0.62) !important;
   line-height: 1.55 !important;
 }
+
+.live-panel .lp-inner > div:has(> .rp-select) + div[style*="letter-spacing"] {
+  margin-top: 4px !important;
+  padding-top: 8px !important;
+  border-top: 1px solid rgba(74, 104, 132, 0.10) !important;
+  color: rgba(37, 51, 71, 0.42) !important;
+}
+
+.live-panel .lp-inner > div:has(> .rp-select) + div[style*="letter-spacing"] + div {
+  max-height: 62px !important;
+  overflow: hidden !important;
+  opacity: 0.72 !important;
+  padding-bottom: 2px !important;
+}
+
+.live-panel .lp-inner > div:has(> .rp-select) + div[style*="letter-spacing"] + div .lp-chip {
+  min-height: 21px !important;
+  padding: 3px 6px !important;
+  font-size: 8px !important;
+  background: rgba(255,255,255,0.38) !important;
+}
+
+.live-panel .lp-inner > div:has(> .rp-select) + div[style*="letter-spacing"] + div:hover,
+.live-panel .lp-inner > div:has(> .rp-select) + div[style*="letter-spacing"] + div:focus-within {
+  max-height: 180px !important;
+  opacity: 1 !important;
+}

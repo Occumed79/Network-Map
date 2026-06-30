@@ -1,3 +1,5 @@
+import "./live-finder-drive-tools.css";
+
 let installed = false;
 let latestCount = 0;
 

@@ -1,0 +1,5 @@
+/* Live Finder UX stylesheet. */
+.live-panel.open .lp-inner {
+  width: 100% !important;
+  box-sizing: border-box !important;
+}

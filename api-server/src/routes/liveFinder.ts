@@ -159,6 +159,21 @@ router.get("/live-finder/search", async (req: Request, res: Response) => {
     return;
   }
 
+  const category = String(req.query.category || "all");
+
+  const clinicalPriorityCats = new Set(["hospital", "clinic", "doctor", "urgent", "lab", "physical", "stress", "audiology"]);
+  const occMedPriorityCats = new Set(["clinic", "doctor", "urgent", "lab", "physical", "stress", "audiology", "drugscreen"]);
+
+  function categoryMatches(row: LiveFinderResult, cat: string): boolean {
+    if (!cat || cat === "all") return true;
+    if (cat === "clinical") return clinicalPriorityCats.has(row.cat);
+    if (cat === "occMed") return occMedPriorityCats.has(row.cat);
+    if (cat === "pharmacy") return row.cat === "pharmacy";
+    if (cat === "dental" || cat === "dentist") return row.cat === "dentist";
+    if (cat === "eye") return row.cat === "eye";
+    return row.cat === cat;
+  }
+
   const query = buildOverpassQuery(lat, lng, Number.isFinite(radiusMiles) ? radiusMiles : 10);
   const settled = await Promise.allSettled(OVERPASS_ENDPOINTS.map((endpoint) => queryMirror(endpoint, query, lat, lng)));
   const providerStatus = settled.map((result, index) => ({
@@ -173,16 +188,34 @@ router.get("/live-finder/search", async (req: Request, res: Response) => {
     settled.flatMap((result) => result.status === "fulfilled" ? result.value : [])
   ).sort((a, b) => a.dist - b.dist);
 
+  const facets = allResults.reduce<Record<string, number>>((acc, row) => {
+    const key = row.cat || "clinic";
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+
+  const filteredResults = allResults.filter(row => categoryMatches(row, category));
+
   const returnLimit = 750;
-  const results = allResults.slice(0, returnLimit);
+  const results = filteredResults.slice(0, returnLimit);
   res.json({
     location: { lat, lng },
     radiusMiles: Number.isFinite(radiusMiles) ? radiusMiles : 10,
+    category,
     count: results.length,
     rawCount: allResults.length,
+    filteredRawCount: filteredResults.length,
     returnedCount: results.length,
-    truncated: allResults.length > results.length,
+    truncated: filteredResults.length > results.length,
     returnLimit,
+    facets,
+    priorityCounts: {
+      clinical: allResults.filter(row => clinicalPriorityCats.has(row.cat)).length,
+      occMed: allResults.filter(row => occMedPriorityCats.has(row.cat)).length,
+      pharmacy: allResults.filter(row => row.cat === "pharmacy").length,
+      dental: allResults.filter(row => row.cat === "dentist").length,
+      eye: allResults.filter(row => row.cat === "eye").length,
+    },
     results,
     providers: providerStatus,
     note: "Live Finder queries configured Overpass mirrors in parallel, merges/deduplicates results, sorts by distance, and caps returned records for browser performance.",

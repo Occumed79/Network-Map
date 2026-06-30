@@ -61,6 +61,14 @@ function markerLabel(layer: L.Layer, fallback: string): string {
   return raw.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 72) || fallback;
 }
 
+function emitOriginChanged(): void {
+  window.dispatchEvent(new CustomEvent("occumed:map-origin-changed", { detail: origin }));
+}
+
+function emitEtaRankings(): void {
+  window.dispatchEvent(new CustomEvent("occumed:provider-eta-rankings", { detail: latestRankings }));
+}
+
 function setOrigin(map: L.Map, point: Point): void {
   origin = point;
   if (searchMarker) map.removeLayer(searchMarker);
@@ -74,6 +82,7 @@ function setOrigin(map: L.Map, point: Point): void {
     zIndexOffset: 6000,
   }).addTo(map);
   setStatus(`Origin set: ${point.label || point.lat.toFixed(4) + ", " + point.lng.toFixed(4)}`);
+  emitOriginChanged();
 }
 
 async function searchPlace(map: L.Map, input: HTMLInputElement): Promise<void> {
@@ -97,6 +106,7 @@ function clearRoutes(map: L.Map): void {
   if (zoneLayer) { map.removeLayer(zoneLayer); zoneLayer = null; }
   latestRankings = [];
   if (etaResultsNode) etaResultsNode.innerHTML = "";
+  emitEtaRankings();
   setStatus("Routes and zones cleared.");
 }
 
@@ -110,7 +120,7 @@ async function drawRoute(map: L.Map, target: Point): Promise<void> {
     const end = L.circleMarker([target.lat, target.lng], { radius: 6, color: "#1e3a8a", fillColor: "#ffffff", fillOpacity: 1, weight: 2 });
     routeLayer = L.layerGroup([line, end]).addTo(map);
     map.fitBounds(line.getBounds(), { padding: [38, 38] });
-    setStatus(`Route: ${route.distanceMiles.toFixed(1)} mi / ${Math.round(route.durationMinutes)} min.`);
+    setStatus(`${target.label || "Provider"}: ${route.distanceMiles.toFixed(1)} mi / ${Math.round(route.durationMinutes)} min.`);
   } catch (err: any) {
     setStatus(err?.message || "Route failed.");
   }
@@ -190,7 +200,8 @@ async function rankVisiblePins(map: L.Map): Promise<void> {
   ranked.sort((a, b) => a.driveMinutes - b.driveMinutes);
   latestRankings = ranked.slice(0, 6);
   renderRankings(map, latestRankings);
-  setStatus(`Ranked ${latestRankings.length} provider pins.`);
+  emitEtaRankings();
+  setStatus(`Ranked ${latestRankings.length} provider pins. Result cards updated.`);
 }
 
 async function copyEta(): Promise<void> {
@@ -289,6 +300,7 @@ function addCommandPanel(map: L.Map): void {
     const etaActions = document.createElement("div");
     etaActions.className = "occumed-mapbox-actions";
     etaActions.appendChild(button("Rank Visible", () => rankVisiblePins(map)));
+    etaActions.appendChild(button("Apply to Results", () => emitEtaRankings()));
     etaActions.appendChild(button("Copy ETA", () => copyEta()));
     etaResultsNode = document.createElement("div");
     etaResultsNode.className = "occumed-eta-results";
@@ -330,6 +342,10 @@ function installOnMap(map: L.Map): void {
     }
   });
   map.on("moveend zoomend", () => { if (densityEnabled) drawDensity(map); });
+  window.addEventListener("occumed:route-to-point", ((event: Event) => {
+    const detail = (event as CustomEvent<Point>).detail;
+    if (detail && Number.isFinite(detail.lat) && Number.isFinite(detail.lng)) drawRoute(map, detail);
+  }) as EventListener);
 }
 
 export function installMapToolsCommandPanel(): void {

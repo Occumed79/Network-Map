@@ -1,7 +1,8 @@
 .occumed-mapbox-tools,
 .occumed-mapbox-advanced,
 .occumed-basemap-control,
-.occumed-eta-ranking {
+.occumed-eta-ranking,
+.occumed-density-control {
   margin-left: 278px !important;
   margin-bottom: 10px !important;
   padding: 9px 10px !important;
@@ -24,7 +25,9 @@
 .occumed-basemap-control:hover,
 .occumed-basemap-control:focus-within,
 .occumed-eta-ranking:hover,
-.occumed-eta-ranking:focus-within {
+.occumed-eta-ranking:focus-within,
+.occumed-density-control:hover,
+.occumed-density-control:focus-within {
   max-height: 300px !important;
   background: rgba(250, 253, 255, 0.96) !important;
   box-shadow: 0 18px 42px rgba(48, 76, 104, 0.18), inset 0 1px 0 rgba(255,255,255,0.96) !important;
@@ -173,4 +176,23 @@
   display: block !important;
   margin: 7px auto 0 !important;
   width: calc(100% - 16px) !important;
+}
+
+.occumed-live-panel-compact .occumed-secondary-control-block {
+  max-height: 38px !important;
+  overflow: hidden !important;
+  opacity: 0.58 !important;
+  border-top: 1px solid rgba(74, 104, 132, 0.10) !important;
+  padding-top: 7px !important;
+  transition: max-height 180ms ease, opacity 180ms ease !important;
+}
+
+.occumed-live-panel-compact .occumed-secondary-control-block:hover,
+.occumed-live-panel-compact .occumed-secondary-control-block:focus-within {
+  max-height: 220px !important;
+  opacity: 1 !important;
+}
+
+.occumed-live-panel-compact .occumed-primary-result-block {
+  order: -1 !important;
 }

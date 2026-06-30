@@ -135,8 +135,11 @@ async function queryMirror(endpoint: string, query: string, lat: number, lng: nu
   const response = await fetch(endpoint, {
     method: "POST",
     body: `data=${encodeURIComponent(query)}`,
-    headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
-    signal: AbortSignal.timeout(9000),
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+      "User-Agent": "OccuMedNetworkMap/1.0",
+    },
+    signal: AbortSignal.timeout(30000),
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const data = await response.json() as { elements?: any[] };

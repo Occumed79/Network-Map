@@ -24,6 +24,7 @@ These features now sit behind one consolidated `Map Tools` command panel instead
 - Alt-click route drawing from selected origin
 - Drive/service-zone isochrone polygons
 - Provider ETA Ranking: ranks visible pins by Mapbox drive-time and draws a selected route
+- Live Finder ETA card integration: applies ranked ETA badges and Route buttons directly inside result cards
 - Copy ETA output for notes, emails, or internal case updates
 - Provider Density Field: draws lightweight Leaflet density halos over visible provider pins
 - Live Finder panel compactor: pushes result blocks higher and collapses secondary filter/source controls
@@ -40,4 +41,4 @@ Do not add dependencies to `package.json` unless `pnpm-lock.yaml` is regenerated
 
 ## Next phase
 
-The next major upgrade is a true Mapbox GL or MapLibre renderer migration for native vector styling, globe, heatmaps, and high-performance GeoJSON layers. That should be done in a branch with a regenerated lockfile and verified build.
+The MapLibre migration has started on branch `maplibre-start` and draft PR #52. Keep renderer/package changes isolated there until the lockfile and Render build are verified.

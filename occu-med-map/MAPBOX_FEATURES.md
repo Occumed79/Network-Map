@@ -24,6 +24,9 @@ The token must not be committed to the repository.
 - Route profile controls: Traffic, Drive, Walk
 - Zone presets: 15/30, 15/30/45, 15/30/45/60
 - Provider ETA Ranking: ranks visible pins by Mapbox drive-time and draws a selected route
+- Copy ETA output for notes, emails, or internal case updates
+- Provider Density Field: draws lightweight Leaflet density halos over visible provider pins
+- Live Finder panel compactor: pushes result blocks higher and collapses secondary filter/source controls
 
 ## Deploy constraint
 

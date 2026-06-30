@@ -1,0 +1,89 @@
+.occumed-mapbox-tools {
+  margin-left: 278px !important;
+  margin-bottom: 10px !important;
+  padding: 10px !important;
+  width: 270px !important;
+  border-radius: 16px !important;
+  background: rgba(250, 253, 255, 0.92) !important;
+  border: 1px solid rgba(83, 111, 136, 0.16) !important;
+  box-shadow: 0 14px 34px rgba(48, 76, 104, 0.16), inset 0 1px 0 rgba(255,255,255,0.94) !important;
+  backdrop-filter: blur(18px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(140%) !important;
+}
+
+.occumed-mapbox-search {
+  width: 100% !important;
+  box-sizing: border-box !important;
+  height: 30px !important;
+  margin-bottom: 7px !important;
+  padding: 0 9px !important;
+  border-radius: 999px !important;
+  background: rgba(255,255,255,0.78) !important;
+  border: 1px solid rgba(80, 112, 140, 0.15) !important;
+  color: #1f2937 !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  outline: none !important;
+}
+
+.occumed-mapbox-search::placeholder {
+  color: rgba(63, 82, 104, 0.48) !important;
+}
+
+.occumed-mapbox-actions {
+  display: flex !important;
+  gap: 5px !important;
+  flex-wrap: wrap !important;
+  margin-bottom: 7px !important;
+}
+
+.occumed-mapbox-actions button,
+.occumed-popup-route {
+  padding: 5px 8px !important;
+  border-radius: 999px !important;
+  background: rgba(255,255,255,0.78) !important;
+  border: 1px solid rgba(80, 112, 140, 0.15) !important;
+  color: #1f2937 !important;
+  cursor: pointer !important;
+  font-size: 10px !important;
+  font-weight: 800 !important;
+}
+
+.occumed-mapbox-actions button:hover,
+.occumed-popup-route:hover {
+  background: #ffffff !important;
+  border-color: rgba(14, 116, 144, 0.30) !important;
+}
+
+.occumed-mapbox-status {
+  min-height: 24px !important;
+  padding: 6px 8px !important;
+  border-radius: 10px !important;
+  background: rgba(14, 116, 144, 0.06) !important;
+  border: 1px solid rgba(14, 116, 144, 0.10) !important;
+  color: rgba(37, 51, 71, 0.70) !important;
+  font-size: 10px !important;
+  line-height: 1.35 !important;
+  font-weight: 650 !important;
+}
+
+.occumed-mapbox-origin-dot {
+  width: 22px !important;
+  height: 22px !important;
+  border-radius: 50% !important;
+  background: #0284c7 !important;
+  border: 3px solid #ffffff !important;
+  box-shadow: 0 0 0 5px rgba(2, 132, 199, 0.20), 0 10px 18px rgba(15, 23, 42, 0.28) !important;
+}
+
+.occumed-mapbox-popup {
+  color: #172033 !important;
+  font-size: 11px !important;
+  line-height: 1.45 !important;
+}
+
+.occumed-popup-route {
+  display: block !important;
+  margin: 7px auto 0 !important;
+  width: calc(100% - 16px) !important;
+}

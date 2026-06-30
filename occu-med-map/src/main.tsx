@@ -3,6 +3,7 @@ import "./mapboxLeafletRuntime";
 import "./mapboxAdvancedControls";
 import "./mapboxProviderRanking";
 import "./providerDensityField";
+import "./rightPanelCompactor";
 import App from "./App";
 import "./index.css";
 import "./professional-overrides.css";

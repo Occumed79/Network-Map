@@ -36,8 +36,7 @@ function markerLabel(layer: L.Layer, fallback: string): string {
   return stripped.slice(0, 70) || fallback;
 }
 
-function collectVisibleCandidates(map: L.Map): Candidate[] {
-  if (!origin) return [];
+function collectVisibleCandidates(map: L.Map, currentOrigin: Point): Candidate[] {
   const bounds = map.getBounds().pad(0.1);
   const rows: Candidate[] = [];
   map.eachLayer((layer: L.Layer) => {
@@ -46,7 +45,7 @@ function collectVisibleCandidates(map: L.Map): Candidate[] {
     const latLng = maybeMarker.getLatLng();
     if (!bounds.contains(latLng)) return;
     const point = { lat: latLng.lat, lng: latLng.lng };
-    const straightMiles = milesBetween(origin, point);
+    const straightMiles = milesBetween(currentOrigin, point);
     if (straightMiles < 0.03 || straightMiles > 250) return;
     rows.push({ ...point, layer, straightMiles, name: markerLabel(layer, `Pin ${rows.length + 1}`) });
   });
@@ -85,11 +84,12 @@ function renderRankings(map: L.Map, rankings: RankedCandidate[]): void {
 }
 
 async function rankVisibleProviders(map: L.Map): Promise<void> {
-  if (!origin) {
+  const currentOrigin = origin;
+  if (!currentOrigin) {
     setStatus("Click the map to set an origin first.");
     return;
   }
-  const candidates = collectVisibleCandidates(map);
+  const candidates = collectVisibleCandidates(map, currentOrigin);
   if (candidates.length === 0) {
     setStatus("No visible provider pins found to rank. Zoom to results first.");
     return;
@@ -98,7 +98,7 @@ async function rankVisibleProviders(map: L.Map): Promise<void> {
   const ranked: RankedCandidate[] = [];
   for (const candidate of candidates) {
     try {
-      const route = await mapboxDirections(origin, candidate, "driving-traffic");
+      const route = await mapboxDirections(currentOrigin, candidate, "driving-traffic");
       ranked.push({ ...candidate, driveMiles: route.distanceMiles, driveMinutes: route.durationMinutes, coordinates: route.coordinates });
     } catch {
       // Skip candidates that Mapbox cannot route to.

@@ -2422,7 +2422,14 @@ export default function App() {
       renderLiveMarkers(results);
       setLiveHint('');
       setLiveError('');
-      setLiveMirror(formatLiveProviderStatus(Array.isArray(data?.providers)?data.providers:[],results.length));
+      const rawCount = Number(data?.rawCount);
+      const returnedCount = Number(data?.returnedCount);
+      const truncated = Boolean(data?.truncated);
+      const providerText = formatLiveProviderStatus(Array.isArray(data?.providers)?data.providers:[],results.length);
+      const capText = truncated && Number.isFinite(rawCount) && Number.isFinite(returnedCount)
+        ? ` · Showing nearest ${returnedCount.toLocaleString()} of ${rawCount.toLocaleString()} matches`
+        : '';
+      setLiveMirror(`${providerText}${capText}`);
     } catch(err) {
       console.warn('[LiveFinder] Backend search failed',err);
       setLiveHint('');
@@ -2631,7 +2638,8 @@ export default function App() {
     if(!liveGrp||!map) return;
     liveGrp.clearLayers();
     const filtered=liveFilter==='all'?results:results.filter(r=>r.cat===liveFilter);
-    filtered.forEach((r:any,i:number)=>{
+    const markerRows = filtered.slice(0, 750);
+    markerRows.forEach((r:any,i:number)=>{
       const c=CATS[r.cat]||CATS.clinic;
       const gmUrl=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name+(r.addr?' '+r.addr:''))}`;
       const mk=L.marker([r.lat,r.lng],{icon:L.divIcon({className:'',html:`<div style="width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(4,10,22,0.92);border:2px solid ${c.col};${showGlowPoints?`box-shadow:0 0 8px ${c.col}44,0 2px 6px rgba(0,0,0,0.6);`:'box-shadow:0 0 0 1px rgba(255,255,255,0.18);'}font-size:13px;cursor:pointer;">${c.ico}</div>`,iconSize:[28,28],iconAnchor:[14,14]}),zIndexOffset:1000+i});

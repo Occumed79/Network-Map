@@ -25,6 +25,7 @@ These features now sit behind one consolidated `Map Tools` command panel instead
 - Drive/service-zone isochrone polygons
 - Provider ETA Ranking: ranks visible pins by Mapbox drive-time and draws a selected route
 - Live Finder ETA card integration: applies ranked ETA badges and Route buttons directly inside result cards
+- Live Finder Drive-Time Tools strip: Rank by Drive Time, Apply ETA, Copy ETA, and Clear actions directly inside the results panel
 - Copy ETA output for notes, emails, or internal case updates
 - Provider Density Field: draws lightweight Leaflet density halos over visible provider pins
 - Live Finder panel compactor: pushes result blocks higher and collapses secondary filter/source controls

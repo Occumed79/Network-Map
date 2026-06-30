@@ -14,15 +14,15 @@ The token must not be committed to the repository.
 
 ## Current Mapbox features
 
+These features now sit behind one consolidated `Map Tools` command panel instead of separate stacked controls.
+
 - Mapbox basemap upgrade for the default Leaflet/OpenStreetMap tile layer
 - Basemap switcher: Streets, Light, Terrain, Satellite
-- Mapbox geocoding search in the Mapbox Intelligence control
+- Mapbox geocoding search
 - Mapbox reverse geocoding when clicking the map
 - Origin selection from clicked locations
-- Mapbox route drawing from selected origin
+- Alt-click route drawing from selected origin
 - Drive/service-zone isochrone polygons
-- Route profile controls: Traffic, Drive, Walk
-- Zone presets: 15/30, 15/30/45, 15/30/45/60
 - Provider ETA Ranking: ranks visible pins by Mapbox drive-time and draws a selected route
 - Copy ETA output for notes, emails, or internal case updates
 - Provider Density Field: draws lightweight Leaflet density halos over visible provider pins

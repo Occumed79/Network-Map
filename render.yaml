@@ -140,8 +140,8 @@ services:
       - key: SEARCH_MAX_TOTAL_EXTERNAL_CALLS
         sync: false
 
- databases:
-   - name: network-map-db
-     databaseName: network_map
-     user: network_map
-     plan: free
+databases:
+  - name: network-map-db
+    databaseName: network_map
+    user: network_map
+    plan: free

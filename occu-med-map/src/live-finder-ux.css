@@ -104,9 +104,59 @@
   opacity: 0.94 !important;
 }
 
+.live-panel.open {
+  width: min(420px, calc(100vw - var(--sidebar-w) - 24px)) !important;
+  max-width: 420px !important;
+  background: linear-gradient(180deg, rgba(235, 250, 255, 0.94), rgba(205, 239, 248, 0.91)) !important;
+  border-left: 1px solid rgba(76, 110, 137, 0.18) !important;
+  box-shadow: -18px 0 42px rgba(44, 82, 108, 0.16), inset 1px 0 0 rgba(255,255,255,0.65) !important;
+  opacity: 1 !important;
+}
+
 .live-panel.open .lp-inner {
   width: 100% !important;
   box-sizing: border-box !important;
+  padding: 16px !important;
+  gap: 12px !important;
+}
+
+.live-panel .lp-title {
+  color: #172033 !important;
+  font-size: 12px !important;
+  letter-spacing: 0.06em !important;
+}
+
+.live-panel .rp-close,
+.live-panel button {
+  border-radius: 10px !important;
+}
+
+.live-panel .rp-input,
+.live-panel .rp-select {
+  min-height: 34px !important;
+  background: rgba(255,255,255,0.78) !important;
+  border: 1px solid rgba(73, 104, 132, 0.14) !important;
+  color: #172033 !important;
+  font-size: 11px !important;
+}
+
+.live-panel .rp-input::placeholder {
+  color: rgba(55, 73, 96, 0.50) !important;
+}
+
+.live-panel .lp-chip {
+  min-height: 25px !important;
+  padding: 5px 8px !important;
+  color: #26364d !important;
+  background: rgba(255,255,255,0.55) !important;
+  border: 1px solid rgba(75, 105, 132, 0.13) !important;
+  box-shadow: none !important;
+}
+
+.live-panel .lp-chip.on {
+  color: #06243a !important;
+  background: rgba(255,255,255,0.92) !important;
+  border-color: rgba(14, 116, 144, 0.28) !important;
 }
 
 .live-panel .lp-name,
@@ -131,4 +181,13 @@
 
 .live-panel .lp-act {
   text-align: center !important;
+}
+
+.live-panel .lp-empty.show {
+  padding: 18px !important;
+  border-radius: 16px !important;
+  background: rgba(255,255,255,0.34) !important;
+  border: 1px solid rgba(83, 111, 136, 0.12) !important;
+  color: rgba(37, 51, 71, 0.62) !important;
+  line-height: 1.55 !important;
 }

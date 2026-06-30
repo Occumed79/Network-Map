@@ -1,0 +1,32 @@
+.occumed-result-eta-bar {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 8px !important;
+  margin-top: 7px !important;
+  padding: 6px 7px !important;
+  border-radius: 10px !important;
+  background: rgba(124, 58, 237, 0.08) !important;
+  border: 1px solid rgba(124, 58, 237, 0.18) !important;
+}
+
+.occumed-result-eta-bar span {
+  color: #6d28d9 !important;
+  font-size: 10px !important;
+  font-weight: 900 !important;
+}
+
+.occumed-result-eta-bar button {
+  border: 1px solid rgba(124, 58, 237, 0.22) !important;
+  background: rgba(255,255,255,0.78) !important;
+  color: #4c1d95 !important;
+  border-radius: 999px !important;
+  padding: 4px 8px !important;
+  font-size: 9px !important;
+  font-weight: 900 !important;
+  cursor: pointer !important;
+}
+
+.occumed-result-eta-bar button:hover {
+  background: #ffffff !important;
+}

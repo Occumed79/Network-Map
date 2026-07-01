@@ -78,7 +78,7 @@ function scanPanels(): void {
 }
 
 export function installLiveFinderDriveTools(): void {
-  if (installed) return;
+  if (installed || import.meta.env.VITE_NATIVE_DRIVE_TIME === "true") return;
   installed = true;
   window.setTimeout(scanPanels, 250);
   const observer = new MutationObserver(() => scheduleScan());

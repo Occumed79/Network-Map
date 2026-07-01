@@ -1,0 +1,69 @@
+.native-drive-time-panel {
+  margin-right: 18px !important;
+  margin-bottom: 18px !important;
+  width: 280px !important;
+  max-height: 44px !important;
+  overflow: hidden !important;
+  padding: 10px !important;
+  border-radius: 18px !important;
+  background: rgba(250, 253, 255, 0.94) !important;
+  border: 1px solid rgba(103, 232, 249, 0.26) !important;
+  box-shadow: 0 0 24px rgba(103,232,249,0.18), 0 18px 42px rgba(48,76,104,0.18), inset 0 1px 0 rgba(255,255,255,0.96) !important;
+  backdrop-filter: blur(18px) saturate(150%) !important;
+}
+
+.native-drive-time-panel:hover,
+.native-drive-time-panel:focus-within {
+  max-height: 420px !important;
+}
+
+.native-drive-time-title {
+  margin-bottom: 8px !important;
+  color: #243044 !important;
+  font-size: 10px !important;
+  font-weight: 900 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
+}
+
+.native-drive-time-actions {
+  display: flex !important;
+  gap: 6px !important;
+  flex-wrap: wrap !important;
+  margin-bottom: 8px !important;
+}
+
+.native-drive-time-actions button,
+.native-drive-time-row {
+  border-radius: 999px !important;
+  border: 1px solid rgba(80,112,140,0.16) !important;
+  background: rgba(255,255,255,0.78) !important;
+  color: #1f2937 !important;
+  cursor: pointer !important;
+  font-size: 10px !important;
+  font-weight: 850 !important;
+  padding: 5px 8px !important;
+}
+
+.native-drive-time-status {
+  min-height: 24px !important;
+  padding: 6px 8px !important;
+  border-radius: 10px !important;
+  background: rgba(14,116,144,0.06) !important;
+  color: rgba(37,51,71,0.70) !important;
+  font-size: 10px !important;
+  line-height: 1.35 !important;
+}
+
+.native-drive-time-results {
+  display: grid !important;
+  gap: 5px !important;
+  margin-top: 7px !important;
+}
+
+.native-drive-time-row {
+  text-align: left !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}

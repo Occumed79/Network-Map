@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import * as topojson from 'topojson-client';
 import * as XLSX from 'xlsx';
@@ -16,6 +16,25 @@ import type { ProviderCandidate, UnifiedSearchResponse, SearchAudit } from './li
 import { SOURCE_BADGES } from './lib/providerSources/types';
 import { buildExplanation } from './lib/providerSources/scoring';
 import { fetchMapInventory, type MapInventoryProvider } from './features/providerSearch/providerSearchClient';
+import { DriveTimeControlStrip } from './features/driveTime/DriveTimeControlStrip';
+import { ProviderEtaBadge } from './features/driveTime/ProviderEtaBadge';
+import { requestEtaRoute } from './features/driveTime/etaRouteEvents';
+import { liveResultsToEtaCandidates } from './features/driveTime/leafletProviderAdapter';
+import { useProviderEta } from './features/driveTime/useProviderEta';
+import './features/driveTime/driveTimeControls.css';
+import './features/driveTime/driveTimeBadge.css';
+
+const NATIVE_DRIVE_TIME_ENABLED = import.meta.env.VITE_NATIVE_DRIVE_TIME === 'true';
+
+async function copyTextSafely(text:string):Promise<boolean> {
+  try {
+    if(!navigator.clipboard?.writeText) return false;
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 type ActiveTool = 'coverage' | 'liveFinder' | 'radius' | 'directories' | 'priceFinder' | 'myClinics' | 'compare' | null;
 
@@ -1040,8 +1059,23 @@ export default function App() {
   const [outreachStatus, setOutreachStatus] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_status')||'{}'); } catch { return {}; } });
   const [dropUi, setDropUi] = useState({panelOpen:false, exportLoading:false, status:''});
   const lastRadiusRef = useRef<{lat:number;lng:number}|null>(null);
+  const providerEta = useProviderEta();
+  const etaCandidates = useMemo(
+    ()=>NATIVE_DRIVE_TIME_ENABLED?liveResultsToEtaCandidates(liveResults):[],
+    [liveResults],
+  );
+  const etaOrigin = NATIVE_DRIVE_TIME_ENABLED && lastRadiusRef.current
+    ? {
+        ...lastRadiusRef.current,
+        label: liveLocation || `${lastRadiusRef.current.lat.toFixed(4)}, ${lastRadiusRef.current.lng.toFixed(4)}`,
+      }
+    : null;
   const liveBackendCategoryRef = useRef(liveBackendCategory);
   useEffect(()=>{ liveBackendCategoryRef.current = liveBackendCategory; },[liveBackendCategory]);
+  useEffect(()=>{
+    if(!NATIVE_DRIVE_TIME_ENABLED) return;
+    providerEta.clear();
+  },[liveResults,dropCenter?.lat,dropCenter?.lng,providerEta.clear]);
 
   function updateOutreachNote(id:any, value:string) {
     setOutreachNotes(prev=>{
@@ -2395,6 +2429,7 @@ export default function App() {
     const categoryForSearch = categoryOverride || liveBackendCategoryRef.current;
     const map=mapRef.current;
     if(!map) return;
+    if(NATIVE_DRIVE_TIME_ENABLED) providerEta.clear();
     setLiveLoading(true);
     setLiveResults([]);
     setLiveHint('Searching...');
@@ -3186,6 +3221,21 @@ export default function App() {
                 {liveLocation?`Center · ${liveLocation}`:'Coordinate-first live search · click the map or search an address.'}
                 {liveMirror&&<div style={{fontSize:9,color:'#2d4060',marginTop:3}}>{liveMirror}</div>}
               </div>
+              {NATIVE_DRIVE_TIME_ENABLED&&!npiCategory&&(
+                <DriveTimeControlStrip
+                  origin={etaOrigin}
+                  candidates={etaCandidates}
+                  loading={providerEta.loading}
+                  rankedCount={providerEta.rankings.length}
+                  error={providerEta.error}
+                  onRank={(options)=>{
+                    if(!etaOrigin) return;
+                    void providerEta.rank(etaOrigin,etaCandidates,options).catch(()=>undefined);
+                  }}
+                  onCopy={()=>{ void providerEta.copy(); }}
+                  onClear={providerEta.clear}
+                />
+              )}
               {showUsDiagnostics && (() => {
                 const gap = territoryGapSummary();
                 return (
@@ -3457,9 +3507,10 @@ export default function App() {
                       </div>
                     );
                   })
-                : filterAndSortLiveResults(liveResults).map((r:any)=>{
+                  : filterAndSortLiveResults(liveResults).map((r:any)=>{
                     const c=CATS[r.cat]||CATS.clinic;
                     const gm=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name+(r.addr?' '+r.addr:''))}`;
+                    const resultEta=NATIVE_DRIVE_TIME_ENABLED?providerEta.findEta(r.name):null;
                     return (
                       <div key={r.id} className={`lp-item${liveHighlightId===r.id?' hl':''}`} onClick={()=>lpFly(r.lat,r.lng,r.id)}>
                         <div className="lp-row1">
@@ -3473,6 +3524,15 @@ export default function App() {
                           {r.hours&&<span className="lp-tag">{r.hours.substring(0,30)}</span>}
                           {r.phone&&<span className="lp-tag">📞</span>}
                         </div>
+                        {NATIVE_DRIVE_TIME_ENABLED&&resultEta&&(
+                          <ProviderEtaBadge
+                            eta={resultEta}
+                            onRoute={requestEtaRoute}
+                            onCopy={(row)=>{
+                              void copyTextSafely(`${row.name} — ${Math.round(row.driveMinutes)} min / ${row.driveMiles.toFixed(1)} mi`);
+                            }}
+                          />
+                        )}
                         <div className="lp-acts">
                           <a href={gm} target="_blank" rel="noopener" className="lp-act pri" onClick={e=>e.stopPropagation()}>Google Maps ↗</a>
                           {r.website&&<a href={r.website} target="_blank" rel="noopener" className="lp-act" onClick={e=>e.stopPropagation()}>Website ↗</a>}

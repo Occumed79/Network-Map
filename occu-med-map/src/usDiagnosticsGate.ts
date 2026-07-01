@@ -1,3 +1,5 @@
+import "./us-diagnostics-gate.css";
+
 let installed = false;
 let lastState = "";
 

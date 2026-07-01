@@ -2920,7 +2920,8 @@ export default function App() {
             </div>
           </div>
           <div className="sb-section">
-            <div className="sb-lbl">SERVICE PRESENCE</div>
+            <div className="sb-lbl" style={{cursor:'pointer',userSelect:'none'}} onClick={()=>setCollapsedSections(p=>({...p,servicePresence:!p.servicePresence}))}>SERVICE PRESENCE {collapsedSections.servicePresence ? '▸' : '▾'}</div>
+            {!collapsedSections.servicePresence && (<>
             <div style={{fontSize:'8.5px',color:'var(--muted)',marginBottom:'8px',lineHeight:'1.3'}}>
               Shows indexed provider locations from the database for the selected service type.
             </div>
@@ -2940,15 +2941,18 @@ export default function App() {
                 {s.label}
               </button>
             ))}
+            </>)}
           </div>
           <div className="sb-divider"/>
           <div className="sb-section">
-            <div className="sb-lbl">VIEW PRESETS</div>
+            <div className="sb-lbl" style={{cursor:'pointer',userSelect:'none'}} onClick={()=>setCollapsedSections(p=>({...p,viewPresets:!p.viewPresets}))}>VIEW PRESETS {collapsedSections.viewPresets ? '▸' : '▾'}</div>
+            {!collapsedSections.viewPresets && (
             <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
               {(['world','us','east','central','west'] as const).map(v=>(
                 <button key={v} className={`vbtn${view===v?' active':''}`} onClick={()=>flyToView(v)}>{v.toUpperCase()}</button>
               ))}
             </div>
+            )}
           </div>
           <div className="sb-divider"/>
           <div className="sb-section">
@@ -3055,7 +3059,8 @@ export default function App() {
           </div>
           <div className="sb-divider"/>
           <div className="sb-section" style={{paddingBottom:10}}>
-            <div className="sb-lbl">DISTRIBUTION (U.S.)</div>
+            <div className="sb-lbl" style={{cursor:'pointer',userSelect:'none'}} onClick={()=>setCollapsedSections(p=>({...p,distribution:!p.distribution}))}>DISTRIBUTION (U.S.) {collapsedSections.distribution ? '▸' : '▾'}</div>
+            {!collapsedSections.distribution && (<>
             {dist.map(d=>(
               <div key={d.v} className="br">
                 <div className="br-hdr">
@@ -3065,16 +3070,19 @@ export default function App() {
                 <div className="br-track"><div className="br-fill" style={{width:`${(d.count/maxDist)*100}%`,background:DCOL[d.v]}}/></div>
               </div>
             ))}
+            </>)}
           </div>
           <div className="sb-divider"/>
           <div className="sb-section" style={{paddingBottom:12}}>
-            <div className="sb-lbl">LEGEND (U.S. DIFFICULTY)</div>
+            <div className="sb-lbl" style={{cursor:'pointer',userSelect:'none'}} onClick={()=>setCollapsedSections(p=>({...p,legend:!p.legend}))}>LEGEND (U.S. DIFFICULTY) {collapsedSections.legend ? '▸' : '▾'}</div>
+            {!collapsedSections.legend && (<>
             {[1,2,3,4,5].map(v=>(
               <div key={v} className="legend-row">
                 <div className="legend-dot" style={{background:DCOL[v]}}/>
                 <span className="legend-lbl">{v} — {DLBL[v]}</span>
               </div>
             ))}
+            </>)}
           </div>
           </>)}
         

@@ -3,7 +3,9 @@ import "./mapboxLeafletRuntime";
 import "./mapToolsCommandPanel";
 import "./rightPanelCompactor";
 import "./liveFinderDriveTools";
-import "./sidebarCommandFixes";
+import "./usDiagnosticsGate";
+import "./modalLabelScrubber";
+import "./modal-command-polish.css";
 import "./features/driveTime/nativeDriveTimeRuntime";
 import "./features/driveTime/nativeDriveTimeRuntime.css";
 import App from "./App";
@@ -19,5 +21,6 @@ import "./sidebar-control-fixes.css";
 import "./modal-popup-fixes.css";
 import "./modal-content-polish.css";
 import "./performance-safety.css";
+import "./app-shell-layout.css";
 
 createRoot(document.getElementById("root")!).render(<App />);

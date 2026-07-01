@@ -1,3 +1,4 @@
+import "./usDiagnosticsGate";
 import L from "leaflet";
 
 type ContinentView = {

@@ -1,4 +1,5 @@
 let installed = false;
+let scanQueued = false;
 
 type RankedProvider = {
   name: string;
@@ -16,6 +17,15 @@ function normalizedText(el: Element): string {
 
 function normalizeName(value: string): string {
   return value.replace(/<[^>]*>/g, " ").replace(/[^a-z0-9]+/gi, " ").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function scheduleScan(): void {
+  if (scanQueued) return;
+  scanQueued = true;
+  window.setTimeout(() => {
+    scanQueued = false;
+    scanPanels();
+  }, 160);
 }
 
 function tagSecondaryControls(root: Element): void {
@@ -53,10 +63,20 @@ function applyEtaToCards(inner: Element): void {
   cards.forEach((card) => {
     const name = card.querySelector(".lp-name")?.textContent || "";
     const ranking = matchRanking(name);
-    card.querySelector(".occumed-result-eta-bar")?.remove();
-    card.removeAttribute("data-eta-rank");
-    if (!ranking) return;
-    card.setAttribute("data-eta-rank", String(latestRankings.indexOf(ranking) + 1).padStart(3, "0"));
+    const nextRank = ranking ? String(latestRankings.indexOf(ranking) + 1).padStart(3, "0") : "";
+    const currentRank = card.getAttribute("data-eta-rank") || "";
+    const existingBar = card.querySelector(".occumed-result-eta-bar");
+
+    if (!ranking) {
+      if (existingBar) existingBar.remove();
+      if (currentRank) card.removeAttribute("data-eta-rank");
+      return;
+    }
+
+    if (currentRank === nextRank && existingBar) return;
+
+    existingBar?.remove();
+    card.setAttribute("data-eta-rank", nextRank);
 
     const bar = document.createElement("div");
     bar.className = "occumed-result-eta-bar";
@@ -79,7 +99,10 @@ function applyEtaToCards(inner: Element): void {
   const rankedCards = cards
     .filter((card) => card.getAttribute("data-eta-rank"))
     .sort((a, b) => String(a.getAttribute("data-eta-rank")).localeCompare(String(b.getAttribute("data-eta-rank"))));
-  rankedCards.forEach((card) => inner.appendChild(card));
+  rankedCards.forEach((card, index) => {
+    const desiredPosition = inner.children[index];
+    if (desiredPosition !== card) inner.insertBefore(card, desiredPosition || null);
+  });
 }
 
 function scanPanels(): void {
@@ -90,11 +113,11 @@ export function installRightPanelCompactor(): void {
   if (installed) return;
   installed = true;
   window.setTimeout(scanPanels, 250);
-  const observer = new MutationObserver(() => scanPanels());
+  const observer = new MutationObserver(() => scheduleScan());
   observer.observe(document.body, { childList: true, subtree: true });
   window.addEventListener("occumed:provider-eta-rankings", ((event: Event) => {
     latestRankings = Array.isArray((event as CustomEvent<RankedProvider[]>).detail) ? (event as CustomEvent<RankedProvider[]>).detail : [];
-    scanPanels();
+    scheduleScan();
   }) as EventListener);
 }
 

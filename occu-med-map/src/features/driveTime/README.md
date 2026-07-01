@@ -10,6 +10,18 @@ Move drive-time ranking into reusable app code:
 provider results -> ETA candidates -> Mapbox Directions -> ranked ETA result -> React cards
 ```
 
+## Feature flag
+
+The no-deploy branch imports a dormant runtime through `main.tsx`.
+
+It activates only when:
+
+```text
+VITE_NATIVE_DRIVE_TIME=true
+```
+
+Without that flag, the runtime exits immediately and does not add controls or map listeners.
+
 ## Main modules
 
 - `providerEtaTypes.ts` — shared types
@@ -22,6 +34,7 @@ provider results -> ETA candidates -> Mapbox Directions -> ranked ETA result -> 
 - `DriveTimeControlStrip.tsx` — native result-panel control strip
 - `etaRouteEvents.ts` — route request event bridge
 - `leafletEtaRouteLayer.ts` — Leaflet route drawing helper
+- `nativeDriveTimeRuntime.ts` — feature-flagged Leaflet runtime for branch testing
 
 ## Replacement target
 

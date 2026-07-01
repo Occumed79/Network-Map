@@ -1405,8 +1405,8 @@ export default function App() {
     const liveGrp = L.layerGroup().addTo(map);
     liveGrpRef.current = liveGrp;
 
-    // Load GeoJSON
-    loadStateGeo(map);
+    // Load GeoJSON only if US Diagnostics is already enabled
+    if (showUsDiagnostics) loadStateGeo(map);
 
     // Tool-aware, globally-safe map click. A normal click on a clean global map
     // does nothing beyond optionally tracking a lightweight selected coordinate.
@@ -1614,6 +1614,20 @@ export default function App() {
     stateGeoRef.current.setStyle((f:any)=>sStyle(f?.properties?.postal||'',metricRef.current));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[showStateColors]);
+
+  // Load / remove state GeoJSON when US Diagnostics toggles
+  useEffect(()=>{
+    const map = mapRef.current;
+    if(!map) return;
+    if(showUsDiagnostics && !stateGeoRef.current) {
+      loadStateGeo(map);
+    } else if(!showUsDiagnostics && stateGeoRef.current) {
+      try { map.removeLayer(stateGeoRef.current); } catch(e){}
+      stateGeoRef.current = null;
+      if(labelLayerRef.current) { try{ map.removeLayer(labelLayerRef.current); }catch(e){} labelLayerRef.current = null; }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[showUsDiagnostics]);
 
   function estimateLocalPopulationDensity(lat:number,lng:number) {
     // U.S.-only intelligence: LOCS/STATE_POP are U.S. cities/states. Never run

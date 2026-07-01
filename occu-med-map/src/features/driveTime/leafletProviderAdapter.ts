@@ -46,12 +46,12 @@ export function liveResultToEtaCandidate(result: any, index: number): EtaProvide
     name: String(result?.name || result?.organizationName || `Provider ${index + 1}`),
     lat,
     lng,
-    address: result?.address,
+    address: result?.address ?? result?.addr,
     phone: result?.phone,
     website: result?.website,
     source: result?.source,
     sourceUrl: result?.sourceUrl,
-    category: result?.category,
+    category: result?.category ?? result?.cat,
     straightMiles: typeof result?.dist === "number" ? result.dist : undefined,
   };
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatEtaRankingForClipboard, rankProvidersByEta } from "./providerEtaEngine";
 import { getProviderEtaResult, setProviderEtaResult, subscribeProviderEtaResult } from "./providerEtaStore";
 import type { EtaOrigin, EtaProviderCandidate, EtaProviderRanking, EtaRankingOptions, EtaRankingResult } from "./providerEtaTypes";
@@ -10,6 +10,7 @@ type ProviderEtaState = {
 };
 
 export function useProviderEta() {
+  const requestIdRef = useRef(0);
   const [state, setState] = useState<ProviderEtaState>({
     result: getProviderEtaResult(),
     loading: false,
@@ -45,20 +46,25 @@ export function useProviderEta() {
     candidates: EtaProviderCandidate[],
     options?: EtaRankingOptions,
   ) => {
+    const requestId = ++requestIdRef.current;
     setState((prev) => ({ ...prev, loading: true, error: "" }));
     try {
       const result = await rankProvidersByEta(origin, candidates, options);
+      if (requestId !== requestIdRef.current) return result;
       setProviderEtaResult(result);
       setState({ result, loading: false, error: "" });
       return result;
     } catch (error: any) {
       const message = error?.message || "Unable to rank providers by drive time.";
-      setState((prev) => ({ ...prev, loading: false, error: message }));
+      if (requestId === requestIdRef.current) {
+        setState((prev) => ({ ...prev, loading: false, error: message }));
+      }
       throw error;
     }
   }, []);
 
   const clear = useCallback(() => {
+    requestIdRef.current += 1;
     setProviderEtaResult(null);
     setState({ result: null, loading: false, error: "" });
   }, []);
@@ -66,9 +72,14 @@ export function useProviderEta() {
   const copy = useCallback(async () => {
     const result = getProviderEtaResult();
     if (!result) return false;
-    const text = formatEtaRankingForClipboard(result);
-    await navigator.clipboard.writeText(text);
-    return true;
+    try {
+      if (!navigator.clipboard?.writeText) return false;
+      const text = formatEtaRankingForClipboard(result);
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      return false;
+    }
   }, []);
 
   return {

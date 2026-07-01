@@ -12,6 +12,7 @@ export function installLeafletEtaRouteLayer(map: L.Map): () => void {
   }
 
   function draw(row: EtaProviderRanking): void {
+    if (row.routeCoordinates.length < 2) return;
     clear();
     const line = L.polyline(row.routeCoordinates, {
       color: "#7c3aed",

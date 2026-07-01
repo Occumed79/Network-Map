@@ -3,6 +3,7 @@ import "./mapboxLeafletRuntime";
 import "./mapToolsCommandPanel";
 import "./rightPanelCompactor";
 import "./liveFinderDriveTools";
+import "./sidebarCommandFixes";
 import App from "./App";
 import "./index.css";
 import "./professional-overrides.css";
@@ -11,5 +12,8 @@ import "./liquid-glass-theme.css";
 import "./live-finder-ux.css";
 import "./mapbox-intelligence.css";
 import "./live-finder-eta-actions.css";
+import "./luminous-shell-fixes.css";
+import "./sidebar-control-fixes.css";
+import "./modal-popup-fixes.css";
 
 createRoot(document.getElementById("root")!).render(<App />);

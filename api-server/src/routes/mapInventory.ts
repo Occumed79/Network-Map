@@ -6,26 +6,6 @@ const router = Router();
 
 type TrustTier = "verified" | "registry" | "directory" | "lead";
 
-type MedicalProviderRow = {
-  id: number;
-  place_id: string;
-  name: string;
-  formatted_address: string | null;
-  lat: number;
-  lng: number;
-  category: string | null;
-  phone: string | null;
-  website: string | null;
-  country_code: string | null;
-  locality: string | null;
-  administrative_area_level_1: string | null;
-  postal_code: string | null;
-  data_source: string | null;
-  source_id: string | null;
-  source_type: string | null;
-  confidence_score: number | null;
-};
-
 const SERVICE_TERMS: Record<string, string[]> = {
   primaryCare: ["primary care", "family medicine", "general practice", "general practitioner", "internal medicine", "doctor", "physician", "ffd", "fitness for duty"],
   specialist: ["specialist", "specialty", "cardiology", "pulmonary", "neurology", "orthopedic", "radiology", "audiology", "dentist"],
@@ -56,14 +36,6 @@ function normalizeTrustTier(confidenceScore: number | null): TrustTier {
   return "lead";
 }
 
-function providerType(row: MedicalProviderRow): string {
-  return row.category || row.source_type || row.data_source || "medical_provider";
-}
-
-function sourceLabel(row: MedicalProviderRow): string {
-  return row.data_source || row.source_type || "medical_providers";
-}
-
 function serviceTerms(serviceType: string | undefined): string[] {
   if (!serviceType) return [];
   const clean = serviceType.trim();
@@ -72,34 +44,10 @@ function serviceTerms(serviceType: string | undefined): string[] {
   return Array.from(new Set([clean, ...mapped].map((term) => term.toLowerCase().trim()).filter(Boolean)));
 }
 
-function addServicePresenceCondition(
-  conditions: string[],
-  params: Array<number | string>,
-  serviceType: string | undefined,
-) {
-  const terms = serviceTerms(serviceType);
-  if (!terms.length) return;
-
-  const clauses = terms.map((term) => {
-    params.push(`%${term}%`);
-    const index = params.length;
-    return `(
-      LOWER(COALESCE(category, '')) LIKE $${index}
-      OR LOWER(COALESCE(source_type, '')) LIKE $${index}
-      OR LOWER(COALESCE(data_source, '')) LIKE $${index}
-      OR LOWER(COALESCE(name, '')) LIKE $${index}
-      OR LOWER(COALESCE(formatted_address, '')) LIKE $${index}
-      OR LOWER(COALESCE(types::text, '')) LIKE $${index}
-      OR LOWER(COALESCE(raw_data::text, '')) LIKE $${index}
-    )`;
-  });
-
-  conditions.push(`(${clauses.join(" OR ")})`);
-}
-
 /**
  * GET /api/map-inventory
- * Fetch indexed providers from the existing medical_providers table by map viewport bounds.
+ * Fetch indexed providers from normalized provider tables by map viewport bounds.
+ * Queries: providers + provider_locations + provider_contacts + provider_services + provider_sources
  * Query params: north, south, east, west (required), serviceType (optional), trustTier (optional)
  */
 router.get("/map-inventory", async (req: Request, res: Response) => {
@@ -122,86 +70,102 @@ router.get("/map-inventory", async (req: Request, res: Response) => {
       return;
     }
 
+    const pool = getPool();
     const params: Array<number | string> = [south, north];
     const conditions = [
-      "lat BETWEEN $1 AND $2",
-      "lat IS NOT NULL",
-      "lng IS NOT NULL",
+      "pl.lat BETWEEN $1 AND $2",
+      "pl.lat IS NOT NULL",
+      "pl.lng IS NOT NULL",
     ];
 
     if (west <= east) {
       params.push(west, east);
-      conditions.push(`lng BETWEEN $${params.length - 1} AND $${params.length}`);
+      conditions.push(`pl.lng BETWEEN $${params.length - 1} AND $${params.length}`);
     } else {
       params.push(west, east);
-      conditions.push(`(lng >= $${params.length - 1} OR lng <= $${params.length})`);
+      conditions.push(`(pl.lng >= $${params.length - 1} OR pl.lng <= $${params.length})`);
     }
 
-    addServicePresenceCondition(conditions, params, serviceType);
+    // Add service type filter via JOIN with provider_services
+    let serviceJoin = "";
+    if (serviceType) {
+      const terms = serviceTerms(serviceType);
+      if (terms.length > 0) {
+        serviceJoin = "LEFT JOIN provider_services ps ON ps.provider_id = p.id";
+        const clauses = terms.map((term) => {
+          params.push(`%${term}%`);
+          const index = params.length;
+          return `LOWER(COALESCE(ps.service_type, '')) LIKE $${index} OR LOWER(COALESCE(ps.taxonomy, '')) LIKE $${index}`;
+        });
+        conditions.push(`(${clauses.join(" OR ")})`);
+      }
+    }
+
+    // Add trust tier filter via JOIN with provider_sources
+    let trustJoin = "";
+    if (trustTier) {
+      trustJoin = "LEFT JOIN provider_sources psrc ON psrc.provider_id = p.id";
+      conditions.push(`psrc.trust_tier = '${trustTier}'`);
+    }
 
     params.push(limit);
     const limitIndex = params.length;
 
     const query = `
-      SELECT
-        id,
-        place_id,
-        name,
-        formatted_address,
-        lat,
-        lng,
-        category,
-        phone,
-        website,
-        country_code,
-        locality,
-        administrative_area_level_1,
-        postal_code,
-        data_source,
-        source_id,
-        source_type,
-        confidence_score
-      FROM public.medical_providers
+      SELECT DISTINCT
+        p.id,
+        p.npi,
+        p.name,
+        p.provider_type,
+        pl.address,
+        pl.city,
+        pl.state,
+        pl.postal_code,
+        pl.lat,
+        pl.lng,
+        pl.coordinate_status,
+        pc.phone,
+        pc.fax,
+        pc.website,
+        psrc.source_label,
+        psrc.trust_tier,
+        psrc.source_url
+      FROM providers p
+      INNER JOIN provider_locations pl ON pl.provider_id = p.id
+      LEFT JOIN provider_contacts pc ON pc.provider_id = p.id
+      ${serviceJoin}
+      ${trustJoin}
+      LEFT JOIN provider_sources psrc ON psrc.provider_id = p.id
       WHERE ${conditions.join(" AND ")}
-      ORDER BY confidence_score DESC NULLS LAST, name ASC
+      ORDER BY p.name ASC
       LIMIT $${limitIndex}
     `;
 
-    const { rows } = await getPool().query<MedicalProviderRow>(query, params);
-    const filteredRows = trustTier
-      ? rows.filter((row) => normalizeTrustTier(row.confidence_score) === trustTier)
-      : rows;
+    const { rows } = await pool.query(query, params);
 
-    const providers = filteredRows.map((row) => {
-      const bestTrust = normalizeTrustTier(row.confidence_score);
-      const type = providerType(row);
-
-      return {
-        id: row.id,
-        npi: null,
-        name: row.name,
-        providerType: type,
-        address: row.formatted_address,
-        city: row.locality,
-        state: row.administrative_area_level_1,
-        postalCode: row.postal_code,
-        lat: row.lat,
-        lng: row.lng,
-        coordinateStatus: "verified",
-        phone: row.phone,
-        fax: null,
-        website: row.website,
-        services: row.category ? [row.category] : serviceType ? [serviceType] : [],
-        trustTier: bestTrust,
-        sources: [
-          {
-            sourceId: row.source_id || row.place_id,
-            sourceLabel: sourceLabel(row),
-            trustTier: bestTrust,
-          },
-        ],
-      };
-    });
+    const providers = rows.map((row: Record<string, unknown>) => ({
+      id: row.id as number,
+      npi: row.npi as string | null,
+      name: row.name as string,
+      providerType: row.provider_type as string,
+      address: row.address as string | null,
+      city: row.city as string | null,
+      state: row.state as string | null,
+      postalCode: row.postal_code as string | null,
+      lat: row.lat as number,
+      lng: row.lng as number,
+      coordinateStatus: (row.coordinate_status as string) || "imported",
+      phone: row.phone as string | null,
+      fax: row.fax as string | null,
+      website: row.website as string | null,
+      services: serviceType ? [serviceType] : [],
+      trustTier: (row.trust_tier as TrustTier) || "lead",
+      sources: row.source_label ? [{
+        sourceId: row.source_url as string || row.source_label as string,
+        sourceLabel: row.source_label as string,
+        trustTier: (row.trust_tier as TrustTier) || "lead",
+      }] : [],
+    }));
 
     res.json({ providers, total: providers.length, serviceType: serviceType || null });
   } catch (e: any) {
@@ -211,3 +175,4 @@ router.get("/map-inventory", async (req: Request, res: Response) => {
 });
 
 export default router;
+

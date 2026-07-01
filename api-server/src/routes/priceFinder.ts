@@ -449,10 +449,13 @@ router.get('/price-finder', async (req, res) => {
       return;
     }
 
-    // Use central NPI adapter + FQHC search
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('NPI Registry timeout')), 15000)
+    );
+
     const [mainClinics, fqhcClinics] = await Promise.all([
-      fetchNpiClinics(city, state, serviceType).catch(() => []),
-      fetchNpiClinics(city, state, "fqhc").catch(() => []),
+      Promise.race([fetchNpiClinics(city, state, serviceType), timeoutPromise]).catch(() => []),
+      Promise.race([fetchNpiClinics(city, state, "fqhc"), timeoutPromise]).catch(() => []),
     ]);
 
     // Deduplicate by name

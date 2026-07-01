@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
 @import 'leaflet/dist/leaflet.css';
 
 /* ══════════════════════════════════════════════════════
@@ -56,16 +55,16 @@
   --danger:  #ef4444;    /* critical / errors */
 
   /* Deep "ink" text shades reused across panels & exported reports */
-  --ink-faint: #3d5478;
-  --ink-muted: #4a6888;
-  --ink-soft:  #8fb3d8;
+  --ink-faint: #5a7090;
+  --ink-muted: #6a8098;
+  --ink-soft:  #9fb8d8;
   --report-bg: #040c1a;  /* exported report header background */
 
   /* Text */
   --text:   #f0f8ff;
-  --text2:  rgba(220,238,255,0.82);
-  --muted:  rgba(180,215,255,0.52);
-  --muted2: rgba(140,180,230,0.32);
+  --text2:  rgba(220,238,255,0.88);
+  --muted:  rgba(180,215,255,0.68);
+  --muted2: rgba(140,180,230,0.48);
 
   /* Cursor glow position */
   --glowX: 50vw;
@@ -75,6 +74,18 @@
   --sidebar-w: 232px;
   --header-h: 50px;
 
+  /* Z-index layering — single source of truth */
+  --z-base: 0;
+  --z-panel: 200;          /* side panels, live panel, directories panel */
+  --z-overlay: 400;        /* radius tool, floating UI overlays */
+  --z-sidebar: 1000;       /* sidebar, timezone overlay */
+  --z-info-card: 1200;     /* top-right info card */
+  --z-modal: 1500;         /* modal backdrops */
+  --z-sheet-backdrop: 1700;/* mobile bottom sheet backdrop */
+  --z-sheet: 1800;         /* mobile bottom sheet */
+  --z-drawer: 2000;        /* mobile sidebar drawer */
+  --z-glow: 9999;          /* decorative cursor glow */
+
   /* Radii — Apple's generous rounding */
   --r-xs: 8px;
   --r-sm: 12px;
@@ -83,9 +94,9 @@
   --r-xl: 28px;
 
   /* Glass blur */
-  --blur-sm: blur(16px) saturate(200%) brightness(1.12);
-  --blur-md: blur(28px) saturate(220%) brightness(1.10);
-  --blur-lg: blur(40px) saturate(240%) brightness(1.08);
+  --blur-sm: blur(12px) saturate(160%) brightness(1.08);
+  --blur-md: blur(20px) saturate(180%) brightness(1.06);
+  --blur-lg: blur(28px) saturate(200%) brightness(1.04);
 
   /* Specular highlight — the key to real glass */
   --spec: linear-gradient(145deg, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0.06) 40%, rgba(255,255,255,0.00) 100%);
@@ -113,7 +124,7 @@ html, body, #root {
   height: 500px;
   border-radius: 999px;
   pointer-events: none;
-  z-index: 9999;
+  z-index: var(--z-glow);
   transform: translate(-50%, -50%);
   background: radial-gradient(
     circle,
@@ -150,7 +161,7 @@ html, body, #root {
   background: var(--panel-glass, rgba(13, 18, 30, 0.78));
   border-right: 1px solid var(--border-soft, rgba(205, 221, 244, 0.16));
   backdrop-filter: blur(16px);
-  z-index: 1000;
+  z-index: var(--z-sidebar);
 }
 
 .map-wrap {
@@ -310,7 +321,7 @@ html, body, #root {
   top: 14px;
   right: 14px;
   width: 226px;
-  z-index: 1200;
+  z-index: var(--z-info-card);
   background: linear-gradient(145deg, rgba(255,255,255,0.13), rgba(255,255,255,0.03));
   border: 1px solid rgba(255,255,255,0.24);
   border-radius: var(--r-lg);
@@ -353,7 +364,7 @@ html, body, #root {
   border-radius: var(--r-md);
   padding: 7px 16px;
   pointer-events: none;
-  z-index: 1000;
+  z-index: var(--z-sidebar);
   backdrop-filter: var(--blur-sm);
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.16), 0 8px 30px rgba(0,0,0,0.45);
 }
@@ -447,7 +458,7 @@ html, body, #root {
   border: 1px solid rgba(255,255,255,0.20);
   border-radius: var(--r-md);
   overflow-y: auto;
-  z-index: 200;
+  z-index: var(--z-panel);
   position: absolute;
   top: 100%;
   left: 0; right: 0;
@@ -863,7 +874,7 @@ html, body, #root {
 }
 
 /* ── MODALS ── */
-.modal-backdrop { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,3,12,0.70); backdrop-filter: blur(10px); z-index: 500; align-items: center; justify-content: center; }
+.modal-backdrop { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,3,12,0.70); backdrop-filter: blur(10px); z-index: var(--z-modal); align-items: center; justify-content: center; }
 .modal-backdrop.open { display: flex; }
 
 .modal-box {
@@ -890,7 +901,6 @@ html, body, #root {
   letter-spacing: 0.8px;
   text-transform: uppercase;
 }
-.modal-body { }
 .modal-close {
   background: rgba(255,255,255,0.08);
   border: 1px solid rgba(255,255,255,0.14);
@@ -912,7 +922,7 @@ html, body, #root {
   background: linear-gradient(180deg, rgba(255,255,255,0.09) 0%, rgba(255,255,255,0.04) 100%);
   border-left: 1px solid var(--border);
   transition: width 0.28s cubic-bezier(0.4,0,0.2,1);
-  z-index: 200;
+  z-index: var(--z-panel);
   backdrop-filter: var(--blur-md);
   box-shadow: -4px 0 32px rgba(0,0,0,0.30);
 }
@@ -975,7 +985,7 @@ html, body, #root {
 .pf-link-desc { font-size: 9.5px; color: rgba(180,215,255,0.60); margin-top: 2px; }
 
 /* ── DIRECTORIES ── */
-.dir-panel { position: absolute; top: 0; right: 0; bottom: 0; width: 0; overflow: hidden; background: linear-gradient(180deg, rgba(255,255,255,0.09) 0%, rgba(255,255,255,0.04) 100%); border-left: 1px solid var(--border); transition: width 0.28s cubic-bezier(0.4,0,0.2,1); z-index: 200; backdrop-filter: var(--blur-md); box-shadow: -4px 0 32px rgba(0,0,0,0.30); }
+.dir-panel { position: absolute; top: 0; right: 0; bottom: 0; width: 0; overflow: hidden; background: linear-gradient(180deg, rgba(255,255,255,0.09) 0%, rgba(255,255,255,0.04) 100%); border-left: 1px solid var(--border); transition: width 0.28s cubic-bezier(0.4,0,0.2,1); z-index: var(--z-panel); backdrop-filter: var(--blur-md); box-shadow: -4px 0 32px rgba(0,0,0,0.30); }
 .dir-panel.open { width: 318px; }
 .dir-inner { width: 318px; height: 100%; overflow-y: auto; overflow-x: hidden; padding: 16px; }
 .dir-inner::-webkit-scrollbar { width: 3px; }
@@ -999,7 +1009,7 @@ html, body, #root {
 /* ── RADIUS TOOL ── */
 .radius-tool-ui {
   position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-  z-index: 400;
+  z-index: var(--z-overlay);
   background: linear-gradient(145deg, rgba(255,255,255,0.12), rgba(255,255,255,0.03));
   border: 1px solid rgba(255,255,255,0.22);
   border-radius: var(--r-xl);
@@ -1096,4 +1106,131 @@ html, body, #root {
 ::-webkit-scrollbar-thumb { background: rgba(var(--accent-rgb),0.18); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(var(--accent-rgb),0.30); }
 input, select, textarea { -webkit-appearance: none; appearance: none; }
+
+/* Sheet handle hidden on desktop */
+.sheet-handle { display: none; }
+
+
+/* ══════════════════════════════════════════════════════
+   RESPONSIVE — Tablet & Mobile
+   ══════════════════════════════════════════════════════ */
+
+/* Tablet (≤1024px) — narrow sidebar, smaller buttons */
+@media (max-width: 1024px) {
+  .sidebar {
+    flex: 0 0 260px;
+    width: 260px;
+  }
+  .mbtn {
+    font-size: 9px !important;
+    padding: 4px 6px !important;
+  }
+  .hero-card {
+    padding: 10px !important;
+  }
+}
+
+/* Mobile (≤768px) — sidebar becomes slide-in drawer */
+@media (max-width: 768px) {
+  .app-body {
+    flex-direction: column;
+  }
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 280px;
+    max-width: 85vw;
+    z-index: var(--z-drawer);
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+    box-shadow: 4px 0 24px rgba(0,0,0,0.5);
+  }
+  .sidebar.mobile-open {
+    transform: translateX(0);
+  }
+  .map-wrap {
+    width: 100%;
+    flex: 1 1 auto;
+  }
+  /* Live panel becomes bottom sheet with snap points */
+  .live-panel.open {
+    position: fixed !important;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100% !important;
+    height: 70vh;
+    max-height: 70vh;
+    border-radius: 16px 16px 0 0;
+    z-index: var(--z-sheet);
+    transition: transform 0.3s cubic-bezier(0.4,0,0.2,1), height 0.3s cubic-bezier(0.4,0,0.2,1);
+    box-shadow: 0 -8px 32px rgba(0,0,0,0.5);
+  }
+  .live-panel.open.sheet-collapsed {
+    height: 60px;
+    max-height: 60px;
+  }
+  .live-panel.open.sheet-expanded {
+    height: 85vh;
+    max-height: 85vh;
+  }
+  .lp-inner {
+    width: 100% !important;
+    padding-top: 0 !important;
+  }
+  /* Drag handle bar at top of bottom sheet */
+  .sheet-handle {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 0 6px;
+    cursor: grab;
+    touch-action: none;
+    flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    background: inherit;
+    border-radius: 16px 16px 0 0;
+    z-index: 10;
+  }
+  .sheet-handle:active {
+    cursor: grabbing;
+  }
+  .sheet-handle-bar {
+    width: 40px;
+    height: 5px;
+    border-radius: 3px;
+    background: rgba(255,255,255,0.3);
+    margin-bottom: 4px;
+  }
+  .sheet-handle-label {
+    font-size: 9px;
+    color: var(--muted);
+    font-family: 'IBM Plex Mono', monospace;
+    letter-spacing: 0.08em;
+  }
+  /* Bottom sheet backdrop */
+  .sheet-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: var(--z-sheet-backdrop);
+  }
+  /* Modal takes less screen on mobile */
+  .modal-backdrop.open {
+    padding: 0 !important;
+  }
+}
+
+/* Small mobile (≤480px) */
+@media (max-width: 480px) {
+  .sidebar {
+    width: 240px;
+  }
+  .mbtn {
+    font-size: 8.5px !important;
+  }
+}
 

@@ -117,6 +117,12 @@ app.head("/api/health", (_req, res) => {
 app.use("/api/price-hunt", rateLimit({ windowMs: 10 * 60 * 1000, max: 20 }));
 app.use("/api/occ-hunt", rateLimit({ windowMs: 10 * 60 * 1000, max: 30 }));
 app.use("/api/price-finder", rateLimit({ windowMs: 10 * 60 * 1000, max: 60 }));
+app.use("/api/provider-sources/search", rateLimit({ windowMs: 10 * 60 * 1000, max: 40 }));
+app.use("/api/provider-sources/npi-custom", rateLimit({ windowMs: 10 * 60 * 1000, max: 30 }));
+app.use("/api/live-finder/search", rateLimit({ windowMs: 10 * 60 * 1000, max: 60 }));
+app.use("/api/enhanced-search", rateLimit({ windowMs: 10 * 60 * 1000, max: 60 }));
+app.use("/api/map-inventory", rateLimit({ windowMs: 10 * 60 * 1000, max: 120 }));
+app.use("/api/provider-layers", rateLimit({ windowMs: 10 * 60 * 1000, max: 120 }));
 
 app.use((req, res, next) => {
   if (req.method !== "GET" || !SNAPSHOT_ROUTES.has(req.path)) {

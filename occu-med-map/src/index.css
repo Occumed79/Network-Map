@@ -1095,6 +1095,9 @@ html, body, #root {
 ::-webkit-scrollbar-thumb:hover { background: rgba(var(--accent-rgb),0.30); }
 input, select, textarea { -webkit-appearance: none; appearance: none; }
 
+/* Sheet handle hidden on desktop */
+.sheet-handle { display: none; }
+
 
 /* ══════════════════════════════════════════════════════
    RESPONSIVE — Tablet & Mobile
@@ -1139,16 +1142,69 @@ input, select, textarea { -webkit-appearance: none; appearance: none; }
     width: 100%;
     flex: 1 1 auto;
   }
-  /* Right panel becomes bottom sheet */
-  .right-panel {
+  /* Live panel becomes bottom sheet with snap points */
+  .live-panel.open {
     position: fixed !important;
     bottom: 0;
     left: 0;
     right: 0;
-    max-height: 60vh;
     width: 100% !important;
+    height: 70vh;
+    max-height: 70vh;
     border-radius: 16px 16px 0 0;
     z-index: 1800;
+    transition: transform 0.3s cubic-bezier(0.4,0,0.2,1), height 0.3s cubic-bezier(0.4,0,0.2,1);
+    box-shadow: 0 -8px 32px rgba(0,0,0,0.5);
+  }
+  .live-panel.open.sheet-collapsed {
+    height: 60px;
+    max-height: 60px;
+  }
+  .live-panel.open.sheet-expanded {
+    height: 85vh;
+    max-height: 85vh;
+  }
+  .lp-inner {
+    width: 100% !important;
+    padding-top: 0 !important;
+  }
+  /* Drag handle bar at top of bottom sheet */
+  .sheet-handle {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 0 6px;
+    cursor: grab;
+    touch-action: none;
+    flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    background: inherit;
+    border-radius: 16px 16px 0 0;
+    z-index: 10;
+  }
+  .sheet-handle:active {
+    cursor: grabbing;
+  }
+  .sheet-handle-bar {
+    width: 40px;
+    height: 5px;
+    border-radius: 3px;
+    background: rgba(255,255,255,0.3);
+    margin-bottom: 4px;
+  }
+  .sheet-handle-label {
+    font-size: 9px;
+    color: var(--muted);
+    font-family: 'IBM Plex Mono', monospace;
+    letter-spacing: 0.08em;
+  }
+  /* Bottom sheet backdrop */
+  .sheet-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 1700;
   }
   /* Modal takes less screen on mobile */
   .modal-backdrop.open {

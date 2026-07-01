@@ -352,6 +352,33 @@ function calcDrive(lat1:number,lng1:number,lat2:number,lng2:number) {
   return {miles:Math.round(dist),timeStr:h>0?`${h}h ${m}m`:`${m}m`,hours:hrs};
 }
 
+async function routeDrive(lat1:number,lng1:number,lat2:number,lng2:number): Promise<{miles:number;timeStr:string;hours:number;routed:boolean}> {
+  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    const fallback = calcDrive(lat1,lng1,lat2,lng2);
+    return {...fallback, routed:false};
+  }
+  try {
+    const origin = `${lat1},${lng1}`;
+    const destination = `${lat2},${lng2}`;
+    const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&units=imperial&departure_time=now&key=${apiKey}`;
+    const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!resp.ok) throw new Error(`Directions API ${resp.status}`);
+    const data = await resp.json();
+    const route = data.routes?.[0]?.legs?.[0];
+    if (!route) throw new Error('No route found');
+    const meters = route.distance?.value || 0;
+    const seconds = route.duration_in_traffic?.value || route.duration?.value || 0;
+    const miles = Math.round(meters / 1609.344);
+    const hours = seconds / 3600;
+    const h = Math.floor(hours), m = Math.round((hours - h) * 60);
+    return { miles, timeStr: h > 0 ? `${h}h ${m}m` : `${m}m`, hours, routed:true };
+  } catch {
+    const fallback = calcDrive(lat1,lng1,lat2,lng2);
+    return {...fallback, routed:false};
+  }
+}
+
 function approxMiles(lat1:number,lng1:number,lat2:number,lng2:number):number {
   const dlat=lat2-lat1,dlng=lng2-lng1;
   return Math.round(Math.sqrt(dlat*dlat+dlng*dlng)*69);
@@ -1325,6 +1352,7 @@ export default function App() {
 
   const [mapReady, setMapReady] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [sheetState, setSheetState] = useState<'default'|'collapsed'|'expanded'>('default');
   const [localPopInfo, setLocalPopInfo] = useState<null|{lat:number;lng:number;density:number;state:string;population:number;nearestCity:string;nearestDist:number}>(null);
 
   // ── Import shared price reports from URL on first load ────────────────────
@@ -1353,12 +1381,6 @@ export default function App() {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   },[]);
-
-  // Invalidate map size when mobile sidebar toggles
-  useEffect(()=>{
-    const t = setTimeout(()=>{ mapRef.current?.invalidateSize(); }, 350);
-    return () => clearTimeout(t);
-  },[mobileSidebarOpen]);
 
   // ── Init Map ───────────────────────────────────────────────────────────────
   useEffect(()=>{
@@ -1426,13 +1448,13 @@ export default function App() {
 
     setMapReady(true);
 
-    // Fix map size after layout settles (sidebar may not be rendered yet)
-    setTimeout(()=>map.invalidateSize(), 100);
-    setTimeout(()=>map.invalidateSize(), 500);
-    const onResizeMap = () => map.invalidateSize();
-    window.addEventListener('resize', onResizeMap);
+    // Use ResizeObserver to keep map size in sync with container dimensions
+    const resizeObserver = new ResizeObserver(() => {
+      map.invalidateSize();
+    });
+    resizeObserver.observe(mapDivRef.current);
 
-    return ()=>{ window.removeEventListener('resize', onResizeMap); map.remove(); mapRef.current=null; cityLayerRef.current=null; };
+    return ()=>{ resizeObserver.disconnect(); map.remove(); mapRef.current=null; cityLayerRef.current=null; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
@@ -3287,11 +3309,42 @@ export default function App() {
         
 
         {/* ── LIVE PANEL ── */}
-        <div className={`live-panel${activeTool === 'liveFinder' ? ' open' : ''}`}>
+        <div className={`live-panel${activeTool === 'liveFinder' ? ' open' : ''}${sheetState !== 'default' ? ` sheet-${sheetState}` : ''}`}>
           {(activeTool === 'liveFinder')&&(
             <div className="lp-inner">
+              {/* Mobile bottom sheet drag handle */}
+              <div
+                className="sheet-handle"
+                onTouchStart={(e)=>{
+                  (e.currentTarget as HTMLElement).dataset.startY = String(e.touches[0].clientY);
+                  (e.currentTarget as HTMLElement).dataset.startSheet = sheetState;
+                }}
+                onTouchMove={(e)=>{
+                  const el = e.currentTarget as HTMLElement;
+                  const startY = parseFloat(el.dataset.startY || '0');
+                  const delta = startY - e.touches[0].clientY;
+                  if (Math.abs(delta) > 60) {
+                    if (delta > 0 && sheetState !== 'expanded') setSheetState('expanded');
+                    else if (delta < 0 && sheetState === 'expanded') setSheetState('default');
+                    else if (delta < 0 && sheetState === 'default') setSheetState('collapsed');
+                    el.dataset.startY = String(e.touches[0].clientY);
+                  }
+                }}
+                onTouchEnd={()=>{
+                  const el = document.querySelector('.sheet-handle') as HTMLElement;
+                  if (el) delete el.dataset.startY;
+                }}
+                onClick={()=>{
+                  if (window.innerWidth <= 768) {
+                    setSheetState(sheetState === 'collapsed' ? 'default' : sheetState === 'default' ? 'expanded' : 'default');
+                  }
+                }}
+              >
+                <div className="sheet-handle-bar" />
+                <div className="sheet-handle-label">LIVE HEALTHCARE FINDER</div>
+              </div>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                <span className="lp-title"> LIVE HEALTHCARE FINDER</span>
+                <span className="lp-title" style={{display: sheetState === 'collapsed' ? 'none' : undefined}}> LIVE HEALTHCARE FINDER</span>
                 <div style={{display:'flex',gap:6,alignItems:'center'}}>
                   <button
                     onClick={exportOutreachCsv}
@@ -3299,7 +3352,7 @@ export default function App() {
                   >
                     EXPORT CSV
                   </button>
-                  <button className="rp-close" onClick={()=>setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder')}>Close</button>
+                  <button className="rp-close" onClick={()=>{setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder');setSheetState('default');}}>Close</button>
                 </div>
               </div>
               <div style={{display:'flex',gap:6}}>
@@ -3949,23 +4002,44 @@ function ProviderBox({data,examKey,cityName,locIdx,onPin}:{data:any;examKey:stri
 
 function DriveTimeBox({fromLat,fromLng,fromName,locB}:{fromLat:number;fromLng:number;fromName:string;locB:{name:string;lat:number;lng:number}|null}) {
   const [dest,setDest]=useState('');
-  const [result,setResult]=useState<{timeStr:string;miles:number;hours:number;name:string}|null>(null);
+  const [result,setResult]=useState<{timeStr:string;miles:number;hours:number;name:string;routed:boolean}|null>(null);
   const [destB]=useState(locB);
-  const dt=destB?calcDrive(fromLat,fromLng,destB.lat,destB.lng):null;
+  const [destBResult,setDestBResult]=useState<{timeStr:string;miles:number;hours:number;routed:boolean}|null>(null);
+  const [loading,setLoading]=useState(false);
+  const [destBLoading,setDestBLoading]=useState(false);
+
+  // Fetch actual route for destB when it's provided
+  useEffect(()=>{
+    if(!destB){setDestBResult(null);return;}
+    let cancelled=false;
+    setDestBLoading(true);
+    routeDrive(fromLat,fromLng,destB.lat,destB.lng).then(r=>{
+      if(!cancelled){setDestBResult(r);setDestBLoading(false);}
+    });
+    return ()=>{cancelled=true;};
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[destB,fromLat,fromLng]);
+
+  const dt=destBResult;
   const urgency=dt?(dt.hours<1?'#10b981':dt.hours<2.5?'#84cc16':dt.hours<4?'#f59e0b':'#f97316'):null;
 
-  function calc() {
+  async function calc() {
     const q=dest.trim().toLowerCase().replace(/,.*$/,'').trim();
     const match=LOCS.find(l=>l[0].toLowerCase()===q)||LOCS.find(l=>l[0].toLowerCase().startsWith(q))||LOCS.find(l=>l[0].toLowerCase().includes(q));
     if(!match){return;}
-    const d=calcDrive(fromLat,fromLng,match[2],match[3]);
-    setResult({...d,name:`${match[0]}, ${match[1]}`});
+    setLoading(true);
+    const r=await routeDrive(fromLat,fromLng,match[2],match[3]);
+    setResult({...r,name:`${match[0]}, ${match[1]}`});
+    setLoading(false);
   }
 
   return (
     <div className="drivetime-box">
-      <div className="drivetime-lbl">🚗 STRAIGHT-LINE ESTIMATE FROM HERE</div>
-      {dt&&destB&&(
+      <div className="drivetime-lbl">🚗 DRIVE TIME FROM HERE</div>
+      {destBLoading&&(
+        <div style={{fontSize:10,color:'#89d4fe',marginBottom:6}}>Calculating route...</div>
+      )}
+      {dt&&destB&&!destBLoading&&(
         <div style={{marginBottom:8}}>
           <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
             <span style={{fontSize:10,color:'#3d5478'}}>{fromName}</span>
@@ -3973,23 +4047,28 @@ function DriveTimeBox({fromLat,fromLng,fromName,locB}:{fromLat:number;fromLng:nu
             <span style={{fontSize:10,color:'#7aabda',fontWeight:600}}>{destB.name}</span>
           </div>
           <div style={{display:'flex',gap:18,marginBottom:6}}>
-            <div><div className="drivetime-val" style={{color:urgency||'#eef4ff'}}>{dt.timeStr}</div><div className="drivetime-sub">est. time (~55mph)</div></div>
-            <div><div className="drivetime-val">{dt.miles} mi</div><div className="drivetime-sub">straight-line dist.</div></div>
+            <div><div className="drivetime-val" style={{color:urgency||'#eef4ff'}}>{dt.timeStr}</div><div className="drivetime-sub">{dt.routed?'drive time (live traffic)':'est. time (~55mph)'}</div></div>
+            <div><div className="drivetime-val">{dt.miles} mi</div><div className="drivetime-sub">{dt.routed?'driving dist.':'straight-line dist.'}</div></div>
           </div>
         </div>
       )}
-      {result&&(
+      {loading&&(
+        <div style={{fontSize:10,color:'#89d4fe',marginBottom:6}}>Calculating route...</div>
+      )}
+      {result&&!loading&&(
         <div style={{marginBottom:8}}>
           <div style={{fontSize:10,color:'#7aabda',marginBottom:4}}>{fromName} → {result.name}</div>
           <div style={{display:'flex',gap:18}}>
-            <div><div className="drivetime-val" style={{color:result.hours<1?'#10b981':result.hours<2.5?'#84cc16':result.hours<4?'#f59e0b':'#f97316'}}>{result.timeStr}</div><div className="drivetime-sub">est. time (~55mph)</div></div>
-            <div><div className="drivetime-val">{result.miles} mi</div><div className="drivetime-sub">straight-line dist.</div></div>
+            <div><div className="drivetime-val" style={{color:result.hours<1?'#10b981':result.hours<2.5?'#84cc16':result.hours<4?'#f59e0b':'#f97316'}}>{result.timeStr}</div><div className="drivetime-sub">{result.routed?'drive time (live traffic)':'est. time (~55mph)'}</div></div>
+            <div><div className="drivetime-val">{result.miles} mi</div><div className="drivetime-sub">{result.routed?'driving dist.':'straight-line dist.'}</div></div>
           </div>
         </div>
       )}
-      <div style={{fontSize:10,color:'#7a8fa8',marginBottom:4}}>⚠ Not a routing API — uses straight-line distance ÷ 55mph. Actual drive time may be significantly longer.</div>
-      <input className="drivetime-input" placeholder="Destination city, e.g. Dallas TX" value={dest} onChange={e=>setDest(e.target.value)} onKeyDown={e=>e.key==='Enter'&&calc()}/>
-      <button className="drivetime-btn" onClick={calc}>CALCULATE ESTIMATE</button>
+      {!result&&!dt&&!loading&&!destBLoading&&(
+        <div style={{fontSize:10,color:'#7a8fa8',marginBottom:4}}>Enter a destination below to calculate actual driving time and distance.</div>
+      )}
+      <input className="drivetime-input" placeholder="Destination city, e.g. Dallas TX" value={dest} onChange={e=>setDest(e.target.value)} onKeyDown={e=>e.key==='Enter'&&!loading&&calc()}/>
+      <button className="drivetime-btn" onClick={calc} disabled={loading}>{loading?'CALCULATING...':'CALCULATE DRIVE TIME'}</button>
     </div>
   );
 }

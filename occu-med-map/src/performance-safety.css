@@ -1,0 +1,34 @@
+.modal-backdrop.open {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.modal-backdrop.open .map-wrap,
+.modal-backdrop.open #map,
+.modal-backdrop.open .leaflet-container {
+  filter: none !important;
+}
+
+.leaflet-tile,
+.leaflet-tile-pane,
+.network-map-tiles {
+  will-change: auto !important;
+}
+
+.occumed-map-tools-panel,
+.sidebar,
+.live-panel.open,
+.right-panel.open,
+.modal-box {
+  contain: layout paint !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

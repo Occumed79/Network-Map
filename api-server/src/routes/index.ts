@@ -18,6 +18,7 @@ import browserExtractionRouter from "./browserExtraction";
 import vectorIndexRouter from "./vectorIndex";
 import providerLayersRouter from "./providerLayers";
 import googlePlacesRouter from "./googlePlaces";
+import enhancedSearchRouter from "./enhancedSearch";
 
 const router: IRouter = Router();
 
@@ -34,6 +35,7 @@ router.use(browserExtractionRouter);
 router.use(vectorIndexRouter);
 router.use(providerLayersRouter);
 router.use(googlePlacesRouter);
+router.use(enhancedSearchRouter);
 
 // --- Legacy routes (kept as compatibility wrappers until fully migrated) ---
 router.use(providerSearchRouter);

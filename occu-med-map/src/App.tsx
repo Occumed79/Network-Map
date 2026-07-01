@@ -2522,7 +2522,10 @@ export default function App() {
     try { await revGeo(lat,lng); } catch(e){}
 
     try {
-    // Fire both the existing backend (Overpass/local) and Google Places in parallel
+    // Reverse geocode to get city/state for universal discovery
+    let cityState:{city:string;state:string}|null = null;
+    try { cityState = await reverseGeocodeCityState(lat,lng); } catch(e){}
+
     const backendParams=new URLSearchParams({
       lat:String(lat),
       lng:String(lng),
@@ -2530,23 +2533,34 @@ export default function App() {
       category:categoryForSearch,
     });
 
-    const [backendResult, placesResult] = await Promise.allSettled([
+    const enhancedParams=new URLSearchParams({
+      lat:String(lat),
+      lng:String(lng),
+      radiusMiles:String(liveRadius),
+      category:categoryForSearch,
+      ...(cityState ? { city:cityState.city, state:cityState.state } : {}),
+    });
+
+    // Fire three sources in parallel:
+    // 1. Overpass/OSM (live-finder) — global map data
+    // 2. Enhanced search — Google Places + Universal Discovery (NPI, web evidence, AI extraction, geocoding)
+    const [backendResult, enhancedResult] = await Promise.allSettled([
       fetch(`/api/live-finder/search?${backendParams.toString()}`,{signal:AbortSignal.timeout(30000)}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}),
-      fetch(`/api/google-places/search?${backendParams.toString()}`,{signal:AbortSignal.timeout(15000)}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}).catch(()=>null),
+      fetch(`/api/enhanced-search?${enhancedParams.toString()}`,{signal:AbortSignal.timeout(45000)}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}).catch(()=>null),
     ]);
 
     const backendData = backendResult.status === 'fulfilled' ? backendResult.value : null;
-    const placesData = placesResult.status === 'fulfilled' ? placesResult.value : null;
+    const enhancedData = enhancedResult.status === 'fulfilled' ? enhancedResult.value : null;
 
-    if (!backendData && !placesData) {
+    if (!backendData && !enhancedData) {
       throw new Error('All search sources failed');
     }
 
     // Merge results from both sources
     const backendRaw:LiveFinderApiResult[] = backendData?.results ? Array.isArray(backendData.results) ? backendData.results : [] : [];
-    const placesRaw:LiveFinderApiResult[] = placesData?.results ? Array.isArray(placesData.results) ? placesData.results : [] : [];
+    const enhancedRaw:LiveFinderApiResult[] = enhancedData?.results ? Array.isArray(enhancedData.results) ? enhancedData.results : [] : [];
 
-    const allRaw = [...backendRaw, ...placesRaw];
+    const allRaw = [...backendRaw, ...enhancedRaw];
     const merged = allRaw
       .map((row:LiveFinderApiResult,index:number)=>normalizeLiveFinderResult(row,index,lat,lng))
       .filter(isLiveFinderResultRow);
@@ -2564,24 +2578,27 @@ export default function App() {
     renderLiveMarkers(deduped);
     setLiveHint('');
     setLiveError('');
-    
+
     // Merge facets from both sources
     const backendFacets = backendData?.facets && typeof backendData.facets === 'object' ? backendData.facets : {};
-    const placesFacets = placesData?.facets && typeof placesData.facets === 'object' ? placesData.facets : {};
+    const enhancedFacets = enhancedData?.facets && typeof enhancedData.facets === 'object' ? enhancedData.facets : {};
     const mergedFacets:Record<string,number> = {};
     for (const [k,v] of Object.entries(backendFacets)) mergedFacets[k] = (mergedFacets[k]||0) + Number(v);
-    for (const [k,v] of Object.entries(placesFacets)) mergedFacets[k] = (mergedFacets[k]||0) + Number(v);
+    for (const [k,v] of Object.entries(enhancedFacets)) mergedFacets[k] = (mergedFacets[k]||0) + Number(v);
     setLiveFacets(mergedFacets);
     setLivePriorityCounts(backendData?.priorityCounts || null);
 
     const backendCount = backendRaw.length;
-    const placesCount = placesRaw.length;
+    const enhancedCount = enhancedRaw.length;
+    const sourceSummary = enhancedData?.sourceSummary;
     const sources:string[] = [];
-    if (backendCount > 0) sources.push('OSM/Local');
-    if (placesCount > 0) sources.push('Google Places');
+    if (backendCount > 0) sources.push('OSM');
+    if (sourceSummary?.googlePlaces > 0) sources.push('Google Places');
+    if (sourceSummary?.universalDiscovery > 0) sources.push('NPI+Web+AI');
     const providerText = `${deduped.length} facilities from ${sources.join(' + ')}`;
     const categoryText = categoryForSearch !== 'all' ? ` · Filter: ${categoryForSearch}` : '';
-    setLiveMirror(`${providerText}${categoryText}`);
+    const savedText = sourceSummary?.savedToNeon ? ` · ${sourceSummary.savedToNeon} saved to DB` : '';
+    setLiveMirror(`${providerText}${categoryText}${savedText}`);
     } catch(err) {
       console.warn('[LiveFinder] All search sources failed',err);
       setLiveHint('');

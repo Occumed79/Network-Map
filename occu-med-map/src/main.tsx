@@ -15,5 +15,6 @@ import "./live-finder-eta-actions.css";
 import "./luminous-shell-fixes.css";
 import "./sidebar-control-fixes.css";
 import "./modal-popup-fixes.css";
+import "./modal-content-polish.css";
 
 createRoot(document.getElementById("root")!).render(<App />);

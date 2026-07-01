@@ -1,4 +1,6 @@
 import "./usDiagnosticsGate";
+import "./modalLabelScrubber";
+import "./modal-command-polish.css";
 import L from "leaflet";
 
 type ContinentView = {
@@ -11,6 +13,7 @@ type ContinentView = {
 const originalMap = L.map.bind(L);
 let installed = false;
 let domInstalled = false;
+let radiusPrimed = false;
 
 const continentViews: ContinentView[] = [
   { key: "world", label: "World", center: [20, 0], zoom: 2 },
@@ -26,6 +29,30 @@ function findSectionByLabel(label: string): Element | null {
   const labels = Array.from(document.querySelectorAll(".sb-lbl"));
   const match = labels.find((node) => (node.textContent || "").trim().toLowerCase() === label.toLowerCase());
   return match?.parentElement || null;
+}
+
+function isRadiusToolActive(): boolean {
+  const buttons = Array.from(document.querySelectorAll<HTMLElement>("button"));
+  return buttons.some((button) => (button.textContent || "").trim().toLowerCase() === "radius tool" && button.classList.contains("active"));
+}
+
+function primeRadiusCenter(map: L.Map): void {
+  if (!isRadiusToolActive()) {
+    radiusPrimed = false;
+    return;
+  }
+  if (radiusPrimed) return;
+  radiusPrimed = true;
+  window.setTimeout(() => {
+    if (!isRadiusToolActive()) return;
+    const center = map.getCenter();
+    map.fire("click", {
+      latlng: center,
+      layerPoint: map.latLngToLayerPoint(center),
+      containerPoint: map.latLngToContainerPoint(center),
+      originalEvent: new MouseEvent("click", { bubbles: true }),
+    } as L.LeafletMouseEvent);
+  }, 180);
 }
 
 function installContinentPresetButtons(): void {
@@ -96,6 +123,8 @@ function installMapCommands(map: L.Map): void {
     if (!detail?.center) return;
     map.flyTo(detail.center, detail.zoom, { duration: 1.15 });
   }) as EventListener);
+  document.addEventListener("click", () => window.setTimeout(() => primeRadiusCenter(map), 40), true);
+  window.setTimeout(() => primeRadiusCenter(map), 400);
 }
 
 export function installSidebarCommandFixes(): void {

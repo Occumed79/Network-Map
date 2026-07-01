@@ -4,6 +4,8 @@ import "./mapToolsCommandPanel";
 import "./rightPanelCompactor";
 import "./liveFinderDriveTools";
 import "./sidebarCommandFixes";
+import "./features/driveTime/nativeDriveTimeRuntime";
+import "./features/driveTime/nativeDriveTimeRuntime.css";
 import App from "./App";
 import "./index.css";
 import "./professional-overrides.css";

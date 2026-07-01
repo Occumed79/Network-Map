@@ -1,0 +1,49 @@
+.drive-time-control-strip {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 14px;
+  background: rgba(124, 58, 237, 0.08);
+  border: 1px solid rgba(124, 58, 237, 0.18);
+}
+
+.drive-time-control-strip__copy {
+  display: grid;
+  gap: 3px;
+}
+
+.drive-time-control-strip__copy strong {
+  color: #c4b5fd;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.drive-time-control-strip__copy span {
+  color: #8fb3d8;
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.drive-time-control-strip__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.drive-time-control-strip__actions button {
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(167, 139, 250, 0.26);
+  background: rgba(255,255,255,0.08);
+  color: #ddd6fe;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.drive-time-control-strip__actions button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}

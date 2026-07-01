@@ -3197,7 +3197,7 @@ export default function App() {
         <div className={`live-panel${activeTool === 'liveFinder' ? ' open' : ''}`}>
           {(activeTool === 'liveFinder')&&(
             <div className="lp-inner">
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+              <div className="lp-panel-header" style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
                 <span className="lp-title"> LIVE HEALTHCARE FINDER</span>
                 <div style={{display:'flex',gap:6,alignItems:'center'}}>
                   <button
@@ -3209,6 +3209,7 @@ export default function App() {
                   <button className="rp-close" onClick={()=>setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder')}>Close</button>
                 </div>
               </div>
+              <div className="lp-controls">
               <div style={{display:'flex',gap:6}}>
                 <button
                   onClick={exportLeadershipPackage}
@@ -3261,7 +3262,7 @@ export default function App() {
               </div>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'6px 8px',borderRadius:8,background:'rgba(125,211,252,0.06)',border:'1px solid rgba(125,211,252,0.18)'}}>
                 <span style={{fontSize:9.5,color:'#9cc7eb'}}>Map clicks run coordinate-first live search</span>
-                <span style={{fontSize:9,color:'#89d4fe',fontFamily:"'IBM Plex Mono',monospace"}}>Global</span>
+                <span style={{fontSize:9,color:'#285b78',fontFamily:"'IBM Plex Mono',monospace"}}>{liveSearched?'Search active':'Choose a location'}</span>
               </div>
               <div style={{fontSize:8.5,color:'#64748b',fontFamily:"'IBM Plex Mono',monospace",letterSpacing:'0.08em',marginBottom:4}}>
                 LIVE SOURCE FILTERS
@@ -3438,6 +3439,8 @@ export default function App() {
                   {Object.keys(npiUnifiedResponse.audit.errorsBySource).length===0&&<div style={{color:'#34d399'}}>All sources responded cleanly.</div>}
                 </div>
               )}
+              </div>
+              <div className="lp-results">
               <div style={{fontSize:9,color:'#8fb3d8'}}>
                 {npiCategory
                   ? `Showing ${npiResults.length} verified candidates`
@@ -3450,7 +3453,7 @@ export default function App() {
                 </div>
               </div>
               {!npiLoading&&!npiCategory&&!liveLoading&&!liveError&&liveResults.length===0&&!liveSearched&&(
-                <div className="lp-empty show">Click anywhere on the map to search nearby facilities.</div>
+                <div className="lp-empty show"><strong>Choose a search location.</strong><span>Use the address search above or click the map to find nearby facilities.</span></div>
               )}
               {!liveLoading&&!liveError&&!npiCategory&&liveSearched&&liveResults.length===0&&(
                 <div className="lp-empty show">No live facilities found within {Math.round(liveRadius/1.60934)} mi of this location. Try a larger radius or a different spot.</div>
@@ -3560,6 +3563,7 @@ export default function App() {
                       </div>
                     );
                   })}
+              </div>
             </div>
           )}
         </div>

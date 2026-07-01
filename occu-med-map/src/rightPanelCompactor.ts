@@ -11,10 +11,6 @@ type RankedProvider = {
 
 let latestRankings: RankedProvider[] = [];
 
-function normalizedText(el: Element): string {
-  return (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
-}
-
 function normalizeName(value: string): string {
   return value.replace(/<[^>]*>/g, " ").replace(/[^a-z0-9]+/gi, " ").replace(/\s+/g, " ").trim().toLowerCase();
 }
@@ -28,24 +24,9 @@ function scheduleScan(): void {
   }, 160);
 }
 
-function tagSecondaryControls(root: Element): void {
+function updateResultCards(root: Element): void {
   const inner = root.querySelector(".lp-inner");
   if (!inner) return;
-  if (inner.getAttribute("data-compact-tagged") !== "true") {
-    inner.setAttribute("data-compact-tagged", "true");
-    inner.classList.add("occumed-live-panel-compact");
-    Array.from(inner.children).forEach((child) => {
-      const text = normalizedText(child);
-      const hasResultMarkup = Boolean(child.querySelector(".lp-name, .lp-addr, .lp-row1, .lp-acts"));
-      if (hasResultMarkup) {
-        child.classList.add("occumed-primary-result-block");
-        return;
-      }
-      if (text.includes("npi") || text.includes("taxonomy") || text.includes("specialization") || text.includes("source") || text.includes("filter")) {
-        child.classList.add("occumed-secondary-control-block");
-      }
-    });
-  }
   applyEtaToCards(inner);
 }
 
@@ -96,21 +77,14 @@ function applyEtaToCards(inner: Element): void {
     else card.appendChild(bar);
   });
 
-  const rankedCards = cards
-    .filter((card) => card.getAttribute("data-eta-rank"))
-    .sort((a, b) => String(a.getAttribute("data-eta-rank")).localeCompare(String(b.getAttribute("data-eta-rank"))));
-  rankedCards.forEach((card, index) => {
-    const desiredPosition = inner.children[index];
-    if (desiredPosition !== card) inner.insertBefore(card, desiredPosition || null);
-  });
 }
 
 function scanPanels(): void {
-  document.querySelectorAll(".live-panel.open").forEach(tagSecondaryControls);
+  document.querySelectorAll(".live-panel.open").forEach(updateResultCards);
 }
 
 export function installRightPanelCompactor(): void {
-  if (installed) return;
+  if (installed || import.meta.env.VITE_NATIVE_DRIVE_TIME === "true") return;
   installed = true;
   window.setTimeout(scanPanels, 250);
   const observer = new MutationObserver(() => scheduleScan());

@@ -22,7 +22,11 @@
     "scrape:google-maps": "tsx scripts/google-maps-scraper.ts",
     "scrape:multi-source": "tsx scripts/multi-source-scraper.ts",
     "upload:geocoded": "tsx scripts/upload-geocoded-data.ts",
-    "deduplicate": "tsx scripts/deduplicate-upload.ts"
+    "deduplicate": "tsx scripts/deduplicate-upload.ts",
+    "import:providers": "tsx scripts/import-provider-json-to-neon.ts",
+    "import:providers:dry": "tsx scripts/import-provider-json-to-neon.ts --dry-run",
+    "import:providers:bluehive": "tsx scripts/import-provider-json-to-neon.ts --source bluehive",
+    "import:providers:dentists": "tsx scripts/import-provider-json-to-neon.ts --source dentists"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",

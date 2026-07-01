@@ -3,6 +3,8 @@ export * from "./providerEtaEngine";
 export * from "./providerEtaStore";
 export * from "./providerEtaExport";
 export * from "./leafletProviderAdapter";
+export * from "./etaRouteEvents";
+export * from "./leafletEtaRouteLayer";
 export * from "./useProviderEta";
 export * from "./ProviderEtaBadge";
 export * from "./DriveTimeControlStrip";

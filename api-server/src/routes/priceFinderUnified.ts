@@ -42,12 +42,6 @@ function candidateToClinic(candidate: ProviderCandidate) {
 router.get("/price-finder", async (req: Request, res: Response, next: NextFunction) => {
   const serviceType = String(req.query.serviceType || "physicalExam").trim();
 
-  // Keep the existing dental-specific route active until the unified search is proven better for dental too.
-  if (serviceType === "dental") {
-    next();
-    return;
-  }
-
   const city = String(req.query.city || "").trim();
   const state = String(req.query.state || "").trim().toUpperCase();
   const radiusMiles = Number(req.query.radiusMiles || 35);

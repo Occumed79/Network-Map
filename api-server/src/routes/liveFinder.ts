@@ -1,8 +1,7 @@
 import { Router, type Request, type Response } from "express";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { logger } from "../lib/logger";
+import { getPool } from "@workspace/db";
+import { isPersistenceConfigured } from "../lib/networkMapPersistence";
 
 const router = Router();
 
@@ -10,10 +9,6 @@ const SOURCE_TIMEOUT_MS = 9000;
 const LOCAL_SOURCE_TIMEOUT_MS = 3000;
 const OPTIONAL_ENRICHMENT_BUDGET_MS = 8000;
 const ROUTE_TIMEOUT_MS = 20000;
-const LOCAL_PROVIDER_PATH = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../../occu-med-map/dist/public/bluehive-map-data.json",
-);
 
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
@@ -64,8 +59,6 @@ type LocalProviderRow = {
   lat?: number | string | null;
   lng?: number | string | null;
 };
-
-let localProvidersPromise: Promise<LocalProviderRow[]> | null = null;
 
 function haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 3958.8;
@@ -172,17 +165,43 @@ function dedupe(results: LiveFinderResult[]): LiveFinderResult[] {
   });
 }
 
-async function loadLocalProviders(): Promise<LocalProviderRow[]> {
-  if (!localProvidersPromise) {
-    localProvidersPromise = readFile(LOCAL_PROVIDER_PATH, "utf8")
-      .then((contents) => JSON.parse(contents) as { providers?: LocalProviderRow[] })
-      .then((data) => Array.isArray(data.providers) ? data.providers : [])
-      .catch((error) => {
-        localProvidersPromise = null;
-        throw error;
-      });
-  }
-  return localProvidersPromise;
+async function loadLocalProviders(lat: number, lng: number, radiusMiles: number): Promise<LocalProviderRow[]> {
+  if (!isPersistenceConfigured()) return [];
+  const pool = getPool();
+  const latDelta = radiusMiles / 69;
+  const lngDelta = radiusMiles / (69 * Math.cos(lat * Math.PI / 180));
+  const query = `
+    SELECT name, formatted_address, lat, lng, phone, website, locality,
+           administrative_area_level_1, postal_code, data_source, source_id, raw_data
+    FROM public.medical_providers
+    WHERE data_source IN ('BlueHive', 'Dentist Dataset')
+      AND lat IS NOT NULL AND lng IS NOT NULL
+      AND lat BETWEEN $1 AND $2
+      AND lng BETWEEN $3 AND $4
+    LIMIT 500
+  `;
+  const { rows } = await pool.query(query, [
+    lat - latDelta, lat + latDelta,
+    lng - lngDelta, lng + lngDelta,
+  ]);
+  return rows.map((r: Record<string, unknown>) => {
+    let raw: Record<string, unknown> = {};
+    try { raw = typeof r.raw_data === "string" ? JSON.parse(r.raw_data) : (r.raw_data as Record<string, unknown>) || {}; } catch {}
+    return {
+      clinic_name: r.name as string,
+      address_1: (raw.address_1 as string) || (r.formatted_address as string) || "",
+      city: r.locality as string || "",
+      state: r.administrative_area_level_1 as string || "",
+      zip: r.postal_code as string || "",
+      phone: r.phone as string || "",
+      website: r.website as string || "",
+      services: (raw.services as string) || "",
+      service_categories: (raw.service_categories as string) || "",
+      source_url: (raw.source_url as string) || "",
+      lat: r.lat as number,
+      lng: r.lng as number,
+    } as LocalProviderRow;
+  });
 }
 
 function normalizeLocalProvider(
@@ -231,7 +250,7 @@ async function queryLocalSource(lat: number, lng: number, radiusMiles: number): 
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     const rows = await Promise.race([
-      loadLocalProviders(),
+      loadLocalProviders(lat, lng, radiusMiles),
       new Promise<never>((_resolve, reject) => {
         timeout = setTimeout(() => reject(new Error("local source timeout")), LOCAL_SOURCE_TIMEOUT_MS);
       }),

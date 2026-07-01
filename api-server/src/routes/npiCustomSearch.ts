@@ -50,8 +50,7 @@ router.post("/provider-sources/npi-custom", async (req: Request, res: Response) 
     if (body.last_name) params.set("last_name", body.last_name);
     if (body.taxonomy_description) params.set("taxonomy_description", body.taxonomy_description);
     if (body.taxonomy_code) {
-      // taxonomy_code uses a different param name in NPI API
-      params.set("taxonomy_description", body.taxonomy_code);
+      params.set("taxonomy_code", body.taxonomy_code);
     }
     if (body.enumeration_type) params.set("enumeration_type", body.enumeration_type);
 

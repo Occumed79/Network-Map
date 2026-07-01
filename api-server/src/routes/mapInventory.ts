@@ -9,6 +9,7 @@ type TrustTier = "verified" | "registry" | "directory" | "lead";
 const SERVICE_TERMS: Record<string, string[]> = {
   primaryCare: ["primary care", "family medicine", "general practice", "general practitioner", "internal medicine", "doctor", "physician", "ffd", "fitness for duty"],
   specialist: ["specialist", "specialty", "cardiology", "pulmonary", "neurology", "orthopedic", "radiology", "audiology", "dentist"],
+  specialists: ["specialist", "specialty", "cardiology", "pulmonary", "neurology", "orthopedic", "radiology", "audiology", "dentist"],
   urgentCare: ["urgent care", "walk-in", "immediate care", "clinic"],
   dental: ["dental", "dentist", "dd 2813", "dd2813"],
   pharmacy: ["pharmacy", "rx", "drugstore"],
@@ -175,4 +176,3 @@ router.get("/map-inventory", async (req: Request, res: Response) => {
 });
 
 export default router;
-

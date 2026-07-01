@@ -7,7 +7,7 @@ const router = Router();
 /**
  * GET /api/provider-layers/:source
  * Fetch all providers from a specific data source for map display.
- * Supported sources: bluehive, dentists, indexed
+ * Supported sources: bluehive, dentists, indexed, my-clinics
  * Queries normalized provider tables (providers, provider_locations, provider_contacts, provider_sources).
  * Returns providers with lat/lng coordinates only.
  */
@@ -18,6 +18,7 @@ router.get("/provider-layers/:source", async (req: Request, res: Response) => {
       bluehive: "BlueHive",
       dentists: "Dentist Dataset",
       indexed: "indexed",
+      "my-clinics": "My Clinics",
     };
 
     const dataSource = validSources[source];
@@ -37,7 +38,32 @@ router.get("/provider-layers/:source", async (req: Request, res: Response) => {
     let query: string;
     let params: Array<string | number>;
 
-    if (source === "indexed") {
+    if (source === "my-clinics") {
+      query = `
+        SELECT
+          name,
+          formatted_address AS address,
+          locality AS city,
+          administrative_area_level_1 AS state,
+          postal_code,
+          lat,
+          lng,
+          phone,
+          website,
+          source_id,
+          data_source,
+          source_type,
+          confidence_score,
+          raw_data
+        FROM medical_providers
+        WHERE data_source = 'My Clinics'
+          AND lat IS NOT NULL
+          AND lng IS NOT NULL
+        ORDER BY name ASC
+        LIMIT $1
+      `;
+      params = [limit];
+    } else if (source === "indexed") {
       query = `
         SELECT
           p.name,
@@ -108,7 +134,10 @@ router.get("/provider-layers/:source", async (req: Request, res: Response) => {
       lng: row.lng as number,
       npi: row.npi as string | null,
       source_url: row.source_url as string | null,
-      data_source: row.source_label as string,
+      source_id: row.source_id as string | null,
+      source_type: row.source_type as string | null,
+      raw_data: row.raw_data as Record<string, unknown> | null,
+      data_source: (row.source_label || row.data_source) as string,
       trust_tier: row.trust_tier as string,
     }));
 

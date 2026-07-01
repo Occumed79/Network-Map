@@ -1,0 +1,67 @@
+.occumed-map-tools-panel {
+  margin-left: 360px !important;
+  margin-bottom: 14px !important;
+  z-index: 1400 !important;
+}
+
+.leaflet-bottom.leaflet-left {
+  z-index: 1450 !important;
+}
+
+.sidebar {
+  z-index: 1300 !important;
+}
+
+.occumed-continent-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 6px !important;
+}
+
+.occumed-continent-btn {
+  width: 100% !important;
+  min-height: 28px !important;
+  text-transform: none !important;
+  letter-spacing: 0.01em !important;
+}
+
+.tog-row {
+  cursor: pointer !important;
+  min-height: 34px !important;
+  padding: 7px 9px !important;
+  margin: 5px 0 !important;
+  border-radius: 999px !important;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.62), rgba(228,249,252,0.30)),
+    rgba(255,255,255,0.34) !important;
+  border: 1px solid rgba(255,255,255,0.74) !important;
+  box-shadow:
+    0 6px 18px rgba(70,95,110,0.10),
+    inset 0 1px 0 rgba(255,255,255,0.92) !important;
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease !important;
+}
+
+.tog-row:hover {
+  transform: translateY(-1px) !important;
+  border-color: rgba(103,232,249,0.48) !important;
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.82),
+    0 0 18px rgba(103,232,249,0.24),
+    0 10px 24px rgba(52,82,107,0.16),
+    inset 0 1px 0 rgba(255,255,255,0.96) !important;
+}
+
+.tog-row .tog-lbl {
+  font-weight: 760 !important;
+}
+
+.tog-switch {
+  margin-left: auto !important;
+  opacity: 1 !important;
+  transform: scale(0.9) !important;
+}
+
+.tog-switch input:checked + .tog-slider,
+.tog-switch input:checked ~ .tog-slider {
+  box-shadow: 0 0 12px rgba(103,232,249,0.55) !important;
+}

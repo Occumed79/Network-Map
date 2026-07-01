@@ -16,5 +16,6 @@ import "./luminous-shell-fixes.css";
 import "./sidebar-control-fixes.css";
 import "./modal-popup-fixes.css";
 import "./modal-content-polish.css";
+import "./performance-safety.css";
 
 createRoot(document.getElementById("root")!).render(<App />);

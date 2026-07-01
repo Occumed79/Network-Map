@@ -2508,41 +2508,70 @@ export default function App() {
     try { await revGeo(lat,lng); } catch(e){}
 
     try {
-      const params=new URLSearchParams({
-        lat:String(lat),
-        lng:String(lng),
-        radiusMiles:String(liveRadius),
-        category:categoryForSearch,
-      });
-      const res=await fetch(`/api/live-finder/search?${params.toString()}`,{signal:AbortSignal.timeout(30000)});
-      if(!res.ok) throw new Error('HTTP '+res.status);
-      const data=await res.json();
-      const rawResults=Array.isArray(data?.results)?data.results:[];
-      const results=rawResults
-        .map((row:LiveFinderApiResult,index:number)=>normalizeLiveFinderResult(row,index,lat,lng))
-        .filter(isLiveFinderResultRow)
-        .sort((a:LiveFinderResultRow,b:LiveFinderResultRow)=>a.dist-b.dist);
-      setLiveResults(results);
-      renderLiveMarkers(results);
-      setLiveHint('');
-      setLiveError('');
-      setLiveFacets(data?.facets && typeof data.facets === 'object' ? data.facets : {});
-      setLivePriorityCounts(data?.priorityCounts || null);
-      const rawCount = Number(data?.rawCount);
-      const filteredRawCount = Number(data?.filteredRawCount);
-      const returnedCount = Number(data?.returnedCount);
-      const truncated = Boolean(data?.truncated);
-      const totalForDisplay = Number.isFinite(filteredRawCount) ? filteredRawCount : rawCount;
-      const providerText = formatLiveProviderStatus(Array.isArray(data?.providers)?data.providers:[],results.length);
-      const categoryText = categoryForSearch !== 'all' ? ` · Filter: ${categoryForSearch}` : '';
-      const capText = truncated && Number.isFinite(totalForDisplay) && Number.isFinite(returnedCount)
-        ? ` · Showing nearest ${returnedCount.toLocaleString()} of ${totalForDisplay.toLocaleString()} matching facilities`
-        : '';
-      setLiveMirror(`${providerText}${capText}${categoryText}`);
+    // Fire both the existing backend (Overpass/local) and Google Places in parallel
+    const backendParams=new URLSearchParams({
+      lat:String(lat),
+      lng:String(lng),
+      radiusMiles:String(liveRadius),
+      category:categoryForSearch,
+    });
+
+    const [backendResult, placesResult] = await Promise.allSettled([
+      fetch(`/api/live-finder/search?${backendParams.toString()}`,{signal:AbortSignal.timeout(30000)}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}),
+      fetch(`/api/google-places/search?${backendParams.toString()}`,{signal:AbortSignal.timeout(15000)}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}).catch(()=>null),
+    ]);
+
+    const backendData = backendResult.status === 'fulfilled' ? backendResult.value : null;
+    const placesData = placesResult.status === 'fulfilled' ? placesResult.value : null;
+
+    if (!backendData && !placesData) {
+      throw new Error('All search sources failed');
+    }
+
+    // Merge results from both sources
+    const backendRaw:LiveFinderApiResult[] = backendData?.results ? Array.isArray(backendData.results) ? backendData.results : [] : [];
+    const placesRaw:LiveFinderApiResult[] = placesData?.results ? Array.isArray(placesData.results) ? placesData.results : [] : [];
+
+    const allRaw = [...backendRaw, ...placesRaw];
+    const merged = allRaw
+      .map((row:LiveFinderApiResult,index:number)=>normalizeLiveFinderResult(row,index,lat,lng))
+      .filter(isLiveFinderResultRow);
+
+    // Dedupe by name + lat/lng proximity
+    const seen = new Set<string>();
+    const deduped = merged.filter(r => {
+      const key = `${r.name.toLowerCase().slice(0,30)}|${r.lat.toFixed(3)}|${r.lng.toFixed(3)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).sort((a:LiveFinderResultRow,b:LiveFinderResultRow)=>a.dist-b.dist);
+
+    setLiveResults(deduped);
+    renderLiveMarkers(deduped);
+    setLiveHint('');
+    setLiveError('');
+    
+    // Merge facets from both sources
+    const backendFacets = backendData?.facets && typeof backendData.facets === 'object' ? backendData.facets : {};
+    const placesFacets = placesData?.facets && typeof placesData.facets === 'object' ? placesData.facets : {};
+    const mergedFacets:Record<string,number> = {};
+    for (const [k,v] of Object.entries(backendFacets)) mergedFacets[k] = (mergedFacets[k]||0) + Number(v);
+    for (const [k,v] of Object.entries(placesFacets)) mergedFacets[k] = (mergedFacets[k]||0) + Number(v);
+    setLiveFacets(mergedFacets);
+    setLivePriorityCounts(backendData?.priorityCounts || null);
+
+    const backendCount = backendRaw.length;
+    const placesCount = placesRaw.length;
+    const sources:string[] = [];
+    if (backendCount > 0) sources.push('OSM/Local');
+    if (placesCount > 0) sources.push('Google Places');
+    const providerText = `${deduped.length} facilities from ${sources.join(' + ')}`;
+    const categoryText = categoryForSearch !== 'all' ? ` · Filter: ${categoryForSearch}` : '';
+    setLiveMirror(`${providerText}${categoryText}`);
     } catch(err) {
-      console.warn('[LiveFinder] Backend search failed',err);
+      console.warn('[LiveFinder] All search sources failed',err);
       setLiveHint('');
-      setLiveError('Could not reach a live source for this location. Try a larger radius or a different spot.');
+      setLiveError('Could not reach any provider source for this location. Try a larger radius or a different spot.');
       setLiveMirror('');
     } finally {
       setLiveLoading(false);
@@ -2550,23 +2579,46 @@ export default function App() {
   }
 
   async function revGeo(lat:number,lng:number) {
-    try {
-      const r=await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=12`,{headers:{'Accept-Language':'en'}});
-      const d=await r.json();
-      const a=d.address||{};
-      const location=(a.city||a.town||a.village||a.county||a.state||a.country||'');
-      const region=a.state_code||a.state||a.country||'';
-      setLiveLocation(location+(region?' · '+region:''));
-    } catch(e){ setLiveLocation(`${lat.toFixed(4)}, ${lng.toFixed(4)}`); }
+    const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+    if (apiKey) {
+      try {
+        const r=await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}&result_type=locality|administrative_area_level_1|country`,{signal:AbortSignal.timeout(5000)});
+        const d=await r.json();
+        const comps=d.results?.[0]?.address_components||[];
+        const city=comps.find((c:any)=>c.types.includes('locality'))?.long_name||comps.find((c:any)=>c.types.includes('administrative_area_level_2'))?.long_name||comps.find((c:any)=>c.types.includes('administrative_area_level_1'))?.long_name||'';
+        const region=comps.find((c:any)=>c.types.includes('administrative_area_level_1'))?.short_name||comps.find((c:any)=>c.types.includes('country'))?.long_name||'';
+        setLiveLocation(city+(region?` · ${region}`:''));
+      } catch(e){ setLiveLocation(`${lat.toFixed(4)}, ${lng.toFixed(4)}`); }
+    } else {
+      try {
+        const r=await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=12`,{headers:{'Accept-Language':'en'}});
+        const d=await r.json();
+        const a=d.address||{};
+        const location=(a.city||a.town||a.village||a.county||a.state||a.country||'');
+        const region=a.state_code||a.state||a.country||'';
+        setLiveLocation(location+(region?' · '+region:''));
+      } catch(e){ setLiveLocation(`${lat.toFixed(4)}, ${lng.toFixed(4)}`); }
+    }
   }
 
   async function reverseGeocodeCityState(lat:number,lng:number):Promise<{city:string;state:string;display:string}|null> {
+    const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+    if (apiKey) {
+      try {
+        const r=await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${apiKey}&result_type=locality|administrative_area_level_1`,{signal:AbortSignal.timeout(5000)});
+        const d=await r.json();
+        const comps=d.results?.[0]?.address_components||[];
+        const city=comps.find((c:any)=>c.types.includes('locality'))?.long_name||comps.find((c:any)=>c.types.includes('administrative_area_level_2'))?.long_name||'';
+        const state=comps.find((c:any)=>c.types.includes('administrative_area_level_1'))?.short_name||'';
+        if(!city) return null;
+        return{city,state,display:`${city}${state?` · ${state}`:''}`};
+      } catch{return null;}
+    }
     try {
       const r=await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=12`,{headers:{'Accept-Language':'en'}});
       const d=await r.json();
       const a=d.address||{};
       const city=a.city||a.town||a.village||a.county||'';
-      // Use state_code for US, otherwise use state or country
       const state=a.state_code||a.state||a.country||'';
       if(!city) return null;
       return{city,state,display:`${city}${state?` · ${state}`:''}`};

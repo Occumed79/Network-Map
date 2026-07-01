@@ -1,0 +1,47 @@
+.provider-eta-badge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 7px;
+  padding: 7px 8px;
+  border-radius: 12px;
+  background: rgba(124, 58, 237, 0.08);
+  border: 1px solid rgba(124, 58, 237, 0.18);
+}
+
+.provider-eta-badge__metrics {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+.provider-eta-badge__metrics strong {
+  color: #c4b5fd;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.provider-eta-badge__metrics span {
+  color: #8fb3d8;
+  font-size: 9px;
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.provider-eta-badge__actions {
+  display: flex;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.provider-eta-badge__actions button {
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(167, 139, 250, 0.26);
+  background: rgba(255,255,255,0.08);
+  color: #ddd6fe;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 900;
+}

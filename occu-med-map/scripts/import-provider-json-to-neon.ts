@@ -52,7 +52,8 @@ interface CliArgs {
   batchSize: number;
 }
 
-type NeonDB = ReturnType<typeof neon>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type NeonDB = any;
 
 // ─── CLI Parsing ──────────────────────────────────────────────────────────
 
@@ -213,10 +214,10 @@ function mapBlueHive(row: BlueHiveRow): NormalizedProvider | null {
       )}`;
 
   const services = row.services
-    ? row.services.split(",").map((s) => s.trim()).filter(Boolean)
+    ? row.services.split(";").map((s) => s.trim()).filter(Boolean)
     : [];
   const categories = row.service_categories
-    ? row.service_categories.split(",").map((s) => s.trim()).filter(Boolean)
+    ? row.service_categories.split(";").map((s) => s.trim()).filter(Boolean)
     : [];
 
   return {
@@ -596,14 +597,14 @@ async function main(): Promise<void> {
   const opts = parseArgs();
 
   const databaseUrl = process.env.NEON_DATABASE_URL;
-  if (!databaseUrl) {
-    console.error("NEON_DATABASE_URL environment variable is required");
-    process.exit(1);
-  }
-
-  const db = neon(databaseUrl);
+  let db: NeonDB = null;
 
   if (!opts.dryRun) {
+    if (!databaseUrl) {
+      console.error("NEON_DATABASE_URL environment variable is required");
+      process.exit(1);
+    }
+    db = neon(databaseUrl);
     await ensureSchema(db);
   }
 
@@ -637,8 +638,7 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log("
-=== Final Summary ===");
+  console.log("\n=== Final Summary ===");
   for (const s of allStats) {
     console.log(
       `${s.batch_name}: ${s.inserted} inserted, ${s.updated} updated, ${s.failed} failed`,

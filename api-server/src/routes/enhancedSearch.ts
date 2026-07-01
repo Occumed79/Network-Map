@@ -53,7 +53,36 @@ const CATEGORY_TO_PLACE_TYPES: Record<string, string[]> = {
   pharmacy: ["pharmacy"],
   dentist: ["dentist"],
   eye: ["doctor", "health"],
+  dotExam: ["doctor", "hospital", "health"],
+  faaMedical: ["doctor", "hospital", "health"],
 };
+
+// Google Places Text Search keywords for specialized categories
+// These use the Places Text Search API which searches by name/keyword, not just type
+const CATEGORY_TO_TEXT_KEYWORDS: Record<string, string[]> = {
+  dotExam: ["DOT physical exam", "DOT medical examiner", "drug testing physical", "occupational health DOT"],
+  faaMedical: ["FAA medical examiner", "aviation medical examiner", "FAA flight physical", "aerospace medicine"],
+  occMed: ["occupational health clinic", "occupational medicine", "work injury clinic", "employer health services"],
+  urgent: ["urgent care clinic", "walk in clinic", "immediate care"],
+  lab: ["blood test laboratory", "drug testing lab", "occupational health lab", "phlebotomy"],
+  pharmacy: ["pharmacy", "drug store"],
+  eye: ["optometrist", "eye doctor", "vision clinic"],
+};
+
+// UK-specific search keywords (auto-applied when location is in UK)
+const UK_TEXT_KEYWORDS: Record<string, string[]> = {
+  all: ["NHS GP practice", "NHS hospital", "medical centre"],
+  clinical: ["NHS GP practice", "private clinic UK", "medical centre"],
+  occMed: ["occupational health UK", "NHS occupational health", "workplace health assessment UK"],
+  pharmacy: ["pharmacy NHS", "Boots pharmacy", "Lloyds pharmacy"],
+  dentist: ["NHS dentist", "dental practice UK"],
+  urgent: ["NHS urgent care", "NHS walk in centre", "minor injuries unit"],
+};
+
+function isUKLocation(lat: number, lng: number): boolean {
+  // Rough UK bounding box: lat 49-61, lng -9 to 2
+  return lat >= 49 && lat <= 61 && lng >= -9 && lng <= 2;
+}
 
 type GooglePlaceResult = {
   place_id: string;
@@ -95,6 +124,72 @@ async function fetchPlaceDetails(placeId: string): Promise<{ phone?: string; web
   }
 }
 
+async function searchGooglePlacesText(lat: number, lng: number, radiusMiles: number, keywords: string[]): Promise<ProviderCandidate[]> {
+  if (!GOOGLE_API_KEY || keywords.length === 0) return [];
+  const radiusMeters = Math.min(Math.round(radiusMiles * 1609.344), 50000);
+  const seenPlaceIds = new Set<string>();
+  const candidates: ProviderCandidate[] = [];
+
+  for (const keyword of keywords) {
+    try {
+      const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(keyword)}&location=${lat},${lng}&radius=${radiusMeters}&key=${GOOGLE_API_KEY}`;
+      const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
+      if (!resp.ok) continue;
+      const data: any = await resp.json();
+      const places: GooglePlaceResult[] = data.results || [];
+
+      for (const place of places) {
+        if (!place.place_id || seenPlaceIds.has(place.place_id)) continue;
+        if (place.business_status === "CLOSED_PERMANENTLY") continue;
+        seenPlaceIds.add(place.place_id);
+
+        const pLat = place.geometry.location.lat;
+        const pLng = place.geometry.location.lng;
+        const dist = haversineMiles(lat, lng, pLat, pLng);
+
+        let details: { phone?: string; website?: string; formattedAddress?: string } = {};
+        if (candidates.length < 20) {
+          details = await fetchPlaceDetails(place.place_id);
+        }
+
+        candidates.push({
+          id: `gplaces-text-${place.place_id}`,
+          name: place.name,
+          address: details.formattedAddress || place.vicinity || "",
+          city: "",
+          state: "",
+          postalCode: "",
+          phone: details.phone || "",
+          website: details.website || "",
+          lat: pLat,
+          lng: pLng,
+          coordinateStatus: "geocoded" as const,
+          source: "Google Places",
+          sourceDetail: `Google Places Text (${keyword})`,
+          sourceUrl: details.website || "",
+          confidence: place.rating && place.rating >= 4 ? "high" : "medium",
+          trustTier: "directory" as const,
+          score: (place.rating ? Math.round(place.rating * 15) : 40) + (place.user_ratings_total ? Math.min(20, Math.round(place.user_ratings_total / 50)) : 0),
+          badges: ["Google Places", ...(place.rating ? [`★${place.rating}`] : [])],
+          evidence: [{
+            serviceDetected: keyword,
+            evidenceUrl: details.website || "",
+            evidenceTextSnippet: place.vicinity || "",
+            confidence: 70,
+            source: "Google Places",
+          }],
+          distanceMiles: dist,
+          _rawSources: ["google_places_text"],
+        });
+      }
+    } catch (e) {
+      logger.warn({ keyword, error: String(e) }, "Google Places text search error");
+    }
+  }
+
+  return candidates;
+}
+
 async function searchGooglePlaces(lat: number, lng: number, radiusMiles: number, category: string): Promise<ProviderCandidate[]> {
   if (!GOOGLE_API_KEY) return [];
   const placeTypes = CATEGORY_TO_PLACE_TYPES[category] || CATEGORY_TO_PLACE_TYPES.all;
@@ -102,6 +197,7 @@ async function searchGooglePlaces(lat: number, lng: number, radiusMiles: number,
   const seenPlaceIds = new Set<string>();
   const candidates: ProviderCandidate[] = [];
 
+  // 1. Nearby Search by type
   for (const placeType of placeTypes) {
     try {
       const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radiusMeters}&type=${placeType}&key=${GOOGLE_API_KEY}`;
@@ -119,7 +215,6 @@ async function searchGooglePlaces(lat: number, lng: number, radiusMiles: number,
         const pLng = place.geometry.location.lng;
         const dist = haversineMiles(lat, lng, pLat, pLng);
 
-        // Fetch details for top 20 results
         let details: { phone?: string; website?: string; formattedAddress?: string } = {};
         if (candidates.length < 20) {
           details = await fetchPlaceDetails(place.place_id);
@@ -157,6 +252,23 @@ async function searchGooglePlaces(lat: number, lng: number, radiusMiles: number,
       }
     } catch (e) {
       logger.warn({ placeType, error: String(e) }, "Google Places search error");
+    }
+  }
+
+  // 2. Text Search for specialized keywords (DOT, FAA, occ health, etc.)
+  const textKeywords = CATEGORY_TO_TEXT_KEYWORDS[category] || [];
+  const ukKeywords = isUKLocation(lat, lng) ? (UK_TEXT_KEYWORDS[category] || UK_TEXT_KEYWORDS.all) : [];
+  const allKeywords = [...textKeywords, ...ukKeywords];
+
+  if (allKeywords.length > 0) {
+    const textCandidates = await searchGooglePlacesText(lat, lng, radiusMiles, allKeywords);
+    // Merge text search results, deduping by place_id
+    for (const tc of textCandidates) {
+      const placeId = tc.id.replace("gplaces-text-", "");
+      if (!seenPlaceIds.has(placeId)) {
+        seenPlaceIds.add(placeId);
+        candidates.push(tc);
+      }
     }
   }
 

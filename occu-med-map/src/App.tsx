@@ -1037,7 +1037,7 @@ export default function App() {
   const [liveSort, setLiveSort] = useState<'distance'|'name'>('distance');
   const [liveLocation, setLiveLocation] = useState('');
   const [liveRadius, setLiveRadius] = useState(10); // miles
-  const [liveBackendCategory, setLiveBackendCategory] = useState<'all'|'clinical'|'occMed'|'hospital'|'clinic'|'doctor'|'urgent'|'lab'|'pharmacy'|'dentist'|'eye'>('clinical');
+  const [liveBackendCategory, setLiveBackendCategory] = useState<'all'|'clinical'|'occMed'|'hospital'|'clinic'|'doctor'|'urgent'|'lab'|'pharmacy'|'dentist'|'eye'|'dotExam'|'faaMedical'>('clinical');
   const [liveFacets, setLiveFacets] = useState<Record<string, number>>({});
   const [livePriorityCounts, setLivePriorityCounts] = useState<any>(null);
   const [liveHighlightId, setLiveHighlightId] = useState<any>(null);
@@ -3515,6 +3515,8 @@ export default function App() {
                   {key:'pharmacy',label:'Pharmacy',count:livePriorityCounts?.pharmacy},
                   {key:'dentist',label:'Dental',count:livePriorityCounts?.dental},
                   {key:'eye',label:'Eye',count:livePriorityCounts?.eye},
+                  {key:'dotExam',label:'DOT Exam',count:undefined},
+                  {key:'faaMedical',label:'FAA Medical',count:undefined},
                   {key:'all',label:'All',count:undefined},
                 ] as const).map(btn => {
                   const count = btn.count;

@@ -19,7 +19,12 @@ New branch foundation:
 - `src/features/driveTime/providerEtaTypes.ts`
 - `src/features/driveTime/providerEtaEngine.ts`
 - `src/features/driveTime/providerEtaStore.ts`
+- `src/features/driveTime/providerEtaExport.ts`
 - `src/features/driveTime/leafletProviderAdapter.ts`
+- `src/features/driveTime/useProviderEta.ts`
+- `src/features/driveTime/ProviderEtaBadge.tsx`
+- `src/features/driveTime/DriveTimeControlStrip.tsx`
+- `src/features/driveTime/index.ts`
 
 Target behavior:
 
@@ -29,6 +34,20 @@ Live Finder results
   → rankProvidersByEta(origin, candidates)
   → store result in providerEtaStore
   → React result cards render ETA / Route / Copy natively
+```
+
+Native pieces now available:
+
+```text
+ETA types
+ETA ranking engine
+ETA global store contract
+Leaflet marker adapter
+Live Finder result adapter
+React ETA hook
+ETA badge component
+Drive-time control strip component
+CSV/text export helpers
 ```
 
 ### 2. Remove temporary DOM bridges

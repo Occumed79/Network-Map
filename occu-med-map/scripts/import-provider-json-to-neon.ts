@@ -342,7 +342,7 @@ function loadJsonRecords(filePath: string): unknown[] {
 // ─── DB Schema ────────────────────────────────────────────────────────────
 
 async function ensureSchema(db: NeonDB): Promise<void> {
-  await db.query(`
+  await db(`
     CREATE TABLE IF NOT EXISTS provider_import_batches (
       id SERIAL PRIMARY KEY,
       batch_name TEXT NOT NULL,
@@ -357,15 +357,12 @@ async function ensureSchema(db: NeonDB): Promise<void> {
       started_at TIMESTAMP DEFAULT NOW(),
       completed_at TIMESTAMP,
       notes TEXT
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_medical_providers_source_id
-      ON medical_providers(source_id);
-    CREATE INDEX IF NOT EXISTS idx_medical_providers_lower_name
-      ON medical_providers(LOWER(name));
-    CREATE INDEX IF NOT EXISTS idx_medical_providers_lower_address
-      ON medical_providers(LOWER(formatted_address));
+    )
   `);
+
+  await db(`CREATE INDEX IF NOT EXISTS idx_medical_providers_source_id ON medical_providers(source_id)`);
+  await db(`CREATE INDEX IF NOT EXISTS idx_medical_providers_lower_name ON medical_providers(LOWER(name))`);
+  await db(`CREATE INDEX IF NOT EXISTS idx_medical_providers_lower_address ON medical_providers(LOWER(formatted_address))`);
 }
 
 // ─── Batch Upsert ─────────────────────────────────────────────────────────
@@ -388,12 +385,13 @@ async function batchUpsert(
 
   for (let i = 0; i < providers.length; i++) {
     const p = providers[i];
-    const base = i * 20;
+    const base = i * 18;
     valuesPlaceholders.push(
-      `(\$${base + 1}, \$${base + 2}, \$${base + 3}, \$${base + 4}, \$${base + 5}, \$${base + 6}, \$${base + 7}, \$${base + 8}, \$${base + 9}, \$${base + 10}, \$${base + 11}, \$${base + 12}, \$${base + 13}, \$${base + 14}, \$${base + 15}, \$${base + 16}, \$${base + 17}, \$${base + 18}, NOW(), NOW())`,
+      `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}::double precision, $${base + 5}::double precision, $${base + 6}::text[], $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11}, $${base + 12}, $${base + 13}, $${base + 14}, $${base + 15}, $${base + 16}, $${base + 17}::double precision, $${base + 18}::jsonb, NOW(), NOW())`,
     );
     params.push(
-      p.place_id, p.name, p.formatted_address, p.lat, p.lng, p.types,
+      p.place_id, p.name, p.formatted_address, p.lat, p.lng,
+      Array.isArray(p.types) ? p.types : (p.types ? [String(p.types)] : []),
       p.category, p.phone, p.website, p.country_code, p.locality,
       p.administrative_area_level_1, p.postal_code, p.data_source,
       p.source_id, p.source_type, p.confidence_score, p.raw_data,
@@ -428,10 +426,10 @@ async function batchUpsert(
   `;
 
   try {
-    const result = await db.query(query, params);
+    const rows = await db(query, params) as Array<Record<string, unknown>>;
     let inserted = 0;
     let updated = 0;
-    for (const row of result.rows as Array<Record<string, unknown>>) {
+    for (const row of rows) {
       if (row.was_inserted) inserted++;
       else updated++;
     }
@@ -451,14 +449,14 @@ async function createBatchRecord(
 ): Promise<number | null> {
   if (dryRun) return null;
 
-  const result = await db.query(
+  const rows = await db(
     `INSERT INTO provider_import_batches
       (batch_name, file_name, total_records, started_at, notes)
-     VALUES (\$1, \$2, \$3, \$4, \$5)
+     VALUES ($1, $2, $3, $4, $5)
      RETURNING id`,
     [stats.batch_name, stats.file_name, stats.total_records, stats.started_at, stats.notes],
-  );
-  const row = result.rows[0] as Record<string, unknown> | undefined;
+  ) as Array<Record<string, unknown>>;
+  const row = rows[0];
   return (row?.id as number) ?? null;
 }
 
@@ -470,12 +468,12 @@ async function updateBatchRecord(
 ): Promise<void> {
   if (dryRun || batchId == null) return;
 
-  await db.query(
+  await db(
     `UPDATE provider_import_batches SET
-      inserted = \$1, updated = \$2, skipped_invalid_coords = \$3,
-      skipped_missing_name = \$4, skipped_duplicate = \$5, failed = \$6,
-      completed_at = \$7, notes = \$8
-     WHERE id = \$9`,
+      inserted = $1, updated = $2, skipped_invalid_coords = $3,
+      skipped_missing_name = $4, skipped_duplicate = $5, failed = $6,
+      completed_at = $7, notes = $8
+     WHERE id = $9`,
     [
       stats.inserted, stats.updated, stats.skipped_invalid_coords,
       stats.skipped_missing_name, stats.skipped_duplicate, stats.failed,

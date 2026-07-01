@@ -23,6 +23,7 @@ import { liveResultsToEtaCandidates } from './features/driveTime/leafletProvider
 import { useProviderEta } from './features/driveTime/useProviderEta';
 import './features/driveTime/driveTimeControls.css';
 import './features/driveTime/driveTimeBadge.css';
+import DatasetBrowser from './DatasetBrowser';
 
 const NATIVE_DRIVE_TIME_ENABLED = import.meta.env.VITE_NATIVE_DRIVE_TIME === 'true';
 
@@ -1055,6 +1056,8 @@ export default function App() {
   const [showDentists, setShowDentists] = useState(false);
   const [dentistData, setDentistData] = useState<any[]>([]);
   const dentistLayerRef = useRef<ReturnType<typeof createClusteredLayer>|null>(null);
+  const [showDatasetBrowser, setShowDatasetBrowser] = useState(false);
+  const [indexedLayerData, setIndexedLayerData] = useState<any[]>([]);
   const [outreachNotes, setOutreachNotes] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_notes')||'{}'); } catch { return {}; } });
   const [outreachStatus, setOutreachStatus] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_status')||'{}'); } catch { return {}; } });
   const [dropUi, setDropUi] = useState({panelOpen:false, exportLoading:false, status:''});
@@ -1409,20 +1412,28 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
-  // ── Load BlueHive provider data ────────────────────────────────────────────
+  // ── Load BlueHive provider data from API ───────────────────────────────────
   useEffect(()=>{
-    fetch('/bluehive-map-data.json')
+    fetch('/api/provider-layers/bluehive')
       .then(r=>r.json())
       .then(data=>setBlueHiveData(data.providers||[]))
       .catch(()=>setBlueHiveData([]));
   },[]);
 
-  // ── Load Dentist data ─────────────────────────────────────────────────────
+  // ── Load Dentist data from API ─────────────────────────────────────────────
   useEffect(()=>{
-    fetch('/dentists.json')
+    fetch('/api/provider-layers/dentists')
       .then(r=>r.json())
-      .then(data=>setDentistData(data||[]))
+      .then(data=>setDentistData(data.providers||[]))
       .catch(()=>setDentistData([]));
+  },[]);
+
+  // ── Load Indexed provider data from API ────────────────────────────────────
+  useEffect(()=>{
+    fetch('/api/provider-layers/indexed?limit=100000')
+      .then(r=>r.json())
+      .then(data=>setIndexedLayerData(data.providers||[]))
+      .catch(()=>setIndexedLayerData([]));
   },[]);
 
   // ── Map Inventory: load indexed providers from Neon on map load + pan/zoom ──
@@ -2915,7 +2926,7 @@ export default function App() {
             <div className="tog-row">
               <span className="tog-lbl" style={{color:'#3b82f6',display:'flex',alignItems:'center',gap:4}}>
                 <span style={{width:7,height:7,borderRadius:'50%',background:'#3b82f6',display:'inline-block',boxShadow:'0 0 6px #3b82f6',flexShrink:0}}/>
-                BlueHive Providers {blueHiveData.length>0&&<span style={{fontSize:9,opacity:0.7,marginLeft:2}}>({blueHiveData.filter((p:any)=>p.lat!==null).length})</span>}
+                BlueHive Providers {blueHiveData.length>0&&<span style={{fontSize:9,opacity:0.7,marginLeft:2}}>({blueHiveData.length})</span>}
               </span>
               <label className="tog-switch"><input type="checkbox" checked={showBlueHive} onChange={e=>setShowBlueHive(e.target.checked)}/><span className="tog-slider"/></label>
             </div>
@@ -2926,6 +2937,31 @@ export default function App() {
               </span>
               <label className="tog-switch"><input type="checkbox" checked={showDentists} onChange={e=>setShowDentists(e.target.checked)}/><span className="tog-slider"/></label>
             </div>
+            <button
+              onClick={()=>setShowDatasetBrowser(true)}
+              style={{
+                width:'100%',
+                marginTop:8,
+                padding:'8px 12px',
+                borderRadius:12,
+                border:'1px solid rgba(255,255,255,0.12)',
+                background:'linear-gradient(135deg, rgba(137,212,254,0.12), rgba(196,168,255,0.08))',
+                color:'#89d4fe',
+                fontSize:11,
+                fontWeight:600,
+                cursor:'pointer',
+                display:'flex',
+                alignItems:'center',
+                justifyContent:'center',
+                gap:6,
+                fontFamily:"'Inter', -apple-system, sans-serif",
+                transition:'all 0.25s ease',
+              }}
+              onMouseEnter={(e)=>{e.currentTarget.style.background='linear-gradient(135deg, rgba(137,212,254,0.20), rgba(196,168,255,0.14))';e.currentTarget.style.borderColor='rgba(137,212,254,0.3)';}}
+              onMouseLeave={(e)=>{e.currentTarget.style.background='linear-gradient(135deg, rgba(137,212,254,0.12), rgba(196,168,255,0.08))';e.currentTarget.style.borderColor='rgba(255,255,255,0.12)';}}
+            >
+              <span style={{fontSize:13}}>🗂</span> Browse Datasets
+            </button>
             {clinicGroups.length>0&&clinicGroups.map(grp=>(
               <div key={grp.id} className="tog-row">
                 <span className="tog-lbl" style={{color:grp.color,display:'flex',alignItems:'center',gap:4}}>
@@ -3031,6 +3067,15 @@ export default function App() {
           )}
 
         </aside>
+
+        {/* ── DATASET BROWSER MODAL ── */}
+        <DatasetBrowser
+          open={showDatasetBrowser}
+          onClose={()=>setShowDatasetBrowser(false)}
+          blueHiveData={blueHiveData}
+          dentistData={dentistData}
+          indexedData={indexedLayerData}
+        />
 
         {/* ── MAP ── */}
         <div className="map-wrap">

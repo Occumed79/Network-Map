@@ -37,7 +37,7 @@ async function copyTextSafely(text:string):Promise<boolean> {
   }
 }
 
-type ActiveTool = 'coverage' | 'liveFinder' | 'radius' | 'directories' | 'priceFinder' | 'myClinics' | 'compare' | null;
+type ActiveTool = 'coverage' | 'liveFinder' | 'radius' | 'directories' | 'myClinics' | 'compare' | null;
 
 /**
  * Source-level guard for whether a coordinate falls inside the United States
@@ -350,6 +350,33 @@ function calcDrive(lat1:number,lng1:number,lat2:number,lng2:number) {
   const hrs=(dist/55)*1.15;
   const h=Math.floor(hrs),m=Math.round((hrs-h)*60);
   return {miles:Math.round(dist),timeStr:h>0?`${h}h ${m}m`:`${m}m`,hours:hrs};
+}
+
+async function routeDrive(lat1:number,lng1:number,lat2:number,lng2:number): Promise<{miles:number;timeStr:string;hours:number;routed:boolean}> {
+  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    const fallback = calcDrive(lat1,lng1,lat2,lng2);
+    return {...fallback, routed:false};
+  }
+  try {
+    const origin = `${lat1},${lng1}`;
+    const destination = `${lat2},${lng2}`;
+    const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&units=imperial&departure_time=now&key=${apiKey}`;
+    const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!resp.ok) throw new Error(`Directions API ${resp.status}`);
+    const data = await resp.json();
+    const route = data.routes?.[0]?.legs?.[0];
+    if (!route) throw new Error('No route found');
+    const meters = route.distance?.value || 0;
+    const seconds = route.duration_in_traffic?.value || route.duration?.value || 0;
+    const miles = Math.round(meters / 1609.344);
+    const hours = seconds / 3600;
+    const h = Math.floor(hours), m = Math.round((hours - h) * 60);
+    return { miles, timeStr: h > 0 ? `${h}h ${m}m` : `${m}m`, hours, routed:true };
+  } catch {
+    const fallback = calcDrive(lat1,lng1,lat2,lng2);
+    return {...fallback, routed:false};
+  }
 }
 
 function approxMiles(lat1:number,lng1:number,lat2:number,lng2:number):number {
@@ -1009,7 +1036,7 @@ export default function App() {
   const [liveRegionFilter, setLiveRegionFilter] = useState<'all'|'us'|'intl'>('all');
   const [liveSort, setLiveSort] = useState<'distance'|'name'>('distance');
   const [liveLocation, setLiveLocation] = useState('');
-  const [liveRadius, setLiveRadius] = useState(10);
+  const [liveRadius, setLiveRadius] = useState(10); // miles
   const [liveBackendCategory, setLiveBackendCategory] = useState<'all'|'clinical'|'occMed'|'hospital'|'clinic'|'doctor'|'urgent'|'lab'|'pharmacy'|'dentist'|'eye'>('clinical');
   const [liveFacets, setLiveFacets] = useState<Record<string, number>>({});
   const [livePriorityCounts, setLivePriorityCounts] = useState<any>(null);
@@ -1057,6 +1084,7 @@ export default function App() {
   const [dentistData, setDentistData] = useState<any[]>([]);
   const dentistLayerRef = useRef<ReturnType<typeof createClusteredLayer>|null>(null);
   const [showDatasetBrowser, setShowDatasetBrowser] = useState(false);
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [indexedLayerData, setIndexedLayerData] = useState<any[]>([]);
   const [outreachNotes, setOutreachNotes] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_notes')||'{}'); } catch { return {}; } });
   const [outreachStatus, setOutreachStatus] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_status')||'{}'); } catch { return {}; } });
@@ -1136,7 +1164,7 @@ export default function App() {
         state: pfState.trim().toUpperCase(),
         serviceType: pfServiceType,
       });
-      const resp = await fetch(`/api/price-finder?${params.toString()}`);
+      const resp = await fetch(`/api/price-finder?${params.toString()}`, { signal: AbortSignal.timeout(15000) });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       setPfClinics(data.clinics || []);
@@ -1147,7 +1175,10 @@ export default function App() {
       setPfDone(true);
       runAutomatedPriceHunt();
     } catch (e: any) {
-      setPfError(e.message || 'Search failed. Please try again.');
+      const msg = e?.name === 'TimeoutError' || e?.name === 'AbortError'
+        ? 'Search timed out — the NPI Registry may be slow. Please try again.'
+        : (e.message || 'Search failed. Please try again.');
+      setPfError(msg);
     } finally {
       setPfLoading(false);
     }
@@ -1320,6 +1351,8 @@ export default function App() {
   const criticalCount = LOCS.filter(l=>getVal(l,metric)>=4).length;
 
   const [mapReady, setMapReady] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [sheetState, setSheetState] = useState<'default'|'collapsed'|'expanded'>('default');
   const [localPopInfo, setLocalPopInfo] = useState<null|{lat:number;lng:number;density:number;state:string;population:number;nearestCity:string;nearestDist:number}>(null);
 
   // ── Import shared price reports from URL on first load ────────────────────
@@ -1340,6 +1373,13 @@ export default function App() {
       });
     } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
+
+  // Close mobile sidebar on resize to desktop
+  useEffect(()=>{
+    const onResize = () => { if (window.innerWidth > 768) setMobileSidebarOpen(false); };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
   },[]);
 
   // ── Init Map ───────────────────────────────────────────────────────────────
@@ -1408,7 +1448,13 @@ export default function App() {
 
     setMapReady(true);
 
-    return ()=>{ map.remove(); mapRef.current=null; cityLayerRef.current=null; };
+    // Use ResizeObserver to keep map size in sync with container dimensions
+    const resizeObserver = new ResizeObserver(() => {
+      map.invalidateSize();
+    });
+    resizeObserver.observe(mapDivRef.current);
+
+    return ()=>{ resizeObserver.disconnect(); map.remove(); mapRef.current=null; cityLayerRef.current=null; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
@@ -1505,6 +1551,7 @@ export default function App() {
   // ── Load State GeoJSON ───────────────────────────────────────────────────
   async function loadStateGeo(map:L.Map) {
     const urls = [
+      '/states-10m.json',
       'https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json',
       'https://unpkg.com/us-atlas@3/states-10m.json',
     ];
@@ -2447,11 +2494,15 @@ export default function App() {
     setLiveError('');
     setLiveSearched(true);
     setLiveMirror('Querying provider sources…');
+    setNpiLoading(false);
+    setNpiCategory(null);
+    setNpiResults([]);
+    setNpiError('');
     lastRadiusRef.current={lat,lng};
 
     if(liveCircleRef.current) { try{map.removeLayer(liveCircleRef.current);}catch(e){} }
     if(livePinRef.current) { try{map.removeLayer(livePinRef.current);}catch(e){} }
-    liveCircleRef.current=L.circle([lat,lng],{radius:liveRadius*1000,color:'#22d3ee',weight:1.5,opacity:0.45,dashArray:'7 5',fillColor:'#06b6d4',fillOpacity:0.03,interactive:false}).addTo(map);
+    liveCircleRef.current=L.circle([lat,lng],{radius:liveRadius*1609.34,color:'#22d3ee',weight:1.5,opacity:0.45,dashArray:'7 5',fillColor:'#06b6d4',fillOpacity:0.03,interactive:false}).addTo(map);
     livePinRef.current=L.marker([lat,lng],{icon:L.divIcon({className:'',html:'<div style="width:14px;height:14px;border-radius:50%;background:#06b6d4;border:2.5px solid #fff;box-shadow:0 0 0 4px rgba(6,182,212,0.28),0 0 14px rgba(6,182,212,0.6);"></div>',iconSize:[14,14],iconAnchor:[7,7]}),zIndexOffset:3000,interactive:false}).addTo(map);
 
     try { await revGeo(lat,lng); } catch(e){}
@@ -2460,7 +2511,7 @@ export default function App() {
       const params=new URLSearchParams({
         lat:String(lat),
         lng:String(lng),
-        radiusMiles:String(liveRadius/1.60934),
+        radiusMiles:String(liveRadius),
         category:categoryForSearch,
       });
       const res=await fetch(`/api/live-finder/search?${params.toString()}`,{signal:AbortSignal.timeout(30000)});
@@ -2828,32 +2879,49 @@ export default function App() {
 
       {/* ── BODY ── */}
       <div className="app-body">
+        {/* Mobile sidebar toggle */}
+        <button
+          onClick={()=>setMobileSidebarOpen(v=>!v)}
+          style={{
+            position:'fixed', top:10, left:10, zIndex:2100,
+            display: window.innerWidth <= 768 ? 'flex' : 'none',
+            alignItems:'center', justifyContent:'center',
+            width:40, height:40, borderRadius:10,
+            background:'rgba(13,18,30,0.85)', backdropFilter:'blur(12px)',
+            border:'1px solid rgba(255,255,255,0.18)', color:'#e8eef8',
+            fontSize:18, cursor:'pointer',
+          }}
+        >{mobileSidebarOpen ? '✕' : '☰'}</button>
+        {/* Mobile backdrop */}
+        {mobileSidebarOpen && window.innerWidth <= 768 && (
+          <div onClick={()=>setMobileSidebarOpen(false)}
+            style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:1900}} />
+        )}
         {/* ── SIDEBAR ── */}
-        <aside className="sidebar">
+        <aside className={`sidebar${mobileSidebarOpen ? ' mobile-open' : ''}`} onClick={(e)=>{ if (window.innerWidth <= 768 && (e.target as HTMLElement).tagName === 'BUTTON') setMobileSidebarOpen(false); }}>
           <div className="hero-card">
             <div className="hero-title">Occu-Med Network Command</div>
 
           <div className="sb-section">
             <div className="sb-lbl">NETWORK TOOLS</div>
-            <button className={`mbtn${activeTool === 'coverage' ? ' active' : ''}`} onClick={() => setActiveTool(activeTool === 'coverage' ? null : 'coverage')}>Coverage</button>
-            <button className={`mbtn${activeTool === 'liveFinder' ? ' active' : ''}`} onClick={() => setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder')}>Live Finder</button>
-            <button className={`mbtn${activeTool === 'radius' ? ' active' : ''}`} onClick={() => setActiveTool(activeTool === 'radius' ? null : 'radius')}>Radius Tool</button>
-            <button className={`mbtn${activeTool === 'directories' ? ' active' : ''}`} onClick={() => setActiveTool(activeTool === 'directories' ? null : 'directories')}>Directories</button>
-            <button className={`mbtn${activeTool === 'priceFinder' ? ' active' : ''}`} onClick={() => setActiveTool(activeTool === 'priceFinder' ? null : 'priceFinder')}>Price Finder</button>
-            <button className={`mbtn${activeTool === 'myClinics' ? ' active' : ''}`} onClick={() => setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>My Clinics</button>
-            <button className={`mbtn${activeTool === 'compare' ? ' active' : ''}`} onClick={() => setActiveTool(activeTool === 'compare' ? null : 'compare')}>Compare</button>
+            <button className={`mbtn${activeTool === 'coverage' ? ' active' : ''}`} title="U.S. coverage diagnostics — population density, territory gap analysis" onClick={() => setActiveTool(activeTool === 'coverage' ? null : 'coverage')}>Coverage</button>
+            <button className={`mbtn${activeTool === 'liveFinder' ? ' active' : ''}`} title="Search for healthcare facilities near any map location" onClick={() => setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder')}>Live Finder</button>
+            <button className={`mbtn${activeTool === 'radius' ? ' active' : ''}`} title="Draw a radius circle and extract facilities within it" onClick={() => setActiveTool(activeTool === 'radius' ? null : 'radius')}>Radius Tool</button>
+            <button className={`mbtn${activeTool === 'directories' ? ' active' : ''}`} title="Browse provider datasets (BlueHive, Dentists, Indexed)" onClick={() => setActiveTool(activeTool === 'directories' ? null : 'directories')}>Directories</button>
+            <button className={`mbtn${activeTool === 'myClinics' ? ' active' : ''}`} title="Save and manage your preferred clinic list" onClick={() => setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>My Clinics</button>
+            <button className={`mbtn${activeTool === 'compare' ? ' active' : ''}`} title="Compare provider coverage across locations" onClick={() => setActiveTool(activeTool === 'compare' ? null : 'compare')}>Compare</button>
           </div>
           <div className="sb-divider"/>
 
             <div className="hero-sub">Find occupational providers, compare prices, and build smarter coverage faster.</div>
             <div className="hero-actions">
-              <button className="hero-btn" onClick={()=>setActiveTool(activeTool === 'priceFinder' ? null : 'priceFinder')}>Area Prices</button>
               <button className={`hero-btn${showUsDiagnostics?' active':''}`} onClick={()=>setShowUsDiagnostics(v=>!v)}>U.S. Diagnostics</button>
               <button className="hero-btn" onClick={()=>setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>My Clinics</button>
             </div>
           </div>
           <div className="sb-section">
-            <div className="sb-lbl">SERVICE PRESENCE</div>
+            <div className="sb-lbl" style={{cursor:'pointer',userSelect:'none'}} onClick={()=>setCollapsedSections(p=>({...p,servicePresence:!p.servicePresence}))}>SERVICE PRESENCE {collapsedSections.servicePresence ? '▸' : '▾'}</div>
+            {!collapsedSections.servicePresence && (<>
             <div style={{fontSize:'8.5px',color:'var(--muted)',marginBottom:'8px',lineHeight:'1.3'}}>
               Shows indexed provider locations from the database for the selected service type.
             </div>
@@ -2873,20 +2941,23 @@ export default function App() {
                 {s.label}
               </button>
             ))}
+            </>)}
           </div>
           <div className="sb-divider"/>
           <div className="sb-section">
-            <div className="sb-lbl">VIEW PRESETS</div>
+            <div className="sb-lbl" style={{cursor:'pointer',userSelect:'none'}} onClick={()=>setCollapsedSections(p=>({...p,viewPresets:!p.viewPresets}))}>VIEW PRESETS {collapsedSections.viewPresets ? '▸' : '▾'}</div>
+            {!collapsedSections.viewPresets && (
             <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
               {(['world','us','east','central','west'] as const).map(v=>(
                 <button key={v} className={`vbtn${view===v?' active':''}`} onClick={()=>flyToView(v)}>{v.toUpperCase()}</button>
               ))}
             </div>
+            )}
           </div>
           <div className="sb-divider"/>
           <div className="sb-section">
-            <div className="sb-lbl">LAYERS</div>
-            {showUsDiagnostics && (<>
+            <div className="sb-lbl" style={{cursor:'pointer',userSelect:'none'}} onClick={()=>setCollapsedSections(p=>({...p,layers:!p.layers}))}>LAYERS {collapsedSections.layers ? '▸' : '▾'}</div>
+            {!collapsedSections.layers && showUsDiagnostics && (<>
               <div className="tog-row">
                 <span className="tog-lbl">State labels (U.S.)</span>
                 <label className="tog-switch"><input type="checkbox" checked={showLabels} onChange={e=>setShowLabels(e.target.checked)}/><span className="tog-slider"/></label>
@@ -2975,17 +3046,21 @@ export default function App() {
           {showUsDiagnostics && (<>
           <div className="sb-divider"/>
           <div className="sb-section">
-            <div className="sb-lbl">FILTER CITIES (U.S.)</div>
+            <div className="sb-lbl" style={{cursor:'pointer',userSelect:'none'}} onClick={()=>setCollapsedSections(p=>({...p,filters:!p.filters}))}>FILTER CITIES (U.S.) {collapsedSections.filters ? '▸' : '▾'}</div>
+            {!collapsedSections.filters && (<>
             <div style={{display:'flex',gap:3,flexWrap:'wrap',marginBottom:8}}>
               <button className={`fbtn${filterDiff===null?' active':''}`} onClick={()=>setFilterDiff(null)}>ALL</button>
               {[1,2,3,4,5].map(v=>(
                 <button key={v} className={`fbtn${filterDiff===v?' active':''}`} style={{color:DCOL[v]}} onClick={()=>setFilterDiff(filterDiff===v?null:v)}>{DLBL[v]}</button>
               ))}
             </div>
+            </>
+            )}
           </div>
           <div className="sb-divider"/>
           <div className="sb-section" style={{paddingBottom:10}}>
-            <div className="sb-lbl">DISTRIBUTION (U.S.)</div>
+            <div className="sb-lbl" style={{cursor:'pointer',userSelect:'none'}} onClick={()=>setCollapsedSections(p=>({...p,distribution:!p.distribution}))}>DISTRIBUTION (U.S.) {collapsedSections.distribution ? '▸' : '▾'}</div>
+            {!collapsedSections.distribution && (<>
             {dist.map(d=>(
               <div key={d.v} className="br">
                 <div className="br-hdr">
@@ -2995,16 +3070,19 @@ export default function App() {
                 <div className="br-track"><div className="br-fill" style={{width:`${(d.count/maxDist)*100}%`,background:DCOL[d.v]}}/></div>
               </div>
             ))}
+            </>)}
           </div>
           <div className="sb-divider"/>
           <div className="sb-section" style={{paddingBottom:12}}>
-            <div className="sb-lbl">LEGEND (U.S. DIFFICULTY)</div>
+            <div className="sb-lbl" style={{cursor:'pointer',userSelect:'none'}} onClick={()=>setCollapsedSections(p=>({...p,legend:!p.legend}))}>LEGEND (U.S. DIFFICULTY) {collapsedSections.legend ? '▸' : '▾'}</div>
+            {!collapsedSections.legend && (<>
             {[1,2,3,4,5].map(v=>(
               <div key={v} className="legend-row">
                 <div className="legend-dot" style={{background:DCOL[v]}}/>
                 <span className="legend-lbl">{v} — {DLBL[v]}</span>
               </div>
             ))}
+            </>)}
           </div>
           </>)}
         
@@ -3239,11 +3317,42 @@ export default function App() {
         
 
         {/* ── LIVE PANEL ── */}
-        <div className={`live-panel${activeTool === 'liveFinder' ? ' open' : ''}`}>
+        <div className={`live-panel${activeTool === 'liveFinder' ? ' open' : ''}${sheetState !== 'default' ? ` sheet-${sheetState}` : ''}`}>
           {(activeTool === 'liveFinder')&&(
             <div className="lp-inner">
+              {/* Mobile bottom sheet drag handle */}
+              <div
+                className="sheet-handle"
+                onTouchStart={(e)=>{
+                  (e.currentTarget as HTMLElement).dataset.startY = String(e.touches[0].clientY);
+                  (e.currentTarget as HTMLElement).dataset.startSheet = sheetState;
+                }}
+                onTouchMove={(e)=>{
+                  const el = e.currentTarget as HTMLElement;
+                  const startY = parseFloat(el.dataset.startY || '0');
+                  const delta = startY - e.touches[0].clientY;
+                  if (Math.abs(delta) > 60) {
+                    if (delta > 0 && sheetState !== 'expanded') setSheetState('expanded');
+                    else if (delta < 0 && sheetState === 'expanded') setSheetState('default');
+                    else if (delta < 0 && sheetState === 'default') setSheetState('collapsed');
+                    el.dataset.startY = String(e.touches[0].clientY);
+                  }
+                }}
+                onTouchEnd={()=>{
+                  const el = document.querySelector('.sheet-handle') as HTMLElement;
+                  if (el) delete el.dataset.startY;
+                }}
+                onClick={()=>{
+                  if (window.innerWidth <= 768) {
+                    setSheetState(sheetState === 'collapsed' ? 'default' : sheetState === 'default' ? 'expanded' : 'default');
+                  }
+                }}
+              >
+                <div className="sheet-handle-bar" />
+                <div className="sheet-handle-label">LIVE HEALTHCARE FINDER</div>
+              </div>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                <span className="lp-title"> LIVE HEALTHCARE FINDER</span>
+                <span className="lp-title" style={{display: sheetState === 'collapsed' ? 'none' : undefined}}> LIVE HEALTHCARE FINDER</span>
                 <div style={{display:'flex',gap:6,alignItems:'center'}}>
                   <button
                     onClick={exportOutreachCsv}
@@ -3251,7 +3360,7 @@ export default function App() {
                   >
                     EXPORT CSV
                   </button>
-                  <button className="rp-close" onClick={()=>setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder')}>Close</button>
+                  <button className="rp-close" onClick={()=>{setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder');setSheetState('default');}}>Close</button>
                 </div>
               </div>
               <div style={{display:'flex',gap:6}}>
@@ -3266,7 +3375,7 @@ export default function App() {
                 {liveLocation?`Center · ${liveLocation}`:'Coordinate-first live search · click the map or search an address.'}
                 {liveMirror&&<div style={{fontSize:9,color:'#2d4060',marginTop:3}}>{liveMirror}</div>}
               </div>
-              {NATIVE_DRIVE_TIME_ENABLED&&!npiCategory&&(
+              {NATIVE_DRIVE_TIME_ENABLED&&!npiCategory&&liveResults.length>0&&(
                 <DriveTimeControlStrip
                   origin={etaOrigin}
                   candidates={etaCandidates}
@@ -3301,8 +3410,8 @@ export default function App() {
               })()}
               <div style={{display:'flex',alignItems:'center',gap:6}}>
                 <span style={{fontSize:9.5,color:'#3d5478',whiteSpace:'nowrap'}}>Radius:</span>
-                <input type="range" min={2} max={50} value={liveRadius} onChange={e=>setLiveRadius(Number(e.target.value))} onMouseUp={()=>{ if(lastRadiusRef.current) doLiveSearch(lastRadiusRef.current.lat,lastRadiusRef.current.lng); }}/>
-                <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:'#89d4fe',whiteSpace:'nowrap'}}>{liveRadius} km</span>
+                <input type="range" min={1} max={50} value={liveRadius} onChange={e=>setLiveRadius(Number(e.target.value))} onMouseUp={()=>{ if(lastRadiusRef.current) doLiveSearch(lastRadiusRef.current.lat,lastRadiusRef.current.lng); }}/>
+                <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:'#89d4fe',whiteSpace:'nowrap'}}>{liveRadius} mi</span>
               </div>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'6px 8px',borderRadius:8,background:'rgba(125,211,252,0.06)',border:'1px solid rgba(125,211,252,0.18)'}}>
                 <span style={{fontSize:9.5,color:'#9cc7eb'}}>Map clicks run coordinate-first live search</span>
@@ -3362,6 +3471,8 @@ export default function App() {
                 </select>
               </div>
               {/* Filter chips — now wired to NPI Registry category search */}
+              {lastRadiusRef.current && isUsPoint(lastRadiusRef.current.lat, lastRadiusRef.current.lng) && (
+              <>
               <div style={{fontSize:8.5,color:'#64748b',fontFamily:"'IBM Plex Mono',monospace",letterSpacing:'0.08em'}}>
                 U.S. NPI FILTERS
               </div>
@@ -3483,6 +3594,8 @@ export default function App() {
                   {Object.keys(npiUnifiedResponse.audit.errorsBySource).length===0&&<div style={{color:'#34d399'}}>All sources responded cleanly.</div>}
                 </div>
               )}
+              </>
+              )}
               <div style={{fontSize:9,color:'#8fb3d8'}}>
                 {npiCategory
                   ? `Showing ${npiResults.length} verified candidates`
@@ -3498,7 +3611,7 @@ export default function App() {
                 <div className="lp-empty show">Click anywhere on the map to search nearby facilities.</div>
               )}
               {!liveLoading&&!liveError&&!npiCategory&&liveSearched&&liveResults.length===0&&(
-                <div className="lp-empty show">No live facilities found within {Math.round(liveRadius/1.60934)} mi of this location. Try a larger radius or a different spot.</div>
+                <div className="lp-empty show">No live facilities found within {liveRadius} mi of this location. Try a larger radius or a different spot.</div>
               )}
               {!npiLoading&&npiCategory&&npiResults.length===0&&!npiError&&(
                 <div className="lp-empty show">No NPI providers found for {NPI_CATEGORY_MAP[npiCategory]?.label} in this area. Try a larger city or different category.</div>
@@ -3631,534 +3744,6 @@ export default function App() {
           </div>
         </div>
       </div>
-
-      {/* ── PRICE FINDER MODAL ── */}
-      {activeTool === 'priceFinder' && (
-        <div className="modal-backdrop open" onClick={()=>setActiveTool(activeTool === 'priceFinder' ? null : 'priceFinder')}>
-          <div className="modal-box" style={{width:760,maxHeight:'88vh',display:'flex',flexDirection:'column'}} onClick={e=>e.stopPropagation()}>
-            <div className="modal-header">
-              <span className="modal-title" style={{color:'#34d399'}}> PROVIDER PRICE FINDER</span>
-              <button className="modal-close" onClick={()=>setActiveTool(activeTool === 'priceFinder' ? null : 'priceFinder')}>Close</button>
-            </div>
-            <div className="modal-body" style={{flex:1,overflowY:'auto',padding:'16px 20px'}}>
-
-              {/* Search form */}
-              <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap'}}>
-                <div style={{flex:2,minWidth:140}}>
-                  <div style={{fontSize:9,color:'#3d5478',letterSpacing:'0.08em',marginBottom:4}}>CITY / ZIP</div>
-                  <input className="rp-input" style={{width:'100%',boxSizing:'border-box'}}
-                    placeholder="e.g. Birmingham" value={pfCity}
-                    onChange={e=>setPfCity(e.target.value)}
-                    onKeyDown={e=>e.key==='Enter'&&runPriceSearch()} />
-                </div>
-                <div style={{flex:1,minWidth:70}}>
-                  <div style={{fontSize:9,color:'#3d5478',letterSpacing:'0.08em',marginBottom:4}}>STATE</div>
-                  <input className="rp-input" style={{width:'100%',boxSizing:'border-box'}}
-                    placeholder="AL" value={pfState}
-                    onChange={e=>setPfState(e.target.value.toUpperCase().slice(0,2))}
-                    onKeyDown={e=>e.key==='Enter'&&runPriceSearch()} />
-                </div>
-                <div style={{flex:2,minWidth:160}}>
-                  <div style={{fontSize:9,color:'#3d5478',letterSpacing:'0.08em',marginBottom:4}}>SERVICE TYPE</div>
-                  <select className="rp-select" style={{width:'100%',boxSizing:'border-box'}}
-                    value={pfServiceType} onChange={e=>setPfServiceType(e.target.value as any)}>
-                    <option value="urgentCare">Urgent Care</option>
-                    <option value="dental">Dental</option>
-                    <option value="pharmacy">Pharmacy</option>
-                    <option value="physicalExam">Physical Exam</option>
-                    <option value="faamedical">FAA Medical</option>
-                    <option value="stressTest">Treadmill Stress Test</option>
-                    <option value="mammogram">Mammogram</option>
-                    <option value="dotExam">DOT Exam</option>
-                    <option value="vaccinations">Vaccinations</option>
-                  </select>
-                </div>
-                <div style={{display:'flex',alignItems:'flex-end'}}>
-                  <button className="rp-assess-btn" style={{padding:'8px 18px',minWidth:90,opacity:pfLoading?0.6:1}}
-                    onClick={runPriceSearch} disabled={pfLoading||!pfCity.trim()}>
-                    {pfLoading ? '⏳ SEARCHING...' : ' SEARCH'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Reference price anchor */}
-              {PF_REF_PRICES[pfServiceType] && (
-                <div style={{background:'rgba(52,211,153,0.06)',border:'1px solid rgba(52,211,153,0.18)',borderRadius:6,padding:'8px 14px',marginBottom:12,display:'flex',gap:14,alignItems:'center',flexWrap:'wrap'}}>
-                  <div>
-                    <div style={{fontSize:8,fontFamily:"'IBM Plex Mono',monospace",color:'#34d399',letterSpacing:'0.1em',marginBottom:2}}>TYPICAL PRICE RANGE</div>
-                    <div style={{fontSize:15,fontWeight:700,color:'#a7f3d0',fontFamily:"'IBM Plex Mono',monospace"}}>{PF_REF_PRICES[pfServiceType].range}</div>
-                  </div>
-                  <div style={{flex:1,fontSize:9,color:'#4a7a66',lineHeight:1.5}}>{PF_REF_PRICES[pfServiceType].note}</div>
-                </div>
-              )}
-
-              {/* Tab bar */}
-                  <div style={{display:'flex',gap:0,marginBottom:14,borderBottom:'1px solid rgba(20,50,100,0.5)',flexWrap:'wrap'}}>
-                {([['providers','📋 PROVIDERS','#67e8f9'],['compare','💰 COMPARE PRICES','#34d399'],['areaPrices',' AREA PRICES','#a78bfa'],['priceHunt','🎯 PRICE HUNT','#f97316'],['occHunt','🩺 OCC HUNT','#38bdf8'],['report','⭐ REPORT A PRICE','#fbbf24']] as const).map(([tab,label,col])=>(
-                  <button key={tab} onClick={()=>setPfTab(tab)} style={{
-                    padding:'7px 16px',background:'transparent',border:'none',
-                    borderBottom:`2px solid ${pfTab===tab?col:'transparent'}`,
-                    color:pfTab===tab?col:'#3d5478',
-                    fontFamily:"'IBM Plex Mono',monospace",fontSize:9,fontWeight:700,
-                    letterSpacing:'0.08em',cursor:'pointer',transition:'color 0.15s,border-color 0.15s',
-                  }}>
-                    {label}{tab==='report'&&pfReports.length>0?` (${pfReports.length})`:''}
-                  </button>
-                ))}
-              </div>
-
-              {/* Loading */}
-              {pfLoading && (
-                <div style={{textAlign:'center',padding:'30px 0',color:'#3d5478',fontSize:11}}>
-                  <div style={{fontSize:20,marginBottom:8}}>⏳</div>
-                  <div>Querying NPI Registry for licensed providers...</div>
-                  <div style={{marginTop:4,fontSize:10,color:'#2a3f5e'}}>Searching primary taxonomy + FQHCs in parallel</div>
-                </div>
-              )}
-
-              {/* Error */}
-              {pfError && !pfLoading && (
-                <div style={{background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:6,padding:'10px 14px',color:'#fca5a5',fontSize:11,marginBottom:12}}>
-                   {pfError}
-                </div>
-              )}
-
-              {/* ── PROVIDERS TAB ── */}
-              {!pfLoading && pfTab==='providers' && (
-                pfDone ? (
-                  <>
-                    <div style={{fontSize:9,color:'#3d5478',letterSpacing:'0.08em',marginBottom:8}}>
-                      LICENSED PROVIDERS NEAR <span style={{color:'#22d3ee'}}>{pfLocation.toUpperCase()}</span>
-                      <span style={{marginLeft:8,color:'#2a3f5e'}}>({pfClinics.length} found · NPI Registry)</span>
-                    </div>
-                    {pfClinics.length===0 && (
-                      <div style={{fontSize:10,color:'#2a3f5e',marginBottom:12,padding:'8px 12px',background:'rgba(10,24,48,0.4)',borderRadius:6}}>
-                        No licensed providers found for this city. Try a nearby major city, or use the <strong style={{color:'#34d399'}}>Compare Prices</strong> tab to book directly on ZocDoc, MDsave, or Sesame.
-                      </div>
-                    )}
-                    <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                      {pfClinics.map((c,i)=>(
-                        <div key={i} style={{
-                          background:c.isFqhc?'rgba(52,211,153,0.07)':'rgba(6,10,24,0.5)',
-                          border:c.isFqhc?'1px solid rgba(52,211,153,0.25)':'1px solid rgba(20,40,80,0.6)',
-                          borderRadius:6,padding:'9px 12px',
-                        }}>
-                          <div style={{display:'flex',alignItems:'flex-start',gap:8}}>
-                            {c.isFqhc && (
-                              <span style={{fontSize:7,fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,color:'#34d399',border:'1px solid rgba(52,211,153,0.4)',borderRadius:3,padding:'2px 5px',whiteSpace:'nowrap',marginTop:2,flexShrink:0}}>
-                                ✓ SLIDING SCALE
-                              </span>
-                            )}
-                            <div style={{flex:1}}>
-                              <div style={{fontSize:11,fontWeight:600,color:'#eef4ff',marginBottom:1}}>{c.name}</div>
-                              <div style={{fontSize:8.5,color:'#4a5a7a',fontFamily:"'IBM Plex Mono',monospace",marginBottom:2}}>{c.taxonomy}</div>
-                              {c.address && <div style={{fontSize:9,color:'#5d7a9e'}}> {c.address}</div>}
-                              {c.phone && <div style={{fontSize:9,color:'#3d8bcd',fontFamily:"'IBM Plex Mono',monospace",marginTop:1}}>
-                                📞 <a href={`tel:${c.phone}`} style={{color:'#89d4fe',textDecoration:'none'}}>{c.phone}</a>
-                              </div>}
-                            </div>
-                            <div style={{display:'flex',flexDirection:'column',gap:4,flexShrink:0}}>
-                              <a href={c.searchUrl} target="_blank" rel="noopener noreferrer"
-                                style={{fontSize:8,fontFamily:"'IBM Plex Mono',monospace",padding:'3px 7px',background:'rgba(6,182,212,0.1)',border:'1px solid rgba(6,182,212,0.25)',borderRadius:3,color:'#22d3ee',textDecoration:'none',textAlign:'center'}}>
-                                FIND PRICE →
-                              </a>
-                              <button onClick={()=>{setPfReportProvider(c.name);setPfTab('report');}}
-                                style={{fontSize:8,fontFamily:"'IBM Plex Mono',monospace",padding:'3px 7px',background:'rgba(251,191,36,0.08)',border:'1px solid rgba(251,191,36,0.2)',borderRadius:3,color:'#fbbf24',cursor:'pointer'}}>
-                                REPORT PRICE
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                ) : (
-                  <div style={{textAlign:'center',padding:'24px 0',color:'#2a3f5e',fontSize:11,lineHeight:1.8}}>
-                    <div style={{fontSize:28,marginBottom:10}}></div>
-                    <div style={{color:'#3d5478',marginBottom:6}}>Enter a city above to find:</div>
-                    <div style={{fontSize:10,color:'#2a3f5e'}}>
-                      • Licensed providers from the federal NPI Registry<br/>
-                      • FQHCs with income-based sliding scale fees<br/>
-                      • Clickable phone numbers and address lookup<br/>
-                      • One-click "Report Price" for any provider
-                    </div>
-                  </div>
-                )
-              )}
-
-              {/* ── COMPARE PRICES TAB ── */}
-              {!pfLoading && pfTab==='compare' && (
-                <>
-                  {/* Deep links: Book & compare */}
-                  <div style={{fontSize:9,color:'#3d5478',letterSpacing:'0.08em',marginBottom:8}}>
-                    BOOK & COMPARE{pfCity.trim()&&<> NEAR <span style={{color:'#22d3ee'}}>{(pfLocation||pfCity).toUpperCase()}{pfState?' · '+pfState.toUpperCase():''}</span></>}
-                  </div>
-                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:18}}>
-                    {pfDeepLinks(pfCity||'your city', pfState, pfServiceType).map((lk,i)=>(
-                      <a key={i} href={lk.url} target="_blank" rel="noopener noreferrer" style={{
-                        background:'rgba(10,24,48,0.5)',border:'1px solid rgba(20,50,100,0.5)',
-                        borderRadius:6,padding:'10px 12px',textDecoration:'none',display:'block',
-                      }}>
-                        <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
-                          <span style={{fontSize:8,fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,color:'#34d399',border:'1px solid rgba(52,211,153,0.3)',borderRadius:3,padding:'1px 5px'}}>{lk.tag}</span>
-                          <span style={{fontSize:10,fontWeight:700,color:'#c8ddf0'}}>{lk.name}</span>
-                        </div>
-                        <div style={{fontSize:9,color:'#4a6080',lineHeight:1.4}}>{lk.desc}</div>
-                      </a>
-                    ))}
-                  </div>
-
-                  {/* Transparent pricing networks */}
-                  <div style={{fontSize:9,color:'#3d5478',letterSpacing:'0.08em',marginBottom:8}}>TRANSPARENT-PRICING NETWORKS</div>
-                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:18}}>
-                    {(pfNetworks.length ? pfNetworks : (PF_NETWORKS[pfServiceType]||PF_NETWORKS.urgentCare)).map((n,i)=>(
-                      <a key={i} href={n.url} target="_blank" rel="noopener noreferrer" style={{
-                        background:'rgba(10,24,48,0.5)',border:'1px solid rgba(20,50,100,0.5)',
-                        borderRadius:6,padding:'9px 11px',textDecoration:'none',display:'block',
-                      }}>
-                        <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
-                          <span style={{fontSize:8,fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,color:'#fbbf24',border:'1px solid rgba(251,191,36,0.3)',borderRadius:3,padding:'1px 5px'}}>{n.tag}</span>
-                        </div>
-                        <div style={{fontSize:10,fontWeight:600,color:'#c8ddf0',marginBottom:3}}>{n.name}</div>
-                        <div style={{fontSize:9,color:'#4a6080',lineHeight:1.4}}>{n.desc}</div>
-                      </a>
-                    ))}
-                  </div>
-
-                  {/* Research tools */}
-                  <div style={{fontSize:9,color:'#3d5478',letterSpacing:'0.08em',marginBottom:8}}>PRICING RESEARCH TOOLS</div>
-                  <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-                    {(pfResources.length ? pfResources : PF_RESOURCES).map((r,i)=>(
-                      <a key={i} href={r.url} target="_blank" rel="noopener noreferrer" style={{
-                        flex:'1 1 180px',background:'rgba(6,182,212,0.05)',border:'1px solid rgba(6,182,212,0.15)',
-                        borderRadius:6,padding:'8px 11px',textDecoration:'none',display:'block',
-                      }}>
-                        <div style={{fontSize:8,fontFamily:"'IBM Plex Mono',monospace",color:'#22d3ee',marginBottom:3}}>{r.tag}</div>
-                        <div style={{fontSize:10,fontWeight:600,color:'#c8ddf0',marginBottom:2}}>{r.name}</div>
-                        <div style={{fontSize:9,color:'#4a6080',lineHeight:1.4}}>{r.desc}</div>
-                      </a>
-                    ))}
-                  </div>
-                </>
-              )}
-
-              {/* ── AREA PRICES TAB ── */}
-              {!pfLoading && pfTab==='areaPrices' && (()=>{
-                const proc = PROCEDURE_RATES[apProcedure];
-                const adjLow  = apState ? adjustedPrice(proc?.selfPayLow||0, apState) : proc?.selfPayLow||0;
-                const adjHigh = apState ? adjustedPrice(proc?.selfPayLow||0, apState) : proc?.selfPayHigh||0;
-                const adjMed  = apState ? adjustedPrice(proc?.medicareAvg||0, apState) : proc?.medicareAvg||0;
-                const tier    = apState ? (STATE_COST_TIER[apState]||'Average') : 'Average';
-                const costIdx = apState ? (STATE_COST_INDEX[apState]??1.0) : 1.0;
-                const allStates = Object.entries(STATE_COST_INDEX)
-                  .map(([st,idx])=>({st, cost: Math.round((proc?.selfPayLow||100)*idx)}))
-                  .sort((a,b)=>a.cost-b.cost);
-                const cheapest = allStates.slice(0,5);
-                const priciest = allStates.slice(-5).reverse();
-                return <>
-                  <div style={{display:'flex',gap:8,marginBottom:14,flexWrap:'wrap'}}>
-                    <div style={{flex:2,minWidth:200}}>
-                      <div style={{fontSize:9,color:'#3d5478',letterSpacing:'0.08em',marginBottom:4}}>PROCEDURE</div>
-                      <select className="rp-select" style={{width:'100%',boxSizing:'border-box'}}
-                        value={apProcedure} onChange={e=>setApProcedure(e.target.value)}>
-                        {Object.entries(PROCEDURE_RATES).map(([k,v])=>(
-                          <option key={k} value={k}>{v.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div style={{flex:1,minWidth:70}}>
-                      <div style={{fontSize:9,color:'#3d5478',letterSpacing:'0.08em',marginBottom:4}}>STATE</div>
-                      <input className="rp-input" style={{width:'100%',boxSizing:'border-box'}}
-                        placeholder="e.g. AL" value={apState}
-                        onChange={e=>setApState(e.target.value.toUpperCase().slice(0,2))} />
-                    </div>
-                  </div>
-
-                  {proc && <>
-                    {/* Reference card */}
-                    <div style={{background:'rgba(167,139,250,0.07)',border:'1px solid rgba(167,139,250,0.2)',borderRadius:8,padding:'14px',marginBottom:14}}>
-                      <div style={{fontSize:9,color:'#a78bfa',letterSpacing:'0.1em',marginBottom:8}}>{proc.cpt} · {proc.description}</div>
-                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10,marginBottom:8}}>
-                        <div>
-                          <div style={{fontSize:8,color:'#3d5478',marginBottom:3}}>MEDICARE ALLOWED</div>
-                          <div style={{fontSize:16,fontWeight:700,color:'#89d4fe',fontFamily:"'IBM Plex Mono',monospace"}}>
-                            {adjMed>0?`$${adjMed.toLocaleString()}`:'Not covered'}
-                          </div>
-                          {apState&&<div style={{fontSize:8,color:'#2a3f5e',marginTop:1}}>Adjusted for {apState}</div>}
-                        </div>
-                        <div>
-                          <div style={{fontSize:8,color:'#3d5478',marginBottom:3}}>SELF-PAY LOW</div>
-                          <div style={{fontSize:16,fontWeight:700,color:'#34d399',fontFamily:"'IBM Plex Mono',monospace"}}>
-                            ${adjLow.toLocaleString()}
-                          </div>
-                          <div style={{fontSize:8,color:'#2a3f5e',marginTop:1}}>Cash / uninsured</div>
-                        </div>
-                        <div>
-                          <div style={{fontSize:8,color:'#3d5478',marginBottom:3}}>SELF-PAY HIGH</div>
-                          <div style={{fontSize:16,fontWeight:700,color:'#f97316',fontFamily:"'IBM Plex Mono',monospace"}}>
-                            ${apState?adjustedPrice(proc.selfPayHigh,apState):proc.selfPayHigh}
-                          </div>
-                          <div style={{fontSize:8,color:'#2a3f5e',marginTop:1}}>Without negotiation</div>
-                        </div>
-                      </div>
-                      {apState && <>
-                        <div style={{fontSize:8,color:'#3d5478',marginBottom:4}}>GEOGRAPHIC COST TIER · {apState}</div>
-                        <div style={{display:'flex',alignItems:'center',gap:10}}>
-                          <span style={{fontSize:11,fontWeight:700,color:tierColor(tier),fontFamily:"'IBM Plex Mono',monospace"}}>{tier}</span>
-                          <div style={{flex:1,height:6,borderRadius:3,background:'rgba(20,50,100,0.5)',overflow:'hidden'}}>
-                            <div style={{height:'100%',borderRadius:3,background:tierColor(tier),width:`${Math.min(100,Math.max(5,((costIdx-0.8)/0.6)*100))}%`,transition:'width 0.3s'}}/>
-                          </div>
-                          <span style={{fontSize:10,fontFamily:"'IBM Plex Mono',monospace",color:costIdx>1.05?'#f97316':costIdx<0.95?'#22c55e':'#67e8f9'}}>
-                            {costIdx>=1?'+':''}{ ((costIdx-1)*100).toFixed(0)}%
-                          </span>
-                        </div>
-                      </>}
-                    </div>
-
-                    {/* Cheapest / most expensive states comparison */}
-                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:14}}>
-                      <div>
-                        <div style={{fontSize:9,color:'#3d5478',letterSpacing:'0.08em',marginBottom:6}}>💚 LOWEST COST STATES</div>
-                        {cheapest.map((s,i)=>(
-                          <div key={s.st} style={{display:'flex',alignItems:'center',gap:6,marginBottom:4,padding:'4px 8px',background:'rgba(34,197,94,0.06)',borderRadius:4,border:'1px solid rgba(34,197,94,0.15)'}}>
-                            <span style={{fontSize:8,color:'#3d5478',fontFamily:"'IBM Plex Mono',monospace",width:14}}>{i+1}</span>
-                            <span style={{fontSize:10,fontWeight:600,color:'#eef4ff',flex:1}}>{s.st}</span>
-                            <span style={{fontSize:10,fontWeight:700,color:'#22c55e',fontFamily:"'IBM Plex Mono',monospace"}}>${s.cost}</span>
-                          </div>
-                        ))}
-                      </div>
-                      <div>
-                        <div style={{fontSize:9,color:'#3d5478',letterSpacing:'0.08em',marginBottom:6}}>🔴 HIGHEST COST STATES</div>
-                        {priciest.map((s,i)=>(
-                          <div key={s.st} style={{display:'flex',alignItems:'center',gap:6,marginBottom:4,padding:'4px 8px',background:'rgba(239,68,68,0.06)',borderRadius:4,border:'1px solid rgba(239,68,68,0.15)'}}>
-                            <span style={{fontSize:8,color:'#3d5478',fontFamily:"'IBM Plex Mono',monospace",width:14}}>{i+1}</span>
-                            <span style={{fontSize:10,fontWeight:600,color:'#eef4ff',flex:1}}>{s.st}</span>
-                            <span style={{fontSize:10,fontWeight:700,color:'#ef4444',fontFamily:"'IBM Plex Mono',monospace"}}>${s.cost}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div style={{fontSize:8.5,color:'#2a3f5e',lineHeight:1.5,padding:'8px 10px',background:'rgba(10,24,48,0.4)',borderRadius:6}}>
-                      Prices are estimates based on 2024 Medicare Physician Fee Schedule and CMS Geographic Practice Cost Index.
-                      Self-pay rates vary by facility. Use ZocDoc, MDsave, or Sesame Care for actual quoted prices.
-                    </div>
-                  </>}
-                </>;
-              })()}
-
-              {/* ── PRICE HUNT TAB ── */}
-              {!pfLoading && pfTab==='priceHunt' && (
-                <>
-                  <div style={{fontSize:9,color:'#3d5478',letterSpacing:'0.08em',marginBottom:8}}>
-                    PRICE HUNT RESULTS{pfLocation&&<> · <span style={{color:'#f97316'}}>{pfLocation.toUpperCase()}</span></>}
-                  </div>
-                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,marginBottom:8}}>
-                    <button
-                      onClick={runAutomatedPriceHunt}
-                      disabled={phLoading || !pfCity.trim()}
-                      style={{fontSize:9,padding:'6px 10px',borderRadius:5,border:'1px solid rgba(249,115,22,0.4)',background:'rgba(249,115,22,0.14)',color:'#f97316',fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,cursor:'pointer',opacity:phLoading?0.6:1}}
-                    >
-                      {phLoading ? 'HUNTING…' : 'RUN AUTOMATED HUNT'}
-                    </button>
-                    <span style={{fontSize:9,color:'#fbbf24',fontFamily:"'IBM Plex Mono',monospace"}}>{phExtracted} extracted prices</span>
-                  </div>
-                  <div style={{fontSize:10,color:'#4a6080',lineHeight:1.6,marginBottom:10}}>
-                    Focused on clinics likely to post self-pay or transparent pricing. Use <strong style={{color:'#fbbf24'}}>FIND PRICE</strong> to jump directly to web search pages.
-                  </div>
-                  {phDebug && (
-                    <div style={{background:'rgba(56,189,248,0.06)',border:'1px solid rgba(56,189,248,0.18)',borderRadius:6,padding:'8px 10px',marginBottom:10,fontSize:8.5,color:'#8ecae6',fontFamily:"'IBM Plex Mono', monospace"}}>
-                      serper={String(phDebug.apiKeys?.serper)} · tavily={String(phDebug.apiKeys?.tavily)} · gemini={String(phDebug.apiKeys?.gemini)} · clinics={phDebug.huntedClinicCount}
-                    </div>
-                  )}
-                  {phResults.length>0 && (
-                    <div style={{display:'grid',gap:6,marginBottom:10}}>
-                      {phResults.map((r:any,idx:number)=>(
-                        <div key={idx} style={{background:'rgba(251,191,36,0.08)',border:'1px solid rgba(251,191,36,0.22)',borderRadius:6,padding:'9px 10px'}}>
-                          <div style={{fontSize:11,fontWeight:700,color:'#ffe5a6',marginBottom:5}}>{r.name}</div>
-                          {(r.matches||[]).map((m:any,mi:number)=>(
-                            <div key={mi} style={{marginBottom:6,padding:'6px',borderRadius:5,background:'rgba(7,20,42,0.5)',border:'1px solid rgba(251,191,36,0.18)'}}>
-                              <div style={{ fontSize: 8, color: '#67e8f9', marginBottom: 5 }}>
-                                <a href={m.url} target="_blank" rel="noopener noreferrer" style={{ color: '#67e8f9' }}>{m.url}</a>
-                              </div>
-                              {m.isPdf && (
-                                <div style={{ fontSize: 8.5, color: '#fbbf24', marginBottom: 4 }}>
-                                  PDF found — likely pricing document or fee schedule
-                                </div>
-                              )}
-                              {!m.isPdf && (!m.hits || m.hits.length === 0) && (
-                                <div style={{ fontSize: 8.5, color: '#93c5fd', marginBottom: 4 }}>
-                                  No extractable price text found yet{m.likelyTransparentSource ? ' (transparent pricing source)' : ''} — open link to verify posted prices.
-                                </div>
-                              )}
-                              {(m.hits || []).map((hit:any,hi:number)=>(
-                                <div key={hi} style={{ marginBottom: 6 }}>
-                                  <div style={{fontSize:9,color:'#fbbf24',marginBottom:3,fontFamily:"'IBM Plex Mono',monospace"}}>{hit.value}</div>
-                                  <div style={{fontSize:8.5,color:'#9bb7d8',lineHeight:1.5}}>{hit.context}</div>
-                                </div>
-                              ))}
-                            </div>
-                          ))}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                    {pfClinics.slice(0,15).map((c,i)=>(
-                      <div key={i} style={{background:'rgba(249,115,22,0.08)',border:'1px solid rgba(249,115,22,0.22)',borderRadius:6,padding:'9px 10px'}}>
-                        <div style={{display:'flex',justifyContent:'space-between',gap:8,alignItems:'center'}}>
-                          <div>
-                            <div style={{fontSize:11,fontWeight:700,color:'#ffd7bf'}}>{c.name}</div>
-                            <div style={{fontSize:9,color:'#c58b73'}}>{c.taxonomy||'Provider'}</div>
-                          </div>
-                          <a href={c.searchUrl} target="_blank" rel="noopener noreferrer" style={{fontSize:8,padding:'4px 8px',borderRadius:4,background:'rgba(249,115,22,0.14)',border:'1px solid rgba(249,115,22,0.3)',color:'#f97316',textDecoration:'none',fontFamily:"'IBM Plex Mono',monospace",fontWeight:700}}>
-                            FIND PRICE ↗
-                          </a>
-                        </div>
-                      </div>
-                    ))}
-                    {pfClinics.length===0 && <div style={{fontSize:10,color:'#4a6080'}}>Run a provider search first, then use Price Hunt.</div>}
-                  </div>
-                </>
-              )}
-
-              {/* ── OCC HUNT TAB ── */}
-              {!pfLoading && pfTab==='occHunt' && (
-                <>
-                  <div style={{fontSize:9,color:'#3d5478',letterSpacing:'0.08em',marginBottom:8}}>
-                    OCC-HEALTH PARTNER HUNT{pfLocation&&<> · <span style={{color:'#38bdf8'}}>{pfLocation.toUpperCase()}</span></>}
-                  </div>
-                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,marginBottom:8}}>
-                    <button
-                      onClick={runAutomatedOccHunt}
-                      disabled={ohLoading || !pfCity.trim()}
-                      style={{fontSize:9,padding:'6px 10px',borderRadius:5,border:'1px solid rgba(56,189,248,0.35)',background:'rgba(56,189,248,0.12)',color:'#38bdf8',fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,cursor:'pointer',opacity:ohLoading?0.6:1}}
-                    >
-                      {ohLoading ? 'SCORING…' : 'RUN OCC PARTNER HUNT'}
-                    </button>
-                    <span style={{fontSize:9,color:'#89d4fe',fontFamily:"'IBM Plex Mono',monospace"}}>{ohResults.length} partners scored</span>
-                  </div>
-                  {ohResults.length>0 && (
-                    <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:10}}>
-                      {ohResults.slice(0,15).map((c:any,i:number)=>(
-                        <div key={i} style={{background:'rgba(56,189,248,0.08)',border:'1px solid rgba(56,189,248,0.22)',borderRadius:6,padding:'9px 10px'}}>
-                          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
-                            <div>
-                              <div style={{fontSize:11,fontWeight:700,color:'#c9eeff'}}>{c.name}</div>
-                              <div style={{fontSize:9,color:'#6fa7c8'}}>{c.taxonomy||'Provider'}</div>
-                            </div>
-                            <div style={{fontSize:8,fontFamily:"'IBM Plex Mono',monospace",padding:'2px 7px',borderRadius:999,border:'1px solid rgba(56,189,248,0.35)',color:'#38bdf8'}}>
-                              FIT {c.score}/10
-                            </div>
-                          </div>
-                          {Array.isArray(c.reasons) && c.reasons.length>0 && (
-                            <div style={{display:'flex',flexWrap:'wrap',gap:4,marginTop:6}}>
-                              {c.reasons.slice(0,3).map((r:string,ri:number)=>(
-                                <span key={ri} style={{fontSize:8,padding:'1px 6px',borderRadius:999,border:'1px solid rgba(103,232,249,0.25)',background:'rgba(103,232,249,0.08)',color:'#8ce6ff'}}>
-                                  {r}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                    {pfClinics
-                      .map(c=>({c,score:occHealthScore(c)}))
-                      .sort((a,b)=>b.score-a.score)
-                      .slice(0,20)
-                      .map(({c,score},i)=>(
-                        <div key={i} style={{background:'rgba(56,189,248,0.08)',border:'1px solid rgba(56,189,248,0.22)',borderRadius:6,padding:'9px 10px'}}>
-                          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
-                            <div>
-                              <div style={{fontSize:11,fontWeight:700,color:'#c9eeff'}}>{c.name}</div>
-                              <div style={{fontSize:9,color:'#6fa7c8'}}>{c.taxonomy||'Provider'}</div>
-                            </div>
-                            <div style={{fontSize:8,fontFamily:"'IBM Plex Mono',monospace",padding:'2px 7px',borderRadius:999,border:'1px solid rgba(56,189,248,0.35)',color:'#38bdf8'}}>
-                              FIT {score}/10
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    {pfClinics.length===0 && <div style={{fontSize:10,color:'#4a6080'}}>Run a provider search first, then use OCC Hunt scoring.</div>}
-                  </div>
-                </>
-              )}
-
-              {/* ── REPORT A PRICE TAB ── */}
-              {!pfLoading && pfTab==='report' && (
-                <>
-                  <div style={{background:'rgba(10,24,48,0.5)',border:'1px solid rgba(251,191,36,0.2)',borderRadius:8,padding:'14px',marginBottom:16}}>
-                    <div style={{fontSize:9,color:'#fbbf24',letterSpacing:'0.08em',marginBottom:10}}>⭐ SUBMIT A PRICE YOU FOUND</div>
-                    <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:8}}>
-                      <div style={{flex:2,minWidth:160}}>
-                        <div style={{fontSize:8,color:'#3d5478',marginBottom:3}}>PROVIDER NAME</div>
-                        <input className="rp-input" style={{width:'100%',boxSizing:'border-box'}}
-                          placeholder="e.g. Concentra Urgent Care" value={pfReportProvider}
-                          onChange={e=>setPfReportProvider(e.target.value)} />
-                      </div>
-                      <div style={{flex:1,minWidth:100}}>
-                        <div style={{fontSize:8,color:'#3d5478',marginBottom:3}}>PRICE PAID</div>
-                        <input className="rp-input" style={{width:'100%',boxSizing:'border-box'}}
-                          placeholder="e.g. $95" value={pfReportPrice}
-                          onChange={e=>setPfReportPrice(e.target.value)} />
-                      </div>
-                      <div style={{display:'flex',alignItems:'flex-end'}}>
-                        <button className="rp-assess-btn"
-                          style={{padding:'8px 14px',background:'rgba(251,191,36,0.12)',borderColor:'rgba(251,191,36,0.3)',color:'#fbbf24'}}
-                          onClick={pfAddReport} disabled={!pfReportProvider.trim()||!pfReportPrice.trim()}>
-                          + ADD
-                        </button>
-                      </div>
-                    </div>
-                    <div style={{fontSize:8.5,color:'#2a3f5e',lineHeight:1.5}}>
-                      Service: <span style={{color:'#89d4fe'}}>{PF_SERVICE_LABELS[pfServiceType]}</span>
-                      {pfLocation && <> · <span style={{color:'#89d4fe'}}>{pfLocation}</span></>}
-                      {' · '}Saved to your browser — use Share to send to colleagues
-                    </div>
-                  </div>
-
-                  {pfReports.length===0 ? (
-                    <div style={{textAlign:'center',padding:'20px 0',color:'#2a3f5e',fontSize:10,lineHeight:1.7}}>
-                      No prices reported yet.<br/>
-                      Search for a provider above, then click <strong style={{color:'#fbbf24'}}>REPORT PRICE</strong> on any result,<br/>or fill in the form manually.
-                    </div>
-                  ) : (
-                    <>
-                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
-                        <div style={{fontSize:9,color:'#3d5478',letterSpacing:'0.08em'}}>{pfReports.length} PRICE REPORTS</div>
-                        <button onClick={pfShareReports} style={{
-                          fontSize:8,fontFamily:"'IBM Plex Mono',monospace",padding:'4px 10px',
-                          background:'rgba(6,182,212,0.08)',border:'1px solid rgba(6,182,212,0.25)',
-                          borderRadius:3,color:pfShareCopied?'#34d399':'#06b6d4',cursor:'pointer',
-                        }}>
-                          {pfShareCopied ? '✓ LINK COPIED' : '🔗 SHARE REPORTS'}
-                        </button>
-                      </div>
-                      <div style={{display:'flex',flexDirection:'column',gap:5}}>
-                        {pfReports.map((r,i)=>(
-                          <div key={i} style={{background:'rgba(255,255,255,0.055)',border:'1px solid rgba(20,40,80,0.6)',borderRadius:6,padding:'8px 12px',display:'flex',gap:10,alignItems:'center'}}>
-                            <div style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:14,fontWeight:700,color:'#34d399',minWidth:70}}>{r.price}</div>
-                            <div style={{flex:1}}>
-                              <div style={{fontSize:10,fontWeight:600,color:'#eef4ff'}}>{r.provider}</div>
-                              <div style={{fontSize:8.5,color:'#3d5478',fontFamily:"'IBM Plex Mono',monospace"}}>{r.service} · {r.city} · {r.date}</div>
-                            </div>
-                            <button onClick={()=>{const n=pfReports.filter((_,j)=>j!==i);setPfReports(n);localStorage.setItem('occumed_price_reports',JSON.stringify(n));}}
-                              style={{background:'transparent',border:'1px solid rgba(255,255,255,0.06)',borderRadius:3,color:'#3d5478',fontSize:9,padding:'2px 7px',cursor:'pointer'}}>Close</button>
-                          </div>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </>
-              )}
-
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── MY CLINICS / UPLOAD MODAL ── */}
       {activeTool === 'myClinics' && (
@@ -4425,23 +4010,44 @@ function ProviderBox({data,examKey,cityName,locIdx,onPin}:{data:any;examKey:stri
 
 function DriveTimeBox({fromLat,fromLng,fromName,locB}:{fromLat:number;fromLng:number;fromName:string;locB:{name:string;lat:number;lng:number}|null}) {
   const [dest,setDest]=useState('');
-  const [result,setResult]=useState<{timeStr:string;miles:number;hours:number;name:string}|null>(null);
+  const [result,setResult]=useState<{timeStr:string;miles:number;hours:number;name:string;routed:boolean}|null>(null);
   const [destB]=useState(locB);
-  const dt=destB?calcDrive(fromLat,fromLng,destB.lat,destB.lng):null;
+  const [destBResult,setDestBResult]=useState<{timeStr:string;miles:number;hours:number;routed:boolean}|null>(null);
+  const [loading,setLoading]=useState(false);
+  const [destBLoading,setDestBLoading]=useState(false);
+
+  // Fetch actual route for destB when it's provided
+  useEffect(()=>{
+    if(!destB){setDestBResult(null);return;}
+    let cancelled=false;
+    setDestBLoading(true);
+    routeDrive(fromLat,fromLng,destB.lat,destB.lng).then(r=>{
+      if(!cancelled){setDestBResult(r);setDestBLoading(false);}
+    });
+    return ()=>{cancelled=true;};
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[destB,fromLat,fromLng]);
+
+  const dt=destBResult;
   const urgency=dt?(dt.hours<1?'#10b981':dt.hours<2.5?'#84cc16':dt.hours<4?'#f59e0b':'#f97316'):null;
 
-  function calc() {
+  async function calc() {
     const q=dest.trim().toLowerCase().replace(/,.*$/,'').trim();
     const match=LOCS.find(l=>l[0].toLowerCase()===q)||LOCS.find(l=>l[0].toLowerCase().startsWith(q))||LOCS.find(l=>l[0].toLowerCase().includes(q));
     if(!match){return;}
-    const d=calcDrive(fromLat,fromLng,match[2],match[3]);
-    setResult({...d,name:`${match[0]}, ${match[1]}`});
+    setLoading(true);
+    const r=await routeDrive(fromLat,fromLng,match[2],match[3]);
+    setResult({...r,name:`${match[0]}, ${match[1]}`});
+    setLoading(false);
   }
 
   return (
     <div className="drivetime-box">
       <div className="drivetime-lbl">🚗 DRIVE TIME FROM HERE</div>
-      {dt&&destB&&(
+      {destBLoading&&(
+        <div style={{fontSize:10,color:'#89d4fe',marginBottom:6}}>Calculating route...</div>
+      )}
+      {dt&&destB&&!destBLoading&&(
         <div style={{marginBottom:8}}>
           <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
             <span style={{fontSize:10,color:'#3d5478'}}>{fromName}</span>
@@ -4449,23 +4055,28 @@ function DriveTimeBox({fromLat,fromLng,fromName,locB}:{fromLat:number;fromLng:nu
             <span style={{fontSize:10,color:'#7aabda',fontWeight:600}}>{destB.name}</span>
           </div>
           <div style={{display:'flex',gap:18,marginBottom:6}}>
-            <div><div className="drivetime-val" style={{color:urgency||'#eef4ff'}}>{dt.timeStr}</div><div className="drivetime-sub">est. drive time</div></div>
-            <div><div className="drivetime-val">{dt.miles} mi</div><div className="drivetime-sub">straight-line</div></div>
+            <div><div className="drivetime-val" style={{color:urgency||'#eef4ff'}}>{dt.timeStr}</div><div className="drivetime-sub">{dt.routed?'drive time (live traffic)':'est. time (~55mph)'}</div></div>
+            <div><div className="drivetime-val">{dt.miles} mi</div><div className="drivetime-sub">{dt.routed?'driving dist.':'straight-line dist.'}</div></div>
           </div>
         </div>
       )}
-      {result&&(
+      {loading&&(
+        <div style={{fontSize:10,color:'#89d4fe',marginBottom:6}}>Calculating route...</div>
+      )}
+      {result&&!loading&&(
         <div style={{marginBottom:8}}>
           <div style={{fontSize:10,color:'#7aabda',marginBottom:4}}>{fromName} → {result.name}</div>
           <div style={{display:'flex',gap:18}}>
-            <div><div className="drivetime-val" style={{color:result.hours<1?'#10b981':result.hours<2.5?'#84cc16':result.hours<4?'#f59e0b':'#f97316'}}>{result.timeStr}</div><div className="drivetime-sub">est. drive time</div></div>
-            <div><div className="drivetime-val">{result.miles} mi</div><div className="drivetime-sub">straight-line</div></div>
+            <div><div className="drivetime-val" style={{color:result.hours<1?'#10b981':result.hours<2.5?'#84cc16':result.hours<4?'#f59e0b':'#f97316'}}>{result.timeStr}</div><div className="drivetime-sub">{result.routed?'drive time (live traffic)':'est. time (~55mph)'}</div></div>
+            <div><div className="drivetime-val">{result.miles} mi</div><div className="drivetime-sub">{result.routed?'driving dist.':'straight-line dist.'}</div></div>
           </div>
         </div>
       )}
-      <div style={{fontSize:8.5,color:'#3d5478',marginBottom:4}}>Based on ~55mph avg. Actual time may vary.</div>
-      <input className="drivetime-input" placeholder="Destination city, e.g. Dallas TX" value={dest} onChange={e=>setDest(e.target.value)} onKeyDown={e=>e.key==='Enter'&&calc()}/>
-      <button className="drivetime-btn" onClick={calc}>CALCULATE DRIVE TIME</button>
+      {!result&&!dt&&!loading&&!destBLoading&&(
+        <div style={{fontSize:10,color:'#7a8fa8',marginBottom:4}}>Enter a destination below to calculate actual driving time and distance.</div>
+      )}
+      <input className="drivetime-input" placeholder="Destination city, e.g. Dallas TX" value={dest} onChange={e=>setDest(e.target.value)} onKeyDown={e=>e.key==='Enter'&&!loading&&calc()}/>
+      <button className="drivetime-btn" onClick={calc} disabled={loading}>{loading?'CALCULATING...':'CALCULATE DRIVE TIME'}</button>
     </div>
   );
 }

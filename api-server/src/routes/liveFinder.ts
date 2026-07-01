@@ -6,9 +6,9 @@ import { logger } from "../lib/logger";
 
 const router = Router();
 
-const SOURCE_TIMEOUT_MS = 7000;
+const SOURCE_TIMEOUT_MS = 9000;
 const LOCAL_SOURCE_TIMEOUT_MS = 3000;
-const OPTIONAL_ENRICHMENT_BUDGET_MS = 3000;
+const OPTIONAL_ENRICHMENT_BUDGET_MS = 8000;
 const ROUTE_TIMEOUT_MS = 20000;
 const LOCAL_PROVIDER_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -19,7 +19,6 @@ const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
   "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-  "https://overpass.openstreetmap.ru/api/interpreter",
 ];
 
 type LiveFinderResult = {

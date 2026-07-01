@@ -2,6 +2,7 @@ import "./live-finder-drive-tools.css";
 
 let installed = false;
 let latestCount = 0;
+let scanQueued = false;
 
 function clickMapTool(labelIncludes: string): void {
   const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>(".occumed-map-tools-panel button"));
@@ -18,6 +19,15 @@ function button(label: string, action: () => void): HTMLButtonElement {
     action();
   });
   return node;
+}
+
+function scheduleScan(): void {
+  if (scanQueued) return;
+  scanQueued = true;
+  window.setTimeout(() => {
+    scanQueued = false;
+    scanPanels();
+  }, 180);
 }
 
 function ensureDriveTools(inner: Element): void {
@@ -56,8 +66,9 @@ function ensureDriveTools(inner: Element): void {
 }
 
 function updateDriveToolsStatus(): void {
+  const next = latestCount > 0 ? `${latestCount} provider ETA rows ready. Route buttons are applied to matched cards.` : "No ETA ranking applied yet.";
   document.querySelectorAll<HTMLElement>(".occumed-live-drive-status").forEach((node) => {
-    node.textContent = latestCount > 0 ? `${latestCount} provider ETA rows ready. Route buttons are applied to matched cards.` : "No ETA ranking applied yet.";
+    if (node.textContent !== next) node.textContent = next;
   });
 }
 
@@ -70,12 +81,12 @@ export function installLiveFinderDriveTools(): void {
   if (installed) return;
   installed = true;
   window.setTimeout(scanPanels, 250);
-  const observer = new MutationObserver(() => scanPanels());
+  const observer = new MutationObserver(() => scheduleScan());
   observer.observe(document.body, { childList: true, subtree: true });
   window.addEventListener("occumed:provider-eta-rankings", ((event: Event) => {
     const rows = (event as CustomEvent<unknown[]>).detail;
     latestCount = Array.isArray(rows) ? rows.length : 0;
-    scanPanels();
+    scheduleScan();
   }) as EventListener);
 }
 

@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
 @import 'leaflet/dist/leaflet.css';
 
 /* ══════════════════════════════════════════════════════
@@ -56,16 +55,16 @@
   --danger:  #ef4444;    /* critical / errors */
 
   /* Deep "ink" text shades reused across panels & exported reports */
-  --ink-faint: #3d5478;
-  --ink-muted: #4a6888;
-  --ink-soft:  #8fb3d8;
+  --ink-faint: #5a7090;
+  --ink-muted: #6a8098;
+  --ink-soft:  #9fb8d8;
   --report-bg: #040c1a;  /* exported report header background */
 
   /* Text */
   --text:   #f0f8ff;
-  --text2:  rgba(220,238,255,0.82);
-  --muted:  rgba(180,215,255,0.52);
-  --muted2: rgba(140,180,230,0.32);
+  --text2:  rgba(220,238,255,0.88);
+  --muted:  rgba(180,215,255,0.68);
+  --muted2: rgba(140,180,230,0.48);
 
   /* Cursor glow position */
   --glowX: 50vw;
@@ -83,9 +82,9 @@
   --r-xl: 28px;
 
   /* Glass blur */
-  --blur-sm: blur(16px) saturate(200%) brightness(1.12);
-  --blur-md: blur(28px) saturate(220%) brightness(1.10);
-  --blur-lg: blur(40px) saturate(240%) brightness(1.08);
+  --blur-sm: blur(12px) saturate(160%) brightness(1.08);
+  --blur-md: blur(20px) saturate(180%) brightness(1.06);
+  --blur-lg: blur(28px) saturate(200%) brightness(1.04);
 
   /* Specular highlight — the key to real glass */
   --spec: linear-gradient(145deg, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0.06) 40%, rgba(255,255,255,0.00) 100%);
@@ -863,7 +862,7 @@ html, body, #root {
 }
 
 /* ── MODALS ── */
-.modal-backdrop { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,3,12,0.70); backdrop-filter: blur(10px); z-index: 500; align-items: center; justify-content: center; }
+.modal-backdrop { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,3,12,0.70); backdrop-filter: blur(10px); z-index: 1500; align-items: center; justify-content: center; }
 .modal-backdrop.open { display: flex; }
 
 .modal-box {
@@ -890,7 +889,6 @@ html, body, #root {
   letter-spacing: 0.8px;
   text-transform: uppercase;
 }
-.modal-body { }
 .modal-close {
   background: rgba(255,255,255,0.08);
   border: 1px solid rgba(255,255,255,0.14);
@@ -1096,4 +1094,75 @@ html, body, #root {
 ::-webkit-scrollbar-thumb { background: rgba(var(--accent-rgb),0.18); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(var(--accent-rgb),0.30); }
 input, select, textarea { -webkit-appearance: none; appearance: none; }
+
+
+/* ══════════════════════════════════════════════════════
+   RESPONSIVE — Tablet & Mobile
+   ══════════════════════════════════════════════════════ */
+
+/* Tablet (≤1024px) — narrow sidebar, smaller buttons */
+@media (max-width: 1024px) {
+  .sidebar {
+    flex: 0 0 260px;
+    width: 260px;
+  }
+  .mbtn {
+    font-size: 9px !important;
+    padding: 4px 6px !important;
+  }
+  .hero-card {
+    padding: 10px !important;
+  }
+}
+
+/* Mobile (≤768px) — sidebar becomes slide-in drawer */
+@media (max-width: 768px) {
+  .app-body {
+    flex-direction: column;
+  }
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 280px;
+    max-width: 85vw;
+    z-index: 2000;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+    box-shadow: 4px 0 24px rgba(0,0,0,0.5);
+  }
+  .sidebar.mobile-open {
+    transform: translateX(0);
+  }
+  .map-wrap {
+    width: 100%;
+    flex: 1 1 auto;
+  }
+  /* Right panel becomes bottom sheet */
+  .right-panel {
+    position: fixed !important;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    max-height: 60vh;
+    width: 100% !important;
+    border-radius: 16px 16px 0 0;
+    z-index: 1800;
+  }
+  /* Modal takes less screen on mobile */
+  .modal-backdrop.open {
+    padding: 0 !important;
+  }
+}
+
+/* Small mobile (≤480px) */
+@media (max-width: 480px) {
+  .sidebar {
+    width: 240px;
+  }
+  .mbtn {
+    font-size: 8.5px !important;
+  }
+}
 

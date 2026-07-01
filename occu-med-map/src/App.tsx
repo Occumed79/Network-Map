@@ -1009,7 +1009,7 @@ export default function App() {
   const [liveRegionFilter, setLiveRegionFilter] = useState<'all'|'us'|'intl'>('all');
   const [liveSort, setLiveSort] = useState<'distance'|'name'>('distance');
   const [liveLocation, setLiveLocation] = useState('');
-  const [liveRadius, setLiveRadius] = useState(10);
+  const [liveRadius, setLiveRadius] = useState(10); // miles
   const [liveBackendCategory, setLiveBackendCategory] = useState<'all'|'clinical'|'occMed'|'hospital'|'clinic'|'doctor'|'urgent'|'lab'|'pharmacy'|'dentist'|'eye'>('clinical');
   const [liveFacets, setLiveFacets] = useState<Record<string, number>>({});
   const [livePriorityCounts, setLivePriorityCounts] = useState<any>(null);
@@ -1057,6 +1057,7 @@ export default function App() {
   const [dentistData, setDentistData] = useState<any[]>([]);
   const dentistLayerRef = useRef<ReturnType<typeof createClusteredLayer>|null>(null);
   const [showDatasetBrowser, setShowDatasetBrowser] = useState(false);
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [indexedLayerData, setIndexedLayerData] = useState<any[]>([]);
   const [outreachNotes, setOutreachNotes] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_notes')||'{}'); } catch { return {}; } });
   const [outreachStatus, setOutreachStatus] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_status')||'{}'); } catch { return {}; } });
@@ -1136,7 +1137,7 @@ export default function App() {
         state: pfState.trim().toUpperCase(),
         serviceType: pfServiceType,
       });
-      const resp = await fetch(`/api/price-finder?${params.toString()}`);
+      const resp = await fetch(`/api/price-finder?${params.toString()}`, { signal: AbortSignal.timeout(15000) });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       setPfClinics(data.clinics || []);
@@ -1147,7 +1148,10 @@ export default function App() {
       setPfDone(true);
       runAutomatedPriceHunt();
     } catch (e: any) {
-      setPfError(e.message || 'Search failed. Please try again.');
+      const msg = e?.name === 'TimeoutError' || e?.name === 'AbortError'
+        ? 'Search timed out — the NPI Registry may be slow. Please try again.'
+        : (e.message || 'Search failed. Please try again.');
+      setPfError(msg);
     } finally {
       setPfLoading(false);
     }
@@ -1320,6 +1324,7 @@ export default function App() {
   const criticalCount = LOCS.filter(l=>getVal(l,metric)>=4).length;
 
   const [mapReady, setMapReady] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [localPopInfo, setLocalPopInfo] = useState<null|{lat:number;lng:number;density:number;state:string;population:number;nearestCity:string;nearestDist:number}>(null);
 
   // ── Import shared price reports from URL on first load ────────────────────
@@ -1341,6 +1346,19 @@ export default function App() {
     } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
+
+  // Close mobile sidebar on resize to desktop
+  useEffect(()=>{
+    const onResize = () => { if (window.innerWidth > 768) setMobileSidebarOpen(false); };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  },[]);
+
+  // Invalidate map size when mobile sidebar toggles
+  useEffect(()=>{
+    const t = setTimeout(()=>{ mapRef.current?.invalidateSize(); }, 350);
+    return () => clearTimeout(t);
+  },[mobileSidebarOpen]);
 
   // ── Init Map ───────────────────────────────────────────────────────────────
   useEffect(()=>{
@@ -1408,7 +1426,13 @@ export default function App() {
 
     setMapReady(true);
 
-    return ()=>{ map.remove(); mapRef.current=null; cityLayerRef.current=null; };
+    // Fix map size after layout settles (sidebar may not be rendered yet)
+    setTimeout(()=>map.invalidateSize(), 100);
+    setTimeout(()=>map.invalidateSize(), 500);
+    const onResizeMap = () => map.invalidateSize();
+    window.addEventListener('resize', onResizeMap);
+
+    return ()=>{ window.removeEventListener('resize', onResizeMap); map.remove(); mapRef.current=null; cityLayerRef.current=null; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
@@ -1505,6 +1529,7 @@ export default function App() {
   // ── Load State GeoJSON ───────────────────────────────────────────────────
   async function loadStateGeo(map:L.Map) {
     const urls = [
+      '/states-10m.json',
       'https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json',
       'https://unpkg.com/us-atlas@3/states-10m.json',
     ];
@@ -2447,11 +2472,15 @@ export default function App() {
     setLiveError('');
     setLiveSearched(true);
     setLiveMirror('Querying provider sources…');
+    setNpiLoading(false);
+    setNpiCategory(null);
+    setNpiResults([]);
+    setNpiError('');
     lastRadiusRef.current={lat,lng};
 
     if(liveCircleRef.current) { try{map.removeLayer(liveCircleRef.current);}catch(e){} }
     if(livePinRef.current) { try{map.removeLayer(livePinRef.current);}catch(e){} }
-    liveCircleRef.current=L.circle([lat,lng],{radius:liveRadius*1000,color:'#22d3ee',weight:1.5,opacity:0.45,dashArray:'7 5',fillColor:'#06b6d4',fillOpacity:0.03,interactive:false}).addTo(map);
+    liveCircleRef.current=L.circle([lat,lng],{radius:liveRadius*1609.34,color:'#22d3ee',weight:1.5,opacity:0.45,dashArray:'7 5',fillColor:'#06b6d4',fillOpacity:0.03,interactive:false}).addTo(map);
     livePinRef.current=L.marker([lat,lng],{icon:L.divIcon({className:'',html:'<div style="width:14px;height:14px;border-radius:50%;background:#06b6d4;border:2.5px solid #fff;box-shadow:0 0 0 4px rgba(6,182,212,0.28),0 0 14px rgba(6,182,212,0.6);"></div>',iconSize:[14,14],iconAnchor:[7,7]}),zIndexOffset:3000,interactive:false}).addTo(map);
 
     try { await revGeo(lat,lng); } catch(e){}
@@ -2460,7 +2489,7 @@ export default function App() {
       const params=new URLSearchParams({
         lat:String(lat),
         lng:String(lng),
-        radiusMiles:String(liveRadius/1.60934),
+        radiusMiles:String(liveRadius),
         category:categoryForSearch,
       });
       const res=await fetch(`/api/live-finder/search?${params.toString()}`,{signal:AbortSignal.timeout(30000)});
@@ -2828,20 +2857,38 @@ export default function App() {
 
       {/* ── BODY ── */}
       <div className="app-body">
+        {/* Mobile sidebar toggle */}
+        <button
+          onClick={()=>setMobileSidebarOpen(v=>!v)}
+          style={{
+            position:'fixed', top:10, left:10, zIndex:2100,
+            display: window.innerWidth <= 768 ? 'flex' : 'none',
+            alignItems:'center', justifyContent:'center',
+            width:40, height:40, borderRadius:10,
+            background:'rgba(13,18,30,0.85)', backdropFilter:'blur(12px)',
+            border:'1px solid rgba(255,255,255,0.18)', color:'#e8eef8',
+            fontSize:18, cursor:'pointer',
+          }}
+        >{mobileSidebarOpen ? '✕' : '☰'}</button>
+        {/* Mobile backdrop */}
+        {mobileSidebarOpen && window.innerWidth <= 768 && (
+          <div onClick={()=>setMobileSidebarOpen(false)}
+            style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:1900}} />
+        )}
         {/* ── SIDEBAR ── */}
-        <aside className="sidebar">
+        <aside className={`sidebar${mobileSidebarOpen ? ' mobile-open' : ''}`} onClick={(e)=>{ if (window.innerWidth <= 768 && (e.target as HTMLElement).tagName === 'BUTTON') setMobileSidebarOpen(false); }}>
           <div className="hero-card">
             <div className="hero-title">Occu-Med Network Command</div>
 
           <div className="sb-section">
             <div className="sb-lbl">NETWORK TOOLS</div>
-            <button className={`mbtn${activeTool === 'coverage' ? ' active' : ''}`} onClick={() => setActiveTool(activeTool === 'coverage' ? null : 'coverage')}>Coverage</button>
-            <button className={`mbtn${activeTool === 'liveFinder' ? ' active' : ''}`} onClick={() => setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder')}>Live Finder</button>
-            <button className={`mbtn${activeTool === 'radius' ? ' active' : ''}`} onClick={() => setActiveTool(activeTool === 'radius' ? null : 'radius')}>Radius Tool</button>
-            <button className={`mbtn${activeTool === 'directories' ? ' active' : ''}`} onClick={() => setActiveTool(activeTool === 'directories' ? null : 'directories')}>Directories</button>
-            <button className={`mbtn${activeTool === 'priceFinder' ? ' active' : ''}`} onClick={() => setActiveTool(activeTool === 'priceFinder' ? null : 'priceFinder')}>Price Finder</button>
-            <button className={`mbtn${activeTool === 'myClinics' ? ' active' : ''}`} onClick={() => setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>My Clinics</button>
-            <button className={`mbtn${activeTool === 'compare' ? ' active' : ''}`} onClick={() => setActiveTool(activeTool === 'compare' ? null : 'compare')}>Compare</button>
+            <button className={`mbtn${activeTool === 'coverage' ? ' active' : ''}`} title="U.S. coverage diagnostics — population density, territory gap analysis" onClick={() => setActiveTool(activeTool === 'coverage' ? null : 'coverage')}>Coverage</button>
+            <button className={`mbtn${activeTool === 'liveFinder' ? ' active' : ''}`} title="Search for healthcare facilities near any map location" onClick={() => setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder')}>Live Finder</button>
+            <button className={`mbtn${activeTool === 'radius' ? ' active' : ''}`} title="Draw a radius circle and extract facilities within it" onClick={() => setActiveTool(activeTool === 'radius' ? null : 'radius')}>Radius Tool</button>
+            <button className={`mbtn${activeTool === 'directories' ? ' active' : ''}`} title="Browse provider datasets (BlueHive, Dentists, Indexed)" onClick={() => setActiveTool(activeTool === 'directories' ? null : 'directories')}>Directories</button>
+            <button className={`mbtn${activeTool === 'priceFinder' ? ' active' : ''}`} title="Search NPI Registry for providers and compare pricing" onClick={() => setActiveTool(activeTool === 'priceFinder' ? null : 'priceFinder')}>Price Finder</button>
+            <button className={`mbtn${activeTool === 'myClinics' ? ' active' : ''}`} title="Save and manage your preferred clinic list" onClick={() => setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>My Clinics</button>
+            <button className={`mbtn${activeTool === 'compare' ? ' active' : ''}`} title="Compare provider coverage across locations" onClick={() => setActiveTool(activeTool === 'compare' ? null : 'compare')}>Compare</button>
           </div>
           <div className="sb-divider"/>
 
@@ -2885,8 +2932,8 @@ export default function App() {
           </div>
           <div className="sb-divider"/>
           <div className="sb-section">
-            <div className="sb-lbl">LAYERS</div>
-            {showUsDiagnostics && (<>
+            <div className="sb-lbl" style={{cursor:'pointer',userSelect:'none'}} onClick={()=>setCollapsedSections(p=>({...p,layers:!p.layers}))}>LAYERS {collapsedSections.layers ? '▸' : '▾'}</div>
+            {!collapsedSections.layers && showUsDiagnostics && (<>
               <div className="tog-row">
                 <span className="tog-lbl">State labels (U.S.)</span>
                 <label className="tog-switch"><input type="checkbox" checked={showLabels} onChange={e=>setShowLabels(e.target.checked)}/><span className="tog-slider"/></label>
@@ -2975,13 +3022,16 @@ export default function App() {
           {showUsDiagnostics && (<>
           <div className="sb-divider"/>
           <div className="sb-section">
-            <div className="sb-lbl">FILTER CITIES (U.S.)</div>
+            <div className="sb-lbl" style={{cursor:'pointer',userSelect:'none'}} onClick={()=>setCollapsedSections(p=>({...p,filters:!p.filters}))}>FILTER CITIES (U.S.) {collapsedSections.filters ? '▸' : '▾'}</div>
+            {!collapsedSections.filters && (<>
             <div style={{display:'flex',gap:3,flexWrap:'wrap',marginBottom:8}}>
               <button className={`fbtn${filterDiff===null?' active':''}`} onClick={()=>setFilterDiff(null)}>ALL</button>
               {[1,2,3,4,5].map(v=>(
                 <button key={v} className={`fbtn${filterDiff===v?' active':''}`} style={{color:DCOL[v]}} onClick={()=>setFilterDiff(filterDiff===v?null:v)}>{DLBL[v]}</button>
               ))}
             </div>
+            </>
+            )}
           </div>
           <div className="sb-divider"/>
           <div className="sb-section" style={{paddingBottom:10}}>
@@ -3266,7 +3316,7 @@ export default function App() {
                 {liveLocation?`Center · ${liveLocation}`:'Coordinate-first live search · click the map or search an address.'}
                 {liveMirror&&<div style={{fontSize:9,color:'#2d4060',marginTop:3}}>{liveMirror}</div>}
               </div>
-              {NATIVE_DRIVE_TIME_ENABLED&&!npiCategory&&(
+              {NATIVE_DRIVE_TIME_ENABLED&&!npiCategory&&liveResults.length>0&&(
                 <DriveTimeControlStrip
                   origin={etaOrigin}
                   candidates={etaCandidates}
@@ -3301,8 +3351,8 @@ export default function App() {
               })()}
               <div style={{display:'flex',alignItems:'center',gap:6}}>
                 <span style={{fontSize:9.5,color:'#3d5478',whiteSpace:'nowrap'}}>Radius:</span>
-                <input type="range" min={2} max={50} value={liveRadius} onChange={e=>setLiveRadius(Number(e.target.value))} onMouseUp={()=>{ if(lastRadiusRef.current) doLiveSearch(lastRadiusRef.current.lat,lastRadiusRef.current.lng); }}/>
-                <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:'#89d4fe',whiteSpace:'nowrap'}}>{liveRadius} km</span>
+                <input type="range" min={1} max={50} value={liveRadius} onChange={e=>setLiveRadius(Number(e.target.value))} onMouseUp={()=>{ if(lastRadiusRef.current) doLiveSearch(lastRadiusRef.current.lat,lastRadiusRef.current.lng); }}/>
+                <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:'#89d4fe',whiteSpace:'nowrap'}}>{liveRadius} mi</span>
               </div>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'6px 8px',borderRadius:8,background:'rgba(125,211,252,0.06)',border:'1px solid rgba(125,211,252,0.18)'}}>
                 <span style={{fontSize:9.5,color:'#9cc7eb'}}>Map clicks run coordinate-first live search</span>
@@ -3362,6 +3412,8 @@ export default function App() {
                 </select>
               </div>
               {/* Filter chips — now wired to NPI Registry category search */}
+              {lastRadiusRef.current && isUsPoint(lastRadiusRef.current.lat, lastRadiusRef.current.lng) && (
+              <>
               <div style={{fontSize:8.5,color:'#64748b',fontFamily:"'IBM Plex Mono',monospace",letterSpacing:'0.08em'}}>
                 U.S. NPI FILTERS
               </div>
@@ -3483,6 +3535,8 @@ export default function App() {
                   {Object.keys(npiUnifiedResponse.audit.errorsBySource).length===0&&<div style={{color:'#34d399'}}>All sources responded cleanly.</div>}
                 </div>
               )}
+              </>
+              )}
               <div style={{fontSize:9,color:'#8fb3d8'}}>
                 {npiCategory
                   ? `Showing ${npiResults.length} verified candidates`
@@ -3498,7 +3552,7 @@ export default function App() {
                 <div className="lp-empty show">Click anywhere on the map to search nearby facilities.</div>
               )}
               {!liveLoading&&!liveError&&!npiCategory&&liveSearched&&liveResults.length===0&&(
-                <div className="lp-empty show">No live facilities found within {Math.round(liveRadius/1.60934)} mi of this location. Try a larger radius or a different spot.</div>
+                <div className="lp-empty show">No live facilities found within {liveRadius} mi of this location. Try a larger radius or a different spot.</div>
               )}
               {!npiLoading&&npiCategory&&npiResults.length===0&&!npiError&&(
                 <div className="lp-empty show">No NPI providers found for {NPI_CATEGORY_MAP[npiCategory]?.label} in this area. Try a larger city or different category.</div>
@@ -3953,6 +4007,11 @@ export default function App() {
                   <div style={{fontSize:9,color:'#3d5478',letterSpacing:'0.08em',marginBottom:8}}>
                     PRICE HUNT RESULTS{pfLocation&&<> · <span style={{color:'#f97316'}}>{pfLocation.toUpperCase()}</span></>}
                   </div>
+                  {!pfDone && !phLoading && phResults.length===0 && (
+                    <div style={{padding:20,textAlign:'center',fontSize:10.5,color:'#5a7090',lineHeight:1.8}}>
+                      Run a provider search first, then click <strong style={{color:'#f97316'}}>RUN AUTOMATED HUNT</strong> to scan transparent-pricing sites for self-pay costs.
+                    </div>
+                  )}
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,marginBottom:8}}>
                     <button
                       onClick={runAutomatedPriceHunt}
@@ -4028,6 +4087,11 @@ export default function App() {
                   <div style={{fontSize:9,color:'#3d5478',letterSpacing:'0.08em',marginBottom:8}}>
                     OCC-HEALTH PARTNER HUNT{pfLocation&&<> · <span style={{color:'#38bdf8'}}>{pfLocation.toUpperCase()}</span></>}
                   </div>
+                  {!pfDone && !ohLoading && ohResults.length===0 && (
+                    <div style={{padding:20,textAlign:'center',fontSize:10.5,color:'#5a7090',lineHeight:1.8}}>
+                      Run a provider search first, then click <strong style={{color:'#38bdf8'}}>RUN OCC PARTNER HUNT</strong> to score clinics by occupational health fit.
+                    </div>
+                  )}
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,marginBottom:8}}>
                     <button
                       onClick={runAutomatedOccHunt}
@@ -4440,7 +4504,7 @@ function DriveTimeBox({fromLat,fromLng,fromName,locB}:{fromLat:number;fromLng:nu
 
   return (
     <div className="drivetime-box">
-      <div className="drivetime-lbl">🚗 DRIVE TIME FROM HERE</div>
+      <div className="drivetime-lbl">🚗 STRAIGHT-LINE ESTIMATE FROM HERE</div>
       {dt&&destB&&(
         <div style={{marginBottom:8}}>
           <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
@@ -4449,8 +4513,8 @@ function DriveTimeBox({fromLat,fromLng,fromName,locB}:{fromLat:number;fromLng:nu
             <span style={{fontSize:10,color:'#7aabda',fontWeight:600}}>{destB.name}</span>
           </div>
           <div style={{display:'flex',gap:18,marginBottom:6}}>
-            <div><div className="drivetime-val" style={{color:urgency||'#eef4ff'}}>{dt.timeStr}</div><div className="drivetime-sub">est. drive time</div></div>
-            <div><div className="drivetime-val">{dt.miles} mi</div><div className="drivetime-sub">straight-line</div></div>
+            <div><div className="drivetime-val" style={{color:urgency||'#eef4ff'}}>{dt.timeStr}</div><div className="drivetime-sub">est. time (~55mph)</div></div>
+            <div><div className="drivetime-val">{dt.miles} mi</div><div className="drivetime-sub">straight-line dist.</div></div>
           </div>
         </div>
       )}
@@ -4458,14 +4522,14 @@ function DriveTimeBox({fromLat,fromLng,fromName,locB}:{fromLat:number;fromLng:nu
         <div style={{marginBottom:8}}>
           <div style={{fontSize:10,color:'#7aabda',marginBottom:4}}>{fromName} → {result.name}</div>
           <div style={{display:'flex',gap:18}}>
-            <div><div className="drivetime-val" style={{color:result.hours<1?'#10b981':result.hours<2.5?'#84cc16':result.hours<4?'#f59e0b':'#f97316'}}>{result.timeStr}</div><div className="drivetime-sub">est. drive time</div></div>
-            <div><div className="drivetime-val">{result.miles} mi</div><div className="drivetime-sub">straight-line</div></div>
+            <div><div className="drivetime-val" style={{color:result.hours<1?'#10b981':result.hours<2.5?'#84cc16':result.hours<4?'#f59e0b':'#f97316'}}>{result.timeStr}</div><div className="drivetime-sub">est. time (~55mph)</div></div>
+            <div><div className="drivetime-val">{result.miles} mi</div><div className="drivetime-sub">straight-line dist.</div></div>
           </div>
         </div>
       )}
-      <div style={{fontSize:8.5,color:'#3d5478',marginBottom:4}}>Based on ~55mph avg. Actual time may vary.</div>
+      <div style={{fontSize:10,color:'#7a8fa8',marginBottom:4}}>⚠ Not a routing API — uses straight-line distance ÷ 55mph. Actual drive time may be significantly longer.</div>
       <input className="drivetime-input" placeholder="Destination city, e.g. Dallas TX" value={dest} onChange={e=>setDest(e.target.value)} onKeyDown={e=>e.key==='Enter'&&calc()}/>
-      <button className="drivetime-btn" onClick={calc}>CALCULATE DRIVE TIME</button>
+      <button className="drivetime-btn" onClick={calc}>CALCULATE ESTIMATE</button>
     </div>
   );
 }

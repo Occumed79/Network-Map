@@ -1390,6 +1390,7 @@ export default function App() {
       preferCanvas:true,
       attributionControl:false,
     });
+    map.doubleClickZoom.disable();
     mapRef.current = map;
 
     // Tile layer with dark filter
@@ -1408,20 +1409,10 @@ export default function App() {
     // Load GeoJSON only if US Diagnostics is already enabled
     if (showUsDiagnostics) loadStateGeo(map);
 
-    // Tool-aware, globally-safe map click. A normal click on a clean global map
-    // does nothing beyond optionally tracking a lightweight selected coordinate.
-    // U.S.-only logic only runs when a U.S. coverage tool is active AND the click
-    // is inside the U.S.
+    // Single clicks remain reserved for tools that explicitly use them.
     map.on('click',(e:L.LeafletMouseEvent)=>{
       const { lat, lng } = e.latlng;
       const tool = activeToolRef.current;
-
-      if (tool === 'liveFinder') {
-        // Coordinate-first global live search.
-        setDropCenter({ lat, lng });
-        doLiveSearch(lat, lng);
-        return;
-      }
 
       if (tool === 'radius') {
         // Radius tool is explicit and separate: set center, open UI, draw ring.
@@ -1437,9 +1428,12 @@ export default function App() {
         setLocalPopInfo(est ?? null);
         return;
       }
+    });
 
-      // Normal global map behavior:
-      // run coordinate-first live provider discovery without U.S. diagnostics.
+    map.on('dblclick',(e:L.LeafletMouseEvent)=>{
+      const tool = activeToolRef.current;
+      if (tool !== null && tool !== 'liveFinder') return;
+      const { lat, lng } = e.latlng;
       setLocalPopInfo(null);
       setDropCenter({ lat, lng });
       setActiveTool('liveFinder');
@@ -3465,7 +3459,7 @@ export default function App() {
                 </button>
               </div>
               <div style={{fontSize:10,color:'#3d5478',lineHeight:1.5}}>
-                {liveLocation?`Center · ${liveLocation}`:'Coordinate-first live search · click the map or search an address.'}
+                {liveLocation?`Center · ${liveLocation}`:'Coordinate-first live search · double-click the map or search an address.'}
                 {liveMirror&&<div style={{fontSize:9,color:'#2d4060',marginTop:3}}>{liveMirror}</div>}
               </div>
               {NATIVE_DRIVE_TIME_ENABLED&&!npiCategory&&liveResults.length>0&&(
@@ -3507,7 +3501,7 @@ export default function App() {
                 <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:'#89d4fe',whiteSpace:'nowrap'}}>{liveRadius} mi</span>
               </div>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'6px 8px',borderRadius:8,background:'rgba(125,211,252,0.06)',border:'1px solid rgba(125,211,252,0.18)'}}>
-                <span style={{fontSize:9.5,color:'#9cc7eb'}}>Map clicks run coordinate-first live search</span>
+                <span style={{fontSize:9.5,color:'#9cc7eb'}}>Double-click the map to run a live search</span>
                 <span style={{fontSize:9,color:'#285b78',fontFamily:"'IBM Plex Mono',monospace"}}>{liveSearched?'Search active':'Choose a location'}</span>
               </div>
               <div style={{fontSize:8.5,color:'#64748b',fontFamily:"'IBM Plex Mono',monospace",letterSpacing:'0.08em',marginBottom:4}}>

@@ -24,8 +24,6 @@ import { useProviderEta } from './features/driveTime/useProviderEta';
 import './features/driveTime/driveTimeControls.css';
 import './features/driveTime/driveTimeBadge.css';
 import DatasetBrowser from './DatasetBrowser';
-import ClinicImportModal, { type MyClinicProvider } from './ClinicImportModal';
-import DirectoryDrawer from './DirectoryDrawer';
 
 const NATIVE_DRIVE_TIME_ENABLED = import.meta.env.VITE_NATIVE_DRIVE_TIME === 'true';
 
@@ -52,15 +50,6 @@ function isUsPoint(lat: number, lng: number): boolean {
   const alaska = lat >= 51.2 && lat <= 71.6 && lng >= -170 && lng <= -129.5;
   const hawaii = lat >= 18.8 && lat <= 22.5 && lng >= -160.8 && lng <= -154.6;
   return continental || alaska || hawaii;
-}
-
-function approximateUsTimeZone(lng: number): string {
-  if (lng < -150) return 'Hawaii / Alaska';
-  if (lng < -128) return 'Alaska';
-  if (lng < -112) return 'Pacific';
-  if (lng < -100) return 'Mountain';
-  if (lng < -85) return 'Central';
-  return 'Eastern';
 }
 
 type NpiCustomSearchParams = {
@@ -175,22 +164,26 @@ const CATS: Record<string,{ico:string;col:string;lbl:string}> = {
   nursing: {ico:'NH',col:'#a78bfa',lbl:'Nursing Home'},
 };
 
-const SERVICE_PRESENCE = [
-  {key:'primaryCare',label:'Primary Care / FFD'},
-  {key:'specialists',label:'Specialists'},
-  {key:'urgentCare',label:'Urgent Care'},
-  {key:'dental',label:'Dental / DD 2813'},
-  {key:'pharmacy',label:'Pharmacy'},
-  {key:'vaccinations',label:'Vaccinations'},
-  {key:'occMed',label:'Occ. Medicine'},
-  {key:'drugTest',label:'Drug Test / MRO'},
-  {key:'audiometry',label:'Audiometry'},
-  {key:'vision',label:'Vision Screening'},
-] as const;
-
-type ProviderDatasetKey = 'bluehive'|'dentists'|'indexed'|'myClinics';
-type ProviderDatasetStatus = { loading:boolean; loaded:boolean; error:string };
-const EMPTY_DATASET_STATUS: ProviderDatasetStatus = { loading:false, loaded:false, error:'' };
+const PROVIDER_DIRS = [
+  {name:'NAOHP Directory',url:'https://naohp.com/',tag:'OCC MED'},
+  {name:'ACOEM Provider Search',url:'https://www.acoem.org/',tag:'OCC MED'},
+  {name:'AAMRO MRO Locator',url:'https://www.aamro.com/',tag:'DRUG TEST'},
+  {name:'DATIA Collector Network',url:'https://www.datia.org/',tag:'DRUG TEST'},
+  {name:'CAOHC Au Program',url:'https://caohc.org/',tag:'AUDIOMETRY'},
+  {name:'NIOSH OEM Residencies',url:'https://www.cdc.gov/niosh/',tag:'OCC MED'},
+  {name:'AAOHN Nurse Locator',url:'https://www.aaohn.org/',tag:'OCC HEALTH'},
+  {name:'NPI Registry',url:'https://npiregistry.cms.hhs.gov/',tag:'ANY'},
+  {name:'HealthGrades',url:'https://www.healthgrades.com/',tag:'ANY'},
+  {name:'Zocdoc',url:'https://www.zocdoc.com/',tag:'ANY'},
+  {name:'CVS MinuteClinic',url:'https://www.cvs.com/minuteclinic/',tag:'URGENT'},
+  {name:'Concentra',url:'https://www.concentra.com/',tag:'OCC MED'},
+  {name:'AFC Urgent Care',url:'https://www.afcurgentcare.com/',tag:'URGENT'},
+  {name:'Quest Diagnostics',url:'https://www.questdiagnostics.com/',tag:'DRUG TEST'},
+  {name:'LabCorp',url:'https://www.labcorp.com/',tag:'DRUG TEST'},
+  {name:'SpecFit360',url:'https://specfit360.com/',tag:'OCC MED'},
+  {name:'US HealthWorks',url:'https://www.ushealthworks.com/',tag:'OCC MED'},
+  {name:'National Drug Screening',url:'https://ndsinc.com/',tag:'DRUG TEST'},
+];
 
 // ── Price Finder: static data ────────────────────────────────────────────────
 const PF_SERVICE_LABELS: Record<string,string> = {
@@ -974,10 +967,11 @@ export default function App() {
   const dropCircleRef = useRef<L.Circle|null>(null);
   const dropPinRef = useRef<L.Marker|null>(null);
   const popDensityLayerRef = useRef<L.LayerGroup|null>(null);
-  const clinicLayerRef = useRef<ReturnType<typeof createClusteredLayer>|null>(null);
+  const clinicLayerRef = useRef<L.LayerGroup|null>(null);
   const blueHiveLayerRef = useRef<ReturnType<typeof createClusteredLayer>|null>(null);
   const savedRadiusLayerRef = useRef<L.LayerGroup|null>(null);
   const rawStateFeaturesRef = useRef<any[]>([]);
+  const clinicFileInputRef = useRef<HTMLInputElement>(null);
 
   // UI State
   const [metric, setMetric] = useState('primaryCare');
@@ -994,8 +988,18 @@ export default function App() {
   const [addrError, setAddrError] = useState('');
   const [addrSuggestions, setAddrSuggestions] = useState<Array<{display_name:string;lat:string;lon:string}>>([]);
   const addrSearchRef = useRef<HTMLDivElement>(null);
-  const [myClinicsData, setMyClinicsData] = useState<MyClinicProvider[]>([]);
-  const [showMyClinics, setShowMyClinics] = useState(true);
+  // Clinic groups
+  type ClinicEntry = { name:string; address:string; city:string; state:string; zip:string; phone:string; notes:string; lat:number|null; lng:number|null; color:string; };
+  type ClinicGroup = { id:number; groupName:string; color:string; visible:boolean; clinics:ClinicEntry[]; };
+  const [clinicGroups, setClinicGroups] = useState<ClinicGroup[]>(() => { try { return JSON.parse(localStorage.getItem('clinic_groups')||'[]'); } catch { return []; } });
+  // Legacy compat: keep uploadedClinics as flat for existing render code
+  const uploadedClinics = clinicGroups.flatMap(g => g.visible ? g.clinics : []);
+  const showUploadedClinics = clinicGroups.some(g=>g.visible);
+  const setShowUploadedClinics = (v:boolean) => setClinicGroups(prev=>prev.map(g=>({...g,visible:v})));
+  const [uploadLoading, setUploadLoading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
+  const [uploadColor, setUploadColor] = useState('#f472b6');
+  const [uploadGroupName, setUploadGroupName] = useState('');
     // Area prices
   const [showAreaPrices, setShowAreaPrices] = useState(false);
   const [apState, setApState] = useState('');
@@ -1074,8 +1078,6 @@ export default function App() {
   const [blueHiveData, setBlueHiveData] = useState<any[]>([]);
   const [showInventory, setShowInventory] = useState(true);
   const [inventoryData, setInventoryData] = useState<MapInventoryProvider[]>([]);
-  const [inventoryLoading, setInventoryLoading] = useState(false);
-  const [inventoryError, setInventoryError] = useState('');
   const inventoryLayerRef = useRef<ReturnType<typeof createClusteredLayer>|null>(null);
   const inventoryFetchRef = useRef<AbortController|null>(null);
   const [showDentists, setShowDentists] = useState(false);
@@ -1084,11 +1086,6 @@ export default function App() {
   const [showDatasetBrowser, setShowDatasetBrowser] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [indexedLayerData, setIndexedLayerData] = useState<any[]>([]);
-  const [datasetRefreshKey, setDatasetRefreshKey] = useState(0);
-  const [datasetStatus, setDatasetStatus] = useState<Record<ProviderDatasetKey,ProviderDatasetStatus>>({
-    bluehive:{...EMPTY_DATASET_STATUS}, dentists:{...EMPTY_DATASET_STATUS},
-    indexed:{...EMPTY_DATASET_STATUS}, myClinics:{...EMPTY_DATASET_STATUS},
-  });
   const [outreachNotes, setOutreachNotes] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_notes')||'{}'); } catch { return {}; } });
   const [outreachStatus, setOutreachStatus] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_status')||'{}'); } catch { return {}; } });
   const [dropUi, setDropUi] = useState({panelOpen:false, exportLoading:false, status:''});
@@ -1461,50 +1458,29 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
+  // ── Load BlueHive provider data from API ───────────────────────────────────
   useEffect(()=>{
-    async function loadDataset(key:ProviderDatasetKey, url:string, setData:(providers:any[])=>void) {
-      setDatasetStatus(previous=>({...previous,[key]:{loading:true,loaded:false,error:''}}));
-      try {
-        const response = await fetch(url);
-        const data = await response.json().catch(()=>null);
-        if(!response.ok) throw new Error(data?.error || `Request failed (${response.status})`);
-        setData(Array.isArray(data?.providers)?data.providers:[]);
-        setDatasetStatus(previous=>({...previous,[key]:{loading:false,loaded:true,error:''}}));
-      } catch(error) {
-        setData([]);
-        setDatasetStatus(previous=>({...previous,[key]:{
-          loading:false,loaded:false,error:error instanceof Error?error.message:'Unable to load providers',
-        }}));
-      }
-    }
+    fetch('/api/provider-layers/bluehive')
+      .then(r=>r.json())
+      .then(data=>setBlueHiveData(data.providers||[]))
+      .catch(()=>setBlueHiveData([]));
+  },[]);
 
-    void Promise.all([
-      loadDataset('bluehive','/api/provider-layers/bluehive',setBlueHiveData),
-      loadDataset('dentists','/api/provider-layers/dentists',setDentistData),
-      loadDataset('indexed','/api/provider-layers/indexed?limit=100000',setIndexedLayerData),
-    ]);
-  },[datasetRefreshKey]);
+  // ── Load Dentist data from API ─────────────────────────────────────────────
+  useEffect(()=>{
+    fetch('/api/provider-layers/dentists')
+      .then(r=>r.json())
+      .then(data=>setDentistData(data.providers||[]))
+      .catch(()=>setDentistData([]));
+  },[]);
 
-  async function refreshMyClinics() {
-    setDatasetStatus(previous=>({...previous,myClinics:{loading:true,loaded:false,error:''}}));
-    try {
-      const response = await fetch('/api/provider-layers/my-clinics?limit=100000');
-      const data = await response.json();
-      if (!response.ok) throw new Error(data?.error || 'Unable to load My Clinics');
-      const providers = data.providers || [];
-      setMyClinicsData(providers);
-      setShowMyClinics(providers.length>0);
-      setDatasetStatus(previous=>({...previous,myClinics:{loading:false,loaded:true,error:''}}));
-    } catch(error) {
-      setMyClinicsData([]);
-      setShowMyClinics(false);
-      setDatasetStatus(previous=>({...previous,myClinics:{
-        loading:false,loaded:false,error:error instanceof Error?error.message:'Unable to load My Clinics',
-      }}));
-    }
-  }
-
-  useEffect(()=>{ void refreshMyClinics(); },[]);
+  // ── Load Indexed provider data from API ────────────────────────────────────
+  useEffect(()=>{
+    fetch('/api/provider-layers/indexed?limit=100000')
+      .then(r=>r.json())
+      .then(data=>setIndexedLayerData(data.providers||[]))
+      .catch(()=>setIndexedLayerData([]));
+  },[]);
 
   // ── Map Inventory: load indexed providers from Neon on map load + pan/zoom ──
   useEffect(()=>{
@@ -1520,8 +1496,6 @@ export default function App() {
         if(inventoryFetchRef.current) inventoryFetchRef.current.abort();
         const ac = new AbortController();
         inventoryFetchRef.current = ac;
-        setInventoryLoading(true);
-        setInventoryError('');
         fetchMapInventory({
           north: bounds.getNorth(),
           south: bounds.getSouth(),
@@ -1530,16 +1504,9 @@ export default function App() {
           serviceType: metric,
           limit: 1000,
         }).then(data=>{
-          if(!ac.signal.aborted) {
-            setInventoryData(data.providers||[]);
-            setInventoryLoading(false);
-          }
-        }).catch((error)=>{
-          if(!ac.signal.aborted) {
-            setInventoryData([]);
-            setInventoryLoading(false);
-            setInventoryError(error instanceof Error?error.message:'Unable to load provider inventory');
-          }
+          if(!ac.signal.aborted) setInventoryData(data.providers||[]);
+        }).catch(()=>{
+          if(!ac.signal.aborted) setInventoryData([]);
         });
       }, 400);
     }
@@ -1831,26 +1798,40 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[showPopDensity]);
 
-  // ── Persisted My Clinics pins ──────────────────────────────────────────────
+  // ── Uploaded clinic pins ───────────────────────────────────────────────────
   useEffect(()=>{
     const map = mapRef.current;
     if (!map) return;
-    if (clinicLayerRef.current) { clinicLayerRef.current.destroy(); clinicLayerRef.current = null; }
-    if (!showMyClinics || myClinicsData.length===0) return;
-    clinicLayerRef.current = createClusteredLayer(map, myClinicsData, {
-      color: '#ec4899',
-      glow: showGlowPoints,
-      badgeLabel: 'My Clinics',
-      buildPopup: (clinic: MyClinicProvider)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:190px;">
-        <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${clinic.name||clinic.clinic_name||'Unnamed clinic'}</div>
-        <div style="font-size:9.5px;color:#7ba0b8">${[clinic.address_1,clinic.city,clinic.state,clinic.zip].filter(Boolean).join(', ')}</div>
-        ${clinic.phone?`<div style="font-size:9.5px;color:#67e8f9;margin-top:3px"><a href="tel:${clinic.phone}" style="color:#67e8f9;text-decoration:none">${clinic.phone}</a></div>`:''}
-        <div style="margin-top:7px;color:#f9a8d4;font-size:8.5px;font-family:'IBM Plex Mono',monospace">MY CLINICS · NEON</div>
-      </div>`,
+    if (clinicLayerRef.current) { map.removeLayer(clinicLayerRef.current); clinicLayerRef.current = null; }
+    if (!showUploadedClinics || uploadedClinics.length===0) return;
+    const grp = L.layerGroup();
+    uploadedClinics.forEach((c,i)=>{
+      if (c.lat===null || c.lng===null) return;
+      const col = c.color || '#f472b6';
+      const mk = L.marker([c.lat, c.lng], {
+        icon: L.divIcon({
+          className: '',
+          html: `<div style="width:18px;height:18px;border-radius:50%;background:${col};${showGlowPoints?`box-shadow:0 0 10px ${col},0 0 20px ${col}66,0 0 4px rgba(0,0,0,0.6);animation:clinic-pulse 2s ease-in-out ${(i*0.15).toFixed(1)}s infinite;`:'box-shadow:0 0 0 1px rgba(255,255,255,0.35);'}cursor:pointer;"></div>`,
+          iconSize: [18,18], iconAnchor: [9,9],
+        }),
+        zIndexOffset: 2000,
+      });
+      mk.bindPopup(`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:170px;">
+        <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${c.name}</div>
+        ${c.address?`<div style="font-size:9.5px;color:#4a6888"> ${c.address}${c.city?', '+c.city:''}${c.state?' '+c.state:''}${c.zip?' '+c.zip:''}</div>`:''}
+        ${c.phone?`<div style="font-size:9.5px;color:#67e8f9;margin-top:2px">📞 <a href="tel:${c.phone}" style="color:#67e8f9;text-decoration:none">${c.phone}</a></div>`:''}
+        ${c.notes?`<div style="font-size:9px;color:#3d5478;margin-top:3px">${c.notes}</div>`:''}
+        <div style="margin-top:6px;display:flex;gap:5px">
+          <div style="width:8px;height:8px;border-radius:50%;background:${col};box-shadow:0 0 6px ${col};flex-shrink:0;margin-top:2px"></div>
+          <span style="font-size:8.5px;color:#3d5478;font-family:'IBM Plex Mono',monospace">UPLOADED CLINIC</span>
+        </div>
+      </div>`);
+      grp.addLayer(mk);
     });
-    return ()=>{ if (clinicLayerRef.current) { clinicLayerRef.current.destroy(); clinicLayerRef.current = null; } };
+    grp.addTo(map);
+    clinicLayerRef.current = grp;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[myClinicsData, showMyClinics, showGlowPoints]);
+  },[uploadedClinics, showUploadedClinics, showGlowPoints]);
 
   // ── BlueHive provider pins (clustered) ────────────────────────────────────
   useEffect(()=>{
@@ -1935,6 +1916,74 @@ export default function App() {
     return ()=>{ if (inventoryLayerRef.current) { inventoryLayerRef.current.destroy(); inventoryLayerRef.current = null; } };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[showInventory, inventoryData, showGlowPoints]);
+
+  async function handleClinicUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setUploadLoading(true);
+    setUploadProgress('Parsing file…');
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, {type:'array'});
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[] = XLSX.utils.sheet_to_json(ws, {defval:''});
+      if (!rows.length) { setUploadProgress('No data found in file.'); setUploadLoading(false); return; }
+
+      // Flexible column detection (case-insensitive)
+      function col(row:any, ...keys:string[]):string {
+        for (const k of keys) {
+          const found = Object.keys(row).find(r=>r.toLowerCase().replace(/[\s_-]/g,'')===k.toLowerCase().replace(/[\s_-]/g,''));
+          if (found && row[found]!=='' && row[found]!==undefined) return String(row[found]).trim();
+        }
+        return '';
+      }
+
+      const parsed = rows.map(r=>({
+        name:    col(r,'name','providername','clinicname','practicename','facility') || 'Unnamed',
+        address: col(r,'address','streetaddress','street','addr'),
+        city:    col(r,'city','town'),
+        state:   col(r,'state','st').toUpperCase().slice(0,2),
+        zip:     col(r,'zip','zipcode','postalcode','postal'),
+        phone:   col(r,'phone','telephone','tel'),
+        notes:   col(r,'notes','note','description','desc'),
+        lat:     parseFloat(col(r,'lat','latitude')) || null,
+        lng:     parseFloat(col(r,'lng','lon','long','longitude')) || null,
+        color:   uploadColor,
+      }));
+
+      // Geocode rows missing coordinates
+      const toGeocode = parsed.filter(p=>p.lat===null||isNaN(p.lat as any));
+      let geocoded = 0;
+      for (const p of toGeocode) {
+        const q = [p.address, p.city, p.state, p.zip].filter(Boolean).join(', ');
+        if (!q) continue;
+        setUploadProgress(`Geocoding ${++geocoded}/${toGeocode.length}: ${p.name}`);
+        try {
+          const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1`,{headers:{'Accept-Language':'en'}});
+          const data = await res.json();
+          if (data?.[0]) { p.lat = parseFloat(data[0].lat); p.lng = parseFloat(data[0].lon); }
+        } catch {}
+        await new Promise(r=>setTimeout(r, 1100)); // Nominatim rate limit: 1 req/sec
+      }
+
+      const final = parsed.filter(p=>p.lat!==null&&!isNaN(p.lat as any));
+      const skipped = parsed.length - final.length;
+      const groupName = uploadGroupName.trim() || `Import ${new Date().toLocaleDateString('en-US',{month:'short',day:'numeric'})}`;
+      const newGroup:ClinicGroup = { id:Date.now(), groupName, color:uploadColor, visible:true, clinics:final };
+      setClinicGroups(prev => {
+        const next = [...prev, newGroup];
+        localStorage.setItem('clinic_groups', JSON.stringify(next));
+        return next;
+      });
+      setUploadGroupName('');
+      setUploadProgress(`✓ Added ${final.length} clinics as "${groupName}"${skipped>0?` (${skipped} skipped — no address/coordinates)`:''}. Toggle each group in the sidebar.`);
+    } catch(err:any) {
+      setUploadProgress(`Error: ${err.message||'Could not parse file'}`);
+    } finally {
+      setUploadLoading(false);
+    }
+  }
 
   const showLabelsRef = useRef(showLabels);
   useEffect(()=>{
@@ -2942,7 +2991,7 @@ export default function App() {
             <button className={`mbtn${activeTool === 'liveFinder' ? ' active' : ''}`} title="Search for healthcare facilities near any map location" onClick={() => setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder')}>Live Finder</button>
             <button className={`mbtn${activeTool === 'radius' ? ' active' : ''}`} title="Draw a radius circle and extract facilities within it" onClick={() => setActiveTool(activeTool === 'radius' ? null : 'radius')}>Radius Tool</button>
             <button className={`mbtn${activeTool === 'directories' ? ' active' : ''}`} title="Browse provider datasets (BlueHive, Dentists, Indexed)" onClick={() => setActiveTool(activeTool === 'directories' ? null : 'directories')}>Directories</button>
-            <button className={`mbtn${activeTool === 'myClinics' ? ' active' : ''}`} title="Upload clinic spreadsheets and manage the persisted layer" onClick={() => setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>Upload Clinics</button>
+            <button className={`mbtn${activeTool === 'myClinics' ? ' active' : ''}`} title="Save and manage your preferred clinic list" onClick={() => setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>My Clinics</button>
             <button className={`mbtn${activeTool === 'compare' ? ' active' : ''}`} title="Compare provider coverage across locations" onClick={() => setActiveTool(activeTool === 'compare' ? null : 'compare')}>Compare</button>
           </div>
           <div className="sb-divider"/>
@@ -2950,6 +2999,7 @@ export default function App() {
             <div className="hero-sub">Find occupational providers, compare prices, and build smarter coverage faster.</div>
             <div className="hero-actions">
               <button className={`hero-btn${showUsDiagnostics?' active':''}`} onClick={()=>setShowUsDiagnostics(v=>!v)}>U.S. Diagnostics</button>
+              <button className="hero-btn" onClick={()=>setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>My Clinics</button>
             </div>
           </div>
           <div className="sb-section">
@@ -2958,15 +3008,18 @@ export default function App() {
             <div style={{fontSize:'8.5px',color:'var(--muted)',marginBottom:'8px',lineHeight:'1.3'}}>
               Shows indexed provider locations from the database for the selected service type.
             </div>
-            <div className="service-presence-status">
-              <strong>{SERVICE_PRESENCE.find(service=>service.key===metric)?.label || metric}</strong>
-              {inventoryLoading
-                ? 'Loading providers for the current map view…'
-                : inventoryError
-                  ? `Unable to load inventory: ${inventoryError}`
-                  : `${inventoryData.length} indexed provider${inventoryData.length===1?'':'s'} visible in the current map view${inventoryData.length===0?' — no matching records in this area':''}`}
-            </div>
-            {SERVICE_PRESENCE.map(s=>(
+            {[
+              {key:'primaryCare',label:'Primary Care / FFD'},
+              {key:'specialists',label:'Specialists'},
+              {key:'urgentCare',label:'Urgent Care'},
+              {key:'dental',label:'Dental / DD 2813'},
+              {key:'pharmacy',label:'Pharmacy'},
+              {key:'vaccinations',label:'Vaccinations'},
+              {key:'occMed',label:'Occ. Medicine'},
+              {key:'drugTest',label:'Drug Test / MRO'},
+              {key:'audiometry',label:'Audiometry'},
+              {key:'vision',label:'Vision Screening'},
+            ].map(s=>(
               <button key={s.key} className={`mbtn${metric===s.key?' active':''}`} onClick={()=>setMetric(s.key)}>
                 {s.label}
               </button>
@@ -2990,66 +3043,54 @@ export default function App() {
             {!collapsedSections.layers && showUsDiagnostics && (<>
               <div className="tog-row">
                 <span className="tog-lbl">State labels (U.S.)</span>
-                <label className="tog-switch"><input aria-label="State labels" type="checkbox" checked={showLabels} onChange={e=>setShowLabels(e.target.checked)}/><span className="tog-slider"/></label>
+                <label className="tog-switch"><input type="checkbox" checked={showLabels} onChange={e=>setShowLabels(e.target.checked)}/><span className="tog-slider"/></label>
               </div>
               <div className="tog-row">
                 <span className="tog-lbl">Timezone overlay (U.S.)</span>
-                <label className="tog-switch"><input aria-label="Timezone overlay" type="checkbox" checked={showTZ} onChange={e=>setShowTZ(e.target.checked)}/><span className="tog-slider"/></label>
+                <label className="tog-switch"><input type="checkbox" checked={showTZ} onChange={e=>setShowTZ(e.target.checked)}/><span className="tog-slider"/></label>
               </div>
               <div className="tog-row">
                 <span className="tog-lbl">Population density (U.S.)</span>
-                <label className="tog-switch"><input aria-label="Population density" type="checkbox" checked={showPopDensity} onChange={e=>setShowPopDensity(e.target.checked)}/><span className="tog-slider"/></label>
+                <label className="tog-switch"><input type="checkbox" checked={showPopDensity} onChange={e=>setShowPopDensity(e.target.checked)}/><span className="tog-slider"/></label>
               </div>
               <div className="tog-row">
                 <span className="tog-lbl">State color fill (U.S.)</span>
-                <label className="tog-switch"><input aria-label="State color fill" type="checkbox" checked={showStateColors} onChange={e=>setShowStateColors(e.target.checked)}/><span className="tog-slider"/></label>
+                <label className="tog-switch"><input type="checkbox" checked={showStateColors} onChange={e=>setShowStateColors(e.target.checked)}/><span className="tog-slider"/></label>
               </div>
               <div className="tog-row">
                 <span className="tog-lbl">70mi radius ring (U.S.)</span>
-                <label className="tog-switch"><input aria-label="70mi radius ring" title={lastRadiusLatRef.current===null?'Click a U.S. map location to position the ring':''} type="checkbox" checked={showRadius} onChange={e=>setShowRadius(e.target.checked)}/><span className="tog-slider"/></label>
+                <label className="tog-switch"><input type="checkbox" checked={showRadius} onChange={e=>setShowRadius(e.target.checked)}/><span className="tog-slider"/></label>
               </div>
               <div className="tog-row">
                 <span className="tog-lbl">Glow effects (U.S.)</span>
-                <label className="tog-switch"><input aria-label="Glow effects" type="checkbox" checked={showGlowPoints} onChange={e=>setShowGlowPoints(e.target.checked)}/><span className="tog-slider"/></label>
+                <label className="tog-switch"><input type="checkbox" checked={showGlowPoints} onChange={e=>setShowGlowPoints(e.target.checked)}/><span className="tog-slider"/></label>
               </div>
               <div className="tog-row">
                 <span className="tog-lbl" style={{color: showCityDots ? 'inherit' : '#7bd7ff'}}>City dots (U.S.) {showCityDots ? '' : '(hidden)'}</span>
-                <label className="tog-switch"><input aria-label="City dots" type="checkbox" checked={showCityDots} onChange={e=>setShowCityDots(e.target.checked)}/><span className="tog-slider"/></label>
+                <label className="tog-switch"><input type="checkbox" checked={showCityDots} onChange={e=>setShowCityDots(e.target.checked)}/><span className="tog-slider"/></label>
               </div>
-              <div className="layer-inline-status">U.S. overlays are interactive; the radius ring is positioned by clicking a U.S. location.</div>
             </>)}
             <div className="tog-row">
               <span className="tog-lbl" style={{color:'#10b981',display:'flex',alignItems:'center',gap:4}}>
                 <span style={{width:7,height:7,borderRadius:'50%',background:'#10b981',display:'inline-block',boxShadow:'0 0 6px #10b981',flexShrink:0}}/>
-                Indexed Providers ({inventoryData.length})
+                Indexed Providers {inventoryData.length>0&&<span style={{fontSize:9,opacity:0.7,marginLeft:2}}>({inventoryData.length})</span>}
               </span>
-              <label className="tog-switch"><input aria-label="Indexed Providers" disabled={inventoryLoading||Boolean(inventoryError)} type="checkbox" checked={showInventory} onChange={e=>setShowInventory(e.target.checked)}/><span className="tog-slider"/></label>
+              <label className="tog-switch"><input type="checkbox" checked={showInventory} onChange={e=>setShowInventory(e.target.checked)}/><span className="tog-slider"/></label>
             </div>
-            <div className={`layer-inline-status${inventoryError?' error':''}`}>{inventoryLoading?'Loading current map view…':inventoryError||`${inventoryData.length} records loaded for ${SERVICE_PRESENCE.find(service=>service.key===metric)?.label}`}</div>
             <div className="tog-row">
               <span className="tog-lbl" style={{color:'#3b82f6',display:'flex',alignItems:'center',gap:4}}>
                 <span style={{width:7,height:7,borderRadius:'50%',background:'#3b82f6',display:'inline-block',boxShadow:'0 0 6px #3b82f6',flexShrink:0}}/>
-                BlueHive Providers ({blueHiveData.length})
+                BlueHive Providers {blueHiveData.length>0&&<span style={{fontSize:9,opacity:0.7,marginLeft:2}}>({blueHiveData.length})</span>}
               </span>
-              <label className="tog-switch"><input aria-label="BlueHive Providers" disabled={datasetStatus.bluehive.loading||Boolean(datasetStatus.bluehive.error)||blueHiveData.length===0} type="checkbox" checked={showBlueHive} onChange={e=>setShowBlueHive(e.target.checked)}/><span className="tog-slider"/></label>
+              <label className="tog-switch"><input type="checkbox" checked={showBlueHive} onChange={e=>setShowBlueHive(e.target.checked)}/><span className="tog-slider"/></label>
             </div>
-            <div className={`layer-inline-status${datasetStatus.bluehive.error?' error':''}`}>{datasetStatus.bluehive.loading?'Loading…':datasetStatus.bluehive.error||`${blueHiveData.length} records loaded${blueHiveData.length===0?' — database import required':''}`}</div>
             <div className="tog-row">
               <span className="tog-lbl" style={{color:'#06b6d4',display:'flex',alignItems:'center',gap:4}}>
                 <span style={{width:7,height:7,borderRadius:'50%',background:'#06b6d4',display:'inline-block',boxShadow:'0 0 6px #06b6d4',flexShrink:0}}/>
-                Dentists ({dentistData.length})
+                Dentists {dentistData.length>0&&<span style={{fontSize:9,opacity:0.7,marginLeft:2}}>({dentistData.length})</span>}
               </span>
-              <label className="tog-switch"><input aria-label="Dentists" disabled={datasetStatus.dentists.loading||Boolean(datasetStatus.dentists.error)||dentistData.length===0} type="checkbox" checked={showDentists} onChange={e=>setShowDentists(e.target.checked)}/><span className="tog-slider"/></label>
+              <label className="tog-switch"><input type="checkbox" checked={showDentists} onChange={e=>setShowDentists(e.target.checked)}/><span className="tog-slider"/></label>
             </div>
-            <div className={`layer-inline-status${datasetStatus.dentists.error?' error':''}`}>{datasetStatus.dentists.loading?'Loading…':datasetStatus.dentists.error||`${dentistData.length} records loaded${dentistData.length===0?' — database import required':''}`}</div>
-            <div className="tog-row">
-              <span className="tog-lbl" style={{color:'#db2777',display:'flex',alignItems:'center',gap:4}}>
-                <span style={{width:7,height:7,borderRadius:'50%',background:'#ec4899',display:'inline-block',boxShadow:'0 0 6px #ec4899',flexShrink:0}}/>
-                My Clinics {myClinicsData.length>0&&<span style={{fontSize:9,opacity:0.7,marginLeft:2}}>({myClinicsData.length})</span>}
-              </span>
-              <label className="tog-switch"><input aria-label="My Clinics" disabled={datasetStatus.myClinics.loading||Boolean(datasetStatus.myClinics.error)||myClinicsData.length===0} type="checkbox" checked={showMyClinics} onChange={e=>setShowMyClinics(e.target.checked)}/><span className="tog-slider"/></label>
-            </div>
-            <div className={`layer-inline-status${datasetStatus.myClinics.error?' error':''}`}>{datasetStatus.myClinics.loading?'Loading uploads…':datasetStatus.myClinics.error||`${myClinicsData.length} uploaded records${myClinicsData.length===0?' — upload a clinic file to create this layer':''}`}</div>
             <button
               onClick={()=>setShowDatasetBrowser(true)}
               style={{
@@ -3075,6 +3116,15 @@ export default function App() {
             >
               <span style={{fontSize:13}}>🗂</span> Browse Datasets
             </button>
+            {clinicGroups.length>0&&clinicGroups.map(grp=>(
+              <div key={grp.id} className="tog-row">
+                <span className="tog-lbl" style={{color:grp.color,display:'flex',alignItems:'center',gap:4}}>
+                  <span style={{width:7,height:7,borderRadius:'50%',background:grp.color,display:'inline-block',boxShadow:`0 0 6px ${grp.color}`,flexShrink:0}}/>
+                  {grp.groupName} ({grp.clinics.length})
+                </span>
+                <label className="tog-switch"><input type="checkbox" checked={grp.visible} onChange={e=>{setClinicGroups(prev=>{const n=prev.map(g=>g.id===grp.id?{...g,visible:e.target.checked}:g);localStorage.setItem('clinic_groups',JSON.stringify(n));return n;})}}/><span className="tog-slider"/></label>
+              </div>
+            ))}
           </div>
           {showUsDiagnostics && (<>
           <div className="sb-divider"/>
@@ -3186,8 +3236,6 @@ export default function App() {
           blueHiveData={blueHiveData}
           dentistData={dentistData}
           indexedData={indexedLayerData}
-          status={{bluehive:datasetStatus.bluehive,dentists:datasetStatus.dentists,indexed:datasetStatus.indexed}}
-          onRetry={()=>setDatasetRefreshKey(key=>key+1)}
         />
 
         {/* ── MAP ── */}
@@ -3265,31 +3313,6 @@ export default function App() {
               <div className="local-pop-row"><span>Nearest city</span><strong>{localPopInfo.nearestCity}</strong></div>
               <div className="local-pop-row"><span>Distance</span><strong>{localPopInfo.nearestDist.toFixed(1)} mi</strong></div>
               <div className="local-pop-meta">{localPopInfo.lat.toFixed(4)}, {localPopInfo.lng.toFixed(4)}</div>
-            </div>
-          )}
-          {showUsDiagnostics&&(
-            <div className="us-diagnostics-glass">
-              <div className="us-diagnostics-header">
-                <div><span className="workflow-eyebrow">U.S. analytics</span><h3>Service diagnostics</h3></div>
-                <button onClick={()=>setShowUsDiagnostics(false)}>Close</button>
-              </div>
-              {dropCenter&&!isUsPoint(dropCenter.lat,dropCenter.lng)?(
-                <div className="workflow-empty">U.S. diagnostics are only available for U.S. locations.</div>
-              ):(localPopInfo?(
-                <div className="diagnostic-cards">
-                  <div className="diagnostic-card accent"><span>Active service</span><strong>{SERVICE_PRESENCE.find(service=>service.key===metric)?.label||MLBL[metric]||metric}</strong></div>
-                  <div className="diagnostic-card"><span>Availability</span><strong>{DLBL[estimateDifficultyFromNeighbors(localPopInfo.lat,localPopInfo.lng,metric)]}</strong></div>
-                  <div className="diagnostic-card"><span>Visible providers</span><strong>{inventoryData.length}</strong></div>
-                  <div className="diagnostic-card"><span>Time zone</span><strong>{approximateUsTimeZone(localPopInfo.lng)}</strong></div>
-                  <div className="diagnostic-card"><span>Population density</span><strong>{Math.round(localPopInfo.density).toLocaleString()}/mi²</strong></div>
-                  <div className="diagnostic-card"><span>Access profile</span><strong>{localPopInfo.density<100?'Rural / difficult':localPopInfo.density<500?'Mixed access':'Metro access'}</strong></div>
-                  <div className="diagnostic-card"><span>State prevalence</span><strong>{localPopInfo.state} · {DLBL[estimateDifficultyFromNeighbors(localPopInfo.lat,localPopInfo.lng,metric)]}</strong></div>
-                  <div className="diagnostic-card"><span>Cost tier</span><strong>{STATE_COST_TIER[localPopInfo.state]||'Average'}</strong></div>
-                  <div className="diagnostic-card"><span>Cost index</span><strong>{((STATE_COST_INDEX[localPopInfo.state]||1)*100).toFixed(0)}% of U.S.</strong></div>
-                </div>
-              ):(
-                <div className="workflow-empty">Click a U.S. location to load local service, population, cost, and access diagnostics.</div>
-              ))}
             </div>
           )}
           {(activeTool === 'radius')&&(
@@ -3436,6 +3459,21 @@ export default function App() {
                 {liveLocation?`Center · ${liveLocation}`:'Coordinate-first live search · click the map or search an address.'}
                 {liveMirror&&<div style={{fontSize:9,color:'#2d4060',marginTop:3}}>{liveMirror}</div>}
               </div>
+              {NATIVE_DRIVE_TIME_ENABLED&&!npiCategory&&liveResults.length>0&&(
+                <DriveTimeControlStrip
+                  origin={etaOrigin}
+                  candidates={etaCandidates}
+                  loading={providerEta.loading}
+                  rankedCount={providerEta.rankings.length}
+                  error={providerEta.error}
+                  onRank={(options)=>{
+                    if(!etaOrigin) return;
+                    void providerEta.rank(etaOrigin,etaCandidates,options).catch(()=>undefined);
+                  }}
+                  onCopy={()=>{ void providerEta.copy(); }}
+                  onClear={providerEta.clear}
+                />
+              )}
               {showUsDiagnostics && (() => {
                 const gap = territoryGapSummary();
                 return (
@@ -3518,9 +3556,6 @@ export default function App() {
                   <option value="name">Sort: Name</option>
                 </select>
               </div>
-              <details className="lp-advanced">
-              <summary>Advanced filters and source details</summary>
-              <div>
               {/* Filter chips — now wired to NPI Registry category search */}
               {lastRadiusRef.current && isUsPoint(lastRadiusRef.current.lat, lastRadiusRef.current.lng) && (
               <>
@@ -3617,6 +3652,11 @@ export default function App() {
                   </button>
                 </div>
               )}
+              {npiLoading&&(
+                <div style={{fontSize:9,color:'#89d4fe',padding:'4px 0'}}>
+                  Querying NPI Registry for {npiCategory ? NPI_CATEGORY_MAP[npiCategory]?.label : ''}...
+                </div>
+              )}
               {npiError&&!npiLoading&&(
                 <div style={{fontSize:9,color:'#fca5a5',padding:'6px 8px',background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.25)',borderRadius:5,lineHeight:1.5}}>
                    {npiError}
@@ -3643,34 +3683,18 @@ export default function App() {
               </>
               )}
               </div>
-              </details>
-              </div>
               <div className="lp-results">
-              {!liveLoading&&!npiLoading&&(npiResults.length>0||liveResults.length>0)&&<div className="lp-result-summary" style={{fontSize:9,color:'#8fb3d8'}}>
+              <div style={{fontSize:9,color:'#8fb3d8'}}>
                 {npiCategory
                   ? `Showing ${npiResults.length} verified candidates`
                   : `Showing ${filterAndSortLiveResults(liveResults).length} of ${liveResults.length} Provider results`}
-              </div>}
+              </div>
               <div className={`lp-loading${(liveLoading||npiLoading)?' show':''}`}>
                 <div className="lp-spin"/>
                 <div style={{fontSize:10,color:'#3d5478'}}>
                   {npiLoading ? 'Querying NPI Registry...' : 'Querying provider sources...'}
                 </div>
               </div>
-              {NATIVE_DRIVE_TIME_ENABLED&&!npiCategory&&!liveLoading&&etaOrigin&&etaCandidates.length>0&&(
-                <DriveTimeControlStrip
-                  origin={etaOrigin}
-                  candidates={etaCandidates}
-                  loading={providerEta.loading}
-                  rankedCount={providerEta.rankings.length}
-                  error={providerEta.error}
-                  onRank={(options)=>{
-                    void providerEta.rank(etaOrigin,etaCandidates,options).catch(()=>undefined);
-                  }}
-                  onCopy={()=>{ void providerEta.copy(); }}
-                  onClear={providerEta.clear}
-                />
-              )}
               {!npiLoading&&!npiCategory&&!liveLoading&&!liveError&&liveResults.length===0&&!liveSearched&&(
                 <div className="lp-empty show"><strong>Choose a search location.</strong><span>Use the address search above or click the map to find nearby facilities.</span></div>
               )}
@@ -3788,13 +3812,148 @@ export default function App() {
         </div>
       </div>
 
-      <DirectoryDrawer open={activeTool==='directories'} onClose={()=>setActiveTool(null)} />
-      <ClinicImportModal
-        open={activeTool==='myClinics'}
-        providers={myClinicsData}
-        onClose={()=>setActiveTool(null)}
-        onImported={refreshMyClinics}
-      />
+      {/* ── DIRECTORIES MODAL ── */}
+      <div className={`modal-backdrop${activeTool==='directories'?' open':''}`} onClick={()=>setActiveTool(activeTool === 'directories' ? null : 'directories')}>
+        <div className="modal-box" style={{width:640}} onClick={e=>e.stopPropagation()}>
+          <div className="modal-header">
+            <span className="modal-title"> PROVIDER DIRECTORIES</span>
+            <button className="modal-close" onClick={()=>setActiveTool(activeTool === 'directories' ? null : 'directories')}>Close</button>
+          </div>
+          <div className="modal-body">
+            <div className="dir-section-lbl">OCCUPATIONAL HEALTH RESOURCES</div>
+            <div className="dir-grid">
+              {PROVIDER_DIRS.map((d,i)=>(
+                <a key={i} className="dir-app" href={d.url} target="_blank" rel="noopener noreferrer">
+                  <div style={{fontSize:18}}>🔗</div>
+                  <div className="dir-app-name">{d.name}</div>
+                  <div className="dir-app-tag">{d.tag}</div>
+                </a>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── MY CLINICS / UPLOAD MODAL ── */}
+      {activeTool === 'myClinics' && (
+        <div className="modal-backdrop open" onClick={()=>setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>
+          <div className="modal-box" style={{width:680,maxHeight:'85vh',display:'flex',flexDirection:'column'}} onClick={e=>e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title" style={{color:'#f472b6'}}> MY CLINICS</span>
+              <button className="modal-close" onClick={()=>setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>Close</button>
+            </div>
+            <div className="modal-body" style={{flex:1,overflowY:'auto',padding:'16px 20px'}}>
+
+              {/* Upload section */}
+              <div style={{background:'rgba(244,114,182,0.06)',border:'1px solid rgba(244,114,182,0.2)',borderRadius:8,padding:'14px',marginBottom:16}}>
+                <div style={{fontSize:9,color:'#f472b6',letterSpacing:'0.08em',marginBottom:8}}>UPLOAD SPREADSHEET</div>
+                <p style={{fontSize:10,color:'#4a6888',lineHeight:1.6,marginBottom:10}}>
+                  Upload an Excel (.xlsx) or CSV file with your clinic locations. Columns detected automatically.
+                  Supported: <span style={{color:'#c8ddf0'}}>Name, Address, City, State, Zip, Phone, Notes, Lat, Lng</span>.
+                  Addresses without coordinates will be geocoded automatically.
+                </p>
+                <div style={{display:'grid',gap:8,marginBottom:8}}>
+                  <div>
+                    <div style={{fontSize:8,color:'#3d5478',marginBottom:3}}>GROUP NAME (e.g. "East Coast Partners")</div>
+                    <input
+                      className="rp-input"
+                      placeholder="Leave blank for auto-name"
+                      value={uploadGroupName}
+                      onChange={e=>setUploadGroupName(e.target.value)}
+                      style={{fontSize:11}}
+                    />
+                  </div>
+                  <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
+                    <div>
+                      <div style={{fontSize:8,color:'#3d5478',marginBottom:3}}>GROUP COLOR</div>
+                      <input type="color" value={uploadColor} onChange={e=>setUploadColor(e.target.value)}
+                        style={{width:40,height:32,border:'1px solid rgba(244,114,182,0.3)',borderRadius:4,background:'transparent',cursor:'pointer',padding:2}} />
+                    </div>
+                    <button className="rp-assess-btn"
+                      style={{padding:'8px 18px',background:'rgba(244,114,182,0.12)',borderColor:'rgba(244,114,182,0.3)',color:'#f472b6',opacity:uploadLoading?0.6:1}}
+                      disabled={uploadLoading}
+                      onClick={()=>clinicFileInputRef.current?.click()}>
+                      {uploadLoading ? '⏳ PROCESSING...' : ' CHOOSE FILE (.xlsx / .csv)'}
+                    </button>
+                    <input ref={clinicFileInputRef} type="file" accept=".xlsx,.xls,.csv" style={{display:'none'}}
+                      onChange={handleClinicUpload} />
+                  </div>
+                </div>
+                {uploadProgress && (
+                  <div style={{fontSize:9,color:uploadProgress.startsWith('✓')?'#34d399':uploadProgress.startsWith('Error')?'#fca5a5':'#67e8f9',fontFamily:"'IBM Plex Mono',monospace",lineHeight:1.5}}>
+                    {uploadProgress}
+                  </div>
+                )}
+              </div>
+
+              {/* Controls */}
+              {clinicGroups.length>0 && (
+                <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:12,flexWrap:'wrap'}}>
+                  <div style={{fontSize:9,color:'#f472b6',letterSpacing:'0.08em',flex:1}}>
+                    {clinicGroups.reduce((a,g)=>a+g.clinics.filter(c=>c.lat!==null).length,0)} / {clinicGroups.reduce((a,g)=>a+g.clinics.length,0)} CLINICS MAPPED · {clinicGroups.length} GROUPS
+                  </div>
+                  <button onClick={()=>{setClinicGroups([]);localStorage.removeItem('clinic_groups');localStorage.removeItem('uploaded_clinics');setUploadProgress('');}}
+                    style={{fontSize:8,fontFamily:"'IBM Plex Mono',monospace",padding:'3px 8px',background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.2)',borderRadius:3,color:'#fca5a5',cursor:'pointer'}}>
+                    CLEAR ALL GROUPS
+                  </button>
+                </div>
+              )}
+
+              {/* Clinic Groups list */}
+              {clinicGroups.length===0 ? (
+                <div style={{textAlign:'center',padding:'24px 0',color:'#2a3f5e',fontSize:10,lineHeight:1.8}}>
+                  <div style={{fontSize:28,marginBottom:10}}></div>
+                  No clinics uploaded yet.<br/>
+                  Upload a spreadsheet to see glowing pins on the map.
+                </div>
+              ) : (
+                <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                  {clinicGroups.map((grp)=>(
+                    <div key={grp.id} style={{background:'rgba(255,255,255,0.06)',border:`1px solid ${grp.color}44`,borderRadius:10,overflow:'hidden'}}>
+                      {/* Group header */}
+                      <div style={{display:'flex',alignItems:'center',gap:8,padding:'10px 12px',background:`${grp.color}14`,borderBottom:`1px solid ${grp.color}33`}}>
+                        <div style={{width:12,height:12,borderRadius:'50%',background:grp.color,boxShadow:`0 0 8px ${grp.color}`,flexShrink:0}}/>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:11,fontWeight:700,color:'#eef4ff'}}>{grp.groupName}</div>
+                          <div style={{fontSize:8.5,color:'#5a78a0',fontFamily:"'IBM Plex Mono',monospace"}}>{grp.clinics.filter(c=>c.lat!==null).length}/{grp.clinics.length} mapped</div>
+                        </div>
+                        {/* Color picker */}
+                        <input type="color" value={grp.color}
+                          onChange={e=>{const c=e.target.value;setClinicGroups(prev=>{const n=prev.map(g=>g.id===grp.id?{...g,color:c,clinics:g.clinics.map(cl=>({...cl,color:c}))}:g);localStorage.setItem('clinic_groups',JSON.stringify(n));return n;});}}
+                          style={{width:28,height:24,border:'1px solid rgba(255,255,255,0.15)',borderRadius:4,background:'transparent',cursor:'pointer',padding:1,flexShrink:0}} />
+                        {/* Visibility toggle */}
+                        <label style={{display:'flex',alignItems:'center',gap:4,cursor:'pointer',fontSize:9,color:'#5a78a0',flexShrink:0}}>
+                          <input type="checkbox" checked={grp.visible} onChange={e=>{setClinicGroups(prev=>{const n=prev.map(g=>g.id===grp.id?{...g,visible:e.target.checked}:g);localStorage.setItem('clinic_groups',JSON.stringify(n));return n;});}}/>
+                          Show
+                        </label>
+                        {/* Delete group */}
+                        <button onClick={()=>setClinicGroups(prev=>{const n=prev.filter(g=>g.id!==grp.id);localStorage.setItem('clinic_groups',JSON.stringify(n));return n;})}
+                          style={{background:'transparent',border:'1px solid rgba(255,255,255,0.06)',borderRadius:3,color:'#3d5478',fontSize:9,padding:'2px 7px',cursor:'pointer',flexShrink:0}}>Close</button>
+                      </div>
+                      {/* Clinic rows (collapsible - show first 5) */}
+                      <div style={{maxHeight:180,overflowY:'auto',padding:'6px 10px',display:'flex',flexDirection:'column',gap:3}}>
+                        {grp.clinics.slice(0,50).map((c,ci)=>(
+                          <div key={ci} style={{display:'flex',gap:6,alignItems:'center',padding:'4px 6px',borderRadius:4,background:'rgba(255,255,255,0.02)',border:'1px solid rgba(255,255,255,0.04)'}}>
+                            <div style={{width:6,height:6,borderRadius:'50%',background:grp.color,flexShrink:0}}/>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontSize:10,fontWeight:600,color:'#eef4ff',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.name}</div>
+                              <div style={{fontSize:8.5,color:'#3d5478',fontFamily:"'IBM Plex Mono',monospace",overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                                {[c.city,c.state].filter(Boolean).join(', ')||c.address||'No address'}
+                                {c.lat!==null?<span style={{color:'#34d399',marginLeft:4}}>✓</span>:<span style={{color:'#f97316',marginLeft:4}}></span>}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        {grp.clinics.length>50&&<div style={{fontSize:8,color:'#3d5478',textAlign:'center',padding:'4px'}}>…and {grp.clinics.length-50} more</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── COMPARE MODAL ── */}
       <div className={`modal-backdrop${activeTool === 'compare' ? ' open' : ''}`} onClick={()=>setActiveTool(activeTool === 'compare' ? null : 'compare')}>

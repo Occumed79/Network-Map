@@ -22,6 +22,5 @@ import "./modal-popup-fixes.css";
 import "./modal-content-polish.css";
 import "./performance-safety.css";
 import "./app-shell-layout.css";
-import "./workflow-ui.css";
 
 createRoot(document.getElementById("root")!).render(<App />);

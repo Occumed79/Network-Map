@@ -132,6 +132,7 @@ export async function fetchMapInventory(bounds: {
   serviceType?: string;
   trustTier?: string;
   limit?: number;
+  signal?: AbortSignal;
 }): Promise<{ providers: MapInventoryProvider[]; total: number }> {
   const params = new URLSearchParams();
   params.set('north', String(bounds.north));
@@ -142,7 +143,7 @@ export async function fetchMapInventory(bounds: {
   if (bounds.trustTier) params.set('trustTier', bounds.trustTier);
   if (bounds.limit) params.set('limit', String(bounds.limit));
 
-  const response = await fetch(`/api/map-inventory?${params.toString()}`);
+  const response = await fetch(`/api/map-inventory?${params.toString()}`, { signal: bounds.signal });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
     const message = data && typeof data === 'object' && 'error' in data

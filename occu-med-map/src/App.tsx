@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import * as topojson from 'topojson-client';
 import * as XLSX from 'xlsx';
@@ -41,10 +41,10 @@ const SERVICE_PRESENCE_OPTIONS = [
 ] as const;
 
 const INITIAL_DATASET_STATUS: Record<DatasetKey, DatasetLoadState> = {
-  bluehive: {loading:true, error:'', loaded:false},
-  dentists: {loading:true, error:'', loaded:false},
-  indexed: {loading:true, error:'', loaded:false},
-  myClinics: {loading:true, error:'', loaded:false},
+  bluehive: {loading:false, error:'', loaded:false},
+  dentists: {loading:false, error:'', loaded:false},
+  indexed: {loading:false, error:'', loaded:false},
+  myClinics: {loading:false, error:'', loaded:false},
 };
 
 function LayerToggle({label,checked,onChange,status,disabled=false}: {
@@ -1120,6 +1120,7 @@ export default function App() {
   const [inventoryData, setInventoryData] = useState<MapInventoryProvider[]>([]);
   const [inventoryLoading, setInventoryLoading] = useState(false);
   const [inventoryError, setInventoryError] = useState('');
+  const [serviceInventoryEnabled, setServiceInventoryEnabled] = useState(false);
   const inventoryLayerRef = useRef<ReturnType<typeof createClusteredLayer>|null>(null);
   const inventoryFetchRef = useRef<AbortController|null>(null);
   const [showIndexedProviders, setShowIndexedProviders] = useState(false);
@@ -1130,7 +1131,7 @@ export default function App() {
   const [myClinicsData, setMyClinicsData] = useState<any[]>([]);
   const [showDatasetBrowser, setShowDatasetBrowser] = useState(false);
   const [datasetStatus, setDatasetStatus] = useState<Record<DatasetKey, DatasetLoadState>>(INITIAL_DATASET_STATUS);
-  const [datasetRefreshKey, setDatasetRefreshKey] = useState(0);
+  const datasetRequestsRef = useRef<Partial<Record<DatasetKey, Promise<void>>>>({});
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [indexedLayerData, setIndexedLayerData] = useState<any[]>([]);
   const [outreachNotes, setOutreachNotes] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_notes')||'{}'); } catch { return {}; } });
@@ -1499,54 +1500,60 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
-  // ── Load provider-layer datasets once for Layers and Dataset Browser ───────
-  useEffect(()=>{
-    let active = true;
-    const sources: Array<{
-      key: DatasetKey;
-      url: string;
-      setData: React.Dispatch<React.SetStateAction<any[]>>;
-    }> = [
-      {key:'bluehive', url:'/api/provider-layers/bluehive', setData:setBlueHiveData},
-      {key:'dentists', url:'/api/provider-layers/dentists', setData:setDentistData},
-      {key:'indexed', url:'/api/provider-layers/indexed?limit=100000', setData:setIndexedLayerData},
-      {key:'myClinics', url:'/api/provider-layers/my-clinics', setData:setMyClinicsData},
-    ];
-
-    setDatasetStatus(prev=>Object.fromEntries(
-      Object.entries(prev).map(([key, value])=>[key, {...value, loading:true, error:''}]),
-    ) as Record<DatasetKey, DatasetLoadState>);
-
-    void Promise.all(sources.map(async ({key,url,setData})=>{
+  const loadProviderDataset = useCallback((key: DatasetKey) => {
+    if(datasetRequestsRef.current[key]) return datasetRequestsRef.current[key];
+    const sourceByKey: Record<DatasetKey,string> = {
+      bluehive:'bluehive',
+      dentists:'dentists',
+      indexed:'indexed',
+      myClinics:'my-clinics',
+    };
+    const request = (async ()=>{
+      setDatasetStatus(prev=>({...prev,[key]:{loading:true,error:'',loaded:false}}));
       try {
-        const response = await fetch(url);
+        const params = new URLSearchParams({limit:'500',page:'1'});
+        const map = mapRef.current;
+        if(map) {
+          const bounds = map.getBounds();
+          params.set('north',String(bounds.getNorth()));
+          params.set('south',String(bounds.getSouth()));
+          params.set('east',String(bounds.getEast()));
+          params.set('west',String(bounds.getWest()));
+        }
+        const response = await fetch(`/api/provider-layers/${sourceByKey[key]}?${params.toString()}`);
         const data = await response.json().catch(()=>null);
-        if(!response.ok) {
-          const detail = data && typeof data.error === 'string' ? `: ${data.error}` : '';
-          throw new Error(`HTTP ${response.status}${detail}`);
+        const responseError = data && typeof data.error === 'string' ? data.error : '';
+        if(!response.ok || responseError) {
+          throw new Error(responseError || `HTTP ${response.status}`);
         }
         const providers = Array.isArray(data?.providers) ? data.providers : [];
-        if(!active) return;
-        setData(providers);
+        if(key==='bluehive') setBlueHiveData(providers);
+        else if(key==='dentists') setDentistData(providers);
+        else if(key==='indexed') setIndexedLayerData(providers);
+        else setMyClinicsData(providers);
         setDatasetStatus(prev=>({...prev,[key]:{loading:false,error:'',loaded:true}}));
       } catch (error) {
-        if(!active) return;
-        setData([]);
+        if(key==='bluehive') setShowBlueHive(false);
+        else if(key==='dentists') setShowDentists(false);
+        else if(key==='indexed') setShowIndexedProviders(false);
+        else setShowMyClinicsLayer(false);
         setDatasetStatus(prev=>({...prev,[key]:{
           loading:false,
           loaded:false,
           error:error instanceof Error ? error.message : 'Provider layer request failed',
         }}));
+      } finally {
+        delete datasetRequestsRef.current[key];
       }
-    }));
-
-    return ()=>{ active = false; };
-  },[datasetRefreshKey]);
+    })();
+    datasetRequestsRef.current[key] = request;
+    return request;
+  },[]);
 
   // ── Map Inventory: load indexed providers from Neon on map load + pan/zoom ──
   useEffect(()=>{
     const map = mapRef.current;
-    if (!map || !mapReady) return;
+    if (!map || !mapReady || !serviceInventoryEnabled) return;
 
     let debounceTimer: ReturnType<typeof setTimeout>|null = null;
 
@@ -1594,7 +1601,7 @@ export default function App() {
       if(inventoryFetchRef.current) inventoryFetchRef.current.abort();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[mapReady, metric]);
+  },[mapReady, metric, serviceInventoryEnabled]);
 
   const activeToolRef = React.useRef(activeTool);
   React.useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
@@ -3083,6 +3090,24 @@ export default function App() {
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER
   // ─────────────────────────────────────────────────────────────────────────
+  function toggleProviderLayer(key:DatasetKey, checked:boolean) {
+    if(key==='indexed') setShowIndexedProviders(checked);
+    else if(key==='bluehive') setShowBlueHive(checked);
+    else if(key==='dentists') setShowDentists(checked);
+    else setShowMyClinicsLayer(checked);
+    if(checked && !datasetStatus[key].loaded && !datasetStatus[key].loading) {
+      void loadProviderDataset(key);
+    }
+  }
+
+  function providerLayerStatus(key:DatasetKey, count:number, emptyMessage:string) {
+    const state=datasetStatus[key];
+    if(state.loading) return 'Loading…';
+    if(state.error) return state.error;
+    if(!state.loaded) return 'Load when enabled';
+    return count===0 ? emptyMessage : `${count.toLocaleString()} loaded`;
+  }
+
   const selectedService = SERVICE_PRESENCE_OPTIONS.find(service=>service.key===metric) || SERVICE_PRESENCE_OPTIONS[0];
   const hasRadiusCenter = !!dropCenter || (lastRadiusLatRef.current!==null && lastRadiusLngRef.current!==null);
   const usLayerStatus = showUsDiagnostics ? (stateGeoRef.current ? 'Available' : 'Loading U.S. map data…') : 'Enable U.S. Diagnostics first';
@@ -3143,13 +3168,15 @@ export default function App() {
             </div>
             <div className="workflow-service-grid">
             {SERVICE_PRESENCE_OPTIONS.map(s=>(
-              <button key={s.key} title={`Service keys: ${s.serviceKeys.join(', ')}`} className={`mbtn${metric===s.key?' active':''}`} onClick={()=>setMetric(s.key)}>
+              <button key={s.key} title={`Service keys: ${s.serviceKeys.join(', ')}`} className={`mbtn${metric===s.key?' active':''}`} onClick={()=>{setMetric(s.key);setServiceInventoryEnabled(true);}}>
                 {s.label}
               </button>
             ))}
             </div>
             <div className={`workflow-service-status${inventoryError?' error':inventoryLoading?' loading':''}`} role="status">
-              {inventoryLoading
+              {!serviceInventoryEnabled
+                ? 'Choose a service to load provider inventory'
+                : inventoryLoading
                 ? `Loading ${selectedService.label}…`
                 : inventoryError
                   ? 'Could not load provider inventory'
@@ -3182,10 +3209,10 @@ export default function App() {
               <LayerToggle label="Radius Ring" checked={showRadius} onChange={setShowRadius} disabled={!showUsDiagnostics||!hasRadiusCenter} status={!showUsDiagnostics?'Enable U.S. Diagnostics first':!hasRadiusCenter?'Select a location first':showRadius?'70 mile radius visible':'Ready'}/>
               <LayerToggle label="Glow Effects" checked={showGlowPoints} onChange={setShowGlowPoints} status={showGlowPoints?'Glow styling active':'Standard marker styling'}/>
               <LayerToggle label="City Dots" checked={showCityDots} onChange={setShowCityDots} disabled={!showUsDiagnostics} status={showCityDots?'City dots visible':usLayerStatus}/>
-              <LayerToggle label="Indexed Providers" checked={showIndexedProviders} onChange={setShowIndexedProviders} disabled={datasetStatus.indexed.loading||!!datasetStatus.indexed.error} status={datasetStatus.indexed.loading?'Loading indexed providers…':datasetStatus.indexed.error||`${indexedLayerData.length.toLocaleString()} indexed providers loaded`}/>
-              <LayerToggle label="BlueHive Providers" checked={showBlueHive} onChange={setShowBlueHive} disabled={datasetStatus.bluehive.loading||!!datasetStatus.bluehive.error} status={datasetStatus.bluehive.loading?'Loading BlueHive providers…':datasetStatus.bluehive.error||`${blueHiveData.length.toLocaleString()} BlueHive providers loaded`}/>
-              <LayerToggle label="Dentists" checked={showDentists} onChange={setShowDentists} disabled={datasetStatus.dentists.loading||!!datasetStatus.dentists.error} status={datasetStatus.dentists.loading?'Loading dentists…':datasetStatus.dentists.error||`${dentistData.length.toLocaleString()} dentists loaded`}/>
-              <LayerToggle label="My Clinics" checked={showMyClinicsLayer} onChange={setShowMyClinicsLayer} disabled={datasetStatus.myClinics.loading||!!datasetStatus.myClinics.error||myClinicsData.length===0} status={datasetStatus.myClinics.loading?'Loading clinics…':datasetStatus.myClinics.error||(myClinicsData.length===0?'No uploaded clinics yet':`${myClinicsData.length.toLocaleString()} clinics loaded`)}/>
+              <LayerToggle label="Indexed Providers" checked={showIndexedProviders} onChange={checked=>toggleProviderLayer('indexed',checked)} disabled={datasetStatus.indexed.loading} status={providerLayerStatus('indexed',indexedLayerData.length,'0 loaded')}/>
+              <LayerToggle label="BlueHive Providers" checked={showBlueHive} onChange={checked=>toggleProviderLayer('bluehive',checked)} disabled={datasetStatus.bluehive.loading} status={providerLayerStatus('bluehive',blueHiveData.length,'0 loaded')}/>
+              <LayerToggle label="Dentists" checked={showDentists} onChange={checked=>toggleProviderLayer('dentists',checked)} disabled={datasetStatus.dentists.loading} status={providerLayerStatus('dentists',dentistData.length,'0 loaded')}/>
+              <LayerToggle label="My Clinics" checked={showMyClinicsLayer} onChange={checked=>toggleProviderLayer('myClinics',checked)} disabled={datasetStatus.myClinics.loading} status={providerLayerStatus('myClinics',myClinicsData.length,'No uploaded clinics yet')}/>
               <button className="workflow-dataset-button" onClick={()=>setShowDatasetBrowser(true)}>▦ Browse Datasets</button>
               {clinicGroups.map(grp=><LayerToggle
                 key={grp.id}
@@ -3312,7 +3339,7 @@ export default function App() {
           indexedData={indexedLayerData}
           myClinicsData={myClinicsData}
           status={datasetStatus}
-          onRetry={()=>setDatasetRefreshKey(key=>key+1)}
+          onLoad={key=>void loadProviderDataset(key)}
         />
 
         {/* ── MAP ── */}

@@ -145,6 +145,9 @@ export async function fetchMapInventory(bounds: {
 
   const response = await fetch(`/api/map-inventory?${params.toString()}`, { signal: bounds.signal });
   const data = await response.json().catch(() => null);
+  if (data && typeof data === 'object' && 'error' in data && (data as { error?: unknown }).error) {
+    throw new Error(String((data as { error: unknown }).error));
+  }
   if (!response.ok) {
     const message = data && typeof data === 'object' && 'error' in data
       ? String((data as { error?: unknown }).error)

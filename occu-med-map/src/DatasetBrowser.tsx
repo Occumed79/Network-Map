@@ -43,7 +43,7 @@ type Props = {
   indexedData:DatasetProvider[];
   myClinicsData:DatasetProvider[];
   status:Record<DatasetKey,DatasetLoadState>;
-  onRetry:()=>void;
+  onLoad:(key:DatasetKey)=>void;
 };
 
 const PAGE_SIZE = 25;
@@ -64,7 +64,7 @@ function mapsLink(provider:DatasetProvider) {
 }
 
 export default function DatasetBrowser({
-  open,onClose,blueHiveData,dentistData,indexedData,myClinicsData,status,onRetry,
+  open,onClose,blueHiveData,dentistData,indexedData,myClinicsData,status,onLoad,
 }:Props) {
   const [activeDataset,setActiveDataset] = useState<DatasetKey>('bluehive');
   const [search,setSearch] = useState('');
@@ -75,6 +75,13 @@ export default function DatasetBrowser({
     setSearch('');
     setPage(0);
   },[open]);
+
+  useEffect(()=>{
+    const activeStatus=status[activeDataset];
+    if(open && !activeStatus.loading && !activeStatus.loaded && !activeStatus.error) {
+      onLoad(activeDataset);
+    }
+  },[activeDataset,onLoad,open,status]);
 
   const dataByKey:Record<DatasetKey,DatasetProvider[]> = {
     bluehive:blueHiveData,
@@ -123,7 +130,7 @@ export default function DatasetBrowser({
             onClick={()=>{setActiveDataset(dataset.key);setSearch('');setPage(0);}}
           >
             <span>{dataset.label}</span>
-            <strong>{datasetState.loading?'…':datasetState.error?'!':count.toLocaleString()}</strong>
+            <strong>{datasetState.loading?'Loading…':datasetState.error?'Error':datasetState.loaded?count.toLocaleString():'Load to count'}</strong>
           </button>;
         })}
       </div>
@@ -147,14 +154,18 @@ export default function DatasetBrowser({
         {!activeStatus.loading && activeStatus.error && <div className="dataset-state error">
           <strong>Could not load {activeMeta.label}</strong>
           <span>{activeStatus.error}</span>
-          <button onClick={onRetry}>Retry datasets</button>
+          <button onClick={()=>onLoad(activeDataset)}>Retry dataset</button>
         </div>}
-        {!activeStatus.loading && !activeStatus.error && activeData.length===0 && <div className="dataset-state empty">
+        {!activeStatus.loading && !activeStatus.loaded && !activeStatus.error && <div className="dataset-state empty">
+          <strong>Load to count</strong>
+          <span>Only the active dataset is requested.</span>
+        </div>}
+        {!activeStatus.loading && activeStatus.loaded && !activeStatus.error && activeData.length===0 && <div className="dataset-state empty">
           <strong>{activeDataset==='myClinics'?'No uploaded clinics yet.':`0 records returned from ${activeMeta.endpoint}`}</strong>
           {activeDataset!=='myClinics' && <span>Database import required for this dataset.</span>}
         </div>}
-        {!activeStatus.loading && !activeStatus.error && activeData.length>0 && filtered.length===0 && <div className="dataset-state empty"><strong>No matching records</strong><span>Clear the search to view all {activeData.length.toLocaleString()} records.</span></div>}
-        {!activeStatus.loading && !activeStatus.error && rows.length>0 && <div className="dataset-table-wrap">
+        {!activeStatus.loading && activeStatus.loaded && !activeStatus.error && activeData.length>0 && filtered.length===0 && <div className="dataset-state empty"><strong>No matching records</strong><span>Clear the search to view all {activeData.length.toLocaleString()} loaded records.</span></div>}
+        {!activeStatus.loading && activeStatus.loaded && !activeStatus.error && rows.length>0 && <div className="dataset-table-wrap">
           <table className="dataset-table">
             <thead><tr><th>Provider</th><th>Location</th><th>Contact</th><th>Source</th></tr></thead>
             <tbody>{rows.map((provider,index)=><tr key={String(provider.source_id || provider.npi || `${providerName(provider)}-${index}`)}>
@@ -168,7 +179,7 @@ export default function DatasetBrowser({
       </div>
 
       <footer className="dataset-footer">
-        <span>{filtered.length.toLocaleString()} records · page {page+1} of {pageCount}</span>
+        <span>{activeStatus.loaded?`${filtered.length.toLocaleString()} loaded records · page ${page+1} of ${pageCount}`:'Dataset not loaded'}</span>
         <div><button disabled={page===0} onClick={()=>setPage(current=>Math.max(0,current-1))}>Previous</button><button disabled={page>=pageCount-1} onClick={()=>setPage(current=>Math.min(pageCount-1,current+1))}>Next</button></div>
       </footer>
     </section>

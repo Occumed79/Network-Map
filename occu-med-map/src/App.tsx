@@ -1041,7 +1041,7 @@ export default function App() {
   const [liveFacets, setLiveFacets] = useState<Record<string, number>>({});
   const [livePriorityCounts, setLivePriorityCounts] = useState<any>(null);
   const [liveHighlightId, setLiveHighlightId] = useState<any>(null);
-  const [liveHint, setLiveHint] = useState('Click anywhere on the map to search for facilities');
+  const [liveHint, setLiveHint] = useState('Choose a location on the map or search for a city to run Live Finder.');
   const [liveError, setLiveError] = useState('');
   const [liveSearched, setLiveSearched] = useState(false);
   const [liveMirror, setLiveMirror] = useState('');
@@ -1390,6 +1390,7 @@ export default function App() {
       preferCanvas:true,
       attributionControl:false,
     });
+    map.doubleClickZoom.disable();
     mapRef.current = map;
 
     // Tile layer with dark filter
@@ -1408,20 +1409,10 @@ export default function App() {
     // Load GeoJSON only if US Diagnostics is already enabled
     if (showUsDiagnostics) loadStateGeo(map);
 
-    // Tool-aware, globally-safe map click. A normal click on a clean global map
-    // does nothing beyond optionally tracking a lightweight selected coordinate.
-    // U.S.-only logic only runs when a U.S. coverage tool is active AND the click
-    // is inside the U.S.
+    // Single clicks remain reserved for tools that explicitly use them.
     map.on('click',(e:L.LeafletMouseEvent)=>{
       const { lat, lng } = e.latlng;
       const tool = activeToolRef.current;
-
-      if (tool === 'liveFinder') {
-        // Coordinate-first global live search.
-        setDropCenter({ lat, lng });
-        doLiveSearch(lat, lng);
-        return;
-      }
 
       if (tool === 'radius') {
         // Radius tool is explicit and separate: set center, open UI, draw ring.
@@ -1437,9 +1428,12 @@ export default function App() {
         setLocalPopInfo(est ?? null);
         return;
       }
+    });
 
-      // Normal global map behavior:
-      // run coordinate-first live provider discovery without U.S. diagnostics.
+    map.on('dblclick',(e:L.LeafletMouseEvent)=>{
+      const tool = activeToolRef.current;
+      if (tool !== null && tool !== 'liveFinder') return;
+      const { lat, lng } = e.latlng;
       setLocalPopInfo(null);
       setDropCenter({ lat, lng });
       setActiveTool('liveFinder');
@@ -2322,7 +2316,7 @@ export default function App() {
           built from U.S.-only datasets and are not shown outside the United States.
           Use Live Finder below to search real facilities here via OpenStreetMap.
         </div>
-        <button className="export-btn" style={{marginBottom:8}} onClick={()=>{ setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder'); doLiveSearch(lat,lng); }}>SEARCH LIVE PROVIDERS</button>
+        <button className="export-btn" style={{marginBottom:8}} onClick={()=>{ setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder'); doLiveSearch(lat,lng,undefined,label); }}>SEARCH LIVE PROVIDERS</button>
         <DriveTimeBox fromLat={lat} fromLng={lng} fromName={label} locB={null}/>
         <button className="export-btn" onClick={()=>doExportReport(rd)}>↓ EXPORT LOCATION REPORT</button>
       </div>
@@ -2497,11 +2491,25 @@ export default function App() {
     return `Sources: ${ok}/${total} returned${failed?` · ${failed} failed`:''} · ${resultCount} facilit${resultCount===1?'y':'ies'}`;
   }
 
-  async function doLiveSearch(lat:number,lng:number, categoryOverride?: string) {
+  async function doLiveSearch(lat:number,lng:number, categoryOverride?: string, selectedLocationLabel?: string) {
     const categoryForSearch = categoryOverride || liveBackendCategoryRef.current;
     const map=mapRef.current;
     if(!map) return;
     if(NATIVE_DRIVE_TIME_ENABLED) providerEta.clear();
+    const validCoordinates = Number.isFinite(lat) && Number.isFinite(lng)
+      && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+    const cityState = validCoordinates ? await reverseGeocodeCityState(lat,lng) : null;
+    if(!validCoordinates || (!cityState && !selectedLocationLabel)) {
+      lastRadiusRef.current=null;
+      setLiveLoading(false);
+      setLiveResults([]);
+      setLiveError('');
+      setLiveSearched(false);
+      setLiveMirror('');
+      setLiveLocation('');
+      setLiveHint('Choose a location on the map or search for a city to run Live Finder.');
+      return;
+    }
     setLiveLoading(true);
     setLiveResults([]);
     setLiveHint('Searching...');
@@ -2513,19 +2521,14 @@ export default function App() {
     setNpiResults([]);
     setNpiError('');
     lastRadiusRef.current={lat,lng};
+    setLiveLocation(selectedLocationLabel || cityState?.display || 'Selected location');
 
     if(liveCircleRef.current) { try{map.removeLayer(liveCircleRef.current);}catch(e){} }
     if(livePinRef.current) { try{map.removeLayer(livePinRef.current);}catch(e){} }
     liveCircleRef.current=L.circle([lat,lng],{radius:liveRadius*1609.34,color:'#22d3ee',weight:1.5,opacity:0.45,dashArray:'7 5',fillColor:'#06b6d4',fillOpacity:0.03,interactive:false}).addTo(map);
     livePinRef.current=L.marker([lat,lng],{icon:L.divIcon({className:'',html:'<div style="width:14px;height:14px;border-radius:50%;background:#06b6d4;border:2.5px solid #fff;box-shadow:0 0 0 4px rgba(6,182,212,0.28),0 0 14px rgba(6,182,212,0.6);"></div>',iconSize:[14,14],iconAnchor:[7,7]}),zIndexOffset:3000,interactive:false}).addTo(map);
 
-    try { await revGeo(lat,lng); } catch(e){}
-
     try {
-    // Reverse geocode to get city/state for universal discovery
-    let cityState:{city:string;state:string}|null = null;
-    try { cityState = await reverseGeocodeCityState(lat,lng); } catch(e){}
-
     const backendParams=new URLSearchParams({
       lat:String(lat),
       lng:String(lng),
@@ -2933,7 +2936,7 @@ export default function App() {
     setLocalPopInfo(null);
     setDropCenter({ lat: lLat, lng: lLng });
     setActiveTool('liveFinder');
-    doLiveSearch(lLat, lLng);
+    doLiveSearch(lLat, lLng, undefined, name);
   }
 
   // ── Cursor light (Liquid Glass) ──────────────────────────────────────────
@@ -3456,7 +3459,7 @@ export default function App() {
                 </button>
               </div>
               <div style={{fontSize:10,color:'#3d5478',lineHeight:1.5}}>
-                {liveLocation?`Center · ${liveLocation}`:'Coordinate-first live search · click the map or search an address.'}
+                {liveLocation?`Center · ${liveLocation}`:'Coordinate-first live search · double-click the map or search an address.'}
                 {liveMirror&&<div style={{fontSize:9,color:'#2d4060',marginTop:3}}>{liveMirror}</div>}
               </div>
               {NATIVE_DRIVE_TIME_ENABLED&&!npiCategory&&liveResults.length>0&&(
@@ -3498,7 +3501,7 @@ export default function App() {
                 <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:'#89d4fe',whiteSpace:'nowrap'}}>{liveRadius} mi</span>
               </div>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'6px 8px',borderRadius:8,background:'rgba(125,211,252,0.06)',border:'1px solid rgba(125,211,252,0.18)'}}>
-                <span style={{fontSize:9.5,color:'#9cc7eb'}}>Map clicks run coordinate-first live search</span>
+                <span style={{fontSize:9.5,color:'#9cc7eb'}}>Double-click the map to run a live search</span>
                 <span style={{fontSize:9,color:'#285b78',fontFamily:"'IBM Plex Mono',monospace"}}>{liveSearched?'Search active':'Choose a location'}</span>
               </div>
               <div style={{fontSize:8.5,color:'#64748b',fontFamily:"'IBM Plex Mono',monospace",letterSpacing:'0.08em',marginBottom:4}}>
@@ -3696,7 +3699,7 @@ export default function App() {
                 </div>
               </div>
               {!npiLoading&&!npiCategory&&!liveLoading&&!liveError&&liveResults.length===0&&!liveSearched&&(
-                <div className="lp-empty show"><strong>Choose a search location.</strong><span>Use the address search above or click the map to find nearby facilities.</span></div>
+                <div className="lp-empty show">Choose a location on the map or search for a city to run Live Finder.</div>
               )}
               {!liveLoading&&!liveError&&!npiCategory&&liveSearched&&liveResults.length===0&&(
                 <div className="lp-empty show">No live facilities found within {liveRadius} mi of this location. Try a larger radius or a different spot.</div>

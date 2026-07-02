@@ -23,9 +23,48 @@ import { liveResultsToEtaCandidates } from './features/driveTime/leafletProvider
 import { useProviderEta } from './features/driveTime/useProviderEta';
 import './features/driveTime/driveTimeControls.css';
 import './features/driveTime/driveTimeBadge.css';
-import DatasetBrowser from './DatasetBrowser';
+import DatasetBrowser, { type DatasetKey, type DatasetLoadState } from './DatasetBrowser';
 
 const NATIVE_DRIVE_TIME_ENABLED = import.meta.env.VITE_NATIVE_DRIVE_TIME === 'true';
+
+const SERVICE_PRESENCE_OPTIONS = [
+  {key:'primaryCare', label:'Primary Care / FFD', serviceKeys:['physicalExam','primaryCare','clinic','doctor']},
+  {key:'specialists', label:'Specialists', serviceKeys:['specialists','doctor','hospital']},
+  {key:'urgentCare', label:'Urgent Care', serviceKeys:['urgentCare','urgent','clinic']},
+  {key:'dental', label:'Dental / DD 2813', serviceKeys:['dental','dentist']},
+  {key:'pharmacy', label:'Pharmacy', serviceKeys:['pharmacy','drugstore']},
+  {key:'vaccinations', label:'Vaccinations', serviceKeys:['vaccinations','pharmacy','clinic']},
+  {key:'occMed', label:'Occ. Medicine', serviceKeys:['occMed','occupational','clinic']},
+  {key:'drugTest', label:'Drug Test / MRO', serviceKeys:['drugTest','drugscreen','medical_lab','lab']},
+  {key:'audiometry', label:'Audiometry', serviceKeys:['audiometry','audiology']},
+  {key:'vision', label:'Vision Screening', serviceKeys:['vision','eye']},
+] as const;
+
+const INITIAL_DATASET_STATUS: Record<DatasetKey, DatasetLoadState> = {
+  bluehive: {loading:true, error:'', loaded:false},
+  dentists: {loading:true, error:'', loaded:false},
+  indexed: {loading:true, error:'', loaded:false},
+  myClinics: {loading:true, error:'', loaded:false},
+};
+
+function LayerToggle({label,checked,onChange,status,disabled=false}: {
+  label:string;
+  checked:boolean;
+  onChange:(checked:boolean)=>void;
+  status:string;
+  disabled?:boolean;
+}) {
+  return <div className={`workflow-layer${checked?' active':''}${disabled?' disabled':''}`}>
+    <div className="workflow-layer-copy">
+      <span className="workflow-layer-name">{label}</span>
+      <span className="workflow-layer-status">{status}</span>
+    </div>
+    <label className="tog-switch">
+      <input aria-label={label} type="checkbox" checked={checked} disabled={disabled} onChange={e=>onChange(e.target.checked)}/>
+      <span className="tog-slider"/>
+    </label>
+  </div>;
+}
 
 async function copyTextSafely(text:string):Promise<boolean> {
   try {
@@ -969,6 +1008,8 @@ export default function App() {
   const popDensityLayerRef = useRef<L.LayerGroup|null>(null);
   const clinicLayerRef = useRef<L.LayerGroup|null>(null);
   const blueHiveLayerRef = useRef<ReturnType<typeof createClusteredLayer>|null>(null);
+  const indexedProviderLayerRef = useRef<ReturnType<typeof createClusteredLayer>|null>(null);
+  const myClinicsLayerRef = useRef<ReturnType<typeof createClusteredLayer>|null>(null);
   const savedRadiusLayerRef = useRef<L.LayerGroup|null>(null);
   const rawStateFeaturesRef = useRef<any[]>([]);
   const clinicFileInputRef = useRef<HTMLInputElement>(null);
@@ -1076,14 +1117,20 @@ export default function App() {
   const [showGlowPoints, setShowGlowPoints] = useState(false);
   const [showBlueHive, setShowBlueHive] = useState(false);
   const [blueHiveData, setBlueHiveData] = useState<any[]>([]);
-  const [showInventory, setShowInventory] = useState(true);
   const [inventoryData, setInventoryData] = useState<MapInventoryProvider[]>([]);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [inventoryError, setInventoryError] = useState('');
   const inventoryLayerRef = useRef<ReturnType<typeof createClusteredLayer>|null>(null);
   const inventoryFetchRef = useRef<AbortController|null>(null);
+  const [showIndexedProviders, setShowIndexedProviders] = useState(false);
   const [showDentists, setShowDentists] = useState(false);
   const [dentistData, setDentistData] = useState<any[]>([]);
   const dentistLayerRef = useRef<ReturnType<typeof createClusteredLayer>|null>(null);
+  const [showMyClinicsLayer, setShowMyClinicsLayer] = useState(false);
+  const [myClinicsData, setMyClinicsData] = useState<any[]>([]);
   const [showDatasetBrowser, setShowDatasetBrowser] = useState(false);
+  const [datasetStatus, setDatasetStatus] = useState<Record<DatasetKey, DatasetLoadState>>(INITIAL_DATASET_STATUS);
+  const [datasetRefreshKey, setDatasetRefreshKey] = useState(0);
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [indexedLayerData, setIndexedLayerData] = useState<any[]>([]);
   const [outreachNotes, setOutreachNotes] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_notes')||'{}'); } catch { return {}; } });
@@ -1452,29 +1499,49 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
-  // ── Load BlueHive provider data from API ───────────────────────────────────
+  // ── Load provider-layer datasets once for Layers and Dataset Browser ───────
   useEffect(()=>{
-    fetch('/api/provider-layers/bluehive')
-      .then(r=>r.json())
-      .then(data=>setBlueHiveData(data.providers||[]))
-      .catch(()=>setBlueHiveData([]));
-  },[]);
+    let active = true;
+    const sources: Array<{
+      key: DatasetKey;
+      url: string;
+      setData: React.Dispatch<React.SetStateAction<any[]>>;
+    }> = [
+      {key:'bluehive', url:'/api/provider-layers/bluehive', setData:setBlueHiveData},
+      {key:'dentists', url:'/api/provider-layers/dentists', setData:setDentistData},
+      {key:'indexed', url:'/api/provider-layers/indexed?limit=100000', setData:setIndexedLayerData},
+      {key:'myClinics', url:'/api/provider-layers/my-clinics', setData:setMyClinicsData},
+    ];
 
-  // ── Load Dentist data from API ─────────────────────────────────────────────
-  useEffect(()=>{
-    fetch('/api/provider-layers/dentists')
-      .then(r=>r.json())
-      .then(data=>setDentistData(data.providers||[]))
-      .catch(()=>setDentistData([]));
-  },[]);
+    setDatasetStatus(prev=>Object.fromEntries(
+      Object.entries(prev).map(([key, value])=>[key, {...value, loading:true, error:''}]),
+    ) as Record<DatasetKey, DatasetLoadState>);
 
-  // ── Load Indexed provider data from API ────────────────────────────────────
-  useEffect(()=>{
-    fetch('/api/provider-layers/indexed?limit=100000')
-      .then(r=>r.json())
-      .then(data=>setIndexedLayerData(data.providers||[]))
-      .catch(()=>setIndexedLayerData([]));
-  },[]);
+    void Promise.all(sources.map(async ({key,url,setData})=>{
+      try {
+        const response = await fetch(url);
+        const data = await response.json().catch(()=>null);
+        if(!response.ok) {
+          const detail = data && typeof data.error === 'string' ? `: ${data.error}` : '';
+          throw new Error(`HTTP ${response.status}${detail}`);
+        }
+        const providers = Array.isArray(data?.providers) ? data.providers : [];
+        if(!active) return;
+        setData(providers);
+        setDatasetStatus(prev=>({...prev,[key]:{loading:false,error:'',loaded:true}}));
+      } catch (error) {
+        if(!active) return;
+        setData([]);
+        setDatasetStatus(prev=>({...prev,[key]:{
+          loading:false,
+          loaded:false,
+          error:error instanceof Error ? error.message : 'Provider layer request failed',
+        }}));
+      }
+    }));
+
+    return ()=>{ active = false; };
+  },[datasetRefreshKey]);
 
   // ── Map Inventory: load indexed providers from Neon on map load + pan/zoom ──
   useEffect(()=>{
@@ -1490,6 +1557,8 @@ export default function App() {
         if(inventoryFetchRef.current) inventoryFetchRef.current.abort();
         const ac = new AbortController();
         inventoryFetchRef.current = ac;
+        setInventoryLoading(true);
+        setInventoryError('');
         fetchMapInventory({
           north: bounds.getNorth(),
           south: bounds.getSouth(),
@@ -1497,10 +1566,18 @@ export default function App() {
           west: bounds.getWest(),
           serviceType: metric,
           limit: 1000,
+          signal: ac.signal,
         }).then(data=>{
-          if(!ac.signal.aborted) setInventoryData(data.providers||[]);
-        }).catch(()=>{
-          if(!ac.signal.aborted) setInventoryData([]);
+          if(!ac.signal.aborted) {
+            setInventoryData(data.providers||[]);
+            setInventoryLoading(false);
+          }
+        }).catch((error)=>{
+          if(!ac.signal.aborted) {
+            setInventoryData([]);
+            setInventoryError(error instanceof Error ? error.message : 'Could not load provider inventory');
+            setInventoryLoading(false);
+          }
         });
       }, 400);
     }
@@ -1879,17 +1956,17 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[showDentists, dentistData, showGlowPoints]);
 
-  // ── Indexed Provider Inventory pins (clustered) ─────────────────────────────
+  // ── Service Presence inventory pins (clustered) ────────────────────────────
   useEffect(()=>{
     const map = mapRef.current;
     if (!map) return;
     if (inventoryLayerRef.current) { inventoryLayerRef.current.destroy(); inventoryLayerRef.current = null; }
-    if (!showInventory || inventoryData.length===0) return;
+    if (inventoryData.length===0) return;
     const trustColor = (t:string)=>t==='verified'?'#34d399':t==='registry'?'#60a5fa':t==='directory'?'#a78bfa':'#94a3b8';
     inventoryLayerRef.current = createClusteredLayer(map, inventoryData, {
       color: '#10b981',
       glow: showGlowPoints,
-      badgeLabel: 'Indexed providers',
+      badgeLabel: 'Service presence providers',
       buildPopup: (p:MapInventoryProvider)=>{
         const tc = trustColor(p.trustTier);
         return `<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:210px;max-width:280px;">
@@ -1909,7 +1986,47 @@ export default function App() {
     });
     return ()=>{ if (inventoryLayerRef.current) { inventoryLayerRef.current.destroy(); inventoryLayerRef.current = null; } };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[showInventory, inventoryData, showGlowPoints]);
+  },[inventoryData, showGlowPoints]);
+
+  // ── Full indexed provider layer (clustered) ────────────────────────────────
+  useEffect(()=>{
+    const map = mapRef.current;
+    if(!map) return;
+    if(indexedProviderLayerRef.current) { indexedProviderLayerRef.current.destroy(); indexedProviderLayerRef.current = null; }
+    if(!showIndexedProviders || indexedLayerData.length===0) return;
+    indexedProviderLayerRef.current = createClusteredLayer(map, indexedLayerData, {
+      color:'#10b981',
+      glow:showGlowPoints,
+      badgeLabel:'Indexed providers',
+      buildPopup:(p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
+        <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||p.name||'Unnamed'}</div>
+        ${p.address_1?`<div style="font-size:9.5px;color:#4a6888">${p.address_1}${p.city?', '+p.city:''}${p.state?' '+p.state:''}</div>`:''}
+        ${p.phone?`<div style="font-size:9.5px;color:#67e8f9;margin-top:2px">${p.phone}</div>`:''}
+        <div style="margin-top:6px;font-size:8.5px;color:#10b981;font-family:'IBM Plex Mono',monospace">INDEXED PROVIDER</div>
+      </div>`,
+    });
+    return ()=>{ if(indexedProviderLayerRef.current) { indexedProviderLayerRef.current.destroy(); indexedProviderLayerRef.current = null; } };
+  },[showIndexedProviders,indexedLayerData,showGlowPoints]);
+
+  // ── Persisted My Clinics provider layer (clustered) ────────────────────────
+  useEffect(()=>{
+    const map = mapRef.current;
+    if(!map) return;
+    if(myClinicsLayerRef.current) { myClinicsLayerRef.current.destroy(); myClinicsLayerRef.current = null; }
+    if(!showMyClinicsLayer || myClinicsData.length===0) return;
+    myClinicsLayerRef.current = createClusteredLayer(map, myClinicsData, {
+      color:'#8b5cf6',
+      glow:showGlowPoints,
+      badgeLabel:'My Clinics',
+      buildPopup:(p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
+        <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||p.name||'Unnamed'}</div>
+        ${p.address_1?`<div style="font-size:9.5px;color:#4a6888">${p.address_1}${p.city?', '+p.city:''}${p.state?' '+p.state:''}</div>`:''}
+        ${p.phone?`<div style="font-size:9.5px;color:#67e8f9;margin-top:2px">${p.phone}</div>`:''}
+        <div style="margin-top:6px;font-size:8.5px;color:#8b5cf6;font-family:'IBM Plex Mono',monospace">MY CLINIC</div>
+      </div>`,
+    });
+    return ()=>{ if(myClinicsLayerRef.current) { myClinicsLayerRef.current.destroy(); myClinicsLayerRef.current = null; } };
+  },[showMyClinicsLayer,myClinicsData,showGlowPoints]);
 
   async function handleClinicUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -2155,10 +2272,12 @@ export default function App() {
         try{ map.removeLayer(radiusCircleRef.current); }catch(e){}
         radiusCircleRef.current=null;
       }
+    } else if(dropCenter) {
+      drawRadiusCircle(dropCenter.lat,dropCenter.lng);
     } else if(lastRadiusLatRef.current!==null&&lastRadiusLngRef.current!==null) {
       drawRadiusCircle(lastRadiusLatRef.current,lastRadiusLngRef.current);
     }
-  },[showRadius]);
+  },[showRadius,dropCenter?.lat,dropCenter?.lng]);
 
   // ── Coverage Lookup ──────────────────────────────────────────────────────
   function handleCityInput(val:string) {
@@ -2964,6 +3083,10 @@ export default function App() {
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER
   // ─────────────────────────────────────────────────────────────────────────
+  const selectedService = SERVICE_PRESENCE_OPTIONS.find(service=>service.key===metric) || SERVICE_PRESENCE_OPTIONS[0];
+  const hasRadiusCenter = !!dropCenter || (lastRadiusLatRef.current!==null && lastRadiusLngRef.current!==null);
+  const usLayerStatus = showUsDiagnostics ? (stateGeoRef.current ? 'Available' : 'Loading U.S. map data…') : 'Enable U.S. Diagnostics first';
+
   return (
     <div className="app-wrap">
       <div className="cursor-light" />
@@ -3000,8 +3123,8 @@ export default function App() {
             <button className={`mbtn${activeTool === 'coverage' ? ' active' : ''}`} title="U.S. coverage diagnostics — population density, territory gap analysis" onClick={() => setActiveTool(activeTool === 'coverage' ? null : 'coverage')}>Coverage</button>
             <button className={`mbtn${activeTool === 'liveFinder' ? ' active' : ''}`} title="Search for healthcare facilities near any map location" onClick={() => setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder')}>Live Finder</button>
             <button className={`mbtn${activeTool === 'radius' ? ' active' : ''}`} title="Draw a radius circle and extract facilities within it" onClick={() => setActiveTool(activeTool === 'radius' ? null : 'radius')}>Radius Tool</button>
-            <button className={`mbtn${activeTool === 'directories' ? ' active' : ''}`} title="Browse provider datasets (BlueHive, Dentists, Indexed)" onClick={() => setActiveTool(activeTool === 'directories' ? null : 'directories')}>Directories</button>
-            <button className={`mbtn${activeTool === 'myClinics' ? ' active' : ''}`} title="Save and manage your preferred clinic list" onClick={() => setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>My Clinics</button>
+            <button className={`mbtn workflow-directory-btn${activeTool === 'directories' ? ' active' : ''}`} title="Browse provider source categories and network directories" onClick={() => setActiveTool(activeTool === 'directories' ? null : 'directories')}>⌕ Provider Directories</button>
+            <button className={`mbtn workflow-upload-btn${activeTool === 'myClinics' ? ' active' : ''}`} title="Import your own clinic list from CSV or Excel" onClick={() => setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>↑ Upload Clinics</button>
             <button className={`mbtn${activeTool === 'compare' ? ' active' : ''}`} title="Compare provider coverage across locations" onClick={() => setActiveTool(activeTool === 'compare' ? null : 'compare')}>Compare</button>
           </div>
           <div className="sb-divider"/>
@@ -3009,7 +3132,7 @@ export default function App() {
             <div className="hero-sub">Find occupational providers, compare prices, and build smarter coverage faster.</div>
             <div className="hero-actions">
               <button className={`hero-btn${showUsDiagnostics?' active':''}`} onClick={()=>setShowUsDiagnostics(v=>!v)}>U.S. Diagnostics</button>
-              <button className="hero-btn" onClick={()=>setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>My Clinics</button>
+              <button className="hero-btn workflow-upload-btn" onClick={()=>setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>Upload Clinics</button>
             </div>
           </div>
           <div className="sb-section">
@@ -3018,22 +3141,23 @@ export default function App() {
             <div style={{fontSize:'8.5px',color:'var(--muted)',marginBottom:'8px',lineHeight:'1.3'}}>
               Shows indexed provider locations from the database for the selected service type.
             </div>
-            {[
-              {key:'primaryCare',label:'Primary Care / FFD'},
-              {key:'specialists',label:'Specialists'},
-              {key:'urgentCare',label:'Urgent Care'},
-              {key:'dental',label:'Dental / DD 2813'},
-              {key:'pharmacy',label:'Pharmacy'},
-              {key:'vaccinations',label:'Vaccinations'},
-              {key:'occMed',label:'Occ. Medicine'},
-              {key:'drugTest',label:'Drug Test / MRO'},
-              {key:'audiometry',label:'Audiometry'},
-              {key:'vision',label:'Vision Screening'},
-            ].map(s=>(
-              <button key={s.key} className={`mbtn${metric===s.key?' active':''}`} onClick={()=>setMetric(s.key)}>
+            <div className="workflow-service-grid">
+            {SERVICE_PRESENCE_OPTIONS.map(s=>(
+              <button key={s.key} title={`Service keys: ${s.serviceKeys.join(', ')}`} className={`mbtn${metric===s.key?' active':''}`} onClick={()=>setMetric(s.key)}>
                 {s.label}
               </button>
             ))}
+            </div>
+            <div className={`workflow-service-status${inventoryError?' error':inventoryLoading?' loading':''}`} role="status">
+              {inventoryLoading
+                ? `Loading ${selectedService.label}…`
+                : inventoryError
+                  ? 'Could not load provider inventory'
+                  : inventoryData.length===0
+                    ? `0 providers found for ${selectedService.label} in this view`
+                    : `${inventoryData.length.toLocaleString()} providers found`}
+              {inventoryError && <span className="workflow-status-detail">{inventoryError}</span>}
+            </div>
             </>)}
           </div>
           <div className="sb-divider"/>
@@ -3050,91 +3174,31 @@ export default function App() {
           <div className="sb-divider"/>
           <div className="sb-section">
             <div className="sb-lbl" style={{cursor:'pointer',userSelect:'none'}} onClick={()=>setCollapsedSections(p=>({...p,layers:!p.layers}))}>LAYERS {collapsedSections.layers ? '▸' : '▾'}</div>
-            {!collapsedSections.layers && showUsDiagnostics && (<>
-              <div className="tog-row">
-                <span className="tog-lbl">State labels (U.S.)</span>
-                <label className="tog-switch"><input type="checkbox" checked={showLabels} onChange={e=>setShowLabels(e.target.checked)}/><span className="tog-slider"/></label>
-              </div>
-              <div className="tog-row">
-                <span className="tog-lbl">Timezone overlay (U.S.)</span>
-                <label className="tog-switch"><input type="checkbox" checked={showTZ} onChange={e=>setShowTZ(e.target.checked)}/><span className="tog-slider"/></label>
-              </div>
-              <div className="tog-row">
-                <span className="tog-lbl">Population density (U.S.)</span>
-                <label className="tog-switch"><input type="checkbox" checked={showPopDensity} onChange={e=>setShowPopDensity(e.target.checked)}/><span className="tog-slider"/></label>
-              </div>
-              <div className="tog-row">
-                <span className="tog-lbl">State color fill (U.S.)</span>
-                <label className="tog-switch"><input type="checkbox" checked={showStateColors} onChange={e=>setShowStateColors(e.target.checked)}/><span className="tog-slider"/></label>
-              </div>
-              <div className="tog-row">
-                <span className="tog-lbl">70mi radius ring (U.S.)</span>
-                <label className="tog-switch"><input type="checkbox" checked={showRadius} onChange={e=>setShowRadius(e.target.checked)}/><span className="tog-slider"/></label>
-              </div>
-              <div className="tog-row">
-                <span className="tog-lbl">Glow effects (U.S.)</span>
-                <label className="tog-switch"><input type="checkbox" checked={showGlowPoints} onChange={e=>setShowGlowPoints(e.target.checked)}/><span className="tog-slider"/></label>
-              </div>
-              <div className="tog-row">
-                <span className="tog-lbl" style={{color: showCityDots ? 'inherit' : '#7bd7ff'}}>City dots (U.S.) {showCityDots ? '' : '(hidden)'}</span>
-                <label className="tog-switch"><input type="checkbox" checked={showCityDots} onChange={e=>setShowCityDots(e.target.checked)}/><span className="tog-slider"/></label>
-              </div>
-            </>)}
-            <div className="tog-row">
-              <span className="tog-lbl" style={{color:'#10b981',display:'flex',alignItems:'center',gap:4}}>
-                <span style={{width:7,height:7,borderRadius:'50%',background:'#10b981',display:'inline-block',boxShadow:'0 0 6px #10b981',flexShrink:0}}/>
-                Indexed Providers {inventoryData.length>0&&<span style={{fontSize:9,opacity:0.7,marginLeft:2}}>({inventoryData.length})</span>}
-              </span>
-              <label className="tog-switch"><input type="checkbox" checked={showInventory} onChange={e=>setShowInventory(e.target.checked)}/><span className="tog-slider"/></label>
-            </div>
-            <div className="tog-row">
-              <span className="tog-lbl" style={{color:'#3b82f6',display:'flex',alignItems:'center',gap:4}}>
-                <span style={{width:7,height:7,borderRadius:'50%',background:'#3b82f6',display:'inline-block',boxShadow:'0 0 6px #3b82f6',flexShrink:0}}/>
-                BlueHive Providers {blueHiveData.length>0&&<span style={{fontSize:9,opacity:0.7,marginLeft:2}}>({blueHiveData.length})</span>}
-              </span>
-              <label className="tog-switch"><input type="checkbox" checked={showBlueHive} onChange={e=>setShowBlueHive(e.target.checked)}/><span className="tog-slider"/></label>
-            </div>
-            <div className="tog-row">
-              <span className="tog-lbl" style={{color:'#06b6d4',display:'flex',alignItems:'center',gap:4}}>
-                <span style={{width:7,height:7,borderRadius:'50%',background:'#06b6d4',display:'inline-block',boxShadow:'0 0 6px #06b6d4',flexShrink:0}}/>
-                Dentists {dentistData.length>0&&<span style={{fontSize:9,opacity:0.7,marginLeft:2}}>({dentistData.length})</span>}
-              </span>
-              <label className="tog-switch"><input type="checkbox" checked={showDentists} onChange={e=>setShowDentists(e.target.checked)}/><span className="tog-slider"/></label>
-            </div>
-            <button
-              onClick={()=>setShowDatasetBrowser(true)}
-              style={{
-                width:'100%',
-                marginTop:8,
-                padding:'8px 12px',
-                borderRadius:12,
-                border:'1px solid rgba(255,255,255,0.12)',
-                background:'linear-gradient(135deg, rgba(137,212,254,0.12), rgba(196,168,255,0.08))',
-                color:'#89d4fe',
-                fontSize:11,
-                fontWeight:600,
-                cursor:'pointer',
-                display:'flex',
-                alignItems:'center',
-                justifyContent:'center',
-                gap:6,
-                fontFamily:"'Inter', -apple-system, sans-serif",
-                transition:'all 0.25s ease',
-              }}
-              onMouseEnter={(e)=>{e.currentTarget.style.background='linear-gradient(135deg, rgba(137,212,254,0.20), rgba(196,168,255,0.14))';e.currentTarget.style.borderColor='rgba(137,212,254,0.3)';}}
-              onMouseLeave={(e)=>{e.currentTarget.style.background='linear-gradient(135deg, rgba(137,212,254,0.12), rgba(196,168,255,0.08))';e.currentTarget.style.borderColor='rgba(255,255,255,0.12)';}}
-            >
-              <span style={{fontSize:13}}>🗂</span> Browse Datasets
-            </button>
-            {clinicGroups.length>0&&clinicGroups.map(grp=>(
-              <div key={grp.id} className="tog-row">
-                <span className="tog-lbl" style={{color:grp.color,display:'flex',alignItems:'center',gap:4}}>
-                  <span style={{width:7,height:7,borderRadius:'50%',background:grp.color,display:'inline-block',boxShadow:`0 0 6px ${grp.color}`,flexShrink:0}}/>
-                  {grp.groupName} ({grp.clinics.length})
-                </span>
-                <label className="tog-switch"><input type="checkbox" checked={grp.visible} onChange={e=>{setClinicGroups(prev=>{const n=prev.map(g=>g.id===grp.id?{...g,visible:e.target.checked}:g);localStorage.setItem('clinic_groups',JSON.stringify(n));return n;})}}/><span className="tog-slider"/></label>
-              </div>
-            ))}
+            {!collapsedSections.layers && <div className="workflow-layer-list">
+              <LayerToggle label="State Labels" checked={showLabels} onChange={setShowLabels} disabled={!showUsDiagnostics} status={showLabels?'State labels visible':usLayerStatus}/>
+              <LayerToggle label="Timezone Overlay" checked={showTZ} onChange={setShowTZ} disabled={!showUsDiagnostics} status={showTZ?'Timezone overlay visible':usLayerStatus}/>
+              <LayerToggle label="Population Density" checked={showPopDensity} onChange={setShowPopDensity} disabled={!showUsDiagnostics} status={showPopDensity?'Population density visible':usLayerStatus}/>
+              <LayerToggle label="State Color Fill" checked={showStateColors} onChange={setShowStateColors} disabled={!showUsDiagnostics} status={showStateColors?'State colors visible':usLayerStatus}/>
+              <LayerToggle label="Radius Ring" checked={showRadius} onChange={setShowRadius} disabled={!showUsDiagnostics||!hasRadiusCenter} status={!showUsDiagnostics?'Enable U.S. Diagnostics first':!hasRadiusCenter?'Select a location first':showRadius?'70 mile radius visible':'Ready'}/>
+              <LayerToggle label="Glow Effects" checked={showGlowPoints} onChange={setShowGlowPoints} status={showGlowPoints?'Glow styling active':'Standard marker styling'}/>
+              <LayerToggle label="City Dots" checked={showCityDots} onChange={setShowCityDots} disabled={!showUsDiagnostics} status={showCityDots?'City dots visible':usLayerStatus}/>
+              <LayerToggle label="Indexed Providers" checked={showIndexedProviders} onChange={setShowIndexedProviders} disabled={datasetStatus.indexed.loading||!!datasetStatus.indexed.error} status={datasetStatus.indexed.loading?'Loading indexed providers…':datasetStatus.indexed.error||`${indexedLayerData.length.toLocaleString()} indexed providers loaded`}/>
+              <LayerToggle label="BlueHive Providers" checked={showBlueHive} onChange={setShowBlueHive} disabled={datasetStatus.bluehive.loading||!!datasetStatus.bluehive.error} status={datasetStatus.bluehive.loading?'Loading BlueHive providers…':datasetStatus.bluehive.error||`${blueHiveData.length.toLocaleString()} BlueHive providers loaded`}/>
+              <LayerToggle label="Dentists" checked={showDentists} onChange={setShowDentists} disabled={datasetStatus.dentists.loading||!!datasetStatus.dentists.error} status={datasetStatus.dentists.loading?'Loading dentists…':datasetStatus.dentists.error||`${dentistData.length.toLocaleString()} dentists loaded`}/>
+              <LayerToggle label="My Clinics" checked={showMyClinicsLayer} onChange={setShowMyClinicsLayer} disabled={datasetStatus.myClinics.loading||!!datasetStatus.myClinics.error||myClinicsData.length===0} status={datasetStatus.myClinics.loading?'Loading clinics…':datasetStatus.myClinics.error||(myClinicsData.length===0?'No uploaded clinics yet':`${myClinicsData.length.toLocaleString()} clinics loaded`)}/>
+              <button className="workflow-dataset-button" onClick={()=>setShowDatasetBrowser(true)}>▦ Browse Datasets</button>
+              {clinicGroups.map(grp=><LayerToggle
+                key={grp.id}
+                label={grp.groupName}
+                checked={grp.visible}
+                status={`${grp.clinics.length} locally uploaded clinics`}
+                onChange={checked=>setClinicGroups(prev=>{
+                  const next=prev.map(group=>group.id===grp.id?{...group,visible:checked}:group);
+                  localStorage.setItem('clinic_groups',JSON.stringify(next));
+                  return next;
+                })}
+              />)}
+            </div>}
           </div>
           {showUsDiagnostics && (<>
           <div className="sb-divider"/>
@@ -3246,6 +3310,9 @@ export default function App() {
           blueHiveData={blueHiveData}
           dentistData={dentistData}
           indexedData={indexedLayerData}
+          myClinicsData={myClinicsData}
+          status={datasetStatus}
+          onRetry={()=>setDatasetRefreshKey(key=>key+1)}
         />
 
         {/* ── MAP ── */}
@@ -3824,9 +3891,9 @@ export default function App() {
 
       {/* ── DIRECTORIES MODAL ── */}
       <div className={`modal-backdrop${activeTool==='directories'?' open':''}`} onClick={()=>setActiveTool(activeTool === 'directories' ? null : 'directories')}>
-        <div className="modal-box" style={{width:640}} onClick={e=>e.stopPropagation()}>
+        <div className="modal-box workflow-modal workflow-directory-modal" style={{width:640}} onClick={e=>e.stopPropagation()}>
           <div className="modal-header">
-            <span className="modal-title"> PROVIDER DIRECTORIES</span>
+            <div><span className="modal-title">⌕ Provider Directories</span><div className="workflow-modal-description">Browse provider source categories and network directories.</div></div>
             <button className="modal-close" onClick={()=>setActiveTool(activeTool === 'directories' ? null : 'directories')}>Close</button>
           </div>
           <div className="modal-body">
@@ -3847,9 +3914,9 @@ export default function App() {
       {/* ── MY CLINICS / UPLOAD MODAL ── */}
       {activeTool === 'myClinics' && (
         <div className="modal-backdrop open" onClick={()=>setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>
-          <div className="modal-box" style={{width:680,maxHeight:'85vh',display:'flex',flexDirection:'column'}} onClick={e=>e.stopPropagation()}>
+          <div className="modal-box workflow-modal workflow-upload-modal" style={{width:680,maxHeight:'85vh',display:'flex',flexDirection:'column'}} onClick={e=>e.stopPropagation()}>
             <div className="modal-header">
-              <span className="modal-title" style={{color:'#f472b6'}}> MY CLINICS</span>
+              <div><span className="modal-title">↑ Upload Clinics</span><div className="workflow-modal-description">Import your own clinic list from CSV or Excel.</div></div>
               <button className="modal-close" onClick={()=>setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>Close</button>
             </div>
             <div className="modal-body" style={{flex:1,overflowY:'auto',padding:'16px 20px'}}>
@@ -3913,7 +3980,7 @@ export default function App() {
               {clinicGroups.length===0 ? (
                 <div style={{textAlign:'center',padding:'24px 0',color:'#2a3f5e',fontSize:10,lineHeight:1.8}}>
                   <div style={{fontSize:28,marginBottom:10}}></div>
-                  No clinics uploaded yet.<br/>
+                  No uploaded clinics yet.<br/>
                   Upload a spreadsheet to see glowing pins on the map.
                 </div>
               ) : (

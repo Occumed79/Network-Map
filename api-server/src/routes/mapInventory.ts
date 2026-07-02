@@ -8,15 +8,16 @@ const router = Router();
 type TrustTier = "verified" | "registry" | "directory" | "lead";
 
 const SERVICE_TERMS: Record<string, string[]> = {
-  primaryCare: ["primary care", "family medicine", "general practice", "general practitioner", "internal medicine", "doctor", "physician", "ffd", "fitness for duty"],
-  specialist: ["specialist", "specialty", "cardiology", "pulmonary", "neurology", "orthopedic", "radiology", "audiology", "dentist"],
-  urgentCare: ["urgent care", "walk-in", "immediate care", "clinic"],
+  primaryCare: ["physicalexam", "physical exam", "primary care", "clinic", "doctor", "family medicine", "general practice", "general practitioner", "internal medicine", "physician", "ffd", "fitness for duty"],
+  specialists: ["specialists", "specialist", "specialty", "doctor", "hospital", "cardiology", "pulmonary", "neurology", "orthopedic", "radiology", "audiology"],
+  specialist: ["specialist", "specialty", "doctor", "hospital", "cardiology", "pulmonary", "neurology", "orthopedic", "radiology", "audiology"],
+  urgentCare: ["urgentcare", "urgent care", "urgent", "walk-in", "immediate care", "clinic"],
   dental: ["dental", "dentist", "dd 2813", "dd2813"],
   pharmacy: ["pharmacy", "rx", "drugstore"],
-  vaccinations: ["vaccination", "vaccine", "immunization", "shot clinic", "travel vaccine"],
-  occMed: ["occupational", "occupational health", "occupational medicine", "workplace health", "industrial medicine", "occ med"],
-  drugTest: ["drug test", "drug screen", "mro", "toxicology", "collection", "urine", "laboratory", "lab"],
-  audiometry: ["audiology", "audiometry", "hearing", "audiogram"],
+  vaccinations: ["vaccinations", "vaccination", "vaccine", "immunization", "pharmacy", "clinic", "shot clinic", "travel vaccine"],
+  occMed: ["occmed", "occupational", "occupational health", "occupational medicine", "clinic", "workplace health", "industrial medicine", "occ med"],
+  drugTest: ["drugtest", "drug test", "drugscreen", "drug screen", "medical_lab", "medical lab", "mro", "toxicology", "collection", "urine", "laboratory", "lab"],
+  audiometry: ["audiometry", "audiology", "hearing", "audiogram"],
   vision: ["vision", "eye", "optometry", "optometrist", "ophthalmology"],
   urgent: ["urgent care", "walk-in", "immediate care"],
   occupational: ["occupational", "occupational health", "occupational medicine"],

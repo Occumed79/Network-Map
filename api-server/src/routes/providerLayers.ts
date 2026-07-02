@@ -119,7 +119,7 @@ router.get("/provider-layers/:source", async (req: Request, res: Response) => {
         INNER JOIN provider_locations pl ON pl.provider_id = p.id
         LEFT JOIN provider_contacts pc ON pc.provider_id = p.id
         LEFT JOIN provider_sources psrc ON psrc.provider_id = p.id
-        WHERE psrc.source_label NOT IN ('BlueHive', 'Dentist Dataset')
+        WHERE psrc.source_label NOT IN ('BlueHive', 'Dentist Dataset', 'My Clinics')
           AND pl.lat IS NOT NULL
           AND pl.lng IS NOT NULL
         ORDER BY p.name ASC

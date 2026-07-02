@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { getPool } from "@workspace/db";
 import { isPersistenceConfigured } from "../lib/networkMapPersistence";
+import { detectProviderSchema } from "../lib/providerSchema";
 
 const router = Router();
 
@@ -71,6 +72,79 @@ router.get("/map-inventory", async (req: Request, res: Response) => {
     }
 
     const pool = getPool();
+    const schema = await detectProviderSchema(pool);
+    if (schema === "none") {
+      console.warn("[MapInventory] no provider table available");
+      res.json({ providers: [], total: 0, serviceType: serviceType || null, note: "No provider table available" });
+      return;
+    }
+
+    if (schema === "legacy") {
+      console.info("[MapInventory] using legacy medical_providers fallback");
+      const params: Array<number | string> = [south, north];
+      const conditions = ["lat BETWEEN $1 AND $2", "lat IS NOT NULL", "lng IS NOT NULL"];
+
+      if (west <= east) {
+        params.push(west, east);
+        conditions.push(`lng BETWEEN $${params.length - 1} AND $${params.length}`);
+      } else {
+        params.push(west, east);
+        conditions.push(`(lng >= $${params.length - 1} OR lng <= $${params.length})`);
+      }
+
+      const terms = serviceTerms(serviceType);
+      if (terms.length > 0) {
+        const searchText = "LOWER(CONCAT_WS(' ', name, category, source_type, data_source, array_to_string(types, ' ')))";
+        const clauses = terms.map((term) => {
+          params.push(`%${term}%`);
+          return `${searchText} LIKE $${params.length}`;
+        });
+        conditions.push(`(${clauses.join(" OR ")})`);
+      }
+
+      params.push(limit);
+      const { rows } = await pool.query(`
+        SELECT id, name, category, formatted_address, locality,
+               administrative_area_level_1, postal_code, lat, lng, phone,
+               website, data_source, source_id, confidence_score, types
+        FROM public.medical_providers
+        WHERE ${conditions.join(" AND ")}
+        ORDER BY name ASC
+        LIMIT $${params.length}
+      `, params);
+
+      const providers = rows.map((row: Record<string, unknown>) => {
+        const rowTrustTier = normalizeTrustTier(row.confidence_score as number | null);
+        return {
+          id: row.id as number,
+          npi: null,
+          name: row.name as string,
+          providerType: row.category as string | null,
+          address: row.formatted_address as string | null,
+          city: row.locality as string | null,
+          state: row.administrative_area_level_1 as string | null,
+          postalCode: row.postal_code as string | null,
+          lat: row.lat as number,
+          lng: row.lng as number,
+          coordinateStatus: "imported",
+          phone: row.phone as string | null,
+          fax: null,
+          website: row.website as string | null,
+          services: Array.isArray(row.types) ? row.types as string[] : serviceType ? [serviceType] : [],
+          trustTier: rowTrustTier,
+          sources: row.data_source ? [{
+            sourceId: (row.source_id as string) || String(row.id),
+            sourceLabel: row.data_source as string,
+            trustTier: rowTrustTier,
+          }] : [],
+        };
+      }).filter((provider) => !trustTier || provider.trustTier === trustTier);
+
+      res.json({ providers, total: providers.length, serviceType: serviceType || null });
+      return;
+    }
+
+    console.info("[MapInventory] using normalized providers schema");
     const params: Array<number | string> = [south, north];
     const conditions = [
       "pl.lat BETWEEN $1 AND $2",
@@ -175,4 +249,3 @@ router.get("/map-inventory", async (req: Request, res: Response) => {
 });
 
 export default router;
-

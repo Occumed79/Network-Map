@@ -1041,7 +1041,7 @@ export default function App() {
   const [liveFacets, setLiveFacets] = useState<Record<string, number>>({});
   const [livePriorityCounts, setLivePriorityCounts] = useState<any>(null);
   const [liveHighlightId, setLiveHighlightId] = useState<any>(null);
-  const [liveHint, setLiveHint] = useState('Click anywhere on the map to search for facilities');
+  const [liveHint, setLiveHint] = useState('Choose a location on the map or search for a city to run Live Finder.');
   const [liveError, setLiveError] = useState('');
   const [liveSearched, setLiveSearched] = useState(false);
   const [liveMirror, setLiveMirror] = useState('');
@@ -2322,7 +2322,7 @@ export default function App() {
           built from U.S.-only datasets and are not shown outside the United States.
           Use Live Finder below to search real facilities here via OpenStreetMap.
         </div>
-        <button className="export-btn" style={{marginBottom:8}} onClick={()=>{ setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder'); doLiveSearch(lat,lng); }}>SEARCH LIVE PROVIDERS</button>
+        <button className="export-btn" style={{marginBottom:8}} onClick={()=>{ setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder'); doLiveSearch(lat,lng,undefined,label); }}>SEARCH LIVE PROVIDERS</button>
         <DriveTimeBox fromLat={lat} fromLng={lng} fromName={label} locB={null}/>
         <button className="export-btn" onClick={()=>doExportReport(rd)}>↓ EXPORT LOCATION REPORT</button>
       </div>
@@ -2497,11 +2497,25 @@ export default function App() {
     return `Sources: ${ok}/${total} returned${failed?` · ${failed} failed`:''} · ${resultCount} facilit${resultCount===1?'y':'ies'}`;
   }
 
-  async function doLiveSearch(lat:number,lng:number, categoryOverride?: string) {
+  async function doLiveSearch(lat:number,lng:number, categoryOverride?: string, selectedLocationLabel?: string) {
     const categoryForSearch = categoryOverride || liveBackendCategoryRef.current;
     const map=mapRef.current;
     if(!map) return;
     if(NATIVE_DRIVE_TIME_ENABLED) providerEta.clear();
+    const validCoordinates = Number.isFinite(lat) && Number.isFinite(lng)
+      && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+    const cityState = validCoordinates ? await reverseGeocodeCityState(lat,lng) : null;
+    if(!validCoordinates || (!cityState && !selectedLocationLabel)) {
+      lastRadiusRef.current=null;
+      setLiveLoading(false);
+      setLiveResults([]);
+      setLiveError('');
+      setLiveSearched(false);
+      setLiveMirror('');
+      setLiveLocation('');
+      setLiveHint('Choose a location on the map or search for a city to run Live Finder.');
+      return;
+    }
     setLiveLoading(true);
     setLiveResults([]);
     setLiveHint('Searching...');
@@ -2513,19 +2527,14 @@ export default function App() {
     setNpiResults([]);
     setNpiError('');
     lastRadiusRef.current={lat,lng};
+    setLiveLocation(selectedLocationLabel || cityState?.display || 'Selected location');
 
     if(liveCircleRef.current) { try{map.removeLayer(liveCircleRef.current);}catch(e){} }
     if(livePinRef.current) { try{map.removeLayer(livePinRef.current);}catch(e){} }
     liveCircleRef.current=L.circle([lat,lng],{radius:liveRadius*1609.34,color:'#22d3ee',weight:1.5,opacity:0.45,dashArray:'7 5',fillColor:'#06b6d4',fillOpacity:0.03,interactive:false}).addTo(map);
     livePinRef.current=L.marker([lat,lng],{icon:L.divIcon({className:'',html:'<div style="width:14px;height:14px;border-radius:50%;background:#06b6d4;border:2.5px solid #fff;box-shadow:0 0 0 4px rgba(6,182,212,0.28),0 0 14px rgba(6,182,212,0.6);"></div>',iconSize:[14,14],iconAnchor:[7,7]}),zIndexOffset:3000,interactive:false}).addTo(map);
 
-    try { await revGeo(lat,lng); } catch(e){}
-
     try {
-    // Reverse geocode to get city/state for universal discovery
-    let cityState:{city:string;state:string}|null = null;
-    try { cityState = await reverseGeocodeCityState(lat,lng); } catch(e){}
-
     const backendParams=new URLSearchParams({
       lat:String(lat),
       lng:String(lng),
@@ -2933,7 +2942,7 @@ export default function App() {
     setLocalPopInfo(null);
     setDropCenter({ lat: lLat, lng: lLng });
     setActiveTool('liveFinder');
-    doLiveSearch(lLat, lLng);
+    doLiveSearch(lLat, lLng, undefined, name);
   }
 
   // ── Cursor light (Liquid Glass) ──────────────────────────────────────────
@@ -3696,7 +3705,7 @@ export default function App() {
                 </div>
               </div>
               {!npiLoading&&!npiCategory&&!liveLoading&&!liveError&&liveResults.length===0&&!liveSearched&&(
-                <div className="lp-empty show"><strong>Choose a search location.</strong><span>Use the address search above or click the map to find nearby facilities.</span></div>
+                <div className="lp-empty show">Choose a location on the map or search for a city to run Live Finder.</div>
               )}
               {!liveLoading&&!liveError&&!npiCategory&&liveSearched&&liveResults.length===0&&(
                 <div className="lp-empty show">No live facilities found within {liveRadius} mi of this location. Try a larger radius or a different spot.</div>

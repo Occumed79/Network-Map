@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { getPool } from "@workspace/db";
 import { isPersistenceConfigured } from "../lib/networkMapPersistence";
 import { detectProviderSchema } from "../lib/providerSchema";
+import { queryWithStatementTimeout } from "../lib/queryWithStatementTimeout";
 
 const router = Router();
 
@@ -14,14 +15,14 @@ function normalizeTrustTier(confidenceScore: number | null): "verified" | "regis
 
 /**
  * GET /api/provider-layers/:source
- * Fetch all providers from a specific data source for map display.
+ * Fetch a bounded page of providers from a specific data source for map display.
  * Supported sources: bluehive, dentists, indexed, my-clinics
  * Queries normalized provider tables (providers, provider_locations, provider_contacts, provider_sources).
  * Returns providers with lat/lng coordinates only.
  */
 router.get("/provider-layers/:source", async (req: Request, res: Response) => {
+  const source = req.params.source as string;
   try {
-    const source = req.params.source as string;
     const validSources: Record<string, string> = {
       bluehive: "BlueHive",
       dentists: "Dentist Dataset",
@@ -36,38 +37,61 @@ router.get("/provider-layers/:source", async (req: Request, res: Response) => {
     }
 
     if (!isPersistenceConfigured()) {
-      res.json({ providers: [], total: 0 });
+      res.json({ providers: [], count: 0, total: 0, source });
       return;
     }
 
-    const limit = Math.min(Math.max(Number(req.query.limit) || 50000, 1), 200000);
+    const limit = Math.min(Math.max(Number(req.query.limit) || 500, 1), 1000);
+    const page = Math.min(Math.max(Number(req.query.page) || 1, 1), 1000);
+    const offset = (page - 1) * limit;
+    const north = Number(req.query.north);
+    const south = Number(req.query.south);
+    const east = Number(req.query.east);
+    const west = Number(req.query.west);
+    const hasBounds = [north, south, east, west].every(Number.isFinite);
     const pool = getPool();
     const schema = await detectProviderSchema(pool);
 
     if (schema === "none") {
       console.warn(`[ProviderLayers] ${source}: no provider table available`);
-      res.json({ providers: [], total: 0, source: dataSource, note: "No provider table available" });
+      res.json({ providers: [], count: 0, total: 0, source, note: "No provider table available" });
       return;
     }
 
     if (schema === "legacy") {
       console.info(`[ProviderLayers] ${source}: using legacy medical_providers fallback`);
-      const params: Array<string | number> = [limit];
+      const params: Array<string | number> = [];
+      const conditions = [
+        "lat IS NOT NULL",
+        "lng IS NOT NULL",
+        "lat BETWEEN -90 AND 90",
+        "lng BETWEEN -180 AND 180",
+        "(lat <> 0 OR lng <> 0)",
+      ];
       let sourceCondition = "LOWER(COALESCE(data_source, '')) NOT IN ('bluehive', 'dentist dataset', 'my clinics')";
       if (source !== "indexed") {
-        params.unshift(dataSource.toLowerCase());
-        sourceCondition = "LOWER(COALESCE(data_source, '')) = $1";
+        params.push(dataSource.toLowerCase());
+        sourceCondition = `LOWER(COALESCE(data_source, '')) = $${params.length}`;
       }
-      const { rows } = await pool.query(`
+      conditions.push(sourceCondition);
+      if (hasBounds) {
+        params.push(south, north);
+        conditions.push(`lat BETWEEN $${params.length - 1} AND $${params.length}`);
+        params.push(west, east);
+        conditions.push(west <= east
+          ? `lng BETWEEN $${params.length - 1} AND $${params.length}`
+          : `(lng >= $${params.length - 1} OR lng <= $${params.length})`);
+      }
+      params.push(limit, offset);
+      const { rows } = await queryWithStatementTimeout(pool, `
         SELECT name, formatted_address, locality, administrative_area_level_1,
                postal_code, lat, lng, phone, website, source_id, data_source,
-               source_type, confidence_score, category, types, raw_data
+               source_type, confidence_score, category, types
         FROM public.medical_providers
-        WHERE ${sourceCondition}
-          AND lat IS NOT NULL
-          AND lng IS NOT NULL
-        ORDER BY name ASC
-        LIMIT $${params.length}
+        WHERE ${conditions.join(" AND ")}
+        ORDER BY id ASC
+        LIMIT $${params.length - 1}
+        OFFSET $${params.length}
       `, params);
       const providers = rows.map((row: Record<string, unknown>) => ({
         clinic_name: row.name as string,
@@ -84,13 +108,12 @@ router.get("/provider-layers/:source", async (req: Request, res: Response) => {
         source_url: null,
         source_id: row.source_id as string | null,
         source_type: row.source_type as string | null,
-        raw_data: row.raw_data as Record<string, unknown> | null,
         data_source: row.data_source as string,
         trust_tier: normalizeTrustTier(row.confidence_score as number | null),
         taxonomy_description: row.category as string | null,
         services: Array.isArray(row.types) ? (row.types as string[]).join(", ") : null,
       }));
-      res.json({ providers, total: providers.length, source: dataSource });
+      res.json({ providers, count: providers.length, total: providers.length, source, page, limit, hasMore: providers.length === limit });
       return;
     }
 
@@ -98,64 +121,93 @@ router.get("/provider-layers/:source", async (req: Request, res: Response) => {
 
     let query: string;
     let params: Array<string | number>;
-
-    if (source === "indexed") {
-      query = `
-        SELECT
-          p.name,
-          p.npi,
-          pl.address,
-          pl.city,
-          pl.state,
-          pl.postal_code,
-          pl.lat,
-          pl.lng,
-          pc.phone,
-          pc.website,
-          psrc.source_label,
-          psrc.source_url,
-          psrc.trust_tier
-        FROM providers p
-        INNER JOIN provider_locations pl ON pl.provider_id = p.id
-        LEFT JOIN provider_contacts pc ON pc.provider_id = p.id
-        LEFT JOIN provider_sources psrc ON psrc.provider_id = p.id
-        WHERE psrc.source_label NOT IN ('BlueHive', 'Dentist Dataset', 'My Clinics')
-          AND pl.lat IS NOT NULL
-          AND pl.lng IS NOT NULL
-        ORDER BY p.name ASC
-        LIMIT $1
-      `;
-      params = [limit];
-    } else {
-      query = `
-        SELECT
-          p.name,
-          p.npi,
-          pl.address,
-          pl.city,
-          pl.state,
-          pl.postal_code,
-          pl.lat,
-          pl.lng,
-          pc.phone,
-          pc.website,
-          psrc.source_label,
-          psrc.source_url,
-          psrc.trust_tier
-        FROM providers p
-        INNER JOIN provider_locations pl ON pl.provider_id = p.id
-        LEFT JOIN provider_contacts pc ON pc.provider_id = p.id
-        LEFT JOIN provider_sources psrc ON psrc.provider_id = p.id
-        WHERE psrc.source_label = $1
-          AND pl.lat IS NOT NULL
-          AND pl.lng IS NOT NULL
-        ORDER BY p.name ASC
-        LIMIT $2
-      `;
-      params = [dataSource, limit];
+    const normalizedBounds: string[] = [];
+    if (hasBounds) {
+      normalizedBounds.push("pl.lat BETWEEN $2 AND $3");
+      normalizedBounds.push(west <= east ? "pl.lng BETWEEN $4 AND $5" : "(pl.lng >= $4 OR pl.lng <= $5)");
     }
 
-    const { rows } = await pool.query(query, params);
+    if (source === "indexed") {
+      params = hasBounds ? [limit, south, north, west, east, offset] : [limit, offset];
+      const offsetIndex = hasBounds ? 6 : 2;
+      query = `
+        SELECT
+          p.name,
+          p.npi,
+          pl.address,
+          pl.city,
+          pl.state,
+          pl.postal_code,
+          pl.lat,
+          pl.lng,
+          pc.phone,
+          pc.website,
+          psrc.source_label,
+          psrc.source_url,
+          psrc.trust_tier
+        FROM providers p
+        INNER JOIN provider_locations pl ON pl.provider_id = p.id
+        LEFT JOIN provider_contacts pc ON pc.provider_id = p.id
+        INNER JOIN LATERAL (
+          SELECT source_label, source_url, trust_tier
+          FROM provider_sources
+          WHERE provider_id = p.id
+            AND source_label NOT IN ('BlueHive', 'Dentist Dataset', 'My Clinics')
+          ORDER BY id ASC
+          LIMIT 1
+        ) psrc ON true
+        WHERE pl.lat IS NOT NULL
+          AND pl.lng IS NOT NULL
+          AND pl.lat BETWEEN -90 AND 90
+          AND pl.lng BETWEEN -180 AND 180
+          AND (pl.lat <> 0 OR pl.lng <> 0)
+          ${normalizedBounds.length ? `AND ${normalizedBounds.join(" AND ")}` : ""}
+        ORDER BY p.id ASC
+        LIMIT $1
+        OFFSET $${offsetIndex}
+      `;
+    } else {
+      params = hasBounds ? [dataSource, south, north, west, east, limit, offset] : [dataSource, limit, offset];
+      const limitIndex = hasBounds ? 6 : 2;
+      const offsetIndex = hasBounds ? 7 : 3;
+      query = `
+        SELECT
+          p.name,
+          p.npi,
+          pl.address,
+          pl.city,
+          pl.state,
+          pl.postal_code,
+          pl.lat,
+          pl.lng,
+          pc.phone,
+          pc.website,
+          psrc.source_label,
+          psrc.source_url,
+          psrc.trust_tier
+        FROM providers p
+        INNER JOIN provider_locations pl ON pl.provider_id = p.id
+        LEFT JOIN provider_contacts pc ON pc.provider_id = p.id
+        INNER JOIN LATERAL (
+          SELECT source_label, source_url, trust_tier
+          FROM provider_sources
+          WHERE provider_id = p.id AND source_label = $1
+          ORDER BY id ASC
+          LIMIT 1
+        ) psrc ON true
+        WHERE pl.lat IS NOT NULL
+          AND pl.lng IS NOT NULL
+          AND pl.lat BETWEEN -90 AND 90
+          AND pl.lng BETWEEN -180 AND 180
+          AND (pl.lat <> 0 OR pl.lng <> 0)
+          ${normalizedBounds.length ? `AND ${normalizedBounds.join(" AND ")}` : ""}
+        ORDER BY p.id ASC
+        LIMIT $${limitIndex}
+        OFFSET $${offsetIndex}
+      `;
+    }
+
+    const { rows } = await queryWithStatementTimeout(pool, query, params);
 
     const providers = rows.map((row: Record<string, unknown>) => ({
       clinic_name: row.name as string,
@@ -174,10 +226,11 @@ router.get("/provider-layers/:source", async (req: Request, res: Response) => {
       trust_tier: row.trust_tier as string,
     }));
 
-    res.json({ providers, total: providers.length, source: dataSource });
+    res.json({ providers, count: providers.length, total: providers.length, source, page, limit, hasMore: providers.length === limit });
   } catch (e: any) {
-    console.error("[ProviderLayers] Error:", e);
-    res.status(500).json({ error: e.message || "Internal server error" });
+    const message = e?.message || "Provider layer query failed";
+    console.error(`[ProviderLayers] ${source} query failed:`, e);
+    res.status(200).json({ providers: [], count: 0, total: 0, error: message, source });
   }
 });
 

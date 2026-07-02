@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { getPool } from "@workspace/db";
 import { isPersistenceConfigured } from "../lib/networkMapPersistence";
 import { detectProviderSchema } from "../lib/providerSchema";
+import { queryWithStatementTimeout } from "../lib/queryWithStatementTimeout";
 
 const router = Router();
 
@@ -60,7 +61,7 @@ router.get("/map-inventory", async (req: Request, res: Response) => {
     const west = Number(req.query.west);
     const serviceType = req.query.serviceType as string | undefined;
     const trustTier = req.query.trustTier as TrustTier | undefined;
-    const limit = Math.min(Math.max(Number(req.query.limit) || 500, 1), 2500);
+    const limit = Math.min(Math.max(Number(req.query.limit) || 250, 1), 1000);
 
     if (!Number.isFinite(north) || !Number.isFinite(south) || !Number.isFinite(east) || !Number.isFinite(west)) {
       res.status(400).json({ error: "Missing required bounds: north, south, east, west" });
@@ -68,7 +69,7 @@ router.get("/map-inventory", async (req: Request, res: Response) => {
     }
 
     if (!isPersistenceConfigured()) {
-      res.json({ providers: [], total: 0, note: "Database not configured — no indexed providers available" });
+      res.json({ providers: [], count: 0, total: 0, note: "Database not configured — no indexed providers available" });
       return;
     }
 
@@ -76,7 +77,7 @@ router.get("/map-inventory", async (req: Request, res: Response) => {
     const schema = await detectProviderSchema(pool);
     if (schema === "none") {
       console.warn("[MapInventory] no provider table available");
-      res.json({ providers: [], total: 0, serviceType: serviceType || null, note: "No provider table available" });
+      res.json({ providers: [], count: 0, total: 0, serviceType: serviceType || null, note: "No provider table available" });
       return;
     }
 
@@ -104,13 +105,13 @@ router.get("/map-inventory", async (req: Request, res: Response) => {
       }
 
       params.push(limit);
-      const { rows } = await pool.query(`
+      const { rows } = await queryWithStatementTimeout(pool, `
         SELECT id, name, category, formatted_address, locality,
                administrative_area_level_1, postal_code, lat, lng, phone,
                website, data_source, source_id, confidence_score, types
         FROM public.medical_providers
         WHERE ${conditions.join(" AND ")}
-        ORDER BY name ASC
+        ORDER BY id ASC
         LIMIT $${params.length}
       `, params);
 
@@ -141,7 +142,7 @@ router.get("/map-inventory", async (req: Request, res: Response) => {
         };
       }).filter((provider) => !trustTier || provider.trustTier === trustTier);
 
-      res.json({ providers, total: providers.length, serviceType: serviceType || null });
+      res.json({ providers, count: providers.length, total: providers.length, serviceType: serviceType || null, limit });
       return;
     }
 
@@ -161,33 +162,35 @@ router.get("/map-inventory", async (req: Request, res: Response) => {
       conditions.push(`(pl.lng >= $${params.length - 1} OR pl.lng <= $${params.length})`);
     }
 
-    // Add service type filter via JOIN with provider_services
-    let serviceJoin = "";
+    // Filter through EXISTS so service rows do not multiply provider results.
     if (serviceType) {
       const terms = serviceTerms(serviceType);
       if (terms.length > 0) {
-        serviceJoin = "LEFT JOIN provider_services ps ON ps.provider_id = p.id";
         const clauses = terms.map((term) => {
           params.push(`%${term}%`);
           const index = params.length;
           return `LOWER(COALESCE(ps.service_type, '')) LIKE $${index} OR LOWER(COALESCE(ps.taxonomy, '')) LIKE $${index}`;
         });
-        conditions.push(`(${clauses.join(" OR ")})`);
+        conditions.push(`EXISTS (
+          SELECT 1 FROM provider_services ps
+          WHERE ps.provider_id = p.id AND (${clauses.join(" OR ")})
+        )`);
       }
     }
 
-    // Add trust tier filter via JOIN with provider_sources
-    let trustJoin = "";
     if (trustTier) {
-      trustJoin = "LEFT JOIN provider_sources psrc ON psrc.provider_id = p.id";
-      conditions.push(`psrc.trust_tier = '${trustTier}'`);
+      params.push(trustTier);
+      conditions.push(`EXISTS (
+        SELECT 1 FROM provider_sources psrc_filter
+        WHERE psrc_filter.provider_id = p.id AND psrc_filter.trust_tier = $${params.length}
+      )`);
     }
 
     params.push(limit);
     const limitIndex = params.length;
 
     const query = `
-      SELECT DISTINCT
+      SELECT
         p.id,
         p.npi,
         p.name,
@@ -208,15 +211,19 @@ router.get("/map-inventory", async (req: Request, res: Response) => {
       FROM providers p
       INNER JOIN provider_locations pl ON pl.provider_id = p.id
       LEFT JOIN provider_contacts pc ON pc.provider_id = p.id
-      ${serviceJoin}
-      ${trustJoin}
-      LEFT JOIN provider_sources psrc ON psrc.provider_id = p.id
+      LEFT JOIN LATERAL (
+        SELECT source_label, trust_tier, source_url
+        FROM provider_sources
+        WHERE provider_id = p.id
+        ORDER BY id ASC
+        LIMIT 1
+      ) psrc ON true
       WHERE ${conditions.join(" AND ")}
-      ORDER BY p.name ASC
+      ORDER BY p.id ASC
       LIMIT $${limitIndex}
     `;
 
-    const { rows } = await pool.query(query, params);
+    const { rows } = await queryWithStatementTimeout(pool, query, params);
 
     const providers = rows.map((row: Record<string, unknown>) => ({
       id: row.id as number,
@@ -242,10 +249,11 @@ router.get("/map-inventory", async (req: Request, res: Response) => {
       }] : [],
     }));
 
-    res.json({ providers, total: providers.length, serviceType: serviceType || null });
+    res.json({ providers, count: providers.length, total: providers.length, serviceType: serviceType || null, limit });
   } catch (e: any) {
-    console.error("[MapInventory] Error:", e);
-    res.status(500).json({ error: e.message || "Internal server error" });
+    const message = e?.message || "Map inventory query failed";
+    console.error("[MapInventory] query failed:", e);
+    res.status(200).json({ providers: [], count: 0, total: 0, error: message });
   }
 });
 

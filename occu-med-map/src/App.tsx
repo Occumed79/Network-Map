@@ -188,6 +188,10 @@ const SERVICE_PRESENCE = [
   {key:'vision',label:'Vision Screening'},
 ] as const;
 
+type ProviderDatasetKey = 'bluehive'|'dentists'|'indexed'|'myClinics';
+type ProviderDatasetStatus = { loading:boolean; loaded:boolean; error:string };
+const EMPTY_DATASET_STATUS: ProviderDatasetStatus = { loading:false, loaded:false, error:'' };
+
 // ── Price Finder: static data ────────────────────────────────────────────────
 const PF_SERVICE_LABELS: Record<string,string> = {
   urgentCare:'Urgent Care', dental:'Dental', pharmacy:'Pharmacy',
@@ -1070,6 +1074,8 @@ export default function App() {
   const [blueHiveData, setBlueHiveData] = useState<any[]>([]);
   const [showInventory, setShowInventory] = useState(true);
   const [inventoryData, setInventoryData] = useState<MapInventoryProvider[]>([]);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [inventoryError, setInventoryError] = useState('');
   const inventoryLayerRef = useRef<ReturnType<typeof createClusteredLayer>|null>(null);
   const inventoryFetchRef = useRef<AbortController|null>(null);
   const [showDentists, setShowDentists] = useState(false);
@@ -1078,6 +1084,11 @@ export default function App() {
   const [showDatasetBrowser, setShowDatasetBrowser] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [indexedLayerData, setIndexedLayerData] = useState<any[]>([]);
+  const [datasetRefreshKey, setDatasetRefreshKey] = useState(0);
+  const [datasetStatus, setDatasetStatus] = useState<Record<ProviderDatasetKey,ProviderDatasetStatus>>({
+    bluehive:{...EMPTY_DATASET_STATUS}, dentists:{...EMPTY_DATASET_STATUS},
+    indexed:{...EMPTY_DATASET_STATUS}, myClinics:{...EMPTY_DATASET_STATUS},
+  });
   const [outreachNotes, setOutreachNotes] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_notes')||'{}'); } catch { return {}; } });
   const [outreachStatus, setOutreachStatus] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_status')||'{}'); } catch { return {}; } });
   const [dropUi, setDropUi] = useState({panelOpen:false, exportLoading:false, status:''});
@@ -1450,39 +1461,46 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
-  // ── Load BlueHive provider data from API ───────────────────────────────────
   useEffect(()=>{
-    fetch('/api/provider-layers/bluehive')
-      .then(r=>r.json())
-      .then(data=>setBlueHiveData(data.providers||[]))
-      .catch(()=>setBlueHiveData([]));
-  },[]);
+    async function loadDataset(key:ProviderDatasetKey, url:string, setData:(providers:any[])=>void) {
+      setDatasetStatus(previous=>({...previous,[key]:{loading:true,loaded:false,error:''}}));
+      try {
+        const response = await fetch(url);
+        const data = await response.json().catch(()=>null);
+        if(!response.ok) throw new Error(data?.error || `Request failed (${response.status})`);
+        setData(Array.isArray(data?.providers)?data.providers:[]);
+        setDatasetStatus(previous=>({...previous,[key]:{loading:false,loaded:true,error:''}}));
+      } catch(error) {
+        setData([]);
+        setDatasetStatus(previous=>({...previous,[key]:{
+          loading:false,loaded:false,error:error instanceof Error?error.message:'Unable to load providers',
+        }}));
+      }
+    }
 
-  // ── Load Dentist data from API ─────────────────────────────────────────────
-  useEffect(()=>{
-    fetch('/api/provider-layers/dentists')
-      .then(r=>r.json())
-      .then(data=>setDentistData(data.providers||[]))
-      .catch(()=>setDentistData([]));
-  },[]);
-
-  // ── Load Indexed provider data from API ────────────────────────────────────
-  useEffect(()=>{
-    fetch('/api/provider-layers/indexed?limit=100000')
-      .then(r=>r.json())
-      .then(data=>setIndexedLayerData(data.providers||[]))
-      .catch(()=>setIndexedLayerData([]));
-  },[]);
+    void Promise.all([
+      loadDataset('bluehive','/api/provider-layers/bluehive',setBlueHiveData),
+      loadDataset('dentists','/api/provider-layers/dentists',setDentistData),
+      loadDataset('indexed','/api/provider-layers/indexed?limit=100000',setIndexedLayerData),
+    ]);
+  },[datasetRefreshKey]);
 
   async function refreshMyClinics() {
+    setDatasetStatus(previous=>({...previous,myClinics:{loading:true,loaded:false,error:''}}));
     try {
       const response = await fetch('/api/provider-layers/my-clinics?limit=100000');
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || 'Unable to load My Clinics');
-      setMyClinicsData(data.providers || []);
-      setShowMyClinics(true);
-    } catch {
+      const providers = data.providers || [];
+      setMyClinicsData(providers);
+      setShowMyClinics(providers.length>0);
+      setDatasetStatus(previous=>({...previous,myClinics:{loading:false,loaded:true,error:''}}));
+    } catch(error) {
       setMyClinicsData([]);
+      setShowMyClinics(false);
+      setDatasetStatus(previous=>({...previous,myClinics:{
+        loading:false,loaded:false,error:error instanceof Error?error.message:'Unable to load My Clinics',
+      }}));
     }
   }
 
@@ -1502,6 +1520,8 @@ export default function App() {
         if(inventoryFetchRef.current) inventoryFetchRef.current.abort();
         const ac = new AbortController();
         inventoryFetchRef.current = ac;
+        setInventoryLoading(true);
+        setInventoryError('');
         fetchMapInventory({
           north: bounds.getNorth(),
           south: bounds.getSouth(),
@@ -1510,9 +1530,16 @@ export default function App() {
           serviceType: metric,
           limit: 1000,
         }).then(data=>{
-          if(!ac.signal.aborted) setInventoryData(data.providers||[]);
-        }).catch(()=>{
-          if(!ac.signal.aborted) setInventoryData([]);
+          if(!ac.signal.aborted) {
+            setInventoryData(data.providers||[]);
+            setInventoryLoading(false);
+          }
+        }).catch((error)=>{
+          if(!ac.signal.aborted) {
+            setInventoryData([]);
+            setInventoryLoading(false);
+            setInventoryError(error instanceof Error?error.message:'Unable to load provider inventory');
+          }
         });
       }, 400);
     }
@@ -2933,7 +2960,11 @@ export default function App() {
             </div>
             <div className="service-presence-status">
               <strong>{SERVICE_PRESENCE.find(service=>service.key===metric)?.label || metric}</strong>
-              {inventoryData.length} indexed provider{inventoryData.length===1?'':'s'} visible in the current map view
+              {inventoryLoading
+                ? 'Loading providers for the current map view…'
+                : inventoryError
+                  ? `Unable to load inventory: ${inventoryError}`
+                  : `${inventoryData.length} indexed provider${inventoryData.length===1?'':'s'} visible in the current map view${inventoryData.length===0?' — no matching records in this area':''}`}
             </div>
             {SERVICE_PRESENCE.map(s=>(
               <button key={s.key} className={`mbtn${metric===s.key?' active':''}`} onClick={()=>setMetric(s.key)}>
@@ -2959,61 +2990,66 @@ export default function App() {
             {!collapsedSections.layers && showUsDiagnostics && (<>
               <div className="tog-row">
                 <span className="tog-lbl">State labels (U.S.)</span>
-                <label className="tog-switch"><input type="checkbox" checked={showLabels} onChange={e=>setShowLabels(e.target.checked)}/><span className="tog-slider"/></label>
+                <label className="tog-switch"><input aria-label="State labels" type="checkbox" checked={showLabels} onChange={e=>setShowLabels(e.target.checked)}/><span className="tog-slider"/></label>
               </div>
               <div className="tog-row">
                 <span className="tog-lbl">Timezone overlay (U.S.)</span>
-                <label className="tog-switch"><input type="checkbox" checked={showTZ} onChange={e=>setShowTZ(e.target.checked)}/><span className="tog-slider"/></label>
+                <label className="tog-switch"><input aria-label="Timezone overlay" type="checkbox" checked={showTZ} onChange={e=>setShowTZ(e.target.checked)}/><span className="tog-slider"/></label>
               </div>
               <div className="tog-row">
                 <span className="tog-lbl">Population density (U.S.)</span>
-                <label className="tog-switch"><input type="checkbox" checked={showPopDensity} onChange={e=>setShowPopDensity(e.target.checked)}/><span className="tog-slider"/></label>
+                <label className="tog-switch"><input aria-label="Population density" type="checkbox" checked={showPopDensity} onChange={e=>setShowPopDensity(e.target.checked)}/><span className="tog-slider"/></label>
               </div>
               <div className="tog-row">
                 <span className="tog-lbl">State color fill (U.S.)</span>
-                <label className="tog-switch"><input type="checkbox" checked={showStateColors} onChange={e=>setShowStateColors(e.target.checked)}/><span className="tog-slider"/></label>
+                <label className="tog-switch"><input aria-label="State color fill" type="checkbox" checked={showStateColors} onChange={e=>setShowStateColors(e.target.checked)}/><span className="tog-slider"/></label>
               </div>
               <div className="tog-row">
                 <span className="tog-lbl">70mi radius ring (U.S.)</span>
-                <label className="tog-switch"><input type="checkbox" checked={showRadius} onChange={e=>setShowRadius(e.target.checked)}/><span className="tog-slider"/></label>
+                <label className="tog-switch"><input aria-label="70mi radius ring" title={lastRadiusLatRef.current===null?'Click a U.S. map location to position the ring':''} type="checkbox" checked={showRadius} onChange={e=>setShowRadius(e.target.checked)}/><span className="tog-slider"/></label>
               </div>
               <div className="tog-row">
                 <span className="tog-lbl">Glow effects (U.S.)</span>
-                <label className="tog-switch"><input type="checkbox" checked={showGlowPoints} onChange={e=>setShowGlowPoints(e.target.checked)}/><span className="tog-slider"/></label>
+                <label className="tog-switch"><input aria-label="Glow effects" type="checkbox" checked={showGlowPoints} onChange={e=>setShowGlowPoints(e.target.checked)}/><span className="tog-slider"/></label>
               </div>
               <div className="tog-row">
                 <span className="tog-lbl" style={{color: showCityDots ? 'inherit' : '#7bd7ff'}}>City dots (U.S.) {showCityDots ? '' : '(hidden)'}</span>
-                <label className="tog-switch"><input type="checkbox" checked={showCityDots} onChange={e=>setShowCityDots(e.target.checked)}/><span className="tog-slider"/></label>
+                <label className="tog-switch"><input aria-label="City dots" type="checkbox" checked={showCityDots} onChange={e=>setShowCityDots(e.target.checked)}/><span className="tog-slider"/></label>
               </div>
+              <div className="layer-inline-status">U.S. overlays are interactive; the radius ring is positioned by clicking a U.S. location.</div>
             </>)}
             <div className="tog-row">
               <span className="tog-lbl" style={{color:'#10b981',display:'flex',alignItems:'center',gap:4}}>
                 <span style={{width:7,height:7,borderRadius:'50%',background:'#10b981',display:'inline-block',boxShadow:'0 0 6px #10b981',flexShrink:0}}/>
-                Indexed Providers {inventoryData.length>0&&<span style={{fontSize:9,opacity:0.7,marginLeft:2}}>({inventoryData.length})</span>}
+                Indexed Providers ({inventoryData.length})
               </span>
-              <label className="tog-switch"><input type="checkbox" checked={showInventory} onChange={e=>setShowInventory(e.target.checked)}/><span className="tog-slider"/></label>
+              <label className="tog-switch"><input aria-label="Indexed Providers" disabled={inventoryLoading||Boolean(inventoryError)} type="checkbox" checked={showInventory} onChange={e=>setShowInventory(e.target.checked)}/><span className="tog-slider"/></label>
             </div>
+            <div className={`layer-inline-status${inventoryError?' error':''}`}>{inventoryLoading?'Loading current map view…':inventoryError||`${inventoryData.length} records loaded for ${SERVICE_PRESENCE.find(service=>service.key===metric)?.label}`}</div>
             <div className="tog-row">
               <span className="tog-lbl" style={{color:'#3b82f6',display:'flex',alignItems:'center',gap:4}}>
                 <span style={{width:7,height:7,borderRadius:'50%',background:'#3b82f6',display:'inline-block',boxShadow:'0 0 6px #3b82f6',flexShrink:0}}/>
-                BlueHive Providers {blueHiveData.length>0&&<span style={{fontSize:9,opacity:0.7,marginLeft:2}}>({blueHiveData.length})</span>}
+                BlueHive Providers ({blueHiveData.length})
               </span>
-              <label className="tog-switch"><input type="checkbox" checked={showBlueHive} onChange={e=>setShowBlueHive(e.target.checked)}/><span className="tog-slider"/></label>
+              <label className="tog-switch"><input aria-label="BlueHive Providers" disabled={datasetStatus.bluehive.loading||Boolean(datasetStatus.bluehive.error)||blueHiveData.length===0} type="checkbox" checked={showBlueHive} onChange={e=>setShowBlueHive(e.target.checked)}/><span className="tog-slider"/></label>
             </div>
+            <div className={`layer-inline-status${datasetStatus.bluehive.error?' error':''}`}>{datasetStatus.bluehive.loading?'Loading…':datasetStatus.bluehive.error||`${blueHiveData.length} records loaded${blueHiveData.length===0?' — database import required':''}`}</div>
             <div className="tog-row">
               <span className="tog-lbl" style={{color:'#06b6d4',display:'flex',alignItems:'center',gap:4}}>
                 <span style={{width:7,height:7,borderRadius:'50%',background:'#06b6d4',display:'inline-block',boxShadow:'0 0 6px #06b6d4',flexShrink:0}}/>
-                Dentists {dentistData.length>0&&<span style={{fontSize:9,opacity:0.7,marginLeft:2}}>({dentistData.length})</span>}
+                Dentists ({dentistData.length})
               </span>
-              <label className="tog-switch"><input type="checkbox" checked={showDentists} onChange={e=>setShowDentists(e.target.checked)}/><span className="tog-slider"/></label>
+              <label className="tog-switch"><input aria-label="Dentists" disabled={datasetStatus.dentists.loading||Boolean(datasetStatus.dentists.error)||dentistData.length===0} type="checkbox" checked={showDentists} onChange={e=>setShowDentists(e.target.checked)}/><span className="tog-slider"/></label>
             </div>
+            <div className={`layer-inline-status${datasetStatus.dentists.error?' error':''}`}>{datasetStatus.dentists.loading?'Loading…':datasetStatus.dentists.error||`${dentistData.length} records loaded${dentistData.length===0?' — database import required':''}`}</div>
             <div className="tog-row">
               <span className="tog-lbl" style={{color:'#db2777',display:'flex',alignItems:'center',gap:4}}>
                 <span style={{width:7,height:7,borderRadius:'50%',background:'#ec4899',display:'inline-block',boxShadow:'0 0 6px #ec4899',flexShrink:0}}/>
                 My Clinics {myClinicsData.length>0&&<span style={{fontSize:9,opacity:0.7,marginLeft:2}}>({myClinicsData.length})</span>}
               </span>
-              <label className="tog-switch"><input type="checkbox" checked={showMyClinics} onChange={e=>setShowMyClinics(e.target.checked)}/><span className="tog-slider"/></label>
+              <label className="tog-switch"><input aria-label="My Clinics" disabled={datasetStatus.myClinics.loading||Boolean(datasetStatus.myClinics.error)||myClinicsData.length===0} type="checkbox" checked={showMyClinics} onChange={e=>setShowMyClinics(e.target.checked)}/><span className="tog-slider"/></label>
             </div>
+            <div className={`layer-inline-status${datasetStatus.myClinics.error?' error':''}`}>{datasetStatus.myClinics.loading?'Loading uploads…':datasetStatus.myClinics.error||`${myClinicsData.length} uploaded records${myClinicsData.length===0?' — upload a clinic file to create this layer':''}`}</div>
             <button
               onClick={()=>setShowDatasetBrowser(true)}
               style={{
@@ -3150,6 +3186,8 @@ export default function App() {
           blueHiveData={blueHiveData}
           dentistData={dentistData}
           indexedData={indexedLayerData}
+          status={{bluehive:datasetStatus.bluehive,dentists:datasetStatus.dentists,indexed:datasetStatus.indexed}}
+          onRetry={()=>setDatasetRefreshKey(key=>key+1)}
         />
 
         {/* ── MAP ── */}

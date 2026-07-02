@@ -19,6 +19,7 @@ import vectorIndexRouter from "./vectorIndex";
 import providerLayersRouter from "./providerLayers";
 import googlePlacesRouter from "./googlePlaces";
 import enhancedSearchRouter from "./enhancedSearch";
+import clinicImportRouter from "./clinicImport";
 
 const router: IRouter = Router();
 
@@ -36,6 +37,7 @@ router.use(vectorIndexRouter);
 router.use(providerLayersRouter);
 router.use(googlePlacesRouter);
 router.use(enhancedSearchRouter);
+router.use(clinicImportRouter);
 
 // --- Legacy routes (kept as compatibility wrappers until fully migrated) ---
 router.use(providerSearchRouter);

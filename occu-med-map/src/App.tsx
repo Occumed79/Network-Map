@@ -1437,7 +1437,7 @@ export default function App() {
       setLocalPopInfo(null);
       setDropCenter({ lat, lng });
       setActiveTool('liveFinder');
-      doLiveSearch(lat, lng);
+      doLiveSearch(lat, lng, undefined, undefined, 'live_finder_double_click');
     });
 
     setMapReady(true);
@@ -2316,7 +2316,7 @@ export default function App() {
           built from U.S.-only datasets and are not shown outside the United States.
           Use Live Finder below to search real facilities here via OpenStreetMap.
         </div>
-        <button className="export-btn" style={{marginBottom:8}} onClick={()=>{ setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder'); doLiveSearch(lat,lng,undefined,label); }}>SEARCH LIVE PROVIDERS</button>
+        <button className="export-btn" style={{marginBottom:8}} onClick={()=>{ setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder'); doLiveSearch(lat,lng,undefined,label,'explicit_google'); }}>SEARCH LIVE PROVIDERS</button>
         <DriveTimeBox fromLat={lat} fromLng={lng} fromName={label} locB={null}/>
         <button className="export-btn" onClick={()=>doExportReport(rd)}>↓ EXPORT LOCATION REPORT</button>
       </div>
@@ -2491,7 +2491,13 @@ export default function App() {
     return `Sources: ${ok}/${total} returned${failed?` · ${failed} failed`:''} · ${resultCount} facilit${resultCount===1?'y':'ies'}`;
   }
 
-  async function doLiveSearch(lat:number,lng:number, categoryOverride?: string, selectedLocationLabel?: string) {
+  async function doLiveSearch(
+    lat:number,
+    lng:number,
+    categoryOverride?:string,
+    selectedLocationLabel?:string,
+    googlePlacesTrigger?:'address_search'|'live_finder_double_click'|'explicit_google',
+  ) {
     const categoryForSearch = categoryOverride || liveBackendCategoryRef.current;
     const map=mapRef.current;
     if(!map) return;
@@ -2542,6 +2548,7 @@ export default function App() {
       radiusMiles:String(liveRadius),
       category:categoryForSearch,
       ...(cityState ? { city:cityState.city, state:cityState.state } : {}),
+      ...(googlePlacesTrigger ? { googlePlacesTrigger } : {}),
     });
 
     // Fire three sources in parallel:
@@ -2936,7 +2943,7 @@ export default function App() {
     setLocalPopInfo(null);
     setDropCenter({ lat: lLat, lng: lLng });
     setActiveTool('liveFinder');
-    doLiveSearch(lLat, lLng, undefined, name);
+    doLiveSearch(lLat, lLng, undefined, name, 'address_search');
   }
 
   // ── Cursor light (Liquid Glass) ──────────────────────────────────────────

@@ -1,4 +1,0 @@
-seed_search_type,seed_search_value,seed_state,facility_name,address,city,state,zip,phone,modalities_available,facility_profile_url,notes,scrape_timestamp
-zip,32501,,Pensacola Open MRI Imaging,4511 N DAVIS HWY STE 1B,PENSACOLA,FL,32503,,MRI,,Distance: 2.83 mi. Phone not exposed in search results.,2026-06-14T01:28:51.740Z
-zip,32501,,CareFirst Imaging - Pensacola,4511 N DAVIS HWY STE 1B,PENSACOLA,FL,32503,,MRI,,Distance: 5.28 mi. Phone not exposed in search results.,2026-06-14T01:28:51.741Z
-zip,32501,,The Center of Imaging Excellence - Crestview,700 HOSPITAL DR,CRESTVIEW,FL,32539,,MRI,,Distance: 44.99 mi. Phone not exposed in search results.,2026-06-14T01:28:51.741Z

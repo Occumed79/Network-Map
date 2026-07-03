@@ -1,4 +1,0 @@
-facility_name,service_name,modality,body_part,price,address,city,state,zip,phone,source_seed,scrape_timestamp
-Pensacola Open MRI Imaging,MRI Brain Without Contrast,MRI,Brain,393.25,4511 N DAVIS HWY STE 1B,PENSACOLA,FL,32503,,MRI|Brain|Without Contrast|70551_zip=32501,2026-06-14T01:28:51.740Z
-CareFirst Imaging - Pensacola,MRI Brain Without Contrast,MRI,Brain,393.25,4511 N DAVIS HWY STE 1B,PENSACOLA,FL,32503,,MRI|Brain|Without Contrast|70551_zip=32501,2026-06-14T01:28:51.741Z
-The Center of Imaging Excellence - Crestview,MRI Brain Without Contrast,MRI,Brain,354.27,700 HOSPITAL DR,CRESTVIEW,FL,32539,,MRI|Brain|Without Contrast|70551_zip=32501,2026-06-14T01:28:51.741Z

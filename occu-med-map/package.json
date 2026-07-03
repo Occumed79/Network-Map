@@ -12,6 +12,8 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "scrape:bluehive": "tsx scripts/scrape-bluehive.ts",
     "scrape:bluehive:recover": "tsx scripts/scrape-bluehive.ts --recover",
+    "scrape:bluehive:sitemap": "tsx scripts/reconcile-bluehive-sitemap.ts",
+    "finalize:bluehive:sitemap": "tsx scripts/finalize-bluehive-sitemap.ts",
     "scrape:zocdoc": "tsx scripts/scrape-zocdoc.ts",
     "scrape:zocdoc:dry": "tsx scripts/scrape-zocdoc.ts --dry-run",
     "scrape:npi": "tsx scripts/scrape-npi.ts",

@@ -1,7 +1,19 @@
-.bluehive-scrape-checkpoint.json
-bluehive_providers.json
-bluehive_providers.csv
-bluehive_scrape_audit.csv
+# BlueHive generated/raw artifacts
+bluehive_*.jsonl
+bluehive_*.csv
+bluehive_*.json
+bluehive_*.log
+.bluehive-scrape-checkpoint*.json
+data/bluehive-audit/
+
+# local junk/secrets
+.DS_Store
+**/.DS_Store
+.env
+**/.env
+*.log
+*.backup*
+*checkpoint.backup*.json
 
 # Zocdoc collector outputs
 .zocdoc-scrape-checkpoint.json

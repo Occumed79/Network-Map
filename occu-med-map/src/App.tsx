@@ -40,7 +40,7 @@ const SERVICE_PRESENCE_OPTIONS = [
   {key:'vision', label:'Vision Screening', serviceKeys:['vision','eye']},
 ] as const;
 
-type ProviderExplorerMode = 'pins' | 'density' | 'hex' | 'density-pins';
+type ProviderExplorerMode = 'pins' | 'density' | 'hex' | 'density-pins' | 'dot-density';
 type ProviderDensityCell = { lat:number; lng:number; count:number };
 
 const INITIAL_PROVIDER_EXPLORER_FILTERS: ProviderExplorerFilters = { source:'all', source_kind:'all', q:'', country:'', admin_area:'', city:'', postal_code:'', clinicType:'', service:'', lat:'', lng:'', radiusMiles:'', useMapBounds:false };
@@ -1144,6 +1144,7 @@ export default function App() {
   const providerExplorerLayerRef = useRef<L.LayerGroup | null>(null);
   const providerExplorerDensityLayerRef = useRef<L.LayerGroup | null>(null);
   const providerExplorerLiveLayerRef = useRef<L.LayerGroup | null>(null);
+  const providerExplorerGapLayerRef = useRef<L.LayerGroup | null>(null);
   const [providerExplorerFilters, setProviderExplorerFilters] = useState<ProviderExplorerFilters>(INITIAL_PROVIDER_EXPLORER_FILTERS);
   const [providerExplorerMode, setProviderExplorerMode] = useState<ProviderExplorerMode>('density');
   const [providerExplorerStatus, setProviderExplorerStatus] = useState('Provider map explorer ready');
@@ -1524,10 +1525,10 @@ export default function App() {
     return { north: bounds.getNorth(), south: bounds.getSouth(), east: bounds.getEast(), west: bounds.getWest() };
   },[]);
 
-  const providerExplorerParams = useCallback((filters: ProviderExplorerFilters, mode: 'pins'|'density'|'hex') => {
+  const providerExplorerParams = useCallback((filters: ProviderExplorerFilters, mode: 'pins'|'density'|'hex'|'live'|'compare') => {
     const params = new URLSearchParams({ mode, limit: mode === 'pins' ? '1000' : '2000', page:'1' });
     Object.entries(filters).forEach(([key,value])=>{ if(key !== 'useMapBounds' && typeof value === 'string' && value && value !== 'all') params.set(key,value); });
-    const shouldUseBounds = filters.useMapBounds || mode === 'pins';
+    const shouldUseBounds = filters.useMapBounds || mode === 'pins' || mode === 'live' || mode === 'compare';
     if(shouldUseBounds) {
       const bounds = getProviderExplorerBounds();
       if(bounds) Object.entries(bounds).forEach(([key,value])=>params.set(key,String(value)));
@@ -1539,6 +1540,7 @@ export default function App() {
     providerExplorerLayerRef.current?.clearLayers();
     providerExplorerDensityLayerRef.current?.clearLayers();
     providerExplorerLiveLayerRef.current?.clearLayers();
+    providerExplorerGapLayerRef.current?.clearLayers();
   },[]);
 
   const drawProviderPins = useCallback((providers: ProviderFeature[], fit = false) => {
@@ -1587,13 +1589,13 @@ export default function App() {
     const aggregateMode = mode === 'hex' ? 'hex' : 'density';
     try {
       let aggregateStatus = '';
-      if(mode === 'density' || mode === 'hex' || mode === 'density-pins') {
+      if(mode === 'density' || mode === 'hex' || mode === 'density-pins' || mode === 'dot-density') {
         const resp = await fetch(`/api/provider-explorer/${aggregateMode}?${providerExplorerParams(filters, aggregateMode)}`);
         const data = await resp.json();
         const cells = Array.isArray(data.cells) ? data.cells as ProviderDensityCell[] : [];
         const rendered = drawProviderDensity(cells, aggregateMode);
         aggregateStatus = `${aggregateMode} view · ${Number(data.total || 0).toLocaleString()} matching records · ${rendered.toLocaleString()} aggregated cells`;
-        setProviderExplorerStatus(`${aggregateStatus} · filters: ${filterSummary(filters).join(', ') || 'none'}`);
+        setProviderExplorerStatus(`${mode === 'dot-density' ? 'dot-density fallback · ' : ''}${aggregateStatus} · filters: ${filterSummary(filters).join(', ') || 'none'}`);
       }
       if(mode === 'pins' || mode === 'density-pins') {
         const resp = await fetch(`/api/provider-explorer/map?${providerExplorerParams({...filters,useMapBounds:true}, 'pins')}`);
@@ -1640,21 +1642,66 @@ export default function App() {
     id:String(row.id || `live-${index}`), source:row.source || 'OpenStreetMap / live discovery', source_kind:'live', name:row.name || 'Unnamed live provider', clinic_type:row.cat || row.category || 'unknown', services:[row.cat,row.type,row.category].filter(Boolean), categories:[row.cat,row.type,row.category].filter(Boolean), address:row.addr || row.address || null, city:null, admin_area:null, country:null, postal_code:null, lat:typeof row.lat === 'number' ? row.lat : null, lng:typeof row.lng === 'number' ? row.lng : null, phone:row.phone || null, website:row.website || null, source_url:row.sourceUrl || null, confidence_score:null, trust_tier:'live-not-stored', last_seen:new Date().toISOString(), imported_at:null, raw_source_data:row,
   })),[liveResults]);
 
-  const renderProviderExplorerLiveLayer = useCallback(() => {
+  async function saveProviderExplorerCandidate(provider: ProviderFeature) {
+    try {
+      const resp = await fetch('/api/provider-explorer/save-candidate', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({provider}) });
+      const data = await resp.json().catch(()=>({}));
+      if(!resp.ok || data.error) throw new Error(data.error || `HTTP ${resp.status}`);
+      setProviderExplorerStatus(`Saved candidate: ${provider.name}`);
+    } catch(error) {
+      setProviderExplorerStatus(error instanceof Error ? error.message : 'Candidate save failed');
+    }
+  }
+
+  async function markProviderExplorerOutreach(provider: ProviderFeature) {
+    try {
+      const resp = await fetch('/api/provider-explorer/outreach-target', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({provider}) });
+      const data = await resp.json().catch(()=>({}));
+      if(!resp.ok || data.error) throw new Error(data.error || `HTTP ${resp.status}`);
+      setProviderExplorerStatus(`Marked outreach target: ${provider.name}`);
+    } catch(error) {
+      setProviderExplorerStatus(error instanceof Error ? error.message : 'Outreach target failed');
+    }
+  }
+
+  const renderProviderExplorerLiveLayer = useCallback(async () => {
     const map = mapRef.current;
     if(!map) return;
     if(!providerExplorerLiveLayerRef.current) providerExplorerLiveLayerRef.current = L.layerGroup().addTo(map);
     const layer = providerExplorerLiveLayerRef.current;
     layer.clearLayers();
     if(!providerExplorerLiveEnabled) return;
-    const providers = mapLiveResultsAsProviderFeatures();
+    let providers = mapLiveResultsAsProviderFeatures();
+    try { const resp = await fetch(`/api/provider-explorer/live?${providerExplorerParams({...providerExplorerFilters, includeLive:true}, 'live')}`); const data = await resp.json(); if(Array.isArray(data.providers) && data.providers.length) providers = data.providers as ProviderFeature[]; } catch {}
     providers.filter((provider): provider is ProviderFeature & {lat:number; lng:number}=>typeof provider.lat === 'number' && typeof provider.lng === 'number').slice(0,1000).forEach(provider=>{
       L.circleMarker([provider.lat, provider.lng], { radius:6, color:'#f97316', weight:2, fillColor:'#fed7aa', fillOpacity:.78 })
-        .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>Live discovery · not stored<br/>Candidate save requires persistence setup.`)
+        .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>Live discovery · not stored<br/>${escapeHtml(provider.clinic_type)}<br/><button class="provider-popup-save" data-provider-id="${escapeHtml(provider.id)}">Save candidate</button>`)
         .addTo(layer);
     });
     setProviderExplorerStatus(prev=>`${prev} · live layer: ${providers.length.toLocaleString()} not-stored results`);
-  },[mapLiveResultsAsProviderFeatures, providerExplorerLiveEnabled]);
+  },[mapLiveResultsAsProviderFeatures, providerExplorerLiveEnabled, providerExplorerFilters, providerExplorerParams]);
+
+
+  const compareProviderExplorerArea = useCallback(async (filters: ProviderExplorerFilters = providerExplorerFilters) => {
+    const map = mapRef.current;
+    if(!map) return;
+    if(!providerExplorerGapLayerRef.current) providerExplorerGapLayerRef.current = L.layerGroup().addTo(map);
+    const layer = providerExplorerGapLayerRef.current;
+    layer.clearLayers();
+    try {
+      const resp = await fetch(`/api/provider-explorer/compare?${providerExplorerParams({...filters, includeLive:true}, 'compare')}`);
+      const data = await resp.json();
+      const liveOnly = Array.isArray(data.live_only) ? data.live_only as ProviderFeature[] : [];
+      liveOnly.filter((provider): provider is ProviderFeature & {lat:number; lng:number}=>typeof provider.lat === 'number' && typeof provider.lng === 'number').slice(0,500).forEach(provider=>{
+        L.circleMarker([provider.lat, provider.lng], { radius:7, color:'#f59e0b', weight:2, fillColor:'#fde68a', fillOpacity:.75 })
+          .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>Live-only gap<br/>${escapeHtml(provider.clinic_type)}<br/>${escapeHtml(provider.match_reason || '')}`)
+          .addTo(layer);
+      });
+      setProviderExplorerStatus(`compare · stored ${Number(data.stored_count||0).toLocaleString()} · live ${Number(data.live_count||0).toLocaleString()} · live-only gaps ${liveOnly.length.toLocaleString()}`);
+    } catch(error) {
+      setProviderExplorerStatus(error instanceof Error ? error.message : 'Compare failed');
+    }
+  },[providerExplorerFilters, providerExplorerParams]);
 
   const loadProviderDataset = useCallback((key: DatasetKey) => {
     if(datasetRequestsRef.current[key]) return datasetRequestsRef.current[key];
@@ -1667,7 +1714,7 @@ export default function App() {
     const request = (async ()=>{
       setDatasetStatus(prev=>({...prev,[key]:{loading:true,error:'',loaded:false}}));
       try {
-        const params = new URLSearchParams({limit:'500',page:'1'});
+        const params = new URLSearchParams({limit:'1000',page:'1'});
         const map = mapRef.current;
         if(map) {
           const bounds = map.getBounds();
@@ -3386,18 +3433,18 @@ export default function App() {
               <div className="provider-map-panel">
                 <div className="provider-map-panel-head"><strong>Provider Map Explorer</strong><span>{providerExplorerMode}</span></div>
                 <div className="provider-map-mode-row">
-                  {(['density','hex','pins','density-pins'] as ProviderExplorerMode[]).map(mode=><button key={mode} className={providerExplorerMode===mode?'active':''} onClick={()=>void renderProviderExplorerMap(mode)}>{mode === 'density-pins' ? 'density + pins' : mode}</button>)}
+                  {(['density','hex','pins','density-pins','dot-density'] as ProviderExplorerMode[]).map(mode=><button key={mode} className={providerExplorerMode===mode?'active':''} onClick={()=>void renderProviderExplorerMap(mode)}>{mode === 'density-pins' ? 'density + pins' : mode}</button>)}
                 </div>
                 <div className="provider-map-mode-row">
                   <button onClick={useCurrentProviderMapBoundsInDatabase}>Use current map bounds in database</button>
                   <button onClick={useCurrentProviderRadiusInDatabase}>Use current radius in database</button>
                   <button onClick={()=>setShowDatasetBrowser(true)}>Open matching records in database</button>
-                  <button onClick={()=>void renderProviderExplorerMap(providerExplorerMode, providerExplorerFilters)}>Refresh map layer</button>
+                  <button onClick={()=>void compareProviderExplorerArea(providerExplorerFilters)}>Compare stored vs live</button><button onClick={()=>void compareProviderExplorerArea(providerExplorerFilters)}>Show live-only gaps</button><button onClick={()=>void renderProviderExplorerLiveLayer()}>Refresh live layer</button><button onClick={()=>void renderProviderExplorerMap(providerExplorerMode, providerExplorerFilters)}>Refresh layer</button>
                   <button onClick={()=>{ clearProviderExplorerMap(); setProviderExplorerFilters(INITIAL_PROVIDER_EXPLORER_FILTERS); setProviderExplorerStatus('Provider map/database filters cleared'); }}>Clear shared filters</button>
                 </div>
                 <label className="provider-live-toggle"><input type="checkbox" checked={providerExplorerLiveEnabled} onChange={e=>setProviderExplorerLiveEnabled(e.target.checked)} /> Live discovery layer <span>{liveResults.length.toLocaleString()} not stored</span></label>
                 <div className="provider-map-status">{providerExplorerStatus}</div>
-                <div className="provider-map-status warning">Candidate save requires persistence setup; live results are not imported into Neon.</div>
+                <div className="provider-map-status warning">Candidate save persists selected records; live results are never imported unless explicitly saved.</div>
               </div>
               {clinicGroups.map(grp=><LayerToggle
                 key={grp.id}
@@ -3527,6 +3574,9 @@ export default function App() {
           onLoad={key=>void loadProviderDataset(key)}
           getMapBounds={getProviderExplorerBounds}
           onViewOnMap={showProviderExplorerRowsOnMap}
+          onViewDensity={(filters)=>void renderProviderExplorerMap('density', filters)}
+          onCompare={(filters)=>void compareProviderExplorerArea(filters)}
+          getCurrentRadius={()=>{ const center = lastRadiusRef.current || dropCenter; return center ? {lat:center.lat,lng:center.lng,radiusMiles:liveRadius || dropRadiusMiles || 10} : null; }}
           sharedFilters={providerExplorerFilters}
           onFiltersChange={setProviderExplorerFilters}
           onOpenMatchingInDatabase={(filters)=>{ setProviderExplorerFilters(filters); setShowDatasetBrowser(true); }}

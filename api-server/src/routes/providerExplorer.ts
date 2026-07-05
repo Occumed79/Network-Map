@@ -55,19 +55,21 @@ function buildWhere(req: Request, schema: "normalized" | "legacy", params: unkno
   const cityExpr = schema === "normalized" ? "pl.city" : "mp.locality"; const adminExpr = schema === "normalized" ? "pl.state" : "mp.administrative_area_level_1";
   const postalExpr = schema === "normalized" ? "pl.postal_code" : "mp.postal_code"; const nameExpr = schema === "normalized" ? "p.name" : "mp.name";
   const sourceExpr = schema === "normalized" ? "psrc.source_label" : "mp.data_source";
+  const sourceTextExpr = `LOWER(COALESCE(${sourceExpr}, ''))`;
+  const countryExpr = schema === "normalized" ? "psrc.raw_data->>'country'" : "COALESCE(mp.country_code, mp.raw_data->>'country')";
   const serviceExpr = schema === "normalized" ? "COALESCE(svc.services_text, '')" : "COALESCE(mp.category, '') || ' ' || COALESCE(array_to_string(mp.types, ' '), '')";
   const where = [`${latExpr} IS NOT NULL`, `${lngExpr} IS NOT NULL`, `${latExpr} BETWEEN -90 AND 90`, `${lngExpr} BETWEEN -180 AND 180`, `(${latExpr} <> 0 OR ${lngExpr} <> 0)`];
   if (source === "live" || source === "candidates") where.push("FALSE");
   if (source && source !== "live" && source !== "candidates") {
-    if (source === "indexed") where.push(`${sourceExpr} NOT IN ('BlueHive','Dentist Dataset','My Clinics')`);
-    else where.push(`${sourceExpr} = ${addParam(params, SOURCE_LABELS[source] || source)}`);
+    if (source === "indexed") where.push(`${sourceTextExpr} NOT IN ('bluehive','dentist dataset','my clinics')`);
+    else where.push(`${sourceTextExpr} = LOWER(${addParam(params, SOURCE_LABELS[source] || source)})`);
   }
   if (sourceKind && sourceKind !== "all") {
-    if (sourceKind === "saved") where.push(`${sourceExpr} = 'My Clinics'`);
-    else if (sourceKind === "stored") where.push(`${sourceExpr} <> 'My Clinics'`);
+    if (sourceKind === "saved") where.push(`${sourceTextExpr} = 'my clinics'`);
+    else if (sourceKind === "stored") where.push(`${sourceTextExpr} <> 'my clinics'`);
     else where.push("FALSE");
   }
-  if (country) where.push(`LOWER(COALESCE(${schema === "normalized" ? "psrc.raw_data->>'country'" : "mp.raw_data->>'country"}, 'US')) = LOWER(${addParam(params, country)})`);
+  if (country) where.push(`LOWER(COALESCE(${countryExpr}, 'US')) = LOWER(${addParam(params, country)})`);
   if (adminArea) where.push(`LOWER(${adminExpr}) = LOWER(${addParam(params, adminArea)})`);
   if (city) where.push(`LOWER(${cityExpr}) = LOWER(${addParam(params, city)})`);
   if (postalCode) where.push(`${postalExpr} ILIKE ${addParam(params, `${postalCode}%`)}`);
@@ -85,7 +87,7 @@ function baseSql(schema: "normalized" | "legacy") {
 }
 
 function selectSql(schema: "normalized" | "legacy") {
-  if (schema === "legacy") return `SELECT mp.source_id AS id, mp.name, mp.formatted_address AS address, mp.locality AS city, mp.administrative_area_level_1 AS admin_area, COALESCE(mp.raw_data->>'country','US') AS country, mp.postal_code, mp.lat, mp.lng, mp.phone, mp.website, mp.data_source AS source, mp.source_type, mp.source_url, mp.confidence_score, mp.category, mp.types AS services, mp.raw_data AS raw_source_data, mp.created_at AS imported_at, mp.updated_at AS last_seen, 'directory' AS trust_tier`;
+  if (schema === "legacy") return `SELECT mp.source_id AS id, mp.name, mp.formatted_address AS address, mp.locality AS city, mp.administrative_area_level_1 AS admin_area, COALESCE(mp.country_code, mp.raw_data->>'country','US') AS country, mp.postal_code, mp.lat, mp.lng, mp.phone, mp.website, mp.data_source AS source, mp.source_type, mp.source_url, mp.confidence_score, mp.category, mp.types AS services, mp.raw_data AS raw_source_data, mp.created_at AS imported_at, mp.updated_at AS last_seen, 'directory' AS trust_tier`;
   return `SELECT p.id, p.name, pl.address, pl.city, pl.state AS admin_area, COALESCE(psrc.raw_data->>'country','US') AS country, pl.postal_code, pl.lat, pl.lng, pc.phone, pc.website, psrc.source_label AS source, psrc.source_url, NULL::numeric AS confidence_score, svc.services, psrc.raw_data AS raw_source_data, psrc.created_at AS imported_at, psrc.fetched_at AS last_seen, psrc.trust_tier`;
 }
 
@@ -121,10 +123,30 @@ async function handle(req: Request, res: Response, forcedMode?: Mode) {
   const providers = normalizeRows(rows); res.json({ mode, providers, records: providers, total, count: providers.length, page, limit, hasMore: offset + providers.length < total, visibleCount: providers.length, sourceNote: "Live adapters are intentionally not persisted; save/candidate writes require explicit action." });
 }
 
-router.get("/provider-explorer", (req, res) => void handle(req, res).catch((e) => res.status(200).json({ providers: [], total: 0, error: e?.message || "Provider explorer failed" })));
-router.get("/provider-explorer/map", (req, res) => void handle(req, res, "pins"));
-router.get("/provider-explorer/density", (req, res) => void handle(req, res, "density"));
-router.get("/provider-explorer/hex", (req, res) => void handle(req, res, "hex"));
-router.get("/provider-explorer/facets", (req, res) => void handle(req, res, "facets"));
+function routeHandler(forcedMode?: Mode) {
+  return (req: Request, res: Response) => {
+    void handle(req, res, forcedMode).catch((e) => {
+      res.status(200).json({
+        providers: [],
+        records: [],
+        cells: [],
+        facets: [],
+        total: 0,
+        count: 0,
+        page: 1,
+        limit: 0,
+        hasMore: false,
+        mode: forcedMode || req.query.mode || "records",
+        error: e?.message || "Provider explorer failed",
+      });
+    });
+  };
+}
+
+router.get("/provider-explorer", routeHandler());
+router.get("/provider-explorer/map", routeHandler("pins"));
+router.get("/provider-explorer/density", routeHandler("density"));
+router.get("/provider-explorer/hex", routeHandler("hex"));
+router.get("/provider-explorer/facets", routeHandler("facets"));
 router.post("/provider-explorer/save-candidate", (_req: Request, res: Response) => res.status(501).json({ error: "Safe save-candidate workflow is scaffolded only; no provider data was written." }));
 export default router;

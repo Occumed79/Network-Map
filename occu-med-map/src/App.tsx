@@ -23,7 +23,7 @@ import { liveResultsToEtaCandidates } from './features/driveTime/leafletProvider
 import { useProviderEta } from './features/driveTime/useProviderEta';
 import './features/driveTime/driveTimeControls.css';
 import './features/driveTime/driveTimeBadge.css';
-import DatasetBrowser, { type DatasetKey, type DatasetLoadState } from './DatasetBrowser';
+import DatasetBrowser, { type DatasetKey, type DatasetLoadState, type ProviderFeature, type ProviderExplorerFilters } from './DatasetBrowser';
 
 const NATIVE_DRIVE_TIME_ENABLED = import.meta.env.VITE_NATIVE_DRIVE_TIME === 'true';
 
@@ -1132,6 +1132,7 @@ export default function App() {
   const [showDatasetBrowser, setShowDatasetBrowser] = useState(false);
   const [datasetStatus, setDatasetStatus] = useState<Record<DatasetKey, DatasetLoadState>>(INITIAL_DATASET_STATUS);
   const datasetRequestsRef = useRef<Partial<Record<DatasetKey, Promise<void>>>>({});
+  const providerExplorerLayerRef = useRef<L.LayerGroup | null>(null);
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [indexedLayerData, setIndexedLayerData] = useState<any[]>([]);
   const [outreachNotes, setOutreachNotes] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_notes')||'{}'); } catch { return {}; } });
@@ -1498,6 +1499,31 @@ export default function App() {
 
     return ()=>{ resizeObserver.disconnect(); map.remove(); mapRef.current=null; cityLayerRef.current=null; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
+
+
+  const getProviderExplorerBounds = useCallback(() => {
+    const map = mapRef.current;
+    if(!map) return null;
+    const bounds = map.getBounds();
+    return { north: bounds.getNorth(), south: bounds.getSouth(), east: bounds.getEast(), west: bounds.getWest() };
+  },[]);
+
+  const showProviderExplorerRowsOnMap = useCallback((providers: ProviderFeature[], filters: ProviderExplorerFilters) => {
+    const map = mapRef.current;
+    if(!map) return;
+    if(!providerExplorerLayerRef.current) providerExplorerLayerRef.current = L.layerGroup().addTo(map);
+    const layer = providerExplorerLayerRef.current;
+    layer.clearLayers();
+    const drawable = providers.filter((provider): provider is ProviderFeature & {lat:number; lng:number} => typeof provider.lat === 'number' && typeof provider.lng === 'number');
+    drawable.slice(0,1000).forEach(provider=>{
+      const color = provider.source_kind === 'saved' ? '#16a34a' : provider.source_kind === 'live' ? '#f97316' : '#0ea5e9';
+      L.circleMarker([provider.lat, provider.lng], { radius: 5, color, weight: 1, fillColor: color, fillOpacity: 0.72 })
+        .bindPopup(`<strong>${provider.name}</strong><br/>${provider.source} · ${provider.source_kind}<br/>${provider.clinic_type}<br/>${[provider.address,provider.city,provider.admin_area,provider.country].filter(Boolean).join(', ')}${provider.website ? `<br/><a href="${provider.website}" target="_blank" rel="noreferrer">Website</a>` : ''}`)
+        .addTo(layer);
+    });
+    if(drawable.length) map.fitBounds(L.latLngBounds(drawable.map(provider=>[provider.lat,provider.lng] as [number,number])), { padding:[28,28], maxZoom: 11 });
+    console.info(`Provider Map Explorer: showing ${Math.min(drawable.length,1000).toLocaleString()} visible pins from ${providers.length.toLocaleString()} database records (${filters.source === 'all' ? 'all sources' : filters.source}). Use density/hex API for large global sets.`);
   },[]);
 
   const loadProviderDataset = useCallback((key: DatasetKey) => {
@@ -3213,7 +3239,7 @@ export default function App() {
               <LayerToggle label="BlueHive Providers" checked={showBlueHive} onChange={checked=>toggleProviderLayer('bluehive',checked)} disabled={datasetStatus.bluehive.loading} status={providerLayerStatus('bluehive',blueHiveData.length,'0 loaded')}/>
               <LayerToggle label="Dentists" checked={showDentists} onChange={checked=>toggleProviderLayer('dentists',checked)} disabled={datasetStatus.dentists.loading} status={providerLayerStatus('dentists',dentistData.length,'0 loaded')}/>
               <LayerToggle label="My Clinics" checked={showMyClinicsLayer} onChange={checked=>toggleProviderLayer('myClinics',checked)} disabled={datasetStatus.myClinics.loading} status={providerLayerStatus('myClinics',myClinicsData.length,'No uploaded clinics yet')}/>
-              <button className="workflow-dataset-button" onClick={()=>setShowDatasetBrowser(true)}>▦ Browse Datasets</button>
+              <button className="workflow-dataset-button" onClick={()=>setShowDatasetBrowser(true)}>▦ Provider Explorer</button>
               {clinicGroups.map(grp=><LayerToggle
                 key={grp.id}
                 label={grp.groupName}
@@ -3340,6 +3366,8 @@ export default function App() {
           myClinicsData={myClinicsData}
           status={datasetStatus}
           onLoad={key=>void loadProviderDataset(key)}
+          getMapBounds={getProviderExplorerBounds}
+          onViewOnMap={showProviderExplorerRowsOnMap}
         />
 
         {/* ── MAP ── */}

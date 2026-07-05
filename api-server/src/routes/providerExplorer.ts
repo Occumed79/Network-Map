@@ -57,11 +57,16 @@ function buildWhere(req: Request, schema: "normalized" | "legacy", params: unkno
   const sourceExpr = schema === "normalized" ? "psrc.source_label" : "mp.data_source";
   const serviceExpr = schema === "normalized" ? "COALESCE(svc.services_text, '')" : "COALESCE(mp.category, '') || ' ' || COALESCE(array_to_string(mp.types, ' '), '')";
   const where = [`${latExpr} IS NOT NULL`, `${lngExpr} IS NOT NULL`, `${latExpr} BETWEEN -90 AND 90`, `${lngExpr} BETWEEN -180 AND 180`, `(${latExpr} <> 0 OR ${lngExpr} <> 0)`];
+  if (source === "live" || source === "candidates") where.push("FALSE");
   if (source && source !== "live" && source !== "candidates") {
     if (source === "indexed") where.push(`${sourceExpr} NOT IN ('BlueHive','Dentist Dataset','My Clinics')`);
     else where.push(`${sourceExpr} = ${addParam(params, SOURCE_LABELS[source] || source)}`);
   }
-  if (sourceKind && sourceKind !== "all") where.push(sourceKind === "saved" ? `${sourceExpr} = 'My Clinics'` : `${sourceExpr} <> 'My Clinics'`);
+  if (sourceKind && sourceKind !== "all") {
+    if (sourceKind === "saved") where.push(`${sourceExpr} = 'My Clinics'`);
+    else if (sourceKind === "stored") where.push(`${sourceExpr} <> 'My Clinics'`);
+    else where.push("FALSE");
+  }
   if (country) where.push(`LOWER(COALESCE(${schema === "normalized" ? "psrc.raw_data->>'country'" : "mp.raw_data->>'country"}, 'US')) = LOWER(${addParam(params, country)})`);
   if (adminArea) where.push(`LOWER(${adminExpr}) = LOWER(${addParam(params, adminArea)})`);
   if (city) where.push(`LOWER(${cityExpr}) = LOWER(${addParam(params, city)})`);
@@ -91,7 +96,25 @@ async function handle(req: Request, res: Response, forcedMode?: Mode) {
   const mode = forcedMode || (asString(req.query.mode) as Mode) || "records"; const params: unknown[] = []; const where = buildWhere(req, schema, params).join(" AND "); const from = baseSql(schema);
   const count = await queryWithStatementTimeout(pool, `SELECT count(*)::int AS total ${from} ${where}`, params);
   const total = Number(count.rows[0]?.total || 0);
-  if (mode === "facets") { const facetSql = `SELECT source, source_kind, country, admin_area, city, clinic_type, count(*)::int count FROM (SELECT x.source, CASE WHEN x.source='My Clinics' THEN 'saved' ELSE 'stored' END source_kind, x.country, x.admin_area, x.city, 'unknown' clinic_type FROM (${selectSql(schema)} ${from} ${where}) x) f GROUP BY GROUPING SETS ((source),(source_kind),(country),(admin_area),(city),(clinic_type))`; const rows = (await queryWithStatementTimeout(pool, facetSql, params)).rows; res.json({ total, facets: rows }); return; }
+  if (mode === "facets") {
+    const serviceFacetExpr = "unnest(COALESCE(x.services::text[], ARRAY[]::text[]))";
+    const facetSql = `
+      SELECT source, source_kind, country, admin_area, city, clinic_type, service, count(*)::int count
+      FROM (
+        SELECT x.source, CASE WHEN x.source='My Clinics' THEN 'saved' ELSE 'stored' END source_kind,
+          x.country, x.admin_area, x.city, 'unknown' clinic_type, NULL::text service
+        FROM (${selectSql(schema)} ${from} ${where}) x
+        UNION ALL
+        SELECT NULL::text source, NULL::text source_kind, NULL::text country, NULL::text admin_area, NULL::text city,
+          NULL::text clinic_type, ${serviceFacetExpr} service
+        FROM (${selectSql(schema)} ${from} ${where}) x
+      ) f
+      GROUP BY GROUPING SETS ((source),(source_kind),(country),(admin_area),(city),(clinic_type),(service))
+      HAVING count(*) > 0`;
+    const rows = (await queryWithStatementTimeout(pool, facetSql, params)).rows;
+    res.json({ total, facets: rows });
+    return;
+  }
   if (mode === "density" || mode === "hex") { const precision = Math.max(1, Math.min(10, Number(req.query.precision) || (mode === "hex" ? 2 : 1))); const latExpr = schema === "normalized" ? "pl.lat" : "mp.lat"; const lngExpr = schema === "normalized" ? "pl.lng" : "mp.lng"; const rows = (await queryWithStatementTimeout(pool, `SELECT round((${latExpr})::numeric, ${precision})::float lat, round((${lngExpr})::numeric, ${precision})::float lng, count(*)::int count ${from} ${where} GROUP BY 1,2 ORDER BY count DESC LIMIT 2000`, params)).rows; res.json({ mode, total, cells: rows, count: rows.length, precision }); return; }
   const page = Math.max(1, Number(req.query.page) || 1); const maxLimit = mode === "pins" ? MAX_PIN_LIMIT : MAX_RECORD_LIMIT; const limit = Math.min(Math.max(1, Number(req.query.limit) || (mode === "pins" ? 1000 : 25)), maxLimit); const offset = (page - 1) * limit;
   params.push(limit, offset); const rows = (await queryWithStatementTimeout(pool, `${selectSql(schema)} ${from} ${where} ORDER BY id ASC LIMIT $${params.length - 1} OFFSET $${params.length}`, params)).rows;

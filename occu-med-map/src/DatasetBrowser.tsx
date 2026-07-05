@@ -8,22 +8,41 @@ export type ProviderFeature = {
 export type DatasetKey = 'bluehive' | 'dentists' | 'indexed' | 'myClinics';
 export type DatasetLoadState = { loading:boolean; loaded:boolean; error:string };
 export type ProviderExplorerFilters = {
-  source:string; source_kind:string; q:string; country:string; admin_area:string; city:string; postal_code:string; clinicType:string; service:string; useMapBounds:boolean;
+  source:string; source_kind:string; q:string; country:string; admin_area:string; city:string; postal_code:string; clinicType:string; service:string; lat:string; lng:string; radiusMiles:string; useMapBounds:boolean;
 };
 
 type ProviderExplorerResponse = { providers?:ProviderFeature[]; records?:ProviderFeature[]; total:number; count:number; page:number; limit:number; hasMore:boolean; facets?:Array<Record<string,unknown>>; error?:string };
-type Props = { open:boolean; onClose:()=>void; getMapBounds?:()=>{north:number;south:number;east:number;west:number}|null; onViewOnMap?:(providers:ProviderFeature[], filters:ProviderExplorerFilters)=>void; onLoad?:(key:DatasetKey)=>void } & Record<string,unknown>;
+type Props = { open:boolean; onClose:()=>void; getMapBounds?:()=>{north:number;south:number;east:number;west:number}|null; onViewOnMap?:(providers:ProviderFeature[], filters:ProviderExplorerFilters)=>void; onLoad?:(key:DatasetKey)=>void; sharedFilters?:ProviderExplorerFilters; onFiltersChange?:(filters:ProviderExplorerFilters)=>void; onOpenMatchingInDatabase?:(filters:ProviderExplorerFilters)=>void } & Record<string,unknown>;
 
 const SOURCE_OPTIONS = [ ['all','All'], ['bluehive','BlueHive'], ['dentists','Dentists'], ['indexed','Indexed'], ['my-clinics','My Clinics'], ['live','Live'], ['saved','Saved'], ['candidates','Candidates'] ];
 const KIND_OPTIONS = [ ['all','All kinds'], ['stored','Stored Neon'], ['live','Live discovery'], ['saved','Saved clinics'], ['candidate','Candidates'] ];
 const LIMIT = 25;
-const EMPTY_FILTERS: ProviderExplorerFilters = { source:'all', source_kind:'all', q:'', country:'', admin_area:'', city:'', postal_code:'', clinicType:'', service:'', useMapBounds:false };
+const EMPTY_FILTERS: ProviderExplorerFilters = { source:'all', source_kind:'all', q:'', country:'', admin_area:'', city:'', postal_code:'', clinicType:'', service:'', lat:'', lng:'', radiusMiles:'', useMapBounds:false };
 
 function mapsLink(provider:ProviderFeature) { const query = provider.lat != null && provider.lng != null ? `${provider.lat},${provider.lng}` : `${provider.name} ${[provider.address,provider.city,provider.admin_area,provider.country].filter(Boolean).join(', ')}`; return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`; }
-function filterSummary(filters:ProviderExplorerFilters) { return Object.entries(filters).filter(([k,v])=>k!=='useMapBounds' && typeof v === 'string' && v !== '' && v !== 'all').map(([k,v])=>`${k}: ${v}`).concat(filters.useMapBounds ? ['map bounds'] : []); }
 
-export default function DatasetBrowser({ open,onClose,getMapBounds,onViewOnMap }:Props) {
-  const [filters,setFilters] = useState<ProviderExplorerFilters>(EMPTY_FILTERS);
+const FACET_KEYS: Array<{key:keyof ProviderExplorerFilters; label:string}> = [
+  {key:'source', label:'Source'}, {key:'source_kind', label:'Kind'}, {key:'country', label:'Country'}, {key:'admin_area', label:'Admin area'}, {key:'clinicType', label:'Clinic type'}, {key:'service', label:'Service/category'},
+];
+function FacetBreakdown({facets,onSelect}:{facets:Array<Record<string,unknown>>; onSelect:(key:string,value:string)=>void}) {
+  const groups = FACET_KEYS.map(({key,label})=>{
+    const apiKey = key === 'clinicType' ? 'clinic_type' : key === 'service' ? 'service' : key;
+    const items = facets
+      .map(row=>({value:String(row[apiKey] || ''), count:Number(row.count || 0)}))
+      .filter(item=>item.value && item.value !== 'null' && item.count > 0)
+      .sort((a,b)=>b.count-a.count)
+      .slice(0,6);
+    return {key,label,items};
+  }).filter(group=>group.items.length);
+  if(!groups.length) return null;
+  return <div className="provider-facets">{groups.map(group=><section key={group.key}><strong>{group.label}</strong>{group.items.map(item=><button key={`${group.key}-${item.value}`} onClick={()=>onSelect(group.key,item.value)}>{item.value}<span>{item.count.toLocaleString()}</span></button>)}</section>)}</div>;
+}
+
+export function filterSummary(filters:ProviderExplorerFilters) { return Object.entries(filters).filter(([k,v])=>k!=='useMapBounds' && typeof v === 'string' && v !== '' && v !== 'all').map(([k,v])=>`${k}: ${v}`).concat(filters.useMapBounds ? ['map bounds'] : []); }
+
+export default function DatasetBrowser({ open,onClose,getMapBounds,onViewOnMap,sharedFilters,onFiltersChange,onOpenMatchingInDatabase }:Props) {
+  const [localFilters,setLocalFilters] = useState<ProviderExplorerFilters>(EMPTY_FILTERS);
+  const filters = sharedFilters || localFilters;
   const [page,setPage] = useState(1);
   const [rows,setRows] = useState<ProviderFeature[]>([]);
   const [total,setTotal] = useState(0);
@@ -33,7 +52,8 @@ export default function DatasetBrowser({ open,onClose,getMapBounds,onViewOnMap }
   const [facets,setFacets] = useState<Array<Record<string,unknown>>>([]);
 
   const active = useMemo(()=>filterSummary(filters),[filters]);
-  const setFilter = <K extends keyof ProviderExplorerFilters>(key:K,value:ProviderExplorerFilters[K]) => { setFilters(prev=>({...prev,[key]:value})); setPage(1); };
+  const updateFilters = (next:ProviderExplorerFilters) => { if(sharedFilters) onFiltersChange?.(next); else setLocalFilters(next); };
+  const setFilter = <K extends keyof ProviderExplorerFilters>(key:K,value:ProviderExplorerFilters[K]) => { updateFilters({...filters,[key]:value}); setPage(1); };
   const buildParams = useCallback((mode = 'records') => {
     const params = new URLSearchParams({ mode, page:String(page), limit:String(LIMIT) });
     Object.entries(filters).forEach(([key,value])=>{ if(key !== 'useMapBounds' && typeof value === 'string' && value && value !== 'all') params.set(key,value); });
@@ -47,7 +67,7 @@ export default function DatasetBrowser({ open,onClose,getMapBounds,onViewOnMap }
       const [recordsResp, facetsResp] = await Promise.all([ fetch(`/api/provider-explorer?${buildParams('records')}`, {signal:ac.signal}), fetch(`/api/provider-explorer/facets?${buildParams('facets')}`, {signal:ac.signal}) ]);
       const data = await recordsResp.json() as ProviderExplorerResponse; const facetData = await facetsResp.json().catch(()=>({facets:[]}));
       if(!recordsResp.ok || data.error) throw new Error(data.error || `HTTP ${recordsResp.status}`);
-      setRows(data.providers || data.records || []); setTotal(Number(data.total || 0)); setHasMore(Boolean(data.hasMore)); setFacets(Array.isArray((facetData as any).facets) ? (facetData as any).facets.slice(0,20) : []);
+      setRows(data.providers || data.records || []); setTotal(Number(data.total || 0)); setHasMore(Boolean(data.hasMore)); setFacets(Array.isArray((facetData as any).facets) ? (facetData as any).facets : []);
     } catch(e) { if(!ac.signal.aborted) setError(e instanceof Error ? e.message : 'Provider explorer request failed'); }
     finally { if(!ac.signal.aborted) setLoading(false); }
   })(); return ()=>ac.abort(); },[open,buildParams]);
@@ -66,11 +86,15 @@ export default function DatasetBrowser({ open,onClose,getMapBounds,onViewOnMap }
         <input value={filters.city} onChange={e=>setFilter('city',e.target.value)} placeholder="City" />
         <input value={filters.clinicType} onChange={e=>setFilter('clinicType',e.target.value)} placeholder="Clinic type" />
         <input value={filters.service} onChange={e=>setFilter('service',e.target.value)} placeholder="Service/capability" />
+        <input value={filters.lat} onChange={e=>setFilter('lat',e.target.value)} placeholder="Radius lat" />
+        <input value={filters.lng} onChange={e=>setFilter('lng',e.target.value)} placeholder="Radius lng" />
+        <input value={filters.radiusMiles} onChange={e=>setFilter('radiusMiles',e.target.value)} placeholder="Radius miles" />
         <label className="provider-bounds-toggle"><input type="checkbox" checked={filters.useMapBounds} onChange={e=>setFilter('useMapBounds',e.target.checked)} /> Use current map view</label>
-        <button onClick={()=>{setFilters(EMPTY_FILTERS);setPage(1);}}>Clear filters</button>
+        <button onClick={()=>{updateFilters(EMPTY_FILTERS);setPage(1);}}>Clear shared filters</button>
       </div>
-      <div className="provider-explorer-summary"><strong>{total.toLocaleString()} matching records</strong><span>{loading?'Loading…':`${rows.length.toLocaleString()} visible on page ${page}`}</span><button onClick={()=>onViewOnMap?.(rows,filters)} disabled={!rows.length}>View these records on map</button><button onClick={()=>setPage(1)}>Open matching records in database</button></div>
+      <div className="provider-explorer-summary"><strong>{total.toLocaleString()} matching records</strong><span>{loading?'Loading…':`${rows.length.toLocaleString()} visible on page ${page}`}</span><button onClick={()=>onViewOnMap?.(rows,filters)} disabled={!rows.length}>View these records on map</button><button onClick={()=>onOpenMatchingInDatabase?.(filters)}>Open matching records in database</button></div>
       {active.length>0 && <div className="provider-active-filters">{active.map(item=><span key={item}>{item}</span>)}</div>}
+      <FacetBreakdown facets={facets} onSelect={(key,value)=>{ setFilter(key as keyof ProviderExplorerFilters, value as never); }} />
       <div className="dataset-content">
         {error && <div className="dataset-state error"><strong>Provider explorer failed</strong><span>{error}</span></div>}
         {!error && loading && <div className="dataset-state"><strong>Loading Neon stored records…</strong><span>Server-side filters and pagination are active.</span></div>}

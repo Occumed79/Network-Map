@@ -19,6 +19,7 @@ import vectorIndexRouter from "./vectorIndex";
 import providerLayersRouter from "./providerLayers";
 import googlePlacesRouter from "./googlePlaces";
 import enhancedSearchRouter from "./enhancedSearch";
+import providerExplorerRouter from "./providerExplorer";
 
 const router: IRouter = Router();
 
@@ -33,6 +34,7 @@ router.use(npiCustomSearchRouter);
 router.use(sourceStatusRouter);
 router.use(browserExtractionRouter);
 router.use(vectorIndexRouter);
+router.use(providerExplorerRouter);
 router.use(providerLayersRouter);
 router.use(googlePlacesRouter);
 router.use(enhancedSearchRouter);

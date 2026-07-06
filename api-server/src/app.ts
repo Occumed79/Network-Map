@@ -124,6 +124,7 @@ app.use("/api/enhanced-search", rateLimit({ windowMs: 10 * 60 * 1000, max: 60 })
 app.use("/api/map-inventory", rateLimit({ windowMs: 10 * 60 * 1000, max: 120 }));
 app.use("/api/provider-layers", rateLimit({ windowMs: 10 * 60 * 1000, max: 120 }));
 app.use("/api/provider-explorer", rateLimit({ windowMs: 10 * 60 * 1000, max: 180 }));
+app.use("/api/my-clinics", rateLimit({ windowMs: 10 * 60 * 1000, max: 80 }));
 
 app.use((req, res, next) => {
   if (req.method !== "GET" || !SNAPSHOT_ROUTES.has(req.path)) {

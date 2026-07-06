@@ -23,7 +23,7 @@ import { liveResultsToEtaCandidates } from './features/driveTime/leafletProvider
 import { useProviderEta } from './features/driveTime/useProviderEta';
 import './features/driveTime/driveTimeControls.css';
 import './features/driveTime/driveTimeBadge.css';
-import DatasetBrowser, { type DatasetKey, type DatasetLoadState } from './DatasetBrowser';
+import DatasetBrowser, { filterSummary, type DatasetKey, type DatasetLoadState, type ProviderFeature, type ProviderExplorerFilters } from './DatasetBrowser';
 
 const NATIVE_DRIVE_TIME_ENABLED = import.meta.env.VITE_NATIVE_DRIVE_TIME === 'true';
 
@@ -39,6 +39,15 @@ const SERVICE_PRESENCE_OPTIONS = [
   {key:'audiometry', label:'Audiometry', serviceKeys:['audiometry','audiology']},
   {key:'vision', label:'Vision Screening', serviceKeys:['vision','eye']},
 ] as const;
+
+const MASTER_PROVIDER_TYPE_OPTIONS = [
+  ['','All provider types'], ['urgent_care','Urgent Care'], ['dot_provider','DOT Provider'], ['faa_provider','FAA Provider'], ['lab','Lab'], ['general_practitioner','General Practitioner'], ['occupational_health_clinic','Occupational Health Clinic'], ['dental','Dental'], ['imaging','Imaging'], ['pharmacy_vaccination','Pharmacy / Vaccination'], ['hospital','Hospital'], ['specialist','Specialist'], ['unknown','Unknown'],
+] as const;
+
+type ProviderExplorerMode = 'pins' | 'density' | 'hex' | 'density-pins' | 'dot-density';
+type ProviderDensityCell = { lat:number; lng:number; count:number };
+
+const INITIAL_PROVIDER_EXPLORER_FILTERS: ProviderExplorerFilters = { source:'all', source_kind:'all', q:'', country:'', admin_area:'', city:'', postal_code:'', clinicType:'', service:'', lat:'', lng:'', radiusMiles:'', useMapBounds:false };
 
 const INITIAL_DATASET_STATUS: Record<DatasetKey, DatasetLoadState> = {
   bluehive: {loading:false, error:'', loaded:false},
@@ -64,6 +73,10 @@ function LayerToggle({label,checked,onChange,status,disabled=false}: {
       <span className="tog-slider"/>
     </label>
   </div>;
+}
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char] || char));
 }
 
 async function copyTextSafely(text:string):Promise<boolean> {
@@ -505,6 +518,37 @@ function countProvidersInRadius(lat:number,lng:number,examKey:string) {
   return{citiesInRadius:nearby.length,estProviders:Math.max(1,estProviders),avgDifficulty:avgDiff};
 }
 
+type ProviderCategoryKey = 'dental'|'faa'|'dot'|'occMed'|'urgentCare'|'drugTesting'|'audiology'|'pft'|'imaging'|'pharmacy'|'primaryCare'|'hospital'|'unknown';
+const PROVIDER_CATEGORY_STYLES: Record<ProviderCategoryKey,{label:string;color:string}> = {
+  dental:{label:'Dental',color:'#22d3ee'}, faa:{label:'FAA',color:'#f59e0b'}, dot:{label:'DOT',color:'#fde047'}, occMed:{label:'Occ Med',color:'#8b5cf6'}, urgentCare:{label:'Urgent Care',color:'#fb923c'}, drugTesting:{label:'Drug Test',color:'#a855f7'}, audiology:{label:'Audiology',color:'#3b82f6'}, pft:{label:'PFT',color:'#14b8a6'}, imaging:{label:'Imaging',color:'#ec4899'}, pharmacy:{label:'Pharmacy/Vaccines',color:'#22c55e'}, primaryCare:{label:'Primary Care',color:'#38bdf8'}, hospital:{label:'Hospital',color:'#ef4444'}, unknown:{label:'Unknown',color:'#94a3b8'},
+};
+const PROVIDER_CATEGORY_LEGEND: ProviderCategoryKey[] = ['dental','faa','dot','occMed','urgentCare','drugTesting','audiology','pft','imaging','pharmacy','primaryCare','hospital','unknown'];
+function providerTextBlob(provider:any): string {
+  return [provider?.clinic_type, provider?.category, provider?.providerType, provider?.source, provider?.source_label, provider?.data_source, provider?.taxonomy_description, provider?.name, provider?.clinic_name, provider?.services, provider?.types, provider?.service_categories]
+    .flatMap(value => Array.isArray(value) ? value : [value])
+    .filter(Boolean).join(' ').toLowerCase();
+}
+function providerCategoryKey(provider:any): ProviderCategoryKey {
+  const text = providerTextBlob(provider);
+  if(/dent(al|ist)|orthodont|periodont|endodont/.test(text)) return 'dental';
+  if(/faa|aviation medical|\bame\b/.test(text)) return 'faa';
+  if(/\bdot\b|department of transportation|cdl|commercial driver/.test(text)) return 'dot';
+  if(/occupational|occ\s*med|employee health|work(ers)? comp/.test(text)) return 'occMed';
+  if(/urgent care|walk[- ]?in/.test(text)) return 'urgentCare';
+  if(/drug|toxicology|mro|urine|screening/.test(text)) return 'drugTesting';
+  if(/audio|hearing|audiology/.test(text)) return 'audiology';
+  if(/spirometry|pft|pulmonary|respiratory/.test(text)) return 'pft';
+  if(/x[ -]?ray|imaging|radiolog|mri|ct scan|mammogram/.test(text)) return 'imaging';
+  if(/vaccin|immuniz|pharmacy|pharmacist/.test(text)) return 'pharmacy';
+  if(/primary care|family medicine|general practice|internal medicine/.test(text)) return 'primaryCare';
+  if(/hospital|medical center|emergency room|\ber\b/.test(text)) return 'hospital';
+  return 'unknown';
+}
+function providerCategoryStyle(provider:any) {
+  const key = providerCategoryKey(provider);
+  return { key, ...PROVIDER_CATEGORY_STYLES[key] };
+}
+
 // ── Dependency-free grid clustering ──────────────────────────────────────────
 // Aggregates large point sets into zoom-aware cluster bubbles so dense layers
 // (e.g. BlueHive ~5.7k, Dentists ~104k) no longer render as a single blob.
@@ -517,6 +561,7 @@ interface ClusterRendererOptions {
   cellPx?: number;       // grid cell size in screen pixels
   badgeLabel: string;    // accessibility / popup label
   buildPopup: (p: any) => string;
+  getStyle?: (p: any) => { key: ProviderCategoryKey; label: string; color: string };
 }
 
 function createClusteredLayer(
@@ -529,17 +574,19 @@ function createClusteredLayer(
   const cellPx = opts.cellPx ?? 62;
   const valid = points.filter(p => p && p.lat != null && p.lng != null && isValidCoord(p.lat, p.lng));
 
-  function dotHtml(): string {
-    return `<div style="width:8px;height:8px;border-radius:50%;background:${opts.color};${opts.glow ? `box-shadow:0 0 8px ${opts.color},0 0 16px ${opts.color}44,inset 0 0 4px rgba(255,255,255,0.6);` : 'box-shadow:0 0 0 1px rgba(255,255,255,0.4),inset 0 0 3px rgba(255,255,255,0.3);'}cursor:pointer;"></div>`;
+  function styleFor(p: any) { return opts.getStyle?.(p) || { key: 'unknown' as ProviderCategoryKey, label: opts.badgeLabel, color: opts.color }; }
+  function dotHtml(style: { color:string; label:string }): string {
+    return `<div title="${style.label}" style="width:10px;height:10px;border-radius:50%;background:${style.color};border:1px solid rgba(255,255,255,.9);${opts.glow ? `box-shadow:0 0 8px ${style.color},0 0 16px ${style.color}55;` : 'box-shadow:0 1px 3px rgba(0,0,0,.45);'}cursor:pointer;"></div>`;
   }
-  function clusterHtml(count: number): string {
-    const size = count >= 1000 ? 60 : count >= 250 ? 48 : count >= 50 ? 36 : 28;
-    const opacity = Math.min(0.85, 0.25 + (count / 500) * 0.6);
+  function clusterHtml(count: number, styles: Array<{color:string}>): string {
+    const size = count >= 1000 ? 64 : count >= 250 ? 52 : count >= 50 ? 40 : 30;
+    const opacity = Math.min(0.9, 0.35 + (count / 500) * 0.5);
+    const colors = Array.from(new Set(styles.map(style=>style.color))).slice(0,4);
+    const gradient = colors.length > 1 ? `conic-gradient(${colors.map((color,index)=>`${color} ${index * (100 / colors.length)}% ${(index + 1) * (100 / colors.length)}%`).join(',')})` : (colors[0] || opts.color);
     return `<div style="width:${size}px;height:${size}px;border-radius:50%;display:flex;align-items:center;justify-content:center;`
-      + `background:radial-gradient(circle at 40% 35%, rgba(255,255,255,${opacity * 0.4}), ${opts.color}${Math.floor(opacity * 255).toString(16).padStart(2,'0')}, transparent 70%);`
-      + `border:1px solid rgba(255,255,255,${opacity * 0.3});`
-      + `box-shadow:0 0 ${size/2}px ${opts.color}${Math.floor(opacity * 40).toString(16).padStart(2,'0')},0 0 ${size}px ${opts.color}${Math.floor(opacity * 20).toString(16).padStart(2,'0')},inset 0 0 20px rgba(255,255,255,${opacity * 0.15});`
-      + `cursor:pointer;backdrop-filter:blur(8px);"></div>`;
+      + `background:${gradient};opacity:${opacity};border:2px solid rgba(255,255,255,.82);`
+      + `box-shadow:0 0 0 4px rgba(15,23,42,.35),0 8px 20px rgba(0,0,0,.38);color:#fff;font:700 10px 'IBM Plex Mono',monospace;text-shadow:0 1px 2px rgba(0,0,0,.75);`
+      + `cursor:pointer;">${count >= 1000 ? `${Math.round(count/100)/10}k` : count}</div>`;
   }
 
   function render() {
@@ -551,8 +598,9 @@ function createClusteredLayer(
 
     if (zoom >= expandZoom) {
       for (const p of visible) {
+        const style = styleFor(p);
         const mk = L.marker([p.lat, p.lng], {
-          icon: L.divIcon({ className: '', html: dotHtml(), iconSize: [8, 8], iconAnchor: [4, 4] }),
+          icon: L.divIcon({ className: '', html: dotHtml(style), iconSize: [12, 12], iconAnchor: [6, 6] }),
           zIndexOffset: 500,
         });
         mk.bindPopup(opts.buildPopup(p));
@@ -561,32 +609,36 @@ function createClusteredLayer(
       return;
     }
 
-    const cells = new Map<string, { sx: number; sy: number; count: number; sample: any }>();
+    const cells = new Map<string, { sx: number; sy: number; count: number; sample: any; styles: Array<{key:ProviderCategoryKey;label:string;color:string}> }>();
     for (const p of visible) {
       const pt = map.project([p.lat, p.lng] as L.LatLngTuple, zoom);
       const key = `${Math.floor(pt.x / cellPx)}:${Math.floor(pt.y / cellPx)}`;
       const c = cells.get(key);
-      if (c) { c.sx += pt.x; c.sy += pt.y; c.count++; }
-      else cells.set(key, { sx: pt.x, sy: pt.y, count: 1, sample: p });
+      const style = styleFor(p);
+      if (c) { c.sx += pt.x; c.sy += pt.y; c.count++; c.styles.push(style); }
+      else cells.set(key, { sx: pt.x, sy: pt.y, count: 1, sample: p, styles: [style] });
     }
 
     cells.forEach(c => {
       const center = map.unproject([c.sx / c.count, c.sy / c.count] as L.PointTuple, zoom);
       if (c.count === 1) {
         const p = c.sample;
+        const style = styleFor(p);
         const mk = L.marker([p.lat, p.lng], {
-          icon: L.divIcon({ className: '', html: dotHtml(), iconSize: [8, 8], iconAnchor: [4, 4] }),
+          icon: L.divIcon({ className: '', html: dotHtml(style), iconSize: [12, 12], iconAnchor: [6, 6] }),
           zIndexOffset: 500,
         });
         mk.bindPopup(opts.buildPopup(p));
         group.addLayer(mk);
       } else {
-        const size = c.count >= 1000 ? 60 : c.count >= 250 ? 48 : c.count >= 50 ? 36 : 28;
+        const size = c.count >= 1000 ? 64 : c.count >= 250 ? 52 : c.count >= 50 ? 40 : 30;
         const mk = L.marker(center, {
-          icon: L.divIcon({ className: '', html: clusterHtml(c.count), iconSize: [size, size], iconAnchor: [size / 2, size / 2] }),
+          icon: L.divIcon({ className: '', html: clusterHtml(c.count, c.styles), iconSize: [size, size], iconAnchor: [size / 2, size / 2] }),
           zIndexOffset: 600,
           title: `Provider density area`,
         });
+        const mix = Array.from(c.styles.reduce((acc, style) => acc.set(style.label, (acc.get(style.label) || 0) + 1), new Map<string,number>()).entries()).sort((a,b)=>b[1]-a[1]).slice(0,5);
+        mk.bindPopup(`<strong>Provider density cluster</strong><br/>${c.count.toLocaleString()} providers in this area<br/>${mix.map(([label,count])=>`${label}: ${count}`).join('<br/>')}<br/><em>Zoom in for individual clinic dots.</em>`);
         mk.on('click', () => map.flyTo(center, Math.min(map.getMaxZoom(), zoom + 2), { duration: 0.8 }));
         group.addLayer(mk);
       }
@@ -1032,7 +1084,7 @@ export default function App() {
   // Clinic groups
   type ClinicEntry = { name:string; address:string; city:string; state:string; zip:string; phone:string; notes:string; lat:number|null; lng:number|null; color:string; };
   type ClinicGroup = { id:number; groupName:string; color:string; visible:boolean; clinics:ClinicEntry[]; };
-  const [clinicGroups, setClinicGroups] = useState<ClinicGroup[]>(() => { try { return JSON.parse(localStorage.getItem('clinic_groups')||'[]'); } catch { return []; } });
+  const [clinicGroups, setClinicGroups] = useState<ClinicGroup[]>([]);
   // Legacy compat: keep uploadedClinics as flat for existing render code
   const uploadedClinics = clinicGroups.flatMap(g => g.visible ? g.clinics : []);
   const showUploadedClinics = clinicGroups.some(g=>g.visible);
@@ -1041,6 +1093,7 @@ export default function App() {
   const [uploadProgress, setUploadProgress] = useState('');
   const [uploadColor, setUploadColor] = useState('#f472b6');
   const [uploadGroupName, setUploadGroupName] = useState('');
+  const [masterProviderTypeFilter, setMasterProviderTypeFilter] = useState('');
     // Area prices
   const [showAreaPrices, setShowAreaPrices] = useState(false);
   const [apState, setApState] = useState('');
@@ -1132,6 +1185,14 @@ export default function App() {
   const [showDatasetBrowser, setShowDatasetBrowser] = useState(false);
   const [datasetStatus, setDatasetStatus] = useState<Record<DatasetKey, DatasetLoadState>>(INITIAL_DATASET_STATUS);
   const datasetRequestsRef = useRef<Partial<Record<DatasetKey, Promise<void>>>>({});
+  const providerExplorerLayerRef = useRef<L.LayerGroup | null>(null);
+  const providerExplorerDensityLayerRef = useRef<L.LayerGroup | null>(null);
+  const providerExplorerLiveLayerRef = useRef<L.LayerGroup | null>(null);
+  const providerExplorerGapLayerRef = useRef<L.LayerGroup | null>(null);
+  const [providerExplorerFilters, setProviderExplorerFilters] = useState<ProviderExplorerFilters>(INITIAL_PROVIDER_EXPLORER_FILTERS);
+  const [providerExplorerMode, setProviderExplorerMode] = useState<ProviderExplorerMode>('density');
+  const [providerExplorerStatus, setProviderExplorerStatus] = useState('Provider map explorer ready');
+  const [providerExplorerLiveEnabled, setProviderExplorerLiveEnabled] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [indexedLayerData, setIndexedLayerData] = useState<any[]>([]);
   const [outreachNotes, setOutreachNotes] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_notes')||'{}'); } catch { return {}; } });
@@ -1500,6 +1561,202 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
+
+  const getProviderExplorerBounds = useCallback(() => {
+    const map = mapRef.current;
+    if(!map) return null;
+    const bounds = map.getBounds();
+    return { north: bounds.getNorth(), south: bounds.getSouth(), east: bounds.getEast(), west: bounds.getWest() };
+  },[]);
+
+  const providerExplorerParams = useCallback((filters: ProviderExplorerFilters, mode: 'pins'|'density'|'hex'|'live'|'compare') => {
+    const params = new URLSearchParams({ mode, limit: mode === 'pins' ? '1000' : '2000', page:'1' });
+    Object.entries(filters).forEach(([key,value])=>{ if(key !== 'useMapBounds' && typeof value === 'string' && value && value !== 'all') params.set(key,value); });
+    const shouldUseBounds = filters.useMapBounds || mode === 'pins' || mode === 'live' || mode === 'compare';
+    if(shouldUseBounds) {
+      const bounds = getProviderExplorerBounds();
+      if(bounds) Object.entries(bounds).forEach(([key,value])=>params.set(key,String(value)));
+    }
+    return params;
+  },[getProviderExplorerBounds]);
+
+  const clearProviderExplorerMap = useCallback(() => {
+    providerExplorerLayerRef.current?.clearLayers();
+    providerExplorerDensityLayerRef.current?.clearLayers();
+    providerExplorerLiveLayerRef.current?.clearLayers();
+    providerExplorerGapLayerRef.current?.clearLayers();
+  },[]);
+
+  const drawProviderPins = useCallback((providers: ProviderFeature[], fit = false) => {
+    const map = mapRef.current;
+    if(!map) return 0;
+    if(!providerExplorerLayerRef.current) providerExplorerLayerRef.current = L.layerGroup().addTo(map);
+    const layer = providerExplorerLayerRef.current;
+    layer.clearLayers();
+    const drawable = providers.filter((provider): provider is ProviderFeature & {lat:number; lng:number} => typeof provider.lat === 'number' && typeof provider.lng === 'number');
+    drawable.slice(0,1000).forEach(provider=>{
+      const style = providerCategoryStyle(provider);
+      const location = [provider.address,provider.city,provider.admin_area,provider.country].filter(Boolean).join(', ');
+      L.circleMarker([provider.lat, provider.lng], { radius: 6, color: '#ffffff', weight: 1, fillColor: style.color, fillOpacity: 0.92, opacity: 0.95 })
+        .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>${escapeHtml(provider.source)} · ${escapeHtml(provider.source_kind)}<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/>${escapeHtml(location)}${provider.website ? `<br/><a href="${escapeHtml(provider.website)}" target="_blank" rel="noreferrer">Website</a>` : ''}`)
+        .addTo(layer);
+    });
+    if(fit && drawable.length) map.fitBounds(L.latLngBounds(drawable.map(provider=>[provider.lat,provider.lng] as [number,number])), { padding:[28,28], maxZoom: 11 });
+    return Math.min(drawable.length,1000);
+  },[]);
+
+  const drawProviderDensity = useCallback((cells: ProviderDensityCell[], mode: 'density'|'hex') => {
+    const map = mapRef.current;
+    if(!map) return 0;
+    if(!providerExplorerDensityLayerRef.current) providerExplorerDensityLayerRef.current = L.layerGroup().addTo(map);
+    const layer = providerExplorerDensityLayerRef.current;
+    layer.clearLayers();
+    const max = Math.max(1,...cells.map(cell=>Number(cell.count)||0));
+    cells.forEach(cell=>{
+      const count = Number(cell.count) || 0;
+      const intensity = Math.max(0.18, Math.log(count + 1) / Math.log(max + 1));
+      const radius = mode === 'hex' ? 12000 + intensity * 52000 : 9000 + intensity * 42000;
+      const color = mode === 'hex' ? '#7c3aed' : '#0891b2';
+      L.circle([cell.lat, cell.lng], { radius, color, weight: mode === 'hex' ? 2 : 0, fillColor: color, fillOpacity: Math.min(0.62, 0.16 + intensity * 0.44), opacity:0.7 })
+        .bindPopup(`<strong>${mode === 'hex' ? 'Hex/grid' : 'Density'} cell</strong><br/>${count.toLocaleString()} matching providers`)
+        .addTo(layer);
+    });
+    return cells.length;
+  },[]);
+
+  const renderProviderExplorerMap = useCallback(async (mode: ProviderExplorerMode = providerExplorerMode, filters: ProviderExplorerFilters = providerExplorerFilters) => {
+    const map = mapRef.current;
+    if(!map) return;
+    setProviderExplorerMode(mode);
+    providerExplorerLayerRef.current?.clearLayers();
+    providerExplorerDensityLayerRef.current?.clearLayers();
+    const aggregateMode = mode === 'hex' ? 'hex' : 'density';
+    try {
+      let aggregateStatus = '';
+      if(mode === 'density' || mode === 'hex' || mode === 'density-pins' || mode === 'dot-density') {
+        const resp = await fetch(`/api/provider-explorer/${aggregateMode}?${providerExplorerParams(filters, aggregateMode)}`);
+        const data = await resp.json();
+        const cells = Array.isArray(data.cells) ? data.cells as ProviderDensityCell[] : [];
+        const rendered = drawProviderDensity(cells, aggregateMode);
+        aggregateStatus = `${aggregateMode} view · ${Number(data.total || 0).toLocaleString()} matching records · ${rendered.toLocaleString()} aggregated cells`;
+        setProviderExplorerStatus(`${mode === 'dot-density' ? 'dot-density fallback · ' : ''}${aggregateStatus} · filters: ${filterSummary(filters).join(', ') || 'none'}`);
+      }
+      if(mode === 'pins' || mode === 'density-pins') {
+        const resp = await fetch(`/api/provider-explorer/map?${providerExplorerParams({...filters,useMapBounds:true}, 'pins')}`);
+        const data = await resp.json();
+        const providers = Array.isArray(data.providers) ? data.providers as ProviderFeature[] : [];
+        const rendered = drawProviderPins(providers, mode === 'pins');
+        const pinStatus = `showing ${rendered.toLocaleString()} visible pins of ${Number(data.total || 0).toLocaleString()} matching records`;
+        setProviderExplorerStatus(`${mode} · ${aggregateStatus ? `${aggregateStatus} · ` : ''}${pinStatus} · filters: ${filterSummary(filters).join(', ') || 'none'}`);
+      }
+    } catch(error) {
+      setProviderExplorerStatus(error instanceof Error ? error.message : 'Provider map explorer failed');
+    }
+  },[drawProviderDensity, drawProviderPins, providerExplorerFilters, providerExplorerMode, providerExplorerParams]);
+
+  const showProviderExplorerRowsOnMap = useCallback((providers: ProviderFeature[], filters: ProviderExplorerFilters) => {
+    setProviderExplorerFilters(filters);
+    const rendered = drawProviderPins(providers, true);
+    setProviderExplorerMode('pins');
+    setProviderExplorerStatus(`pins · showing ${rendered.toLocaleString()} visible pins from current database page · filters: ${filterSummary(filters).join(', ') || 'none'}`);
+  },[drawProviderPins]);
+
+  const useCurrentProviderMapBoundsInDatabase = useCallback(() => {
+    setProviderExplorerFilters(prev=>({...prev,useMapBounds:true}));
+    setShowDatasetBrowser(true);
+  },[]);
+
+  const useCurrentProviderRadiusInDatabase = useCallback(() => {
+    const center = lastRadiusRef.current || dropCenter;
+    if(!center) {
+      setProviderExplorerStatus('Select a radius center first, then apply radius filters to the database.');
+      return;
+    }
+    setProviderExplorerFilters(prev=>({
+      ...prev,
+      lat:String(center.lat),
+      lng:String(center.lng),
+      radiusMiles:String(liveRadius || dropRadiusMiles || 10),
+      useMapBounds:false,
+    }));
+    setShowDatasetBrowser(true);
+  },[dropCenter, dropRadiusMiles, liveRadius]);
+
+  const mapLiveResultsAsProviderFeatures = useCallback((): ProviderFeature[] => liveResults.map((row:any,index:number)=>({
+    id:String(row.id || `live-${index}`), source:row.source || 'OpenStreetMap / live discovery', source_kind:'live', name:row.name || 'Unnamed live provider', clinic_type:row.cat || row.category || 'unknown', services:[row.cat,row.type,row.category].filter(Boolean), categories:[row.cat,row.type,row.category].filter(Boolean), address:row.addr || row.address || null, city:null, admin_area:null, country:null, postal_code:null, lat:typeof row.lat === 'number' ? row.lat : null, lng:typeof row.lng === 'number' ? row.lng : null, phone:row.phone || null, website:row.website || null, source_url:row.sourceUrl || null, confidence_score:null, trust_tier:'live-not-stored', last_seen:new Date().toISOString(), imported_at:null, raw_source_data:row,
+  })),[liveResults]);
+
+  async function saveProviderExplorerCandidate(provider: ProviderFeature) {
+    try {
+      const resp = await fetch('/api/provider-explorer/save-candidate', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({provider}) });
+      const data = await resp.json().catch(()=>({}));
+      if(!resp.ok || data.error) throw new Error(data.error || `HTTP ${resp.status}`);
+      setProviderExplorerStatus(`Saved candidate: ${provider.name}`);
+    } catch(error) {
+      setProviderExplorerStatus(error instanceof Error ? error.message : 'Candidate save failed');
+    }
+  }
+
+  async function markProviderExplorerOutreach(provider: ProviderFeature) {
+    try {
+      const resp = await fetch('/api/provider-explorer/outreach-target', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({provider}) });
+      const data = await resp.json().catch(()=>({}));
+      if(!resp.ok || data.error) throw new Error(data.error || `HTTP ${resp.status}`);
+      setProviderExplorerStatus(`Marked outreach target: ${provider.name}`);
+    } catch(error) {
+      setProviderExplorerStatus(error instanceof Error ? error.message : 'Outreach target failed');
+    }
+  }
+
+  const renderProviderExplorerLiveLayer = useCallback(async () => {
+    const map = mapRef.current;
+    if(!map) return;
+    if(!providerExplorerLiveLayerRef.current) providerExplorerLiveLayerRef.current = L.layerGroup().addTo(map);
+    const layer = providerExplorerLiveLayerRef.current;
+    layer.clearLayers();
+    if(!providerExplorerLiveEnabled) return;
+    let providers = mapLiveResultsAsProviderFeatures();
+    try { const resp = await fetch(`/api/provider-explorer/live?${providerExplorerParams({...providerExplorerFilters, includeLive:true}, 'live')}`); const data = await resp.json(); if(Array.isArray(data.providers) && data.providers.length) providers = data.providers as ProviderFeature[]; } catch {}
+    providers.filter((provider): provider is ProviderFeature & {lat:number; lng:number}=>typeof provider.lat === 'number' && typeof provider.lng === 'number').slice(0,1000).forEach(provider=>{
+      const style = providerCategoryStyle(provider);
+      const marker = L.circleMarker([provider.lat, provider.lng], { radius:6, color:'#ffffff', weight:1, fillColor:style.color, fillOpacity:.92, opacity:.95 })
+        .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>Live discovery · not stored<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/><button class="provider-popup-save" data-provider-id="${escapeHtml(provider.id)}">Save candidate</button>`)
+        .addTo(layer);
+      marker.on('popupopen', () => {
+        const button = marker.getPopup()?.getElement()?.querySelector<HTMLButtonElement>('.provider-popup-save');
+        button?.addEventListener('click', event => {
+          event.preventDefault();
+          void saveProviderExplorerCandidate(provider);
+          marker.closePopup();
+        }, { once:true });
+      });
+    });
+    setProviderExplorerStatus(prev=>`${prev} · live layer: ${providers.length.toLocaleString()} not-stored results`);
+  },[mapLiveResultsAsProviderFeatures, providerExplorerLiveEnabled, providerExplorerFilters, providerExplorerParams]);
+
+
+  const compareProviderExplorerArea = useCallback(async (filters: ProviderExplorerFilters = providerExplorerFilters) => {
+    const map = mapRef.current;
+    if(!map) return;
+    if(!providerExplorerGapLayerRef.current) providerExplorerGapLayerRef.current = L.layerGroup().addTo(map);
+    const layer = providerExplorerGapLayerRef.current;
+    layer.clearLayers();
+    try {
+      const resp = await fetch(`/api/provider-explorer/compare?${providerExplorerParams({...filters, includeLive:true}, 'compare')}`);
+      const data = await resp.json();
+      const liveOnly = Array.isArray(data.live_only) ? data.live_only as ProviderFeature[] : [];
+      liveOnly.filter((provider): provider is ProviderFeature & {lat:number; lng:number}=>typeof provider.lat === 'number' && typeof provider.lng === 'number').slice(0,500).forEach(provider=>{
+        const style = providerCategoryStyle(provider);
+        L.circleMarker([provider.lat, provider.lng], { radius:7, color:'#ffffff', weight:2, fillColor:style.color, fillOpacity:.9, opacity:.98 })
+          .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>Live-only gap<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/>${escapeHtml(provider.match_reason || '')}`)
+          .addTo(layer);
+      });
+      setProviderExplorerStatus(`compare · stored ${Number(data.stored_count||0).toLocaleString()} · live ${Number(data.live_count||0).toLocaleString()} · live-only gaps ${liveOnly.length.toLocaleString()}`);
+    } catch(error) {
+      setProviderExplorerStatus(error instanceof Error ? error.message : 'Compare failed');
+    }
+  },[providerExplorerFilters, providerExplorerParams]);
+
   const loadProviderDataset = useCallback((key: DatasetKey) => {
     if(datasetRequestsRef.current[key]) return datasetRequestsRef.current[key];
     const sourceByKey: Record<DatasetKey,string> = {
@@ -1511,7 +1768,8 @@ export default function App() {
     const request = (async ()=>{
       setDatasetStatus(prev=>({...prev,[key]:{loading:true,error:'',loaded:false}}));
       try {
-        const params = new URLSearchParams({limit:'500',page:'1'});
+        const params = new URLSearchParams({limit:'1000',page:'1'});
+        if(key==='myClinics' && masterProviderTypeFilter) params.set('clinic_type', masterProviderTypeFilter);
         const map = mapRef.current;
         if(map) {
           const bounds = map.getBounds();
@@ -1548,7 +1806,11 @@ export default function App() {
     })();
     datasetRequestsRef.current[key] = request;
     return request;
-  },[]);
+  },[masterProviderTypeFilter]);
+
+  useEffect(()=>{
+    if(showMyClinicsLayer) void loadProviderDataset('myClinics');
+  },[masterProviderTypeFilter, showMyClinicsLayer, loadProviderDataset]);
 
   // ── Map Inventory: load indexed providers from Neon on map load + pan/zoom ──
   useEffect(()=>{
@@ -1920,6 +2182,7 @@ export default function App() {
     blueHiveLayerRef.current = createClusteredLayer(map, blueHiveData, {
       color: '#3b82f6',
       glow: showGlowPoints,
+      getStyle: providerCategoryStyle,
       badgeLabel: 'BlueHive providers',
       buildPopup: (p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
         <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||'Unnamed'}</div>
@@ -1946,6 +2209,7 @@ export default function App() {
     dentistLayerRef.current = createClusteredLayer(map, dentistData, {
       color: '#06b6d4',
       glow: showGlowPoints,
+      getStyle: providerCategoryStyle,
       badgeLabel: 'dentists',
       buildPopup: (p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
         <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||'Unnamed'}</div>
@@ -1973,6 +2237,7 @@ export default function App() {
     inventoryLayerRef.current = createClusteredLayer(map, inventoryData, {
       color: '#10b981',
       glow: showGlowPoints,
+      getStyle: providerCategoryStyle,
       badgeLabel: 'Service presence providers',
       buildPopup: (p:MapInventoryProvider)=>{
         const tc = trustColor(p.trustTier);
@@ -2004,6 +2269,7 @@ export default function App() {
     indexedProviderLayerRef.current = createClusteredLayer(map, indexedLayerData, {
       color:'#10b981',
       glow:showGlowPoints,
+      getStyle: providerCategoryStyle,
       badgeLabel:'Indexed providers',
       buildPopup:(p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
         <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||p.name||'Unnamed'}</div>
@@ -2024,6 +2290,7 @@ export default function App() {
     myClinicsLayerRef.current = createClusteredLayer(map, myClinicsData, {
       color:'#8b5cf6',
       glow:showGlowPoints,
+      getStyle: providerCategoryStyle,
       badgeLabel:'My Clinics',
       buildPopup:(p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
         <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||p.name||'Unnamed'}</div>
@@ -2035,69 +2302,50 @@ export default function App() {
     return ()=>{ if(myClinicsLayerRef.current) { myClinicsLayerRef.current.destroy(); myClinicsLayerRef.current = null; } };
   },[showMyClinicsLayer,myClinicsData,showGlowPoints]);
 
+  async function uploadClinicChunk(groupName:string, filename:string, rows:any[], chunkIndex:number, totalChunks:number) {
+    const suffix = totalChunks > 1 ? ` (${chunkIndex + 1}/${totalChunks})` : '';
+    const response = await fetch('/api/my-clinics/upload', {
+      method:'POST', headers:{'content-type':'application/json'},
+      body:JSON.stringify({ groupName: `${groupName}${suffix}`, filename, rows }),
+    });
+    const data = await response.json().catch(()=>({}));
+    if(!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
+    return data as { rawRows:number; stagedRows:number; masteredRows:number; errorRows:number; needsGeocodeRows:number };
+  }
+
   async function handleClinicUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = '';
     setUploadLoading(true);
-    setUploadProgress('Parsing file…');
+    setUploadProgress('Parsing file for backend ingest…');
     try {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, {type:'array'});
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rows: any[] = XLSX.utils.sheet_to_json(ws, {defval:''});
-      if (!rows.length) { setUploadProgress('No data found in file.'); setUploadLoading(false); return; }
-
-      // Flexible column detection (case-insensitive)
-      function col(row:any, ...keys:string[]):string {
-        for (const k of keys) {
-          const found = Object.keys(row).find(r=>r.toLowerCase().replace(/[\s_-]/g,'')===k.toLowerCase().replace(/[\s_-]/g,''));
-          if (found && row[found]!=='' && row[found]!==undefined) return String(row[found]).trim();
-        }
-        return '';
-      }
-
-      const parsed = rows.map(r=>({
-        name:    col(r,'name','providername','clinicname','practicename','facility') || 'Unnamed',
-        address: col(r,'address','streetaddress','street','addr'),
-        city:    col(r,'city','town'),
-        state:   col(r,'state','st').toUpperCase().slice(0,2),
-        zip:     col(r,'zip','zipcode','postalcode','postal'),
-        phone:   col(r,'phone','telephone','tel'),
-        notes:   col(r,'notes','note','description','desc'),
-        lat:     parseFloat(col(r,'lat','latitude')) || null,
-        lng:     parseFloat(col(r,'lng','lon','long','longitude')) || null,
-        color:   uploadColor,
-      }));
-
-      // Geocode rows missing coordinates
-      const toGeocode = parsed.filter(p=>p.lat===null||isNaN(p.lat as any));
-      let geocoded = 0;
-      for (const p of toGeocode) {
-        const q = [p.address, p.city, p.state, p.zip].filter(Boolean).join(', ');
-        if (!q) continue;
-        setUploadProgress(`Geocoding ${++geocoded}/${toGeocode.length}: ${p.name}`);
-        try {
-          const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1`,{headers:{'Accept-Language':'en'}});
-          const data = await res.json();
-          if (data?.[0]) { p.lat = parseFloat(data[0].lat); p.lng = parseFloat(data[0].lon); }
-        } catch {}
-        await new Promise(r=>setTimeout(r, 1100)); // Nominatim rate limit: 1 req/sec
-      }
-
-      const final = parsed.filter(p=>p.lat!==null&&!isNaN(p.lat as any));
-      const skipped = parsed.length - final.length;
+      if (!rows.length) { setUploadProgress('No data found in file.'); return; }
       const groupName = uploadGroupName.trim() || `Import ${new Date().toLocaleDateString('en-US',{month:'short',day:'numeric'})}`;
-      const newGroup:ClinicGroup = { id:Date.now(), groupName, color:uploadColor, visible:true, clinics:final };
-      setClinicGroups(prev => {
-        const next = [...prev, newGroup];
-        localStorage.setItem('clinic_groups', JSON.stringify(next));
-        return next;
-      });
+      const chunkSize = 5000;
+      const chunks = Array.from({length:Math.ceil(rows.length/chunkSize)},(_,index)=>rows.slice(index*chunkSize,(index+1)*chunkSize));
+      const summary = { rawRows:0, stagedRows:0, masteredRows:0, errorRows:0, needsGeocodeRows:0 };
+      for (let index=0; index<chunks.length; index++) {
+        setUploadProgress(`Uploading ${file.name} to Provider Ingest Pipeline (${index+1}/${chunks.length})…`);
+        const result = await uploadClinicChunk(groupName, file.name, chunks[index], index, chunks.length);
+        summary.rawRows += Number(result.rawRows || 0);
+        summary.stagedRows += Number(result.stagedRows || 0);
+        summary.masteredRows += Number(result.masteredRows || 0);
+        summary.errorRows += Number(result.errorRows || 0);
+        summary.needsGeocodeRows += Number(result.needsGeocodeRows || 0);
+      }
       setUploadGroupName('');
-      setUploadProgress(`✓ Added ${final.length} clinics as "${groupName}"${skipped>0?` (${skipped} skipped — no address/coordinates)`:''}. Toggle each group in the sidebar.`);
+      setClinicGroups([]);
+      setShowMyClinicsLayer(true);
+      setDatasetStatus(prev=>({...prev,myClinics:{loading:false,error:'',loaded:false}}));
+      await loadProviderDataset('myClinics');
+      setUploadProgress(`✓ Backend ingest complete: ${summary.rawRows} raw rows · ${summary.stagedRows} staged · ${summary.masteredRows} map-ready · ${summary.needsGeocodeRows} needs geocode · ${summary.errorRows} errors.`);
     } catch(err:any) {
-      setUploadProgress(`Error: ${err.message||'Could not parse file'}`);
+      setUploadProgress(`Error: ${err.message||'Could not upload file'}`);
     } finally {
       setUploadLoading(false);
     }
@@ -3072,6 +3320,19 @@ export default function App() {
     doLiveSearch(lLat, lLng, undefined, name, 'address_search');
   }
 
+
+  useEffect(()=>{
+    renderProviderExplorerLiveLayer();
+  },[renderProviderExplorerLiveLayer, liveResults]);
+
+  useEffect(()=>{
+    if(!mapReady) return;
+    const timeout = window.setTimeout(() => {
+      void renderProviderExplorerMap(providerExplorerMode, providerExplorerFilters);
+    }, 350);
+    return () => window.clearTimeout(timeout);
+  },[mapReady, providerExplorerFilters, providerExplorerMode, renderProviderExplorerMap]);
+
   // ── Cursor light (Liquid Glass) ──────────────────────────────────────────
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -3100,12 +3361,13 @@ export default function App() {
     }
   }
 
-  function providerLayerStatus(key:DatasetKey, count:number, emptyMessage:string) {
+  function providerLayerStatus(key:DatasetKey, count:number, emptyMessage:string, visible:boolean) {
     const state=datasetStatus[key];
-    if(state.loading) return 'Loading…';
+    if(state.loading) return 'Loading provider data…';
     if(state.error) return state.error;
-    if(!state.loaded) return 'Load when enabled';
-    return count===0 ? emptyMessage : `${count.toLocaleString()} loaded`;
+    if(!state.loaded) return visible ? 'Loading starts when enabled' : 'Toggle on to load';
+    if(count===0) return emptyMessage;
+    return `${count.toLocaleString()} loaded · ${visible ? 'visible' : 'toggle off'}`;
   }
 
   const selectedService = SERVICE_PRESENCE_OPTIONS.find(service=>service.key===metric) || SERVICE_PRESENCE_OPTIONS[0];
@@ -3209,22 +3471,31 @@ export default function App() {
               <LayerToggle label="Radius Ring" checked={showRadius} onChange={setShowRadius} disabled={!showUsDiagnostics||!hasRadiusCenter} status={!showUsDiagnostics?'Enable U.S. Diagnostics first':!hasRadiusCenter?'Select a location first':showRadius?'70 mile radius visible':'Ready'}/>
               <LayerToggle label="Glow Effects" checked={showGlowPoints} onChange={setShowGlowPoints} status={showGlowPoints?'Glow styling active':'Standard marker styling'}/>
               <LayerToggle label="City Dots" checked={showCityDots} onChange={setShowCityDots} disabled={!showUsDiagnostics} status={showCityDots?'City dots visible':usLayerStatus}/>
-              <LayerToggle label="Indexed Providers" checked={showIndexedProviders} onChange={checked=>toggleProviderLayer('indexed',checked)} disabled={datasetStatus.indexed.loading} status={providerLayerStatus('indexed',indexedLayerData.length,'0 loaded')}/>
-              <LayerToggle label="BlueHive Providers" checked={showBlueHive} onChange={checked=>toggleProviderLayer('bluehive',checked)} disabled={datasetStatus.bluehive.loading} status={providerLayerStatus('bluehive',blueHiveData.length,'0 loaded')}/>
-              <LayerToggle label="Dentists" checked={showDentists} onChange={checked=>toggleProviderLayer('dentists',checked)} disabled={datasetStatus.dentists.loading} status={providerLayerStatus('dentists',dentistData.length,'0 loaded')}/>
-              <LayerToggle label="My Clinics" checked={showMyClinicsLayer} onChange={checked=>toggleProviderLayer('myClinics',checked)} disabled={datasetStatus.myClinics.loading} status={providerLayerStatus('myClinics',myClinicsData.length,'No uploaded clinics yet')}/>
-              <button className="workflow-dataset-button" onClick={()=>setShowDatasetBrowser(true)}>▦ Browse Datasets</button>
-              {clinicGroups.map(grp=><LayerToggle
-                key={grp.id}
-                label={grp.groupName}
-                checked={grp.visible}
-                status={`${grp.clinics.length} locally uploaded clinics`}
-                onChange={checked=>setClinicGroups(prev=>{
-                  const next=prev.map(group=>group.id===grp.id?{...group,visible:checked}:group);
-                  localStorage.setItem('clinic_groups',JSON.stringify(next));
-                  return next;
-                })}
-              />)}
+              <LayerToggle label="Indexed Providers" checked={showIndexedProviders} onChange={checked=>toggleProviderLayer('indexed',checked)} disabled={datasetStatus.indexed.loading} status={providerLayerStatus('indexed',indexedLayerData.length,'0 loaded',showIndexedProviders)}/>
+              <LayerToggle label="BlueHive Providers" checked={showBlueHive} onChange={checked=>toggleProviderLayer('bluehive',checked)} disabled={datasetStatus.bluehive.loading} status={providerLayerStatus('bluehive',blueHiveData.length,'0 loaded',showBlueHive)}/>
+              <LayerToggle label="Dentists" checked={showDentists} onChange={checked=>toggleProviderLayer('dentists',checked)} disabled={datasetStatus.dentists.loading} status={providerLayerStatus('dentists',dentistData.length,'0 loaded',showDentists)}/>
+              <LayerToggle label="My Clinics" checked={showMyClinicsLayer} onChange={checked=>toggleProviderLayer('myClinics',checked)} disabled={datasetStatus.myClinics.loading} status={providerLayerStatus('myClinics',myClinicsData.length,'No uploaded clinics yet',showMyClinicsLayer)}/>
+              <button className="workflow-dataset-button" onClick={()=>setShowDatasetBrowser(true)}>▦ Provider Explorer</button>
+              <div className="provider-map-panel">
+                <div className="provider-map-panel-head"><strong>Provider Map Explorer</strong><span>{providerExplorerMode}</span></div>
+                <div className="provider-map-mode-row">
+                  {(['density','hex','pins','density-pins','dot-density'] as ProviderExplorerMode[]).map(mode=><button key={mode} className={providerExplorerMode===mode?'active':''} onClick={()=>void renderProviderExplorerMap(mode)}>{mode === 'density-pins' ? 'density + pins' : mode}</button>)}
+                </div>
+                <div className="provider-map-mode-row">
+                  <button onClick={useCurrentProviderMapBoundsInDatabase}>Use current map bounds in database</button>
+                  <button onClick={useCurrentProviderRadiusInDatabase}>Use current radius in database</button>
+                  <button onClick={()=>setShowDatasetBrowser(true)}>Open matching records in database</button>
+                  <button onClick={()=>void compareProviderExplorerArea(providerExplorerFilters)}>Compare stored vs live</button><button onClick={()=>void compareProviderExplorerArea(providerExplorerFilters)}>Show live-only gaps</button><button onClick={()=>void renderProviderExplorerLiveLayer()}>Refresh live layer</button><button onClick={()=>void renderProviderExplorerMap(providerExplorerMode, providerExplorerFilters)}>Refresh layer</button>
+                  <button onClick={()=>{ clearProviderExplorerMap(); setProviderExplorerFilters(INITIAL_PROVIDER_EXPLORER_FILTERS); setProviderExplorerStatus('Provider map/database filters cleared'); }}>Clear shared filters</button>
+                </div>
+                <label className="provider-live-toggle"><input type="checkbox" checked={providerExplorerLiveEnabled} onChange={e=>setProviderExplorerLiveEnabled(e.target.checked)} /> Live discovery layer <span>{liveResults.length.toLocaleString()} not stored</span></label>
+                <div className="provider-category-legend">{PROVIDER_CATEGORY_LEGEND.map(key=><span key={key}><i style={{background:PROVIDER_CATEGORY_STYLES[key].color}} />{PROVIDER_CATEGORY_STYLES[key].label}</span>)}</div>
+                <select className="provider-type-filter" value={masterProviderTypeFilter} onChange={e=>{setMasterProviderTypeFilter(e.target.value); setDatasetStatus(prev=>({...prev,myClinics:{loading:false,error:'',loaded:false}}));}}>
+                  {MASTER_PROVIDER_TYPE_OPTIONS.map(([value,label])=><option key={value} value={value}>{label}</option>)}
+                </select>
+                <div className="provider-map-status">{providerExplorerStatus}</div>
+                <div className="provider-map-status warning">Candidate save persists selected records; live results are never imported unless explicitly saved.</div>
+              </div>
             </div>}
           </div>
           {showUsDiagnostics && (<>
@@ -3340,6 +3611,14 @@ export default function App() {
           myClinicsData={myClinicsData}
           status={datasetStatus}
           onLoad={key=>void loadProviderDataset(key)}
+          getMapBounds={getProviderExplorerBounds}
+          onViewOnMap={showProviderExplorerRowsOnMap}
+          onViewDensity={(filters)=>void renderProviderExplorerMap('density', filters)}
+          onCompare={(filters)=>void compareProviderExplorerArea(filters)}
+          getCurrentRadius={()=>{ const center = lastRadiusRef.current || dropCenter; return center ? {lat:center.lat,lng:center.lng,radiusMiles:liveRadius || dropRadiusMiles || 10} : null; }}
+          sharedFilters={providerExplorerFilters}
+          onFiltersChange={setProviderExplorerFilters}
+          onOpenMatchingInDatabase={(filters)=>{ setProviderExplorerFilters(filters); setShowDatasetBrowser(true); }}
         />
 
         {/* ── MAP ── */}
@@ -3990,70 +4269,9 @@ export default function App() {
                 )}
               </div>
 
-              {/* Controls */}
-              {clinicGroups.length>0 && (
-                <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:12,flexWrap:'wrap'}}>
-                  <div style={{fontSize:9,color:'#f472b6',letterSpacing:'0.08em',flex:1}}>
-                    {clinicGroups.reduce((a,g)=>a+g.clinics.filter(c=>c.lat!==null).length,0)} / {clinicGroups.reduce((a,g)=>a+g.clinics.length,0)} CLINICS MAPPED · {clinicGroups.length} GROUPS
-                  </div>
-                  <button onClick={()=>{setClinicGroups([]);localStorage.removeItem('clinic_groups');localStorage.removeItem('uploaded_clinics');setUploadProgress('');}}
-                    style={{fontSize:8,fontFamily:"'IBM Plex Mono',monospace",padding:'3px 8px',background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.2)',borderRadius:3,color:'#fca5a5',cursor:'pointer'}}>
-                    CLEAR ALL GROUPS
-                  </button>
-                </div>
-              )}
-
-              {/* Clinic Groups list */}
-              {clinicGroups.length===0 ? (
-                <div style={{textAlign:'center',padding:'24px 0',color:'#2a3f5e',fontSize:10,lineHeight:1.8}}>
-                  <div style={{fontSize:28,marginBottom:10}}></div>
-                  No uploaded clinics yet.<br/>
-                  Upload a spreadsheet to see glowing pins on the map.
-                </div>
-              ) : (
-                <div style={{display:'flex',flexDirection:'column',gap:10}}>
-                  {clinicGroups.map((grp)=>(
-                    <div key={grp.id} style={{background:'rgba(255,255,255,0.06)',border:`1px solid ${grp.color}44`,borderRadius:10,overflow:'hidden'}}>
-                      {/* Group header */}
-                      <div style={{display:'flex',alignItems:'center',gap:8,padding:'10px 12px',background:`${grp.color}14`,borderBottom:`1px solid ${grp.color}33`}}>
-                        <div style={{width:12,height:12,borderRadius:'50%',background:grp.color,boxShadow:`0 0 8px ${grp.color}`,flexShrink:0}}/>
-                        <div style={{flex:1}}>
-                          <div style={{fontSize:11,fontWeight:700,color:'#eef4ff'}}>{grp.groupName}</div>
-                          <div style={{fontSize:8.5,color:'#5a78a0',fontFamily:"'IBM Plex Mono',monospace"}}>{grp.clinics.filter(c=>c.lat!==null).length}/{grp.clinics.length} mapped</div>
-                        </div>
-                        {/* Color picker */}
-                        <input type="color" value={grp.color}
-                          onChange={e=>{const c=e.target.value;setClinicGroups(prev=>{const n=prev.map(g=>g.id===grp.id?{...g,color:c,clinics:g.clinics.map(cl=>({...cl,color:c}))}:g);localStorage.setItem('clinic_groups',JSON.stringify(n));return n;});}}
-                          style={{width:28,height:24,border:'1px solid rgba(255,255,255,0.15)',borderRadius:4,background:'transparent',cursor:'pointer',padding:1,flexShrink:0}} />
-                        {/* Visibility toggle */}
-                        <label style={{display:'flex',alignItems:'center',gap:4,cursor:'pointer',fontSize:9,color:'#5a78a0',flexShrink:0}}>
-                          <input type="checkbox" checked={grp.visible} onChange={e=>{setClinicGroups(prev=>{const n=prev.map(g=>g.id===grp.id?{...g,visible:e.target.checked}:g);localStorage.setItem('clinic_groups',JSON.stringify(n));return n;});}}/>
-                          Show
-                        </label>
-                        {/* Delete group */}
-                        <button onClick={()=>setClinicGroups(prev=>{const n=prev.filter(g=>g.id!==grp.id);localStorage.setItem('clinic_groups',JSON.stringify(n));return n;})}
-                          style={{background:'transparent',border:'1px solid rgba(255,255,255,0.06)',borderRadius:3,color:'#3d5478',fontSize:9,padding:'2px 7px',cursor:'pointer',flexShrink:0}}>Close</button>
-                      </div>
-                      {/* Clinic rows (collapsible - show first 5) */}
-                      <div style={{maxHeight:180,overflowY:'auto',padding:'6px 10px',display:'flex',flexDirection:'column',gap:3}}>
-                        {grp.clinics.slice(0,50).map((c,ci)=>(
-                          <div key={ci} style={{display:'flex',gap:6,alignItems:'center',padding:'4px 6px',borderRadius:4,background:'rgba(255,255,255,0.02)',border:'1px solid rgba(255,255,255,0.04)'}}>
-                            <div style={{width:6,height:6,borderRadius:'50%',background:grp.color,flexShrink:0}}/>
-                            <div style={{flex:1,minWidth:0}}>
-                              <div style={{fontSize:10,fontWeight:600,color:'#eef4ff',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.name}</div>
-                              <div style={{fontSize:8.5,color:'#3d5478',fontFamily:"'IBM Plex Mono',monospace",overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                                {[c.city,c.state].filter(Boolean).join(', ')||c.address||'No address'}
-                                {c.lat!==null?<span style={{color:'#34d399',marginLeft:4}}>✓</span>:<span style={{color:'#f97316',marginLeft:4}}></span>}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                        {grp.clinics.length>50&&<div style={{fontSize:8,color:'#3d5478',textAlign:'center',padding:'4px'}}>…and {grp.clinics.length-50} more</div>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <div style={{fontSize:9,color:'#5a78a0',fontFamily:"'IBM Plex Mono',monospace",lineHeight:1.6,padding:'12px 0'}}>
+                Uploads now persist through the backend provider ingest pipeline. Map-ready rows are loaded from Neon through the My Clinics layer; rows without coordinates are staged as needs_geocode and are not lost.
+              </div>
             </div>
           </div>
         </div>

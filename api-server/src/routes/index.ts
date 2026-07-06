@@ -20,6 +20,7 @@ import providerLayersRouter from "./providerLayers";
 import googlePlacesRouter from "./googlePlaces";
 import enhancedSearchRouter from "./enhancedSearch";
 import providerExplorerRouter from "./providerExplorer";
+import myClinicsUploadRouter from "./myClinicsUpload";
 
 const router: IRouter = Router();
 
@@ -36,6 +37,7 @@ router.use(browserExtractionRouter);
 router.use(vectorIndexRouter);
 router.use(providerExplorerRouter);
 router.use(providerLayersRouter);
+router.use(myClinicsUploadRouter);
 router.use(googlePlacesRouter);
 router.use(enhancedSearchRouter);
 

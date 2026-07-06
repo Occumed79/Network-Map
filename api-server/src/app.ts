@@ -103,8 +103,8 @@ app.use(
     },
   }),
 );
-app.use(express.json({ limit: "1mb" }));
-app.use(express.urlencoded({ extended: true, limit: "1mb" }));
+app.use(express.json({ limit: "15mb" }));
+app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 
 app.get("/api/health", (_req, res) => {
   res.status(200).json({ ok: true, service: "network-map", awake: true });
@@ -124,6 +124,7 @@ app.use("/api/enhanced-search", rateLimit({ windowMs: 10 * 60 * 1000, max: 60 })
 app.use("/api/map-inventory", rateLimit({ windowMs: 10 * 60 * 1000, max: 120 }));
 app.use("/api/provider-layers", rateLimit({ windowMs: 10 * 60 * 1000, max: 120 }));
 app.use("/api/provider-explorer", rateLimit({ windowMs: 10 * 60 * 1000, max: 180 }));
+app.use("/api/my-clinics", rateLimit({ windowMs: 10 * 60 * 1000, max: 80 }));
 
 app.use((req, res, next) => {
   if (req.method !== "GET" || !SNAPSHOT_ROUTES.has(req.path)) {

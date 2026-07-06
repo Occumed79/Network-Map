@@ -514,6 +514,37 @@ function countProvidersInRadius(lat:number,lng:number,examKey:string) {
   return{citiesInRadius:nearby.length,estProviders:Math.max(1,estProviders),avgDifficulty:avgDiff};
 }
 
+type ProviderCategoryKey = 'dental'|'faa'|'dot'|'occMed'|'urgentCare'|'drugTesting'|'audiology'|'pft'|'imaging'|'pharmacy'|'primaryCare'|'hospital'|'unknown';
+const PROVIDER_CATEGORY_STYLES: Record<ProviderCategoryKey,{label:string;color:string}> = {
+  dental:{label:'Dental',color:'#22d3ee'}, faa:{label:'FAA',color:'#f59e0b'}, dot:{label:'DOT',color:'#fde047'}, occMed:{label:'Occ Med',color:'#8b5cf6'}, urgentCare:{label:'Urgent Care',color:'#fb923c'}, drugTesting:{label:'Drug Test',color:'#a855f7'}, audiology:{label:'Audiology',color:'#3b82f6'}, pft:{label:'PFT',color:'#14b8a6'}, imaging:{label:'Imaging',color:'#ec4899'}, pharmacy:{label:'Pharmacy/Vaccines',color:'#22c55e'}, primaryCare:{label:'Primary Care',color:'#38bdf8'}, hospital:{label:'Hospital',color:'#ef4444'}, unknown:{label:'Unknown',color:'#94a3b8'},
+};
+const PROVIDER_CATEGORY_LEGEND: ProviderCategoryKey[] = ['dental','faa','dot','occMed','urgentCare','drugTesting','audiology','pft','imaging','pharmacy','primaryCare','hospital','unknown'];
+function providerTextBlob(provider:any): string {
+  return [provider?.clinic_type, provider?.category, provider?.providerType, provider?.source, provider?.source_label, provider?.data_source, provider?.taxonomy_description, provider?.name, provider?.clinic_name, provider?.services, provider?.types, provider?.service_categories]
+    .flatMap(value => Array.isArray(value) ? value : [value])
+    .filter(Boolean).join(' ').toLowerCase();
+}
+function providerCategoryKey(provider:any): ProviderCategoryKey {
+  const text = providerTextBlob(provider);
+  if(/dent(al|ist)|orthodont|periodont|endodont/.test(text)) return 'dental';
+  if(/faa|aviation medical|\bame\b/.test(text)) return 'faa';
+  if(/\bdot\b|department of transportation|cdl|commercial driver/.test(text)) return 'dot';
+  if(/occupational|occ\s*med|employee health|work(ers)? comp/.test(text)) return 'occMed';
+  if(/urgent care|walk[- ]?in/.test(text)) return 'urgentCare';
+  if(/drug|toxicology|mro|urine|screening/.test(text)) return 'drugTesting';
+  if(/audio|hearing|audiology/.test(text)) return 'audiology';
+  if(/spirometry|pft|pulmonary|respiratory/.test(text)) return 'pft';
+  if(/x[ -]?ray|imaging|radiolog|mri|ct scan|mammogram/.test(text)) return 'imaging';
+  if(/vaccin|immuniz|pharmacy|pharmacist/.test(text)) return 'pharmacy';
+  if(/primary care|family medicine|general practice|internal medicine/.test(text)) return 'primaryCare';
+  if(/hospital|medical center|emergency room|\ber\b/.test(text)) return 'hospital';
+  return 'unknown';
+}
+function providerCategoryStyle(provider:any) {
+  const key = providerCategoryKey(provider);
+  return { key, ...PROVIDER_CATEGORY_STYLES[key] };
+}
+
 // ── Dependency-free grid clustering ──────────────────────────────────────────
 // Aggregates large point sets into zoom-aware cluster bubbles so dense layers
 // (e.g. BlueHive ~5.7k, Dentists ~104k) no longer render as a single blob.
@@ -526,6 +557,7 @@ interface ClusterRendererOptions {
   cellPx?: number;       // grid cell size in screen pixels
   badgeLabel: string;    // accessibility / popup label
   buildPopup: (p: any) => string;
+  getStyle?: (p: any) => { key: ProviderCategoryKey; label: string; color: string };
 }
 
 function createClusteredLayer(
@@ -538,17 +570,19 @@ function createClusteredLayer(
   const cellPx = opts.cellPx ?? 62;
   const valid = points.filter(p => p && p.lat != null && p.lng != null && isValidCoord(p.lat, p.lng));
 
-  function dotHtml(): string {
-    return `<div style="width:8px;height:8px;border-radius:50%;background:${opts.color};${opts.glow ? `box-shadow:0 0 8px ${opts.color},0 0 16px ${opts.color}44,inset 0 0 4px rgba(255,255,255,0.6);` : 'box-shadow:0 0 0 1px rgba(255,255,255,0.4),inset 0 0 3px rgba(255,255,255,0.3);'}cursor:pointer;"></div>`;
+  function styleFor(p: any) { return opts.getStyle?.(p) || { key: 'unknown' as ProviderCategoryKey, label: opts.badgeLabel, color: opts.color }; }
+  function dotHtml(style: { color:string; label:string }): string {
+    return `<div title="${style.label}" style="width:10px;height:10px;border-radius:50%;background:${style.color};border:1px solid rgba(255,255,255,.9);${opts.glow ? `box-shadow:0 0 8px ${style.color},0 0 16px ${style.color}55;` : 'box-shadow:0 1px 3px rgba(0,0,0,.45);'}cursor:pointer;"></div>`;
   }
-  function clusterHtml(count: number): string {
-    const size = count >= 1000 ? 60 : count >= 250 ? 48 : count >= 50 ? 36 : 28;
-    const opacity = Math.min(0.85, 0.25 + (count / 500) * 0.6);
+  function clusterHtml(count: number, styles: Array<{color:string}>): string {
+    const size = count >= 1000 ? 64 : count >= 250 ? 52 : count >= 50 ? 40 : 30;
+    const opacity = Math.min(0.9, 0.35 + (count / 500) * 0.5);
+    const colors = Array.from(new Set(styles.map(style=>style.color))).slice(0,4);
+    const gradient = colors.length > 1 ? `conic-gradient(${colors.map((color,index)=>`${color} ${index * (100 / colors.length)}% ${(index + 1) * (100 / colors.length)}%`).join(',')})` : (colors[0] || opts.color);
     return `<div style="width:${size}px;height:${size}px;border-radius:50%;display:flex;align-items:center;justify-content:center;`
-      + `background:radial-gradient(circle at 40% 35%, rgba(255,255,255,${opacity * 0.4}), ${opts.color}${Math.floor(opacity * 255).toString(16).padStart(2,'0')}, transparent 70%);`
-      + `border:1px solid rgba(255,255,255,${opacity * 0.3});`
-      + `box-shadow:0 0 ${size/2}px ${opts.color}${Math.floor(opacity * 40).toString(16).padStart(2,'0')},0 0 ${size}px ${opts.color}${Math.floor(opacity * 20).toString(16).padStart(2,'0')},inset 0 0 20px rgba(255,255,255,${opacity * 0.15});`
-      + `cursor:pointer;backdrop-filter:blur(8px);"></div>`;
+      + `background:${gradient};opacity:${opacity};border:2px solid rgba(255,255,255,.82);`
+      + `box-shadow:0 0 0 4px rgba(15,23,42,.35),0 8px 20px rgba(0,0,0,.38);color:#fff;font:700 10px 'IBM Plex Mono',monospace;text-shadow:0 1px 2px rgba(0,0,0,.75);`
+      + `cursor:pointer;">${count >= 1000 ? `${Math.round(count/100)/10}k` : count}</div>`;
   }
 
   function render() {
@@ -560,8 +594,9 @@ function createClusteredLayer(
 
     if (zoom >= expandZoom) {
       for (const p of visible) {
+        const style = styleFor(p);
         const mk = L.marker([p.lat, p.lng], {
-          icon: L.divIcon({ className: '', html: dotHtml(), iconSize: [8, 8], iconAnchor: [4, 4] }),
+          icon: L.divIcon({ className: '', html: dotHtml(style), iconSize: [12, 12], iconAnchor: [6, 6] }),
           zIndexOffset: 500,
         });
         mk.bindPopup(opts.buildPopup(p));
@@ -570,32 +605,36 @@ function createClusteredLayer(
       return;
     }
 
-    const cells = new Map<string, { sx: number; sy: number; count: number; sample: any }>();
+    const cells = new Map<string, { sx: number; sy: number; count: number; sample: any; styles: Array<{key:ProviderCategoryKey;label:string;color:string}> }>();
     for (const p of visible) {
       const pt = map.project([p.lat, p.lng] as L.LatLngTuple, zoom);
       const key = `${Math.floor(pt.x / cellPx)}:${Math.floor(pt.y / cellPx)}`;
       const c = cells.get(key);
-      if (c) { c.sx += pt.x; c.sy += pt.y; c.count++; }
-      else cells.set(key, { sx: pt.x, sy: pt.y, count: 1, sample: p });
+      const style = styleFor(p);
+      if (c) { c.sx += pt.x; c.sy += pt.y; c.count++; c.styles.push(style); }
+      else cells.set(key, { sx: pt.x, sy: pt.y, count: 1, sample: p, styles: [style] });
     }
 
     cells.forEach(c => {
       const center = map.unproject([c.sx / c.count, c.sy / c.count] as L.PointTuple, zoom);
       if (c.count === 1) {
         const p = c.sample;
+        const style = styleFor(p);
         const mk = L.marker([p.lat, p.lng], {
-          icon: L.divIcon({ className: '', html: dotHtml(), iconSize: [8, 8], iconAnchor: [4, 4] }),
+          icon: L.divIcon({ className: '', html: dotHtml(style), iconSize: [12, 12], iconAnchor: [6, 6] }),
           zIndexOffset: 500,
         });
         mk.bindPopup(opts.buildPopup(p));
         group.addLayer(mk);
       } else {
-        const size = c.count >= 1000 ? 60 : c.count >= 250 ? 48 : c.count >= 50 ? 36 : 28;
+        const size = c.count >= 1000 ? 64 : c.count >= 250 ? 52 : c.count >= 50 ? 40 : 30;
         const mk = L.marker(center, {
-          icon: L.divIcon({ className: '', html: clusterHtml(c.count), iconSize: [size, size], iconAnchor: [size / 2, size / 2] }),
+          icon: L.divIcon({ className: '', html: clusterHtml(c.count, c.styles), iconSize: [size, size], iconAnchor: [size / 2, size / 2] }),
           zIndexOffset: 600,
           title: `Provider density area`,
         });
+        const mix = Array.from(c.styles.reduce((acc, style) => acc.set(style.label, (acc.get(style.label) || 0) + 1), new Map<string,number>()).entries()).sort((a,b)=>b[1]-a[1]).slice(0,5);
+        mk.bindPopup(`<strong>Provider density cluster</strong><br/>${c.count.toLocaleString()} providers in this area<br/>${mix.map(([label,count])=>`${label}: ${count}`).join('<br/>')}<br/><em>Zoom in for individual clinic dots.</em>`);
         mk.on('click', () => map.flyTo(center, Math.min(map.getMaxZoom(), zoom + 2), { duration: 0.8 }));
         group.addLayer(mk);
       }
@@ -1551,10 +1590,10 @@ export default function App() {
     layer.clearLayers();
     const drawable = providers.filter((provider): provider is ProviderFeature & {lat:number; lng:number} => typeof provider.lat === 'number' && typeof provider.lng === 'number');
     drawable.slice(0,1000).forEach(provider=>{
-      const color = provider.source_kind === 'saved' ? '#16a34a' : provider.source_kind === 'live' ? '#f97316' : '#0ea5e9';
+      const style = providerCategoryStyle(provider);
       const location = [provider.address,provider.city,provider.admin_area,provider.country].filter(Boolean).join(', ');
-      L.circleMarker([provider.lat, provider.lng], { radius: 5, color, weight: 1, fillColor: color, fillOpacity: 0.72 })
-        .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>${escapeHtml(provider.source)} · ${escapeHtml(provider.source_kind)}<br/>${escapeHtml(provider.clinic_type)}<br/>${escapeHtml(location)}${provider.website ? `<br/><a href="${escapeHtml(provider.website)}" target="_blank" rel="noreferrer">Website</a>` : ''}`)
+      L.circleMarker([provider.lat, provider.lng], { radius: 6, color: '#ffffff', weight: 1, fillColor: style.color, fillOpacity: 0.92, opacity: 0.95 })
+        .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>${escapeHtml(provider.source)} · ${escapeHtml(provider.source_kind)}<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/>${escapeHtml(location)}${provider.website ? `<br/><a href="${escapeHtml(provider.website)}" target="_blank" rel="noreferrer">Website</a>` : ''}`)
         .addTo(layer);
     });
     if(fit && drawable.length) map.fitBounds(L.latLngBounds(drawable.map(provider=>[provider.lat,provider.lng] as [number,number])), { padding:[28,28], maxZoom: 11 });
@@ -1674,9 +1713,18 @@ export default function App() {
     let providers = mapLiveResultsAsProviderFeatures();
     try { const resp = await fetch(`/api/provider-explorer/live?${providerExplorerParams({...providerExplorerFilters, includeLive:true}, 'live')}`); const data = await resp.json(); if(Array.isArray(data.providers) && data.providers.length) providers = data.providers as ProviderFeature[]; } catch {}
     providers.filter((provider): provider is ProviderFeature & {lat:number; lng:number}=>typeof provider.lat === 'number' && typeof provider.lng === 'number').slice(0,1000).forEach(provider=>{
-      L.circleMarker([provider.lat, provider.lng], { radius:6, color:'#f97316', weight:2, fillColor:'#fed7aa', fillOpacity:.78 })
-        .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>Live discovery · not stored<br/>${escapeHtml(provider.clinic_type)}<br/><button class="provider-popup-save" data-provider-id="${escapeHtml(provider.id)}">Save candidate</button>`)
+      const style = providerCategoryStyle(provider);
+      const marker = L.circleMarker([provider.lat, provider.lng], { radius:6, color:'#ffffff', weight:1, fillColor:style.color, fillOpacity:.92, opacity:.95 })
+        .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>Live discovery · not stored<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/><button class="provider-popup-save" data-provider-id="${escapeHtml(provider.id)}">Save candidate</button>`)
         .addTo(layer);
+      marker.on('popupopen', () => {
+        const button = marker.getPopup()?.getElement()?.querySelector<HTMLButtonElement>('.provider-popup-save');
+        button?.addEventListener('click', event => {
+          event.preventDefault();
+          void saveProviderExplorerCandidate(provider);
+          marker.closePopup();
+        }, { once:true });
+      });
     });
     setProviderExplorerStatus(prev=>`${prev} · live layer: ${providers.length.toLocaleString()} not-stored results`);
   },[mapLiveResultsAsProviderFeatures, providerExplorerLiveEnabled, providerExplorerFilters, providerExplorerParams]);
@@ -1693,8 +1741,9 @@ export default function App() {
       const data = await resp.json();
       const liveOnly = Array.isArray(data.live_only) ? data.live_only as ProviderFeature[] : [];
       liveOnly.filter((provider): provider is ProviderFeature & {lat:number; lng:number}=>typeof provider.lat === 'number' && typeof provider.lng === 'number').slice(0,500).forEach(provider=>{
-        L.circleMarker([provider.lat, provider.lng], { radius:7, color:'#f59e0b', weight:2, fillColor:'#fde68a', fillOpacity:.75 })
-          .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>Live-only gap<br/>${escapeHtml(provider.clinic_type)}<br/>${escapeHtml(provider.match_reason || '')}`)
+        const style = providerCategoryStyle(provider);
+        L.circleMarker([provider.lat, provider.lng], { radius:7, color:'#ffffff', weight:2, fillColor:style.color, fillOpacity:.9, opacity:.98 })
+          .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>Live-only gap<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/>${escapeHtml(provider.match_reason || '')}`)
           .addTo(layer);
       });
       setProviderExplorerStatus(`compare · stored ${Number(data.stored_count||0).toLocaleString()} · live ${Number(data.live_count||0).toLocaleString()} · live-only gaps ${liveOnly.length.toLocaleString()}`);
@@ -2123,6 +2172,7 @@ export default function App() {
     blueHiveLayerRef.current = createClusteredLayer(map, blueHiveData, {
       color: '#3b82f6',
       glow: showGlowPoints,
+      getStyle: providerCategoryStyle,
       badgeLabel: 'BlueHive providers',
       buildPopup: (p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
         <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||'Unnamed'}</div>
@@ -2149,6 +2199,7 @@ export default function App() {
     dentistLayerRef.current = createClusteredLayer(map, dentistData, {
       color: '#06b6d4',
       glow: showGlowPoints,
+      getStyle: providerCategoryStyle,
       badgeLabel: 'dentists',
       buildPopup: (p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
         <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||'Unnamed'}</div>
@@ -2176,6 +2227,7 @@ export default function App() {
     inventoryLayerRef.current = createClusteredLayer(map, inventoryData, {
       color: '#10b981',
       glow: showGlowPoints,
+      getStyle: providerCategoryStyle,
       badgeLabel: 'Service presence providers',
       buildPopup: (p:MapInventoryProvider)=>{
         const tc = trustColor(p.trustTier);
@@ -2207,6 +2259,7 @@ export default function App() {
     indexedProviderLayerRef.current = createClusteredLayer(map, indexedLayerData, {
       color:'#10b981',
       glow:showGlowPoints,
+      getStyle: providerCategoryStyle,
       badgeLabel:'Indexed providers',
       buildPopup:(p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
         <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||p.name||'Unnamed'}</div>
@@ -2227,6 +2280,7 @@ export default function App() {
     myClinicsLayerRef.current = createClusteredLayer(map, myClinicsData, {
       color:'#8b5cf6',
       glow:showGlowPoints,
+      getStyle: providerCategoryStyle,
       badgeLabel:'My Clinics',
       buildPopup:(p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
         <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||p.name||'Unnamed'}</div>
@@ -3316,12 +3370,13 @@ export default function App() {
     }
   }
 
-  function providerLayerStatus(key:DatasetKey, count:number, emptyMessage:string) {
+  function providerLayerStatus(key:DatasetKey, count:number, emptyMessage:string, visible:boolean) {
     const state=datasetStatus[key];
-    if(state.loading) return 'Loading…';
+    if(state.loading) return 'Loading provider data…';
     if(state.error) return state.error;
-    if(!state.loaded) return 'Load when enabled';
-    return count===0 ? emptyMessage : `${count.toLocaleString()} loaded`;
+    if(!state.loaded) return visible ? 'Loading starts when enabled' : 'Toggle on to load';
+    if(count===0) return emptyMessage;
+    return `${count.toLocaleString()} loaded · ${visible ? 'visible' : 'toggle off'}`;
   }
 
   const selectedService = SERVICE_PRESENCE_OPTIONS.find(service=>service.key===metric) || SERVICE_PRESENCE_OPTIONS[0];
@@ -3425,10 +3480,10 @@ export default function App() {
               <LayerToggle label="Radius Ring" checked={showRadius} onChange={setShowRadius} disabled={!showUsDiagnostics||!hasRadiusCenter} status={!showUsDiagnostics?'Enable U.S. Diagnostics first':!hasRadiusCenter?'Select a location first':showRadius?'70 mile radius visible':'Ready'}/>
               <LayerToggle label="Glow Effects" checked={showGlowPoints} onChange={setShowGlowPoints} status={showGlowPoints?'Glow styling active':'Standard marker styling'}/>
               <LayerToggle label="City Dots" checked={showCityDots} onChange={setShowCityDots} disabled={!showUsDiagnostics} status={showCityDots?'City dots visible':usLayerStatus}/>
-              <LayerToggle label="Indexed Providers" checked={showIndexedProviders} onChange={checked=>toggleProviderLayer('indexed',checked)} disabled={datasetStatus.indexed.loading} status={providerLayerStatus('indexed',indexedLayerData.length,'0 loaded')}/>
-              <LayerToggle label="BlueHive Providers" checked={showBlueHive} onChange={checked=>toggleProviderLayer('bluehive',checked)} disabled={datasetStatus.bluehive.loading} status={providerLayerStatus('bluehive',blueHiveData.length,'0 loaded')}/>
-              <LayerToggle label="Dentists" checked={showDentists} onChange={checked=>toggleProviderLayer('dentists',checked)} disabled={datasetStatus.dentists.loading} status={providerLayerStatus('dentists',dentistData.length,'0 loaded')}/>
-              <LayerToggle label="My Clinics" checked={showMyClinicsLayer} onChange={checked=>toggleProviderLayer('myClinics',checked)} disabled={datasetStatus.myClinics.loading} status={providerLayerStatus('myClinics',myClinicsData.length,'No uploaded clinics yet')}/>
+              <LayerToggle label="Indexed Providers" checked={showIndexedProviders} onChange={checked=>toggleProviderLayer('indexed',checked)} disabled={datasetStatus.indexed.loading} status={providerLayerStatus('indexed',indexedLayerData.length,'0 loaded',showIndexedProviders)}/>
+              <LayerToggle label="BlueHive Providers" checked={showBlueHive} onChange={checked=>toggleProviderLayer('bluehive',checked)} disabled={datasetStatus.bluehive.loading} status={providerLayerStatus('bluehive',blueHiveData.length,'0 loaded',showBlueHive)}/>
+              <LayerToggle label="Dentists" checked={showDentists} onChange={checked=>toggleProviderLayer('dentists',checked)} disabled={datasetStatus.dentists.loading} status={providerLayerStatus('dentists',dentistData.length,'0 loaded',showDentists)}/>
+              <LayerToggle label="My Clinics" checked={showMyClinicsLayer} onChange={checked=>toggleProviderLayer('myClinics',checked)} disabled={datasetStatus.myClinics.loading} status={providerLayerStatus('myClinics',myClinicsData.length,'No uploaded clinics yet',showMyClinicsLayer)}/>
               <button className="workflow-dataset-button" onClick={()=>setShowDatasetBrowser(true)}>▦ Provider Explorer</button>
               <div className="provider-map-panel">
                 <div className="provider-map-panel-head"><strong>Provider Map Explorer</strong><span>{providerExplorerMode}</span></div>
@@ -3443,6 +3498,7 @@ export default function App() {
                   <button onClick={()=>{ clearProviderExplorerMap(); setProviderExplorerFilters(INITIAL_PROVIDER_EXPLORER_FILTERS); setProviderExplorerStatus('Provider map/database filters cleared'); }}>Clear shared filters</button>
                 </div>
                 <label className="provider-live-toggle"><input type="checkbox" checked={providerExplorerLiveEnabled} onChange={e=>setProviderExplorerLiveEnabled(e.target.checked)} /> Live discovery layer <span>{liveResults.length.toLocaleString()} not stored</span></label>
+                <div className="provider-category-legend">{PROVIDER_CATEGORY_LEGEND.map(key=><span key={key}><i style={{background:PROVIDER_CATEGORY_STYLES[key].color}} />{PROVIDER_CATEGORY_STYLES[key].label}</span>)}</div>
                 <div className="provider-map-status">{providerExplorerStatus}</div>
                 <div className="provider-map-status warning">Candidate save persists selected records; live results are never imported unless explicitly saved.</div>
               </div>

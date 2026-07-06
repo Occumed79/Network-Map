@@ -1,0 +1,78 @@
+name: Provider Geocode Repair
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "medical_providers data_source to repair, e.g. npi_bulk, npi_registry, healthgrades"
+        required: false
+        default: "npi_bulk"
+        type: string
+      limit:
+        description: "Maximum records to process"
+        required: false
+        default: "25"
+        type: string
+      apply:
+        description: "Write repaired coordinates back to Neon"
+        required: true
+        default: false
+        type: boolean
+      clinic_imports:
+        description: "Also repair clinic_imports staging rows"
+        required: true
+        default: false
+        type: boolean
+      allow_city_centroids:
+        description: "Allow city/state centroid geocoding when no street address is available"
+        required: true
+        default: false
+        type: boolean
+
+jobs:
+  repair-provider-geocodes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run geocode repair
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          NOMINATIM_USER_AGENT: Occu-Med-Network-Map-Geocode-Repair/1.0
+        run: |
+          ARGS="--limit=${{ inputs.limit }}"
+
+          if [ -n "${{ inputs.source }}" ]; then
+            ARGS="$ARGS --source=${{ inputs.source }}"
+          fi
+
+          if [ "${{ inputs.apply }}" = "true" ]; then
+            ARGS="$ARGS --apply"
+          fi
+
+          if [ "${{ inputs.clinic_imports }}" = "true" ]; then
+            ARGS="$ARGS --clinic-imports"
+          fi
+
+          if [ "${{ inputs.allow_city_centroids }}" = "true" ]; then
+            ARGS="$ARGS --allow-city-centroids"
+          fi
+
+          echo "Running provider geocode repair with args: $ARGS"
+          pnpm --filter @workspace/api-server exec tsx scripts/provider-geocode-repair.ts $ARGS

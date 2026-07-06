@@ -206,3 +206,7 @@
 .provider-map-status { color:#afc9d8; font-size:9px; line-height:1.35; margin-top:5px; }
 .provider-map-status.warning { color:#fbbf24; }
 @media (max-width: 900px) { .provider-facets { grid-template-columns:1fr; } }
+.provider-explorer-runtime-status { padding:6px 20px; color:#496272; background:rgba(255,255,255,.55); border-bottom:1px solid rgba(59,93,117,.08); font:10px 'IBM Plex Mono',monospace; }
+.provider-category-legend { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px 8px; margin:7px 0; padding:7px; border:1px solid rgba(123,215,255,.16); border-radius:9px; background:rgba(2,8,23,.24); }
+.provider-category-legend span { display:flex; align-items:center; gap:5px; color:#cfe8f6; font-size:8.5px; line-height:1.1; }
+.provider-category-legend i { display:inline-block; width:8px; height:8px; border-radius:50%; border:1px solid rgba(255,255,255,.85); box-shadow:0 1px 3px rgba(0,0,0,.45); flex-shrink:0; }

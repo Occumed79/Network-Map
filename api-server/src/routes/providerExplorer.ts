@@ -171,7 +171,7 @@ function baseSql(schema: ProviderSchema) {
 }
 
 function selectSql(schema: ProviderSchema) {
-  if (schema === "legacy") return `SELECT mp.source_id::text AS id, mp.name, lower(regexp_replace(COALESCE(mp.name,''),'[^a-zA-Z0-9]+',' ','g')) normalized_name, mp.formatted_address AS address, mp.locality AS city, mp.administrative_area_level_1 AS admin_area, COALESCE(mp.country_code, mp.raw_data->>'country','US') AS country, mp.postal_code, mp.lat, mp.lng, mp.phone, mp.website, mp.data_source AS source, CASE WHEN lower(COALESCE(mp.data_source,''))='my clinics' THEN 'saved' ELSE 'stored' END source_kind, mp.source_url, mp.confidence_score, mp.category, mp.types AS services, mp.types AS categories, mp.raw_data AS raw_source_data, mp.created_at AS imported_at, mp.updated_at AS last_seen, 'directory' AS trust_tier, NULL::text status`;
+  if (schema === "legacy") return `SELECT mp.source_id::text AS id, mp.name, lower(regexp_replace(COALESCE(mp.name,''),'[^a-zA-Z0-9]+',' ','g')) normalized_name, mp.formatted_address AS address, mp.locality AS city, mp.administrative_area_level_1 AS admin_area, COALESCE(mp.country_code, mp.raw_data->>'country','US') AS country, mp.postal_code, mp.lat, mp.lng, mp.phone, mp.website, mp.data_source AS source, CASE WHEN lower(COALESCE(mp.data_source,''))='my clinics' THEN 'saved' ELSE 'stored' END source_kind, COALESCE(mp.raw_data->>'source_url', mp.raw_data->>'url', mp.website)::text AS source_url, mp.confidence_score, mp.category, mp.types AS services, mp.types AS categories, mp.raw_data AS raw_source_data, mp.created_at AS imported_at, mp.updated_at AS last_seen, 'directory' AS trust_tier, NULL::text status`;
   return `SELECT p.id::text AS id, p.name, lower(regexp_replace(COALESCE(p.name,''),'[^a-zA-Z0-9]+',' ','g')) normalized_name, pl.address, pl.city, pl.state AS admin_area, COALESCE(psrc.raw_data->>'country','US') AS country, pl.postal_code, pl.lat, pl.lng, pc.phone, pc.website, psrc.source_label AS source, CASE WHEN psrc.source_label='My Clinics' THEN 'saved' ELSE 'stored' END source_kind, psrc.source_url, NULL::numeric AS confidence_score, NULL::text AS category, svc.services, svc.services AS categories, psrc.raw_data AS raw_source_data, psrc.created_at AS imported_at, psrc.fetched_at AS last_seen, psrc.trust_tier, NULL::text status`;
 }
 
@@ -243,14 +243,14 @@ function buildCandidateWhere(ctx: QueryContext, params: unknown[], spatialEngine
 function normalizeRows(rows: Array<Record<string, any>>): ProviderFeature[] {
   return rows.map((row) => {
     const services = toTextArray(row.services);
-    const categories = toTextArray(row.categories?.length ? row.categories : row.services);
+    const categories = toTextArray(row.categories?.length ? row.categories : row.category || row.services);
     const raw = row.raw_source_data || null;
-    const clinicType = row.clinic_type || classifyProvider({ name: row.name, services, taxonomy_description: services.join(" "), raw_source_data: raw });
-    const sourceKind = (row.source_kind || sourceKindFor(row.source)) as SourceKind;
+    const clinicType = row.clinic_type || classifyProvider({ name: row.name, category: row.category, services, raw_source_data: raw });
     return {
-      id: String(row.id), source: row.source || "indexed", source_kind: sourceKind, name: row.name || "Unnamed provider",
-      normalized_name: row.normalized_name || normalizeName(row.name), clinic_type: clinicType, services, categories,
-      address: row.address || null, city: row.city || null, admin_area: row.admin_area || null, country: row.country || (row.admin_area ? "US" : null), postal_code: row.postal_code || null,
+      id: String(row.id || randomUUID()), source: row.source || row.source_label || "indexed", source_kind: row.source_kind || sourceKindFor(row.source),
+      name: row.name || "Unnamed provider", normalized_name: row.normalized_name || normalizeName(row.name), clinic_type: clinicType,
+      services, categories, address: row.address || null, city: row.city || null, admin_area: row.admin_area || null,
+      country: row.country || (row.admin_area ? "US" : null), postal_code: row.postal_code || null,
       lat: row.lat == null ? null : Number(row.lat), lng: row.lng == null ? null : Number(row.lng), phone: row.phone || null,
       website: row.website || null, source_url: row.source_url || null, confidence_score: row.confidence_score == null ? null : Number(row.confidence_score),
       trust_tier: row.trust_tier || "lead", last_seen: row.last_seen || null, imported_at: row.imported_at || null, raw_source_data: raw,
@@ -259,207 +259,139 @@ function normalizeRows(rows: Array<Record<string, any>>): ProviderFeature[] {
   });
 }
 
-function candidateSelectSql() {
-  return `SELECT id::text, source_label AS source, source_kind, name, normalized_name, clinic_type, services, categories, address, city, admin_area, country, postal_code, lat, lng, phone, website, source_url, confidence_score, trust_tier, last_seen, created_at AS imported_at, raw_source_data, status FROM provider_candidates`;
-}
-
-async function queryStored(pool: ReturnType<typeof getPool>, schema: ProviderSchema, ctx: QueryContext, spatialEngine: SpatialEngine, mode: Mode, page: number, limit: number) {
-  if (schema === "none" || (!ctx.includeStored && !ctx.includeSaved)) return { rows: [], total: 0 };
+async function queryStored(pool: ReturnType<typeof getPool>, schema: ProviderSchema, ctx: QueryContext, mode: Mode, spatialEngine: SpatialEngine, page = 1, limit = 25) {
+  if (schema === "none") return { providers: [] as ProviderFeature[], total: 0 };
   const params: unknown[] = [];
   const where = buildStoredWhere(ctx, schema, params, spatialEngine).join(" AND ");
   const from = baseSql(schema);
-  const count = await queryWithStatementTimeout(pool, `SELECT count(*)::int AS total ${from} ${where}`, params);
-  const total = Number(count.rows[0]?.total || 0);
-  params.push(limit, (page - 1) * limit);
+  const total = Number((await queryWithStatementTimeout(pool, `SELECT count(*)::int AS total ${from} ${where}`, params)).rows[0]?.total || 0);
+  if (mode === "density" || mode === "hex") return { providers: [] as ProviderFeature[], total };
+  const offset = (page - 1) * limit;
+  params.push(limit, offset);
   const rows = (await queryWithStatementTimeout(pool, `${selectSql(schema)} ${from} ${where} ORDER BY id ASC LIMIT $${params.length - 1} OFFSET $${params.length}`, params)).rows;
-  return { rows, total };
+  return { providers: normalizeRows(rows), total };
 }
 
-async function queryCandidates(pool: ReturnType<typeof getPool>, ctx: QueryContext, spatialEngine: SpatialEngine, page: number, limit: number) {
-  if (!ctx.includeSaved && !ctx.includeCandidates) return { rows: [], total: 0 };
+async function queryCandidates(pool: ReturnType<typeof getPool>, ctx: QueryContext, spatialEngine: SpatialEngine, page = 1, limit = 25) {
   const params: unknown[] = [];
   const where = buildCandidateWhere(ctx, params, spatialEngine).join(" AND ");
-  const count = await queryWithStatementTimeout(pool, `SELECT count(*)::int AS total FROM provider_candidates WHERE ${where}`, params);
-  const total = Number(count.rows[0]?.total || 0);
-  params.push(limit, (page - 1) * limit);
-  const rows = (await queryWithStatementTimeout(pool, `${candidateSelectSql()} WHERE ${where} ORDER BY updated_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params)).rows;
-  return { rows, total };
+  const total = Number((await queryWithStatementTimeout(pool, `SELECT count(*)::int AS total FROM provider_candidates WHERE ${where}`, params)).rows[0]?.total || 0);
+  const offset = (page - 1) * limit;
+  params.push(limit, offset);
+  const rows = (await queryWithStatementTimeout(pool, `SELECT id::text, source_label AS source, source_kind, name, normalized_name, clinic_type, services, categories, address, city, admin_area, country, postal_code, lat, lng, phone, website, source_url, confidence_score, trust_tier, raw_source_data, created_at AS imported_at, last_seen, status FROM provider_candidates WHERE ${where} ORDER BY updated_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params)).rows;
+  return { providers: normalizeRows(rows), total };
 }
 
-async function queryAggregates(pool: ReturnType<typeof getPool>, schema: ProviderSchema, ctx: QueryContext, spatialEngine: SpatialEngine, mode: "density" | "hex") {
-  const precision = mode === "hex" ? 2 : 1;
-  if (schema === "none") return { total: 0, cells: [] };
-  const params: unknown[] = [];
-  const e = storedExpressions(schema);
-  const where = buildStoredWhere(ctx, schema, params, spatialEngine).join(" AND ");
-  const from = baseSql(schema);
-  const totalRows = await queryWithStatementTimeout(pool, `SELECT count(*)::int AS total ${from} ${where}`, params);
-  const rows = (await queryWithStatementTimeout(pool, `SELECT round((${e.lat})::numeric, ${precision})::float lat, round((${e.lng})::numeric, ${precision})::float lng, count(*)::int count ${from} ${where} GROUP BY 1,2 ORDER BY count DESC LIMIT 2000`, params)).rows;
-  return { total: Number(totalRows.rows[0]?.total || 0), cells: rows, precision };
+function hasLiveScope(ctx: QueryContext): boolean { return Boolean(ctx.bounds || (ctx.lat !== undefined && ctx.lng !== undefined && ctx.radiusMiles !== undefined)); }
+function overpassQuery(ctx: QueryContext): string {
+  const terms = ctx.clinicType || ctx.service || "clinic";
+  const amenity = terms.toLowerCase().includes("pharmacy") ? `[amenity=pharmacy]` : terms.toLowerCase().includes("dental") ? `[amenity=dentist]` : `[amenity~"clinic|doctors|hospital|dentist|pharmacy"]`;
+  if (ctx.bounds) return `[out:json][timeout:15];(node${amenity}(${ctx.bounds.south},${ctx.bounds.west},${ctx.bounds.north},${ctx.bounds.east});way${amenity}(${ctx.bounds.south},${ctx.bounds.west},${ctx.bounds.north},${ctx.bounds.east});relation${amenity}(${ctx.bounds.south},${ctx.bounds.west},${ctx.bounds.north},${ctx.bounds.east}););out center tags 80;`;
+  const radius = Math.min(Math.max(ctx.radiusMiles || 10, 1), MAX_LIVE_RADIUS_MILES) * 1609.344;
+  return `[out:json][timeout:15];(node${amenity}(around:${radius},${ctx.lat},${ctx.lng});way${amenity}(around:${radius},${ctx.lat},${ctx.lng});relation${amenity}(around:${radius},${ctx.lat},${ctx.lng}););out center tags 80;`;
 }
-
-async function queryFacets(pool: ReturnType<typeof getPool>, schema: ProviderSchema, ctx: QueryContext, spatialEngine: SpatialEngine) {
-  if (schema === "none") return { total: 0, facets: [] };
-  const params: unknown[] = [];
-  const where = buildStoredWhere(ctx, schema, params, spatialEngine).join(" AND ");
-  const from = baseSql(schema);
-  const count = await queryWithStatementTimeout(pool, `SELECT count(*)::int AS total ${from} ${where}`, params);
-  const serviceFacetExpr = "unnest(COALESCE(x.services::text[], ARRAY[]::text[]))";
-  const facetSql = `SELECT source, source_kind, country, admin_area, city, clinic_type, service, count(*)::int count FROM (SELECT x.source, x.source_kind, x.country, x.admin_area, x.city, 'unknown' clinic_type, NULL::text service FROM (${selectSql(schema)} ${from} ${where}) x UNION ALL SELECT NULL::text source, NULL::text source_kind, NULL::text country, NULL::text admin_area, NULL::text city, NULL::text clinic_type, ${serviceFacetExpr} service FROM (${selectSql(schema)} ${from} ${where}) x) f GROUP BY GROUPING SETS ((source),(source_kind),(country),(admin_area),(city),(clinic_type),(service)) HAVING count(*) > 0`;
-  const rows = (await queryWithStatementTimeout(pool, facetSql, params)).rows;
-  return { total: Number(count.rows[0]?.total || 0), facets: rows };
+function elementToProvider(el: OverpassElement): ProviderFeature | null {
+  const tags = el.tags || {}; const lat = el.lat ?? el.center?.lat; const lng = el.lon ?? el.center?.lon;
+  if (lat == null || lng == null) return null;
+  const services = [tags.healthcare, tags.amenity, tags["healthcare:speciality"], tags.speciality].filter(Boolean) as string[];
+  const name = tags.name || tags.operator || "Unnamed live provider";
+  const address = [tags["addr:housenumber"], tags["addr:street"]].filter(Boolean).join(" ") || null;
+  const raw = { osm_id: el.id, tags };
+  return { id: `osm-${el.id}`, source: "OpenStreetMap / Overpass", source_kind: "live", name, normalized_name: normalizeName(name), clinic_type: classifyProvider({ name, services, raw_source_data: raw }), services, categories: services, address, city: tags["addr:city"] || null, admin_area: tags["addr:state"] || tags["addr:province"] || null, country: tags["addr:country"] || null, postal_code: tags["addr:postcode"] || null, lat, lng, phone: tags.phone || tags["contact:phone"] || null, website: tags.website || tags["contact:website"] || null, source_url: `https://www.openstreetmap.org/${"lat" in el ? "node" : "way"}/${el.id}`, confidence_score: null, trust_tier: "live-not-stored", last_seen: nowIso(), imported_at: null, raw_source_data: raw, status: "live" };
 }
-
-function overpassTagsFor(ctx: QueryContext) {
-  const text = `${ctx.clinicType || ""} ${ctx.service || ""} ${ctx.q || ""}`.toLowerCase();
-  if (/dent/i.test(text)) return [`["amenity"="dentist"]`];
-  if (/pharmacy|vaccin|travel/i.test(text)) return [`["amenity"="pharmacy"]`];
-  if (/hospital/i.test(text)) return [`["amenity"="hospital"]`];
-  return [`["amenity"="clinic"]`, `["amenity"="doctors"]`, `["healthcare"]`, `["amenity"="hospital"]`];
-}
-
-function overpassQuery(ctx: QueryContext): string | null {
-  if (ctx.lat !== undefined && ctx.lng !== undefined && ctx.radiusMiles !== undefined) {
-    const radius = Math.min(ctx.radiusMiles, MAX_LIVE_RADIUS_MILES) * 1609.344;
-    const selectors = overpassTagsFor(ctx).map(tag => `node${tag}(around:${Math.round(radius)},${ctx.lat},${ctx.lng});way${tag}(around:${Math.round(radius)},${ctx.lat},${ctx.lng});relation${tag}(around:${Math.round(radius)},${ctx.lat},${ctx.lng});`).join("\n");
-    return `[out:json][timeout:20];(${selectors});out center tags 100;`;
-  }
-  if (ctx.bounds) {
-    const { south, west, north, east } = ctx.bounds;
-    const selectors = overpassTagsFor(ctx).map(tag => `node${tag}(${south},${west},${north},${east});way${tag}(${south},${west},${north},${east});relation${tag}(${south},${west},${north},${east});`).join("\n");
-    return `[out:json][timeout:20];(${selectors});out center tags 200;`;
-  }
-  return null;
-}
-
-function normalizeOverpass(elements: OverpassElement[]): ProviderFeature[] {
-  return elements.map((el) => {
-    const tags = el.tags || {};
-    const lat = el.lat ?? el.center?.lat ?? null;
-    const lng = el.lon ?? el.center?.lon ?? null;
-    const services = [tags.amenity, tags.healthcare, tags.speciality, tags["healthcare:speciality"]].filter(Boolean) as string[];
-    const raw = { osm_id: el.id, tags };
-    return {
-      id: `osm-${el.id}`, source: "OSM/Overpass", source_kind: "live", name: tags.name || tags.operator || "Unnamed live provider",
-      normalized_name: normalizeName(tags.name || tags.operator), clinic_type: classifyProvider({ name: tags.name, services, raw_source_data: raw }), services, categories: services,
-      address: [tags["addr:housenumber"], tags["addr:street"]].filter(Boolean).join(" ") || null, city: tags["addr:city"] || null, admin_area: tags["addr:state"] || null, country: tags["addr:country"] || null, postal_code: tags["addr:postcode"] || null,
-      lat, lng, phone: tags.phone || tags["contact:phone"] || null, website: tags.website || tags["contact:website"] || null, source_url: `https://www.openstreetmap.org/${el.lat ? "node" : "way"}/${el.id}`,
-      confidence_score: null, trust_tier: "live-not-stored", last_seen: nowIso(), imported_at: null, raw_source_data: raw,
-    };
-  }).filter(p => p.lat != null && p.lng != null);
-}
-
 async function fetchLiveProviders(ctx: QueryContext) {
-  const query = overpassQuery(ctx);
-  if (!query) return { providers: [] as ProviderFeature[], warning: "Live discovery requires map bounds or lat/lng/radius." };
-  const key = JSON.stringify({ q: ctx.q, clinicType: ctx.clinicType, service: ctx.service, bounds: ctx.bounds, lat: ctx.lat, lng: ctx.lng, radiusMiles: ctx.radiusMiles });
-  const cached = liveCache.get(key);
-  if (cached && cached.expires > Date.now()) return cached;
+  if (!hasLiveScope(ctx)) return { providers: [] as ProviderFeature[], warning: "Live discovery requires map bounds or radius." };
+  const key = JSON.stringify({ b: ctx.bounds, lat: ctx.lat, lng: ctx.lng, r: ctx.radiusMiles, c: ctx.clinicType, s: ctx.service });
+  const cached = liveCache.get(key); if (cached && cached.expires > Date.now()) return cached;
   try {
-    const resp = await fetch(OVERPASS_ENDPOINT, { method: "POST", body: query, headers: { "content-type": "text/plain" }, signal: AbortSignal.timeout(22000) });
+    const resp = await fetch(OVERPASS_ENDPOINT, { method: "POST", body: overpassQuery(ctx), headers: { "content-type": "text/plain" }, signal: AbortSignal.timeout(18000) });
     if (!resp.ok) throw new Error(`Overpass HTTP ${resp.status}`);
     const data = await resp.json() as { elements?: OverpassElement[] };
-    const providers = normalizeOverpass(data.elements || []);
-    const result = { providers, expires: Date.now() + OVERPASS_CACHE_MS };
-    liveCache.set(key, result);
+    let providers = (data.elements || []).map(elementToProvider).filter((p): p is ProviderFeature => Boolean(p));
+    if (ctx.q) providers = providers.filter((p) => `${p.name} ${p.services.join(" ")} ${p.city || ""}`.toLowerCase().includes(ctx.q!.toLowerCase()));
+    const result = { providers: providers.slice(0, 500), warning: undefined };
+    liveCache.set(key, { ...result, expires: Date.now() + OVERPASS_CACHE_MS });
     return result;
   } catch (e) {
-    return { providers: [] as ProviderFeature[], warning: e instanceof Error ? e.message : "Live discovery failed" };
+    return { providers: [] as ProviderFeature[], warning: e instanceof Error ? `Live discovery unavailable: ${e.message}` : "Live discovery unavailable" };
   }
 }
+function distanceMiles(a: ProviderFeature, b: ProviderFeature): number { if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) return Infinity; const R=3959; const dLat=(b.lat-a.lat)*Math.PI/180; const dLng=(b.lng-a.lng)*Math.PI/180; const s=Math.sin(dLat/2)**2+Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLng/2)**2; return 2*R*Math.asin(Math.sqrt(s)); }
 
-function distanceMiles(a: ProviderFeature, b: ProviderFeature) {
-  if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) return Infinity;
-  const r = 3959;
-  const dLat = (b.lat - a.lat) * Math.PI / 180;
-  const dLng = (b.lng - a.lng) * Math.PI / 180;
-  const lat1 = a.lat * Math.PI / 180;
-  const lat2 = b.lat * Math.PI / 180;
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return 2 * r * Math.asin(Math.sqrt(h));
-}
-
-async function handleCompare(req: Request, res: Response, schema: ProviderSchema, spatialEngine: SpatialEngine) {
+async function handleRecords(req: Request, res: Response, forcedMode?: Mode) {
+  const mode = forcedMode || (asString(req.query.mode) as Mode) || "records";
   const ctx = parseQuery(req);
-  const pool = getPool();
-  const stored = normalizeRows((await queryStored(pool, schema, { ...ctx, includeLive: false, includeStored: true, includeSaved: true, includeCandidates: false }, spatialEngine, "records", 1, 1000)).rows);
-  const live = (await fetchLiveProviders(ctx)).providers;
-  const matched = new Set<string>();
-  const liveOnly: ProviderFeature[] = [];
-  for (const l of live) {
-    const match = stored.find(s => normalizeName(s.name) === normalizeName(l.name) || distanceMiles(s, l) <= 0.25);
-    if (match) { matched.add(match.id); l.match_reason = normalizeName(match.name) === normalizeName(l.name) ? "name" : "distance<=0.25mi"; l.distance_miles = distanceMiles(match, l); }
-    else liveOnly.push({ ...l, match_reason: "live-only" });
+  if (!isPersistenceConfigured()) {
+    if (mode === "live") { const live = await fetchLiveProviders(ctx); res.json({ mode, providers: live.providers, records: live.providers, total: live.providers.length, count: live.providers.length, warning: live.warning, status: { persistenceConfigured: false, schema: "none", spatialEngine: "numeric-fallback", liveAdapters: ["osm-overpass"] } }); return; }
+    if (mode === "compare") { const live = await fetchLiveProviders(ctx); res.json({ mode, stored_count: 0, live_count: live.providers.length, matched_count: 0, live_only_count: live.providers.length, stored_only_count: 0, live_only: live.providers.map((p) => ({ ...p, match_reason: "live_only" })), stored_only: [], warning: live.warning, status: { persistenceConfigured: false, schema: "none", spatialEngine: "numeric-fallback", liveAdapters: ["osm-overpass"] } }); return; }
+    res.json({ providers: [], records: [], cells: [], facets: [], total: 0, count: 0, page: 1, limit: 0, hasMore: false, mode, status: { persistenceConfigured: false, spatialEngine: "numeric-fallback" } }); return;
   }
-  const storedOnly = stored.filter(s => !matched.has(s.id)).map(s => ({ ...s, match_reason: "stored-only" }));
-  res.json({ mode: "compare", stored_count: stored.length, live_count: live.length, matched_count: matched.size, live_only_count: liveOnly.length, stored_only_count: storedOnly.length, live_only: liveOnly, stored_only: storedOnly });
+  const pool = getPool(); const setup = await ensureProviderExplorerPersistence(pool); const schema = await detectProviderSchema(pool);
+  if (mode === "live") { const live = await fetchLiveProviders(ctx); res.json({ mode, providers: live.providers, records: live.providers, total: live.providers.length, count: live.providers.length, warning: live.warning, status: { persistenceConfigured: true, schema, ...setup } }); return; }
+  if (mode === "compare") { const stored = await queryStored(pool, schema, ctx, "pins", setup.spatialEngine, 1, 1000); const live = await fetchLiveProviders(ctx); const matched = new Set<string>(); const liveOnly: ProviderFeature[] = []; for (const lp of live.providers) { const match = stored.providers.find((sp) => normalizeName(sp.name) === normalizeName(lp.name) || distanceMiles(sp, lp) <= 0.25); if (match) { matched.add(match.id); lp.match_reason = normalizeName(match.name) === normalizeName(lp.name) ? "normalized_name" : "distance_0.25mi"; lp.distance_miles = distanceMiles(match, lp); } else liveOnly.push({ ...lp, match_reason: "live_only" }); } const storedOnly = stored.providers.filter((p) => !matched.has(p.id)).map((p) => ({ ...p, match_reason: "stored_only" })); res.json({ mode, stored_count: stored.total, live_count: live.providers.length, matched_count: matched.size, live_only_count: liveOnly.length, stored_only_count: storedOnly.length, live_only: liveOnly, stored_only: storedOnly, warning: live.warning, status: { persistenceConfigured: true, schema, ...setup } }); return; }
+  if (mode === "facets") {
+    const params: unknown[] = []; const where = schema === "none" ? "FALSE" : buildStoredWhere(ctx, schema, params, setup.spatialEngine).join(" AND "); const from = schema === "none" ? "FROM (SELECT NULL) noop WHERE" : baseSql(schema);
+    const rows = schema === "none" ? [] : (await queryWithStatementTimeout(pool, `SELECT source, source_kind, country, admin_area, city, clinic_type, service, count(*)::int count FROM (SELECT x.source, x.source_kind, x.country, x.admin_area, x.city, 'unknown' clinic_type, NULL::text service FROM (${selectSql(schema)} ${from} ${where}) x UNION ALL SELECT NULL::text, NULL::text, NULL::text, NULL::text, NULL::text, NULL::text, unnest(COALESCE(x.services::text[], ARRAY[]::text[])) FROM (${selectSql(schema)} ${from} ${where}) x) f GROUP BY GROUPING SETS ((source),(source_kind),(country),(admin_area),(city),(clinic_type),(service)) HAVING count(*) > 0`, params)).rows;
+    res.json({ mode, total: rows.reduce((m: number, r: any) => Math.max(m, Number(r.count) || 0), 0), facets: rows, status: { persistenceConfigured: true, schema, ...setup } }); return;
+  }
+  if (mode === "density" || mode === "hex") {
+    const precision = Math.max(1, Math.min(10, Number(req.query.precision) || (mode === "hex" ? 2 : 1))); const cells: Array<{lat:number;lng:number;count:number}> = []; let total = 0;
+    if (schema !== "none") { const params: unknown[] = []; const e = storedExpressions(schema); const where = buildStoredWhere(ctx, schema, params, setup.spatialEngine).join(" AND "); const from = baseSql(schema); const rows = (await queryWithStatementTimeout(pool, `SELECT round((${e.lat})::numeric, ${precision})::float lat, round((${e.lng})::numeric, ${precision})::float lng, count(*)::int count ${from} ${where} GROUP BY 1,2 ORDER BY count DESC LIMIT 2000`, params)).rows; cells.push(...rows); total += Number((await queryWithStatementTimeout(pool, `SELECT count(*)::int total ${from} ${where}`, params)).rows[0]?.total || 0); }
+    res.json({ mode, total, cells, count: cells.length, precision, status: { persistenceConfigured: true, schema, ...setup } }); return;
+  }
+  const page = Math.max(1, Number(req.query.page) || 1); const maxLimit = mode === "pins" ? MAX_PIN_LIMIT : MAX_RECORD_LIMIT; const limit = Math.min(Math.max(1, Number(req.query.limit) || (mode === "pins" ? 1000 : 25)), maxLimit);
+  const stored = await queryStored(pool, schema, ctx, mode, setup.spatialEngine, page, limit); const cand = await queryCandidates(pool, ctx, setup.spatialEngine, page, limit); const live = ctx.includeLive || ctx.source === "live" || ctx.sourceKind === "live" ? await fetchLiveProviders(ctx) : { providers: [] as ProviderFeature[], warning: undefined };
+  const providers = [...stored.providers, ...cand.providers, ...live.providers].slice(0, limit); const total = stored.total + cand.total + live.providers.length;
+  res.json({ mode, providers, records: providers, total, count: providers.length, page, limit, hasMore: page * limit < total, visibleCount: providers.length, warning: live.warning, status: { persistenceConfigured: true, schema, ...setup } });
 }
 
-function requirePersistence(res: Response) {
-  if (!isPersistenceConfigured()) { res.status(503).json({ error: "Provider Explorer persistence requires DATABASE_URL." }); return false; }
-  return true;
-}
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function isUuid(value: unknown): value is string { return typeof value === "string" && UUID_RE.test(value); }
 
-function candidateFromPayload(body: CandidatePayload) {
-  const provider = body.provider || body;
-  const name = provider.name || "Unnamed provider";
-  const services = toTextArray(provider.services);
-  const categories = toTextArray(provider.categories?.length ? provider.categories : provider.services);
-  const clinicType = provider.clinic_type || classifyProvider({ name, services, raw_source_data: provider.raw_source_data });
-  return { id: randomUUID(), source_kind: "candidate", source_label: provider.source || "Live discovery", name, normalized_name: normalizeName(name), clinic_type: clinicType, services, categories, address: provider.address || null, city: provider.city || null, admin_area: provider.admin_area || null, country: provider.country || null, postal_code: provider.postal_code || null, lat: provider.lat ?? null, lng: provider.lng ?? null, phone: provider.phone || null, website: provider.website || null, source_url: provider.source_url || null, confidence_score: provider.confidence_score ?? null, trust_tier: provider.trust_tier || "lead", status: body.status || "candidate", notes: body.notes || null, raw_source_data: provider.raw_source_data || provider };
+async function insertProviderCandidate(pool: ReturnType<typeof getPool>, setup: Awaited<ReturnType<typeof ensureProviderExplorerPersistence>>, payload: CandidatePayload, status: "candidate" | "saved") {
+  const name = asString(payload.name); if (!name) throw new Error("name is required");
+  const services = toTextArray(payload.services); const categories = toTextArray(payload.categories); const raw = payload.raw_source_data || payload.raw_source_data === null ? payload.raw_source_data : payload;
+  const sourceKind = status === "saved" ? "saved" : "candidate"; const sourceLabel = status === "saved" ? "My Clinics" : (payload.source || (payload as any).source_label || "Live discovery");
+  const values = [sourceKind, sourceLabel, name, normalizeName(name), payload.clinic_type || classifyProvider({ name, services, service_categories: categories, raw_source_data: raw }), services, categories, payload.address || null, payload.city || null, payload.admin_area || null, payload.country || null, payload.postal_code || null, payload.lat ?? null, payload.lng ?? null, payload.phone || null, payload.website || null, payload.source_url || null, payload.confidence_score ?? null, payload.trust_tier || sourceKind, status, payload.notes || null, JSON.stringify(raw || {})];
+  const geogColumn = setup.spatialEngine === "postgis" ? ", geog" : "";
+  const geogValue = setup.spatialEngine === "postgis" ? ", CASE WHEN $13::double precision IS NOT NULL AND $14::double precision IS NOT NULL THEN ST_SetSRID(ST_MakePoint($14,$13),4326)::geography ELSE NULL END" : "";
+  return (await pool.query(`INSERT INTO provider_candidates (source_kind, source_label, name, normalized_name, clinic_type, services, categories, address, city, admin_area, country, postal_code, lat, lng, phone, website, source_url, confidence_score, trust_tier, status, notes, raw_source_data, last_seen, saved_at${geogColumn}) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, now(), CASE WHEN $20='saved' THEN now() ELSE NULL END${geogValue}) RETURNING *`, values)).rows[0];
 }
 
 async function saveCandidate(req: Request, res: Response) {
-  if (!requirePersistence(res)) return;
-  const pool = getPool();
-  const persistence = await ensureProviderExplorerPersistence(pool);
-  const c = candidateFromPayload(req.body || {});
-  const row = (await pool.query(`INSERT INTO provider_candidates (id, source_kind, source_label, name, normalized_name, clinic_type, services, categories, address, city, admin_area, country, postal_code, lat, lng, phone, website, source_url, confidence_score, trust_tier, status, notes, raw_source_data, last_seen, geog) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,now(),${persistence.spatialEngine === "postgis" ? "ST_SetSRID(ST_MakePoint($15,$14),4326)::geography" : "NULL"}) RETURNING *`, [c.id, c.source_kind, c.source_label, c.name, c.normalized_name, c.clinic_type, c.services, c.categories, c.address, c.city, c.admin_area, c.country, c.postal_code, c.lat, c.lng, c.phone, c.website, c.source_url, c.confidence_score, c.trust_tier, c.status, c.notes, JSON.stringify(c.raw_source_data)])).rows[0];
-  res.json({ ok: true, provider: normalizeRows([row])[0] });
+  if (!isPersistenceConfigured()) { res.status(503).json({ error: "Candidate persistence requires DATABASE_URL." }); return; }
+  const pool = getPool(); const setup = await ensureProviderExplorerPersistence(pool); const payload = ((req.body?.provider || req.body) ?? {}) as CandidatePayload;
+  const row = await insertProviderCandidate(pool, setup, payload, "candidate");
+  res.status(201).json({ provider: normalizeRows([row])[0], candidate: row });
 }
-
 async function updateCandidateStatus(req: Request, res: Response, status: string) {
-  if (!requirePersistence(res)) return;
-  const id = asString(req.body?.id) || asString(req.body?.provider?.id) || asString(req.query.id);
-  if (!id) { res.status(400).json({ error: "Candidate id is required." }); return; }
-  const row = (await getPool().query(`UPDATE provider_candidates SET status=$2, source_kind=CASE WHEN $2='saved' THEN 'saved' ELSE source_kind END, source_label=CASE WHEN $2='saved' THEN 'My Clinics' ELSE source_label END, saved_at=CASE WHEN $2='saved' THEN now() ELSE saved_at END, dismissed_at=CASE WHEN $2='dismissed' THEN now() ELSE dismissed_at END, updated_at=now() WHERE id=$1 RETURNING *`, [id, status])).rows[0];
-  if (!row) { res.status(404).json({ error: "Candidate not found." }); return; }
-  res.json({ ok: true, provider: normalizeRows([row])[0] });
+  if (!isPersistenceConfigured()) { res.status(503).json({ error: "Candidate persistence requires DATABASE_URL." }); return; }
+  const pool = getPool(); const setup = await ensureProviderExplorerPersistence(pool); const id = asString(req.body?.id || req.body?.candidateId || req.query.id); const payload = ((req.body?.provider || req.body) ?? {}) as CandidatePayload;
+  if (!id && status !== "saved") { res.status(400).json({ error: "id is required" }); return; }
+  let row = null;
+  if (isUuid(id)) row = (await pool.query(`UPDATE provider_candidates SET status=$2, source_kind=CASE WHEN $2='saved' THEN 'saved' ELSE 'candidate' END, source_label=CASE WHEN $2='saved' THEN 'My Clinics' ELSE source_label END, saved_at=CASE WHEN $2='saved' THEN now() ELSE saved_at END, dismissed_at=CASE WHEN $2='dismissed' THEN now() ELSE dismissed_at END, notes=COALESCE($3, notes), updated_at=now() WHERE id=$1 RETURNING *`, [id, status, req.body?.notes || null])).rows[0];
+  if (!row && status === "saved" && asString(payload.name)) {
+    row = await insertProviderCandidate(pool, setup, payload, "saved");
+    res.status(201).json({ provider: normalizeRows([row])[0], candidate: row, persistedFromPayload: true }); return;
+  }
+  if (!row && status === "dismissed") { res.json({ persisted: false, dismissed: false, message: "Provider was not a persisted candidate; nothing to dismiss." }); return; }
+  if (!row) { res.status(404).json({ error: "candidate not found" }); return; }
+  res.json({ provider: normalizeRows([row])[0], candidate: row });
 }
-
 async function outreachTarget(req: Request, res: Response) {
-  if (!requirePersistence(res)) return;
-  const provider = req.body?.provider || req.body || {};
-  const row = (await getPool().query(`INSERT INTO provider_outreach_targets (provider_candidate_id, provider_source_id, source_kind, source_label, name, status, notes, raw_source_data) VALUES ($1,$2,$3,$4,$5,'outreach_target',$6,$7) RETURNING *`, [asString(provider.id)?.startsWith("osm-") ? null : provider.id || null, provider.id || null, provider.source_kind || null, provider.source || null, provider.name || "Unnamed provider", req.body?.notes || null, JSON.stringify(provider.raw_source_data || provider)])).rows[0];
-  res.json({ ok: true, outreach: row });
+  if (!isPersistenceConfigured()) { res.status(503).json({ error: "Outreach persistence requires DATABASE_URL." }); return; }
+  const pool = getPool(); await ensureProviderExplorerPersistence(pool); const payload = req.body?.provider || req.body || {}; const name = asString(payload.name); if (!name) { res.status(400).json({ error: "name is required" }); return; }
+  const providerSourceId = asString(payload.id) || null; const sourceKind = asString(payload.source_kind) || null; const sourceLabel = asString(payload.source || payload.source_label) || null; const candidateId = isUuid(payload.candidateId) ? payload.candidateId : isUuid(payload.id) ? payload.id : null;
+  const existing = (await pool.query(`SELECT * FROM provider_outreach_targets WHERE (provider_source_id IS NOT DISTINCT FROM $1 OR lower(name)=lower($2)) AND source_kind IS NOT DISTINCT FROM $3 AND source_label IS NOT DISTINCT FROM $4 ORDER BY updated_at DESC LIMIT 1`, [providerSourceId, name, sourceKind, sourceLabel])).rows[0];
+  if (existing) { const row = (await pool.query(`UPDATE provider_outreach_targets SET status='outreach_target', notes=COALESCE($2, notes), raw_source_data=COALESCE($3, raw_source_data), updated_at=now() WHERE id=$1 RETURNING *`, [existing.id, req.body?.notes || payload.notes || null, JSON.stringify(payload.raw_source_data || payload)])).rows[0]; res.json({ outreach_target: row, deduped: true }); return; }
+  const row = (await pool.query(`INSERT INTO provider_outreach_targets (provider_candidate_id, provider_source_id, source_kind, source_label, name, status, notes, raw_source_data) VALUES ($1,$2,$3,$4,$5,'outreach_target',$6,$7) RETURNING *`, [candidateId, providerSourceId, sourceKind, sourceLabel, name, req.body?.notes || payload.notes || null, JSON.stringify(payload.raw_source_data || payload)])).rows[0];
+  res.status(201).json({ outreach_target: row, deduped: false });
 }
-
-async function handle(req: Request, res: Response, forcedMode?: Mode) {
-  const mode = forcedMode || (asString(req.query.mode) as Mode) || "records";
-  if (!isPersistenceConfigured()) { res.json({ providers: [], records: [], cells: [], facets: [], total: 0, count: 0, page: 1, limit: 0, hasMore: false, mode, status: { persistenceConfigured: false, spatialEngine: "numeric-fallback", candidatePersistence: false, savedPersistence: false } }); return; }
-  const pool = getPool();
-  const persistence = await ensureProviderExplorerPersistence(pool);
-  const schema = await detectProviderSchema(pool);
-  if (mode === "status") { res.json({ persistenceConfigured: true, schema, spatialEngine: persistence.spatialEngine, liveAdapters: ["osm-overpass"], candidatePersistence: true, savedProviderPersistence: true }); return; }
-  if (schema === "none" && mode !== "live") { res.json({ providers: [], total: 0, count: 0, note: "No provider table available", status: { schema, ...persistence } }); return; }
-  if (mode === "compare") { await handleCompare(req, res, schema, persistence.spatialEngine); return; }
-  const ctx = parseQuery(req);
-  if (mode === "live") { const live = await fetchLiveProviders(ctx); res.json({ mode, providers: live.providers, records: live.providers, total: live.providers.length, count: live.providers.length, warning: live.warning }); return; }
-  if (mode === "facets") { const facets = await queryFacets(pool, schema, ctx, persistence.spatialEngine); res.json({ ...facets, status: persistence }); return; }
-  if (mode === "density" || mode === "hex") { const data = await queryAggregates(pool, schema, ctx, persistence.spatialEngine, mode); res.json({ mode, ...data, count: data.cells.length, status: persistence }); return; }
-  const page = Math.max(1, Number(req.query.page) || 1);
-  const maxLimit = mode === "pins" ? MAX_PIN_LIMIT : MAX_RECORD_LIMIT;
-  const limit = Math.min(Math.max(1, Number(req.query.limit) || (mode === "pins" ? 1000 : 25)), maxLimit);
-  const stored = await queryStored(pool, schema, ctx, persistence.spatialEngine, mode, page, limit);
-  const candidates = await queryCandidates(pool, ctx, persistence.spatialEngine, page, limit);
-  let providers = normalizeRows([...stored.rows, ...candidates.rows]);
-  let warning: string | undefined;
-  if (ctx.includeLive) { const live = await fetchLiveProviders(ctx); providers = [...providers, ...live.providers]; warning = live.warning; }
-  const total = stored.total + candidates.total + (ctx.includeLive ? providers.filter(p=>p.source_kind === "live").length : 0);
-  res.json({ mode, providers, records: providers, total, count: providers.length, page, limit, hasMore: page * limit < total, visibleCount: providers.length, warning, status: persistence });
+async function status(req: Request, res: Response) {
+  if (!isPersistenceConfigured()) { res.json({ persistenceConfigured: false, schema: "none", spatialEngine: "numeric-fallback", liveAdapters: ["osm-overpass"], candidatePersistence: false, savedPersistence: false }); return; }
+  const pool = getPool(); const setup = await ensureProviderExplorerPersistence(pool); const schema = await detectProviderSchema(pool); res.json({ persistenceConfigured: true, schema, ...setup, liveAdapters: ["osm-overpass"] });
 }
-
-function routeHandler(forcedMode?: Mode) { return (req: Request, res: Response) => { void handle(req, res, forcedMode).catch((e) => res.status(200).json({ providers: [], records: [], cells: [], facets: [], total: 0, count: 0, page: 1, limit: 0, hasMore: false, mode: forcedMode || req.query.mode || "records", error: e?.message || "Provider explorer failed" })); }; }
+function routeHandler(forcedMode?: Mode) { return (req: Request, res: Response) => { void handleRecords(req, res, forcedMode).catch((e) => res.status(200).json({ providers: [], records: [], cells: [], facets: [], total: 0, count: 0, page: 1, limit: 0, hasMore: false, mode: forcedMode || req.query.mode || "records", error: "Provider explorer request failed" })); }; }
 function postHandler(fn: (req: Request, res: Response) => Promise<void>) { return (req: Request, res: Response) => { void fn(req, res).catch((e) => res.status(500).json({ error: e?.message || "Provider explorer write failed" })); }; }
 
 router.get("/provider-explorer", routeHandler());
@@ -469,10 +401,10 @@ router.get("/provider-explorer/hex", routeHandler("hex"));
 router.get("/provider-explorer/facets", routeHandler("facets"));
 router.get("/provider-explorer/live", routeHandler("live"));
 router.get("/provider-explorer/compare", routeHandler("compare"));
-router.get("/provider-explorer/status", routeHandler("status" as Mode));
+router.get("/provider-explorer/status", postHandler(status));
 router.post("/provider-explorer/save-candidate", postHandler(saveCandidate));
-router.post("/provider-explorer/save-to-my-clinics", postHandler(async (req, res) => updateCandidateStatus(req, res, "saved")));
-router.post("/provider-explorer/dismiss-candidate", postHandler(async (req, res) => updateCandidateStatus(req, res, "dismissed")));
+router.post("/provider-explorer/save-to-my-clinics", postHandler((req, res) => updateCandidateStatus(req, res, "saved")));
+router.post("/provider-explorer/dismiss-candidate", postHandler((req, res) => updateCandidateStatus(req, res, "dismissed")));
 router.post("/provider-explorer/outreach-target", postHandler(outreachTarget));
 router.patch("/provider-explorer/provider-status", postHandler(async (req, res) => updateCandidateStatus(req, res, asString(req.body?.status) || "candidate")));
 export default router;

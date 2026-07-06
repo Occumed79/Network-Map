@@ -210,3 +210,4 @@
 .provider-category-legend { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px 8px; margin:7px 0; padding:7px; border:1px solid rgba(123,215,255,.16); border-radius:9px; background:rgba(2,8,23,.24); }
 .provider-category-legend span { display:flex; align-items:center; gap:5px; color:#cfe8f6; font-size:8.5px; line-height:1.1; }
 .provider-category-legend i { display:inline-block; width:8px; height:8px; border-radius:50%; border:1px solid rgba(255,255,255,.85); box-shadow:0 1px 3px rgba(0,0,0,.45); flex-shrink:0; }
+.provider-type-filter { width:100%; margin:6px 0; padding:7px 8px; border:1px solid rgba(123,215,255,.22); border-radius:8px; background:rgba(2,8,23,.35); color:#dff8ff; font-size:10px; }

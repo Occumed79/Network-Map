@@ -5,6 +5,7 @@ import { detectProviderSchema } from "../lib/providerSchema";
 import { queryWithStatementTimeout } from "../lib/queryWithStatementTimeout";
 
 const router = Router();
+const SOURCE_KEY_MY_CLINICS = "my_clinics_upload";
 
 function normalizeTrustTier(confidenceScore: number | null): "verified" | "registry" | "directory" | "lead" {
   if (confidenceScore !== null && confidenceScore >= 0.85) return "verified";
@@ -68,6 +69,39 @@ router.get("/provider-layers/:source", async (req: Request, res: Response) => {
     const useBounds = req.query.useBounds === "true" || req.query.bounds === "true";
     const hasBounds = useBounds && north !== null && south !== null && east !== null && west !== null;
     const pool = getPool();
+
+    if (source === "my-clinics") {
+      const viewExists = (await pool.query("SELECT to_regclass('public.provider_master_map_view') IS NOT NULL AS ok")).rows[0]?.ok;
+      if (viewExists) {
+        const params: Array<string | number> = [SOURCE_KEY_MY_CLINICS, limit, offset];
+        const conditions = ["COALESCE(to_jsonb(mv)->>'source_key', to_jsonb(mv)->>'primary_source_key', '') = $1", "NULLIF(to_jsonb(mv)->>'lat','') IS NOT NULL", "NULLIF(to_jsonb(mv)->>'lng','') IS NOT NULL"];
+        if (hasBounds) {
+          params.push(south, north); conditions.push(`(to_jsonb(mv)->>'lat')::double precision BETWEEN $${params.length - 1} AND $${params.length}`);
+          params.push(west, east); conditions.push(west <= east ? `(to_jsonb(mv)->>'lng')::double precision BETWEEN $${params.length - 1} AND $${params.length}` : `((to_jsonb(mv)->>'lng')::double precision >= $${params.length - 1} OR (to_jsonb(mv)->>'lng')::double precision <= $${params.length})`);
+        }
+        const clinicType = typeof req.query.clinic_type === "string" ? req.query.clinic_type : typeof req.query.provider_type === "string" ? req.query.provider_type : "";
+        if (clinicType) { params.push(clinicType); conditions.push(`(COALESCE(to_jsonb(mv)->>'primary_provider_type','') = $${params.length} OR COALESCE(to_jsonb(mv)->>'capability_tags','') ILIKE '%' || $${params.length} || '%')`); }
+        const { rows } = await queryWithStatementTimeout(pool, `
+          SELECT to_jsonb(mv) AS row_data
+          FROM provider_master_map_view mv
+          WHERE ${conditions.join(" AND ")}
+          ORDER BY COALESCE(to_jsonb(mv)->>'name', to_jsonb(mv)->>'clinic_name', '') ASC
+          LIMIT $2 OFFSET $3
+        `, params);
+        const providers = rows.map((row: { row_data: Record<string, unknown> }) => {
+          const data = row.row_data || {};
+          const name = String(data.name || data.clinic_name || "Unnamed");
+          const providerType = String(data.primary_provider_type || data.clinic_type || "unknown");
+          const tags = Array.isArray(data.capability_tags) ? data.capability_tags : providerType ? [providerType] : [];
+          return {
+            clinic_name: name, name, address_1: (data.address || data.address_1 || null) as string | null, city: (data.city || null) as string | null, state: (data.admin_area || data.state || null) as string | null, zip: (data.postal_code || data.zip || null) as string | null, phone: (data.phone || null) as string | null, website: (data.website || null) as string | null, lat: Number(data.lat), lng: Number(data.lng), npi: (data.npi || null) as string | null, source_url: (data.source_url || null) as string | null, source_id: (data.master_key || data.id || null) as string | null, source_type: "user_upload", data_source: "My Clinics", source: "my_clinics_upload", trust_tier: (data.trust_tier || "uploaded") as string, confidence_score: data.quality_score == null ? null : Number(data.quality_score), category: providerType, clinic_type: providerType, providerType, taxonomy_description: providerType, services: tags.join(", "), types: tags,
+          };
+        });
+        res.json({ providers, count: providers.length, total: providers.length, source, page, limit, hasMore: providers.length === limit, source_key: SOURCE_KEY_MY_CLINICS });
+        return;
+      }
+    }
+
     const schema = await detectProviderSchema(pool);
 
     if (schema === "none") {

@@ -4,8 +4,7 @@ let installed = false;
 let lastState = "";
 
 function diagnosticsButton(): HTMLElement | null {
-  const buttons = Array.from(document.querySelectorAll<HTMLElement>("button"));
-  return buttons.find((button) => (button.textContent || "").trim().toLowerCase() === "u.s. diagnostics") || null;
+  return document.querySelector<HTMLElement>(".diagnostics-toggle");
 }
 
 function syncDiagnosticsClass(): void {

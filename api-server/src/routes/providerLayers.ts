@@ -3,9 +3,18 @@ import { getPool } from "@workspace/db";
 import { isPersistenceConfigured } from "../lib/networkMapPersistence";
 import { detectProviderSchema } from "../lib/providerSchema";
 import { queryWithStatementTimeout } from "../lib/queryWithStatementTimeout";
+import { parseOptionalNumber } from "../lib/providerCoordinates";
 
 const router = Router();
 const SOURCE_KEY_MY_CLINICS = "my_clinics_upload";
+
+type LayerProvider = Record<string, unknown> & {
+  name?: string;
+  clinic_name?: string;
+  lat?: number;
+  lng?: number;
+  source_id?: string | null;
+};
 
 function normalizeTrustTier(confidenceScore: number | null): "verified" | "registry" | "directory" | "lead" {
   if (confidenceScore !== null && confidenceScore >= 0.85) return "verified";
@@ -15,8 +24,67 @@ function normalizeTrustTier(confidenceScore: number | null): "verified" | "regis
 }
 
 function asFiniteNumber(value: unknown): number | null {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
+  return parseOptionalNumber(value);
+}
+
+function providerIdentity(provider: LayerProvider): string {
+  const name = String(provider.name || provider.clinic_name || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const lat = Number(provider.lat);
+  const lng = Number(provider.lng);
+  if (name && Number.isFinite(lat) && Number.isFinite(lng)) return `${name}|${lat.toFixed(5)}|${lng.toFixed(5)}`;
+  return String(provider.source_id || `${name}|${provider.city || ""}|${provider.state || ""}`);
+}
+
+export function mergeMyClinicsLayerProviders(...groups: LayerProvider[][]): LayerProvider[] {
+  const merged = new Map<string, LayerProvider>();
+  for (const provider of groups.flat()) {
+    const key = providerIdentity(provider);
+    if (!merged.has(key)) merged.set(key, provider);
+  }
+  return [...merged.values()].sort((a, b) => String(a.name || a.clinic_name || "").localeCompare(String(b.name || b.clinic_name || "")));
+}
+
+async function loadSavedCandidateProviders(
+  pool: ReturnType<typeof getPool>,
+  bounds: { north: number; south: number; east: number; west: number } | null,
+  clinicType: string,
+): Promise<LayerProvider[]> {
+  const candidatesExist = (await pool.query("SELECT to_regclass('public.provider_candidates') IS NOT NULL AS ok")).rows[0]?.ok;
+  if (!candidatesExist) return [];
+
+  const params: Array<string | number> = [];
+  const conditions = ["status = 'saved'", "lat IS NOT NULL", "lng IS NOT NULL", "lat BETWEEN -90 AND 90", "lng BETWEEN -180 AND 180", "(lat <> 0 OR lng <> 0)"];
+  if (bounds) {
+    conditions.push(`lat BETWEEN ${addParam(params, bounds.south)} AND ${addParam(params, bounds.north)}`);
+    conditions.push(bounds.west <= bounds.east ? `lng BETWEEN ${addParam(params, bounds.west)} AND ${addParam(params, bounds.east)}` : `(lng >= ${addParam(params, bounds.west)} OR lng <= ${addParam(params, bounds.east)})`);
+  }
+  if (clinicType) {
+    const placeholder = addParam(params, clinicType);
+    conditions.push(`(clinic_type = ${placeholder} OR array_to_string(services, ',') ILIKE '%' || ${placeholder} || '%' OR array_to_string(categories, ',') ILIKE '%' || ${placeholder} || '%')`);
+  }
+
+  const { rows } = await queryWithStatementTimeout(pool, `
+    SELECT id::text, name, address, city, admin_area, postal_code, lat, lng, phone, website,
+           source_url, trust_tier, confidence_score, clinic_type, services, categories
+    FROM public.provider_candidates
+    WHERE ${conditions.join(" AND ")}
+    ORDER BY name ASC
+  `, params);
+
+  return rows.map((row: Record<string, unknown>) => {
+    const services = Array.isArray(row.services) ? row.services : [];
+    const categories = Array.isArray(row.categories) ? row.categories : [];
+    const types = [...new Set([...services, ...categories].map(String))];
+    return {
+      clinic_name: row.name as string, name: row.name as string, address_1: row.address as string | null, city: row.city as string | null,
+      state: row.admin_area as string | null, zip: row.postal_code as string | null, phone: row.phone as string | null, website: row.website as string | null,
+      lat: Number(row.lat), lng: Number(row.lng), npi: null, source_url: row.source_url as string | null, source_id: `candidate:${String(row.id)}`,
+      source_type: "saved_candidate", data_source: "My Clinics", source: "provider_candidates", trust_tier: (row.trust_tier || "saved") as string,
+      confidence_score: row.confidence_score == null ? null : Number(row.confidence_score), category: (row.clinic_type || "unknown") as string,
+      clinic_type: (row.clinic_type || "unknown") as string, providerType: (row.clinic_type || "unknown") as string,
+      taxonomy_description: (row.clinic_type || "unknown") as string, services: types.join(", "), types,
+    };
+  });
 }
 
 function addParam(params: Array<string | number>, value: string | number): string {
@@ -69,26 +137,28 @@ router.get("/provider-layers/:source", async (req: Request, res: Response) => {
     const useBounds = req.query.useBounds === "true" || req.query.bounds === "true";
     const hasBounds = useBounds && north !== null && south !== null && east !== null && west !== null;
     const pool = getPool();
+    const clinicType = typeof req.query.clinic_type === "string" ? req.query.clinic_type : typeof req.query.provider_type === "string" ? req.query.provider_type : "";
+    const savedCandidateProviders = source === "my-clinics"
+      ? await loadSavedCandidateProviders(pool, hasBounds ? { north: north!, south: south!, east: east!, west: west! } : null, clinicType)
+      : [];
 
     if (source === "my-clinics") {
       const viewExists = (await pool.query("SELECT to_regclass('public.provider_master_map_view') IS NOT NULL AS ok")).rows[0]?.ok;
       if (viewExists) {
-        const params: Array<string | number> = [SOURCE_KEY_MY_CLINICS, limit, offset];
+        const params: Array<string | number> = [SOURCE_KEY_MY_CLINICS];
         const conditions = ["COALESCE(to_jsonb(mv)->>'source_key', to_jsonb(mv)->>'primary_source_key', '') = $1", "NULLIF(to_jsonb(mv)->>'lat','') IS NOT NULL", "NULLIF(to_jsonb(mv)->>'lng','') IS NOT NULL"];
         if (hasBounds) {
           params.push(south, north); conditions.push(`(to_jsonb(mv)->>'lat')::double precision BETWEEN $${params.length - 1} AND $${params.length}`);
           params.push(west, east); conditions.push(west <= east ? `(to_jsonb(mv)->>'lng')::double precision BETWEEN $${params.length - 1} AND $${params.length}` : `((to_jsonb(mv)->>'lng')::double precision >= $${params.length - 1} OR (to_jsonb(mv)->>'lng')::double precision <= $${params.length})`);
         }
-        const clinicType = typeof req.query.clinic_type === "string" ? req.query.clinic_type : typeof req.query.provider_type === "string" ? req.query.provider_type : "";
         if (clinicType) { params.push(clinicType); conditions.push(`(COALESCE(to_jsonb(mv)->>'primary_provider_type','') = $${params.length} OR COALESCE(to_jsonb(mv)->>'capability_tags','') ILIKE '%' || $${params.length} || '%')`); }
         const { rows } = await queryWithStatementTimeout(pool, `
           SELECT to_jsonb(mv) AS row_data
           FROM provider_master_map_view mv
           WHERE ${conditions.join(" AND ")}
           ORDER BY COALESCE(to_jsonb(mv)->>'name', to_jsonb(mv)->>'clinic_name', '') ASC
-          LIMIT $2 OFFSET $3
         `, params);
-        const providers = rows.map((row: { row_data: Record<string, unknown> }) => {
+        const storedProviders = rows.map((row: { row_data: Record<string, unknown> }) => {
           const data = row.row_data || {};
           const name = String(data.name || data.clinic_name || "Unnamed");
           const providerType = String(data.primary_provider_type || data.clinic_type || "unknown");
@@ -97,7 +167,9 @@ router.get("/provider-layers/:source", async (req: Request, res: Response) => {
             clinic_name: name, name, address_1: (data.address || data.address_1 || null) as string | null, city: (data.city || null) as string | null, state: (data.admin_area || data.state || null) as string | null, zip: (data.postal_code || data.zip || null) as string | null, phone: (data.phone || null) as string | null, website: (data.website || null) as string | null, lat: Number(data.lat), lng: Number(data.lng), npi: (data.npi || null) as string | null, source_url: (data.source_url || null) as string | null, source_id: (data.master_key || data.id || null) as string | null, source_type: "user_upload", data_source: "My Clinics", source: "my_clinics_upload", trust_tier: (data.trust_tier || "uploaded") as string, confidence_score: data.quality_score == null ? null : Number(data.quality_score), category: providerType, clinic_type: providerType, providerType, taxonomy_description: providerType, services: tags.join(", "), types: tags,
           };
         });
-        res.json({ providers, count: providers.length, total: providers.length, source, page, limit, hasMore: providers.length === limit, source_key: SOURCE_KEY_MY_CLINICS });
+        const combined = mergeMyClinicsLayerProviders(storedProviders, savedCandidateProviders);
+        const providers = all ? combined : combined.slice(offset, offset + limit);
+        res.json({ providers, count: providers.length, loaded: providers.length, total: combined.length, source, page: all ? 1 : page, limit: all ? providers.length : limit, hasMore: all ? false : offset + providers.length < combined.length, all, source_key: SOURCE_KEY_MY_CLINICS });
         return;
       }
     }
@@ -105,6 +177,11 @@ router.get("/provider-layers/:source", async (req: Request, res: Response) => {
     const schema = await detectProviderSchema(pool);
 
     if (schema === "none") {
+      if (source === "my-clinics" && savedCandidateProviders.length) {
+        const providers = all ? savedCandidateProviders : savedCandidateProviders.slice(offset, offset + limit);
+        res.json({ providers, count: providers.length, loaded: providers.length, total: savedCandidateProviders.length, source, page: all ? 1 : page, limit: all ? providers.length : limit, hasMore: all ? false : offset + providers.length < savedCandidateProviders.length, all });
+        return;
+      }
       console.warn(`[ProviderLayers] ${source}: no provider table available`);
       res.json({ providers: [], count: 0, loaded: 0, total: 0, source, note: "No provider table available", all });
       return;
@@ -140,7 +217,8 @@ router.get("/provider-layers/:source", async (req: Request, res: Response) => {
       const total = Number(countResult.rows[0]?.total || 0);
 
       const dataParams = [...params];
-      const limitClause = all ? "" : `LIMIT ${addParam(dataParams, limit)} OFFSET ${addParam(dataParams, offset)}`;
+      const combineSavedCandidates = source === "my-clinics";
+      const limitClause = all || combineSavedCandidates ? "" : `LIMIT ${addParam(dataParams, limit)} OFFSET ${addParam(dataParams, offset)}`;
       const { rows } = await queryWithStatementTimeout(pool, `
         SELECT name, formatted_address, locality, administrative_area_level_1,
                postal_code, lat, lng, phone, website, source_id, data_source,
@@ -150,7 +228,7 @@ router.get("/provider-layers/:source", async (req: Request, res: Response) => {
         ORDER BY id ASC
         ${limitClause}
       `, dataParams);
-      const providers = rows.map((row: Record<string, unknown>) => ({
+      const storedProviders = rows.map((row: Record<string, unknown>) => ({
         clinic_name: row.name as string,
         name: row.name as string,
         address_1: row.formatted_address as string | null,
@@ -172,15 +250,18 @@ router.get("/provider-layers/:source", async (req: Request, res: Response) => {
         types: Array.isArray(row.types) ? row.types : [],
         services: Array.isArray(row.types) ? (row.types as string[]).join(", ") : null,
       }));
+      const combined = combineSavedCandidates ? mergeMyClinicsLayerProviders(storedProviders, savedCandidateProviders) : storedProviders;
+      const providers = !all && combineSavedCandidates ? combined.slice(offset, offset + limit) : combined;
+      const responseTotal = combineSavedCandidates ? combined.length : total;
       res.json({
         providers,
         count: providers.length,
         loaded: providers.length,
-        total,
+        total: responseTotal,
         source,
         page: all ? 1 : page,
         limit: all ? providers.length : limit,
-        hasMore: all ? false : offset + providers.length < total,
+        hasMore: all ? false : offset + providers.length < responseTotal,
         all,
       });
       return;
@@ -230,7 +311,8 @@ router.get("/provider-layers/:source", async (req: Request, res: Response) => {
     const total = Number(countResult.rows[0]?.total || 0);
 
     const dataParams = [...params];
-    const limitClause = all ? "" : `LIMIT ${addParam(dataParams, limit)} OFFSET ${addParam(dataParams, offset)}`;
+    const combineSavedCandidates = source === "my-clinics";
+    const limitClause = all || combineSavedCandidates ? "" : `LIMIT ${addParam(dataParams, limit)} OFFSET ${addParam(dataParams, offset)}`;
     const { rows } = await queryWithStatementTimeout(pool, `
       SELECT
         p.name,
@@ -255,7 +337,7 @@ router.get("/provider-layers/:source", async (req: Request, res: Response) => {
       ${limitClause}
     `, dataParams);
 
-    const providers = rows.map((row: Record<string, unknown>) => ({
+    const storedProviders = rows.map((row: Record<string, unknown>) => ({
       clinic_name: row.name as string,
       name: row.name as string,
       address_1: row.address as string | null,
@@ -272,15 +354,18 @@ router.get("/provider-layers/:source", async (req: Request, res: Response) => {
       trust_tier: row.trust_tier as string,
     }));
 
+    const combined = combineSavedCandidates ? mergeMyClinicsLayerProviders(storedProviders, savedCandidateProviders) : storedProviders;
+    const providers = !all && combineSavedCandidates ? combined.slice(offset, offset + limit) : combined;
+    const responseTotal = combineSavedCandidates ? combined.length : total;
     res.json({
       providers,
       count: providers.length,
       loaded: providers.length,
-      total,
+      total: responseTotal,
       source,
       page: all ? 1 : page,
       limit: all ? providers.length : limit,
-      hasMore: all ? false : offset + providers.length < total,
+      hasMore: all ? false : offset + providers.length < responseTotal,
       all,
     });
   } catch (e: any) {

@@ -5,6 +5,7 @@ import { isPersistenceConfigured } from "../lib/networkMapPersistence";
 import { detectProviderSchema, type ProviderSchema } from "../lib/providerSchema";
 import { queryWithStatementTimeout } from "../lib/queryWithStatementTimeout";
 import { classifyProvider } from "../lib/providerClassifier";
+import { parseOptionalNumber } from "../lib/providerCoordinates";
 
 const router = Router();
 
@@ -43,7 +44,7 @@ let persistenceReady: Promise<{ spatialEngine: SpatialEngine; candidatePersisten
 
 function asString(value: unknown): string | undefined { return typeof value === "string" && value.trim() ? value.trim() : undefined; }
 function asBool(value: unknown, fallback: boolean): boolean { if (value === undefined) return fallback; return value === true || value === "true" || value === "1"; }
-function asNumber(value: unknown): number | undefined { const n = Number(value); return Number.isFinite(n) ? n : undefined; }
+function asNumber(value: unknown): number | undefined { return parseOptionalNumber(value) ?? undefined; }
 function addParam(params: unknown[], value: unknown): string { params.push(value); return `$${params.length}`; }
 function milesToDegrees(miles: number): number { return miles / 69; }
 function normalizeName(value: unknown): string { return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
@@ -283,6 +284,9 @@ async function queryCandidates(pool: ReturnType<typeof getPool>, ctx: QueryConte
 }
 
 function hasLiveScope(ctx: QueryContext): boolean { return Boolean(ctx.bounds || (ctx.lat !== undefined && ctx.lng !== undefined && ctx.radiusMiles !== undefined)); }
+export function buildLiveCacheKeyForTest(ctx: Pick<QueryContext, "bounds" | "lat" | "lng" | "radiusMiles" | "clinicType" | "service" | "q">): string {
+  return JSON.stringify({ b: ctx.bounds, lat: ctx.lat, lng: ctx.lng, r: ctx.radiusMiles, c: ctx.clinicType, s: ctx.service, q: ctx.q?.toLowerCase() });
+}
 function overpassQuery(ctx: QueryContext): string {
   const terms = ctx.clinicType || ctx.service || "clinic";
   const amenity = terms.toLowerCase().includes("pharmacy") ? `[amenity=pharmacy]` : terms.toLowerCase().includes("dental") ? `[amenity=dentist]` : `[amenity~"clinic|doctors|hospital|dentist|pharmacy"]`;
@@ -301,7 +305,7 @@ function elementToProvider(el: OverpassElement): ProviderFeature | null {
 }
 async function fetchLiveProviders(ctx: QueryContext) {
   if (!hasLiveScope(ctx)) return { providers: [] as ProviderFeature[], warning: "Live discovery requires map bounds or radius." };
-  const key = JSON.stringify({ b: ctx.bounds, lat: ctx.lat, lng: ctx.lng, r: ctx.radiusMiles, c: ctx.clinicType, s: ctx.service });
+  const key = buildLiveCacheKeyForTest(ctx);
   const cached = liveCache.get(key); if (cached && cached.expires > Date.now()) return cached;
   try {
     const resp = await fetch(OVERPASS_ENDPOINT, { method: "POST", body: overpassQuery(ctx), headers: { "content-type": "text/plain" }, signal: AbortSignal.timeout(18000) });

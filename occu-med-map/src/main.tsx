@@ -29,6 +29,7 @@ import "./performance-safety.css";
 import "./app-shell-layout.css";
 import "./workflow-ui.css";
 import "./network-command-center.css";
+import "./phase-two-legacy.css";
 
 createRoot(document.getElementById("root")!).render(
   <PhaseTwoShell>

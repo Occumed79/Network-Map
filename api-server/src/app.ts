@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { saveSearchSnapshot } from "./lib/networkMapPersistence";
+import { requireWriteAuth } from "./middleware/writeAuth";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -101,13 +102,21 @@ app.use(
       }
       callback(new Error("Origin is not allowed by CORS"));
     },
+    allowedHeaders: ["Content-Type", "Authorization", "X-Admin-Token"],
   }),
 );
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 
 app.get("/api/health", (_req, res) => {
-  res.status(200).json({ ok: true, service: "network-map", awake: true });
+  res.status(200).json({
+    ok: true,
+    service: "network-map",
+    awake: true,
+    commit: process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || "unknown",
+    environment: process.env.NODE_ENV || "development",
+    writeAuthConfigured: Boolean(process.env.WRITE_API_TOKEN?.trim()),
+  });
 });
 
 app.head("/api/health", (_req, res) => {
@@ -125,6 +134,7 @@ app.use("/api/map-inventory", rateLimit({ windowMs: 10 * 60 * 1000, max: 120 }))
 app.use("/api/provider-layers", rateLimit({ windowMs: 10 * 60 * 1000, max: 120 }));
 app.use("/api/provider-explorer", rateLimit({ windowMs: 10 * 60 * 1000, max: 180 }));
 app.use("/api/my-clinics", rateLimit({ windowMs: 10 * 60 * 1000, max: 80 }));
+app.use(requireWriteAuth);
 
 app.use((req, res, next) => {
   if (req.method !== "GET" || !SNAPSHOT_ROUTES.has(req.path)) {

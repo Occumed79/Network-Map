@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { createHash } from "node:crypto";
-import { getPool } from "@workspace/db";
+import { getPool, type PoolClient } from "@workspace/db";
 import { isPersistenceConfigured } from "../lib/networkMapPersistence";
 import { hasValidCoordinates, parseOptionalNumber } from "../lib/providerCoordinates";
 import { isUsableProviderName, normalizedProviderName, providerQualityReasons } from "../lib/providerDataQuality";
@@ -181,7 +181,7 @@ function masterKeyFor(row: NormalizedClinicRow): string {
 }
 
 async function upsertMasterSource(
-  client: Awaited<ReturnType<ReturnType<typeof getPool>["connect"]>>,
+  client: PoolClient,
   input: {
     masterProviderId: string;
     stageRecordId: string;

@@ -1,0 +1,42 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck frontend
+        run: pnpm --filter @workspace/occu-med-map typecheck
+
+      - name: Typecheck API
+        run: pnpm --filter @workspace/api-server typecheck
+
+      - name: Run Provider Explorer smoke tests
+        run: pnpm --filter @workspace/api-server test:provider-explorer
+
+      - name: Build frontend
+        run: pnpm --filter @workspace/occu-med-map build
+
+      - name: Build API
+        run: pnpm --filter @workspace/api-server build

@@ -20,8 +20,10 @@ type Viewport = {
 
 const CACHE_FRESH_MS = 45_000;
 const CACHE_STALE_MS = 5 * 60_000;
-const DEFAULT_LIMIT = 1000;
-const MAX_LIMIT = 2000;
+// Page size only. Provider toggles are not capped at this value: every page
+// for the active viewport is fetched and combined before App.tsx sees it.
+const PAGE_SIZE = 2000;
+const MAX_PAGE_SIZE = 5000;
 const cacheByRequest = new Map<string, CachedResponse>();
 const latestBySource = new Map<string, CachedResponse>();
 const inFlight = new Map<string, Promise<CachedResponse | null>>();
@@ -40,17 +42,20 @@ function requestMethod(input: RequestInfo | URL, init?: RequestInit): string {
   return String(init?.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
 }
 
-function clampLimit(value: string | null): number {
+function pageSize(value: string | null): number {
   const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_LIMIT;
-  return Math.min(Math.max(Math.trunc(parsed), 1), MAX_LIMIT);
+  if (!Number.isFinite(parsed) || parsed <= 0) return PAGE_SIZE;
+  return Math.min(Math.max(Math.trunc(parsed), PAGE_SIZE), MAX_PAGE_SIZE);
 }
 
 function normalizeProviderLayerUrl(url: URL): URL {
   const next = new URL(url.toString());
-  if (!next.searchParams.has("all")) next.searchParams.set("all", "false");
-  next.searchParams.set("limit", String(clampLimit(next.searchParams.get("limit"))));
-  if (!next.searchParams.has("page")) next.searchParams.set("page", "1");
+  // The route remains paginated for database stability, but the browser
+  // transparently loads every page. "all=false" no longer means only the
+  // first page is displayed.
+  next.searchParams.set("all", "false");
+  next.searchParams.set("limit", String(pageSize(next.searchParams.get("limit"))));
+  next.searchParams.set("page", "1");
   const hasBounds = ["north", "south", "east", "west"].every((key) => {
     const value = Number(next.searchParams.get(key));
     return Number.isFinite(value);
@@ -85,7 +90,7 @@ function sourceFromUrl(url: URL): string {
 }
 
 function filterKey(url: URL): string {
-  const ignored = new Set(["north", "south", "east", "west", "useBounds", "bounds"]);
+  const ignored = new Set(["north", "south", "east", "west", "useBounds", "bounds", "page"]);
   return Array.from(url.searchParams.entries())
     .filter(([key]) => !ignored.has(key))
     .sort(([left], [right]) => left.localeCompare(right))
@@ -128,6 +133,75 @@ function dispatchStatus(entry: CachedResponse, fromCache: boolean, stale = false
       timestamp: Date.now(),
     },
   }));
+}
+
+function asPayload(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+async function fetchAllProviderPages(url: URL, init?: RequestInit): Promise<Response> {
+  const firstResponse = await nativeFetch(url.toString(), init);
+  if (!firstResponse.ok) return firstResponse;
+
+  const firstPayload = asPayload(await firstResponse.clone().json().catch(() => null));
+  if (!firstPayload || !Array.isArray(firstPayload.providers)) return firstResponse;
+  if (firstPayload.transientFailure || firstPayload.error) return firstResponse;
+
+  const providers: unknown[] = [...firstPayload.providers];
+  const total = Math.max(Number(firstPayload.total ?? providers.length) || providers.length, providers.length);
+  const limit = Math.max(Number(url.searchParams.get("limit")) || PAGE_SIZE, 1);
+  let page = 1;
+  let hasMore = Boolean(firstPayload.hasMore) || providers.length < total;
+
+  while (hasMore && providers.length < total) {
+    page += 1;
+    const pageUrl = new URL(url.toString());
+    pageUrl.searchParams.set("page", String(page));
+    const pageResponse = await nativeFetch(pageUrl.toString(), init);
+    if (!pageResponse.ok) {
+      throw new Error(`Provider layer page ${page} failed with HTTP ${pageResponse.status}`);
+    }
+    const pagePayload = asPayload(await pageResponse.json().catch(() => null));
+    if (!pagePayload || pagePayload.transientFailure || pagePayload.error) {
+      throw new Error(String(pagePayload?.warning || pagePayload?.error || `Provider layer page ${page} failed`));
+    }
+    const pageProviders = Array.isArray(pagePayload.providers) ? pagePayload.providers : [];
+    if (pageProviders.length === 0) break;
+    providers.push(...pageProviders);
+    hasMore = Boolean(pagePayload.hasMore) || providers.length < total;
+
+    // Guard only against a malformed API that repeats pages forever. This is
+    // derived from the database-reported total and does not cap valid rows.
+    const expectedPages = Math.ceil(total / limit);
+    if (page > expectedPages + 1) break;
+  }
+
+  const mergedPayload = {
+    ...firstPayload,
+    providers,
+    count: providers.length,
+    loaded: providers.length,
+    total,
+    page: 1,
+    limit,
+    hasMore: providers.length < total,
+    autoPaginated: true,
+    pagesLoaded: page,
+    visibleCapped: false,
+  };
+  const headers = new Headers(firstResponse.headers);
+  headers.delete("content-length");
+  headers.delete("content-encoding");
+  headers.set("content-type", "application/json; charset=utf-8");
+  headers.set("X-Network-Map-Pages", String(page));
+  headers.set("X-Network-Map-Visible-Cap", "none");
+  return new Response(JSON.stringify(mergedPayload), {
+    status: firstResponse.status,
+    statusText: firstResponse.statusText,
+    headers,
+  });
 }
 
 async function captureResponse(
@@ -209,7 +283,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 
   const request = (async () => {
     try {
-      const response = await nativeFetch(url.toString(), init);
+      const response = await fetchAllProviderPages(url, init);
       const captured = await captureResponse(response, source, viewport, currentFilterKey);
       if (captured) {
         cacheByRequest.set(requestKey, captured);
@@ -231,7 +305,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return responseFromCache(latest, true);
   }
 
-  return nativeFetch(url.toString(), init);
+  return fetchAllProviderPages(url, init);
 }) as typeof window.fetch;
 
 export {};

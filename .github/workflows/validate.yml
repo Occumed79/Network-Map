@@ -35,6 +35,9 @@ jobs:
       - name: Run Provider Explorer smoke tests
         run: pnpm --filter @workspace/api-server test:provider-explorer
 
+      - name: Run P1 data stabilization smoke tests
+        run: pnpm --filter @workspace/api-server test:p1-data
+
       - name: Build frontend
         run: pnpm --filter @workspace/occu-med-map build
 

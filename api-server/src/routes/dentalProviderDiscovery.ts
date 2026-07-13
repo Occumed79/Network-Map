@@ -1,46 +1,24 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { searchNpi } from "../providerSources/adapters/npi";
+import type { ProviderCandidate } from "../providerSources/types";
 import { upsertProvider } from "../providerSources/persistence";
 import { isPersistenceConfigured } from "../lib/networkMapPersistence";
 
 const router = Router();
 
-const DENTAL_TAXONOMIES = [
-  "Dentist",
-  "General Practice",
-  "Dental Public Health",
-  "Endodontics",
-  "Oral and Maxillofacial Surgery",
-  "Oral and Maxillofacial Radiology",
-  "Orthodontics and Dentofacial Orthopedics",
-  "Pediatric Dentistry",
-  "Periodontics",
-  "Prosthodontics",
-];
-
 const DENTAL_NETWORKS = [
-  { name:'Affordable Care', desc:'Dental practice network with transparent fee schedule information where available.', url:'https://www.affordablecare.com/', tag:'FEE SCHEDULE' },
-  { name:'1-800-Dentist', desc:'Find local dentists and compare options in the requested area.', url:'https://www.1800dentist.com/', tag:'COMPARE' },
-  { name:'Open Care', desc:'Compares dental practices by location, insurance, reviews, and appointment availability.', url:'https://www.opencare.com/', tag:'COMPARE' },
-  { name:'Dental Plans', desc:'Discount dental plans with listed savings for common dental services.', url:'https://www.dentalplans.com/', tag:'DISCOUNT' },
-  { name:'CostHelper Health', desc:'User-reported dental cost ranges for common dental procedures.', url:'https://health.costhelper.com/dentist.html', tag:'COST GUIDE' },
+  { name: "Affordable Care", desc: "Dental practice network with transparent fee schedule information where available.", url: "https://www.affordablecare.com/", tag: "FEE SCHEDULE" },
+  { name: "1-800-Dentist", desc: "Find local dentists and compare options in the requested area.", url: "https://www.1800dentist.com/", tag: "COMPARE" },
+  { name: "Open Care", desc: "Compares dental practices by location, insurance, reviews, and appointment availability.", url: "https://www.opencare.com/", tag: "COMPARE" },
+  { name: "Dental Plans", desc: "Discount dental plans with listed savings for common dental services.", url: "https://www.dentalplans.com/", tag: "DISCOUNT" },
+  { name: "CostHelper Health", desc: "User-reported dental cost ranges for common dental procedures.", url: "https://health.costhelper.com/dentist.html", tag: "COST GUIDE" },
 ];
 
 const PRICING_RESOURCES = [
-  { name:'FAIR Health Consumer', desc:'Estimate out-of-pocket dental costs by procedure and location.', url:'https://fairhealthconsumer.org/', tag:'ESTIMATOR' },
-  { name:'ClearHealthCosts', desc:'Crowdsourced prices for healthcare and dental services.', url:'https://clearhealthcosts.com/', tag:'CROWDSOURCED' },
-  { name:'CostHelper Health', desc:'Consumer-reported dental procedure price ranges.', url:'https://health.costhelper.com/dentist.html', tag:'COST GUIDE' },
+  { name: "FAIR Health Consumer", desc: "Estimate out-of-pocket dental costs by procedure and location.", url: "https://fairhealthconsumer.org/", tag: "ESTIMATOR" },
+  { name: "ClearHealthCosts", desc: "Crowdsourced prices for healthcare and dental services.", url: "https://clearhealthcosts.com/", tag: "CROWDSOURCED" },
+  { name: "CostHelper Health", desc: "Consumer-reported dental procedure price ranges.", url: "https://health.costhelper.com/dentist.html", tag: "COST GUIDE" },
 ];
-
-type NpiAddress = Record<string, string | undefined>;
-type NpiTaxonomy = { code?: string; desc?: string; primary?: boolean };
-type NpiResult = {
-  number?: number;
-  enumeration_type?: string;
-  basic?: Record<string, string | undefined>;
-  addresses?: NpiAddress[];
-  taxonomies?: NpiTaxonomy[];
-};
 
 type DentalProvider = {
   name: string;
@@ -52,97 +30,47 @@ type DentalProvider = {
   searchUrl: string;
   npiType: string;
   source: string;
+  trustTier: ProviderCandidate["trustTier"];
+  coordinateStatus: ProviderCandidate["coordinateStatus"];
 };
 
 function isDentalRequest(req: Request): boolean {
   return String(req.query.serviceType || "").trim() === "dental";
 }
 
-function bestAddress(addresses: NpiAddress[] = []): NpiAddress | undefined {
-  return addresses.find((addr) => addr.address_purpose === "LOCATION") || addresses[0];
-}
-
-function formatAddress(addr?: NpiAddress): string {
-  if (!addr) return "";
-  return [
-    addr.address_1,
-    addr.address_2,
-    addr.city,
-    addr.state,
-    addr.postal_code?.slice(0, 5),
-  ].filter(Boolean).join(", ");
-}
-
-function formatProvider(result: NpiResult): DentalProvider {
-  const basic = result.basic || {};
-  const addr = bestAddress(result.addresses || []);
-  const taxonomy = result.taxonomies?.find((t) => t.primary)?.desc || result.taxonomies?.[0]?.desc || "Dental provider";
-  const npi = result.number ? String(result.number) : "";
-  const individualName = [basic.first_name, basic.middle_name, basic.last_name]
-    .filter(Boolean)
-    .join(" ")
-    .trim();
-  const credential = basic.credential ? `, ${basic.credential}` : "";
-  const name = basic.organization_name || (individualName ? `${individualName}${credential}` : "Unknown Dental Provider");
-  const address = formatAddress(addr);
-  const city = addr?.city || "";
-  const state = addr?.state || "";
-
+function candidateToDentalProvider(candidate: ProviderCandidate): DentalProvider {
+  const taxonomy = candidate.taxonomy || "Dental provider";
+  const searchQuery = [candidate.name, candidate.address].filter(Boolean).join(" ");
   return {
-    name,
-    address,
-    phone: addr?.telephone_number || "",
+    name: candidate.name,
+    address: candidate.address,
+    phone: candidate.phone,
     taxonomy,
-    isFqhc: taxonomy.toLowerCase().includes("federally qualified") || taxonomy.toLowerCase().includes("fqhc"),
-    npiUrl: npi ? `https://npiregistry.cms.hhs.gov/provider-view/${npi}` : "https://npiregistry.cms.hhs.gov/",
-    searchUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${name} ${address || `${city} ${state}`}`.trim())}`,
-    npiType: result.enumeration_type || "NPI",
+    isFqhc: /federally qualified|fqhc/i.test(taxonomy),
+    npiUrl: candidate.sourceUrl || "https://npiregistry.cms.hhs.gov/",
+    searchUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(searchQuery)}`,
+    npiType: candidate.sourceDetail || "NPI",
     source: "NPPES NPI Registry",
+    trustTier: candidate.trustTier,
+    coordinateStatus: candidate.coordinateStatus,
   };
 }
 
-function dedupeProviders(providers: DentalProvider[]): DentalProvider[] {
-  const seen = new Set<string>();
-  return providers.filter((provider) => {
-    const key = [provider.name, provider.address || provider.phone].join("|").toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
 async function discoverDentalProviders(city: string, state: string): Promise<DentalProvider[]> {
-  // Use the central NPI adapter (single authoritative NPI implementation)
   const candidates = await searchNpi(city, state, "dental");
 
-  const providers = candidates.map((c) => formatProvider({
-    number: c.npi ? Number(c.npi) : undefined,
-    enumeration_type: c.sourceDetail?.includes("NPI-2") ? "NPI-2" : "NPI-1",
-    basic: { organization_name: c.name, first_name: "", last_name: "" },
-    addresses: [{
-      address_1: c.address,
-      city: c.city,
-      state: c.state,
-      postal_code: c.postalCode,
-      telephone_number: c.phone,
-      address_purpose: "LOCATION",
-    }],
-    taxonomies: [{ desc: c.taxonomy || "Dentist", code: c.taxonomyCode, primary: true }],
-  }));
-
-  // Upsert dental providers into Neon
   if (isPersistenceConfigured()) {
-    for (const c of candidates) {
-      try { await upsertProvider(c, "dental"); } catch { /* ignore */ }
-    }
+    await Promise.allSettled(
+      candidates.map((candidate) => upsertProvider(candidate, "dental")),
+    );
   }
 
-  return dedupeProviders(providers)
+  return candidates
+    .map(candidateToDentalProvider)
     .sort((a, b) => {
-      const aOrg = a.npiType === "NPI-2" ? 0 : 1;
-      const bOrg = b.npiType === "NPI-2" ? 0 : 1;
-      if (aOrg !== bOrg) return aOrg - bOrg;
-      return a.name.localeCompare(b.name);
+      const aOrganization = a.npiType.includes("NPI-2") ? 0 : 1;
+      const bOrganization = b.npiType.includes("NPI-2") ? 0 : 1;
+      return aOrganization - bOrganization || a.name.localeCompare(b.name);
     });
 }
 
@@ -172,17 +100,18 @@ router.get("/price-finder", async (req: Request, res: Response, next: NextFuncti
 
   try {
     const clinics = await discoverDentalProviders(city, state);
+    res.setHeader("X-Network-Map-NPI-Pipeline", "central-adapter");
     res.json({
-      location: `${city}${state ? ", " + state : ""}`,
+      location: `${city}${state ? `, ${state}` : ""}`,
       serviceType: "dental",
       clinicCount: clinics.length,
       clinics: clinics.slice(0, 50),
       networks: DENTAL_NETWORKS,
       pricingResources: PRICING_RESOURCES,
-      discoveryNote: "Dental provider discovery includes both individual dentist NPIs and organization NPIs. This reduces undercounting in smaller markets.",
+      discoveryNote: "Dental discovery uses the central backend NPI adapter and includes organization and individual registrations.",
     });
-  } catch (err) {
-    console.error("dental price-finder error", err);
+  } catch (error) {
+    console.error("dental price-finder error", error);
     res.status(500).json({ error: "Dental provider search failed. Please try again." });
   }
 });
@@ -207,20 +136,21 @@ router.get("/price-hunt", async (req: Request, res: Response, next: NextFunction
       queries: buildDentalPriceQueries(clinic, city, state),
       matches: [],
       hitCount: 0,
-      discoveryNote: "Provider found through broad NPI dental discovery. Use the Google Maps link for manual verification when no posted price page is found.",
+      discoveryNote: "Provider discovered through the central NPI adapter. Use the map link for manual verification when no posted price page is found.",
     }));
 
+    res.setHeader("X-Network-Map-NPI-Pipeline", "central-adapter");
     res.json({
-      location: `${city}${state ? ", " + state : ""}`,
+      location: `${city}${state ? `, ${state}` : ""}`,
       serviceType: "dental",
       clinicCount: results.length,
       results,
       extracted: 0,
       pricingResources: PRICING_RESOURCES,
-      discoveryNote: "Dental price hunt now starts from a broader provider list instead of organization-only NPI records.",
+      discoveryNote: "Dental price hunt starts from the same central NPI adapter used by the rest of Network Map.",
     });
-  } catch (err) {
-    console.error("dental price-hunt error", err);
+  } catch (error) {
+    console.error("dental price-hunt error", error);
     res.status(500).json({ error: "Dental price hunt failed. Please try again." });
   }
 });

@@ -9,7 +9,8 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:provider-explorer": "node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/provider-explorer-smoke.ts"
+    "test:provider-explorer": "node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/provider-explorer-smoke.ts",
+    "test:p1-data": "node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/p1-data-stabilization-smoke.ts"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",

@@ -1,4 +1,6 @@
 import { createRoot } from "react-dom/client";
+import "./adminApiRuntime";
+import "./providerLayerRequestRuntime";
 import "./mapboxLeafletRuntime";
 import "./mapToolsCommandPanel";
 import "./rightPanelCompactor";

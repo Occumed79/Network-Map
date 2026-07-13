@@ -71,6 +71,25 @@ function emptyExplorerPayload(url: URL): Record<string, unknown> {
   };
 }
 
+function emptyLegacyProviderLayerPayload(url: URL): Record<string, unknown> {
+  const source = url.pathname.split('/').filter(Boolean).at(-1) || 'legacy';
+  return {
+    providers: [],
+    data: [],
+    source,
+    count: 0,
+    loaded: 0,
+    total: 0,
+    page: 1,
+    limit: 0,
+    hasMore: false,
+    all: false,
+    autoPaginated: false,
+    visibleCapped: false,
+    supersededBy: 'p2-layer-console',
+  };
+}
+
 function enabledKinds(url: URL): P2SourceKind[] {
   const explicitKind = url.searchParams.get('source_kind');
   if (explicitKind && ['stored', 'saved', 'candidate', 'live'].includes(explicitKind)) {
@@ -173,7 +192,24 @@ function installFetchGuard(): void {
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = requestUrl(input);
     const method = requestMethod(input, init);
-    const isProviderExplorerRead = method === 'GET' && url?.pathname.startsWith('/api/provider-explorer');
+    const isSameOrigin = Boolean(url && url.origin === window.location.origin);
+    const isLegacyProviderLayerRead = method === 'GET'
+      && isSameOrigin
+      && Boolean(url?.pathname.startsWith('/api/provider-layers/'));
+    const isProviderExplorerRead = method === 'GET'
+      && isSameOrigin
+      && Boolean(url?.pathname.startsWith('/api/provider-explorer'));
+
+    if (url && isLegacyProviderLayerRead) {
+      return new Response(JSON.stringify(emptyLegacyProviderLayerPayload(url)), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+          'X-Network-Map-Legacy-Layer': 'retired',
+          'X-Network-Map-Visible-Cap': 'none',
+        },
+      });
+    }
 
     if (url && isProviderExplorerRead && url.searchParams.get(P2_REQUEST_MARKER) !== P2_REQUEST_VALUE) {
       return new Response(JSON.stringify(emptyExplorerPayload(url)), {
@@ -253,16 +289,8 @@ export function installPhaseTwoLegacyLayerBridge(): void {
 
   const run = () => scheduleLegacyRetirement();
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run, { once: true });
-  else window.setTimeout(run, 0);
-
-  // React and Leaflet create many nodes during startup. Observe structural changes
-  // only and coalesce them to one scan per animation frame. Watching every class,
-  // value, checked, and disabled mutation created a self-amplifying main-thread loop.
-  const observer = new MutationObserver(scheduleLegacyRetirement);
-  observer.observe(document.documentElement, {
-    childList: true,
-    subtree: true,
-  });
+  else run();
+  window.addEventListener('load', run, { once: true });
 
   const onControlChange = (event: Event) => {
     const target = event.target;
@@ -273,11 +301,9 @@ export function installPhaseTwoLegacyLayerBridge(): void {
   };
   document.addEventListener('change', onControlChange, true);
 
-  const retryTimers = [250, 1000, 2500].map((delay) => window.setTimeout(scheduleLegacyRetirement, delay));
-  window.setTimeout(() => {
-    observer.disconnect();
-    retryTimers.forEach((timer) => window.clearTimeout(timer));
-  }, 5000);
+  [100, 350, 900, 1800, 4000].forEach((delay) => {
+    window.setTimeout(scheduleLegacyRetirement, delay);
+  });
 }
 
 installPhaseTwoLegacyLayerBridge();

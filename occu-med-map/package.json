@@ -10,6 +10,7 @@
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
+    "test:p2-map": "tsx scripts/phase-two-map-smoke.ts",
     "scrape:bluehive": "tsx scripts/scrape-bluehive.ts",
     "scrape:bluehive:recover": "tsx scripts/scrape-bluehive.ts --recover",
     "scrape:bluehive:sitemap": "tsx scripts/reconcile-bluehive-sitemap.ts",

@@ -1,7 +1,5 @@
 import { createRoot } from "react-dom/client";
 import "./adminApiRuntime";
-import "./providerLayerRequestRuntime";
-import "./providerLayerTelemetryRuntime";
 import "./mapboxLeafletRuntime";
 import "./mapToolsCommandPanel";
 import "./phaseTwoMapBridge";

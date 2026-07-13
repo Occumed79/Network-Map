@@ -42,6 +42,7 @@ async function boot() {
     import("./phaseTwoPreviewIsolation"),
     import("./phaseTwoMapBridge"),
     import("./phase-two-shell.css"),
+    import("./phase-two-control-fix.css"),
   ]);
   const { default: PhaseTwoShell } = await import("./PhaseTwoShell");
   root.render(

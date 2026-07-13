@@ -78,7 +78,8 @@ function installFetchGuard(): void {
 }
 
 function hide(node: HTMLElement | null): void {
-  if (!node) return;
+  if (!node || node.dataset.p2Retired === 'true') return;
+  node.dataset.p2Retired = 'true';
   node.hidden = true;
   node.setAttribute('aria-hidden', 'true');
   node.classList.add('p2-legacy-provider-controls');

@@ -30,7 +30,18 @@ jobs:
         run: pnpm --filter @workspace/occu-med-map typecheck
 
       - name: Typecheck API
-        run: pnpm --filter @workspace/api-server typecheck
+        run: |
+          set -o pipefail
+          pnpm --filter @workspace/api-server typecheck 2>&1 | tee api-typecheck.log
+
+      - name: Upload API typecheck diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-typecheck-diagnostics
+          path: api-typecheck.log
+          if-no-files-found: ignore
+          retention-days: 3
 
       - name: Run Provider Explorer smoke tests
         run: pnpm --filter @workspace/api-server test:provider-explorer

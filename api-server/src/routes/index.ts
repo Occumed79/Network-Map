@@ -21,6 +21,7 @@ import googlePlacesRouter from "./googlePlaces";
 import enhancedSearchRouter from "./enhancedSearch";
 import providerExplorerRouter from "./providerExplorer";
 import myClinicsUploadRouter from "./myClinicsUpload";
+import { stabilizeProviderLayerRequests } from "../middleware/providerLayerContract";
 
 const router: IRouter = Router();
 
@@ -36,6 +37,7 @@ router.use(sourceStatusRouter);
 router.use(browserExtractionRouter);
 router.use(vectorIndexRouter);
 router.use(providerExplorerRouter);
+router.use(stabilizeProviderLayerRequests);
 router.use(providerLayersRouter);
 router.use(myClinicsUploadRouter);
 router.use(googlePlacesRouter);

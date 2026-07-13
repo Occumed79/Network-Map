@@ -5,6 +5,7 @@ import "./providerLayerTelemetryRuntime";
 import "./mapboxLeafletRuntime";
 import "./mapToolsCommandPanel";
 import "./phaseTwoMapBridge";
+import "./phaseTwoLegacyLayerBridge";
 import "./rightPanelCompactor";
 import "./liveFinderDriveTools";
 import "./usDiagnosticsGate";

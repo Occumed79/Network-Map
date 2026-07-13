@@ -4,7 +4,6 @@ import "./mapToolsCommandPanel";
 import "./rightPanelCompactor";
 import "./liveFinderDriveTools";
 import "./usDiagnosticsGate";
-import "./modalLabelScrubber";
 import "./modal-command-polish.css";
 import "./features/driveTime/nativeDriveTimeRuntime";
 import "./features/driveTime/nativeDriveTimeRuntime.css";
@@ -23,5 +22,6 @@ import "./modal-content-polish.css";
 import "./performance-safety.css";
 import "./app-shell-layout.css";
 import "./workflow-ui.css";
+import "./network-command-center.css";
 
 createRoot(document.getElementById("root")!).render(<App />);

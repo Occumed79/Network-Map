@@ -19,9 +19,9 @@ export function buildLiveFinderPopupHtml(result: LiveFinderResult, showGoogleMap
         <div style="font-size:8.5px;font-weight:700;font-family:'IBM Plex Mono',monospace;color:${htmlAttr(category.col)};letter-spacing:1px;text-transform:uppercase;margin-top:2px">${escapeHtml(category.lbl)}</div>
       </div>
     </div>
-    ${result.addr ? `<div style="font-size:9.5px;color:#4a6888;margin-bottom:3px;">📍 ${escapeHtml(result.addr)}</div>` : ''}
-    ${result.phone ? `<div style="font-size:9.5px;color:#4a6888;margin-bottom:3px;">📞 ${telUrl ? `<a href="${htmlAttr(telUrl)}" style="color:#67e8f9;text-decoration:none">${escapeHtml(result.phone)}</a>` : escapeHtml(result.phone)}</div>` : ''}
-    ${result.hours ? `<div style="font-size:9px;color:#3d5478;margin-bottom:5px;">🕐 ${escapeHtml(result.hours)}</div>` : ''}
+    ${result.addr ? `<div style="font-size:9.5px;color:#4a6888;margin-bottom:3px;">Address: ${escapeHtml(result.addr)}</div>` : ''}
+    ${result.phone ? `<div style="font-size:9.5px;color:#4a6888;margin-bottom:3px;">Phone: ${telUrl ? `<a href="${htmlAttr(telUrl)}">${escapeHtml(result.phone)}</a>` : escapeHtml(result.phone)}</div>` : ''}
+    ${result.hours ? `<div style="font-size:9px;color:#3d5478;margin-bottom:5px;">Hours: ${escapeHtml(result.hours)}</div>` : ''}
     <div style="font-size:8.5px;color:#2d3f55;margin-bottom:7px;">~${escapeHtml(fmtDist(result.dist))} away · ${escapeHtml(result.source || 'Source unknown')}</div>
     <div style="display:flex;gap:4px;">
       ${showGoogleMaps && googleMapsUrl ? `<a href="${htmlAttr(googleMapsUrl)}" target="_blank" rel="noopener" style="flex:1;text-align:center;padding:5px;border-radius:3px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.25);color:#93c5fd;font-size:8.5px;font-family:'IBM Plex Mono',monospace;font-weight:700;text-decoration:none;">GOOGLE MAPS</a>` : ''}

@@ -3,6 +3,31 @@ import L from 'leaflet';
 import * as topojson from 'topojson-client';
 import * as XLSX from 'xlsx';
 import {
+  Activity,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  CircleDot,
+  Crosshair,
+  Database,
+  Download,
+  ExternalLink,
+  GitCompareArrows,
+  Globe2,
+  Layers3,
+  LoaderCircle,
+  MapIcon,
+  Menu,
+  PanelRightOpen,
+  Phone,
+  Radar,
+  RefreshCw,
+  Search,
+  SlidersHorizontal,
+  Upload,
+  X,
+} from 'lucide-react';
+import {
   SD, LOCS, MKEYS, MICONS, MLBL, DCOL, DLBL, ALL_METRICS, getVal, STATE_CTR, EXTRA_COORDS
 } from './lib/data';
 import { STATE_POP, densityColor, densityLabel } from './lib/populationData';
@@ -549,45 +574,29 @@ function providerCategoryStyle(provider:any) {
   return { key, ...PROVIDER_CATEGORY_STYLES[key] };
 }
 
-// ── Dependency-free grid clustering ──────────────────────────────────────────
-// Aggregates large point sets into zoom-aware cluster bubbles so dense layers
-// (e.g. BlueHive ~5.7k, Dentists ~104k) no longer render as a single blob.
-// Below `expandZoom` points are grouped into pixel-grid cells; at/above it the
-// individual markers (with their popups) are shown. Re-renders on map move/zoom.
-interface ClusterRendererOptions {
+// ── Provider density fields + 8px points ─────────────────────────────────────
+// Provider sources stay visually distinct without collapsing into numbered
+// clusters. Every viewport gets a soft, non-interactive density field beneath
+// the individual 8px points; popups remain attached to the real provider point.
+interface ProviderFieldRendererOptions {
   color: string;
   glow: boolean;
-  expandZoom?: number;   // zoom at which individual pins appear
-  cellPx?: number;       // grid cell size in screen pixels
-  badgeLabel: string;    // accessibility / popup label
+  cellPx?: number;
+  badgeLabel: string;
   buildPopup: (p: any) => string;
   getStyle?: (p: any) => { key: ProviderCategoryKey; label: string; color: string };
 }
 
-function createClusteredLayer(
+function createProviderFieldLayer(
   map: L.Map,
   points: any[],
-  opts: ClusterRendererOptions,
+  opts: ProviderFieldRendererOptions,
 ): { group: L.LayerGroup; destroy: () => void } {
   const group = L.layerGroup().addTo(map);
-  const expandZoom = opts.expandZoom ?? 11;
-  const cellPx = opts.cellPx ?? 62;
+  const cellPx = opts.cellPx ?? 54;
   const valid = points.filter(p => p && p.lat != null && p.lng != null && isValidCoord(p.lat, p.lng));
 
   function styleFor(p: any) { return opts.getStyle?.(p) || { key: 'unknown' as ProviderCategoryKey, label: opts.badgeLabel, color: opts.color }; }
-  function dotHtml(style: { color:string; label:string }): string {
-    return `<div title="${style.label}" style="width:10px;height:10px;border-radius:50%;background:${style.color};border:1px solid rgba(255,255,255,.9);${opts.glow ? `box-shadow:0 0 8px ${style.color},0 0 16px ${style.color}55;` : 'box-shadow:0 1px 3px rgba(0,0,0,.45);'}cursor:pointer;"></div>`;
-  }
-  function clusterHtml(count: number, styles: Array<{color:string}>): string {
-    const size = count >= 1000 ? 64 : count >= 250 ? 52 : count >= 50 ? 40 : 30;
-    const opacity = Math.min(0.9, 0.35 + (count / 500) * 0.5);
-    const colors = Array.from(new Set(styles.map(style=>style.color))).slice(0,4);
-    const gradient = colors.length > 1 ? `conic-gradient(${colors.map((color,index)=>`${color} ${index * (100 / colors.length)}% ${(index + 1) * (100 / colors.length)}%`).join(',')})` : (colors[0] || opts.color);
-    return `<div style="width:${size}px;height:${size}px;border-radius:50%;display:flex;align-items:center;justify-content:center;`
-      + `background:${gradient};opacity:${opacity};border:2px solid rgba(255,255,255,.82);`
-      + `box-shadow:0 0 0 4px rgba(15,23,42,.35),0 8px 20px rgba(0,0,0,.38);color:#fff;font:700 10px 'IBM Plex Mono',monospace;text-shadow:0 1px 2px rgba(0,0,0,.75);`
-      + `cursor:pointer;">${count >= 1000 ? `${Math.round(count/100)/10}k` : count}</div>`;
-  }
 
   function render() {
     group.clearLayers();
@@ -596,53 +605,45 @@ function createClusteredLayer(
     const bounds = map.getBounds().pad(0.35);
     const visible = valid.filter(p => bounds.contains([p.lat, p.lng] as L.LatLngTuple));
 
-    if (zoom >= expandZoom) {
-      for (const p of visible) {
-        const style = styleFor(p);
-        const mk = L.marker([p.lat, p.lng], {
-          icon: L.divIcon({ className: '', html: dotHtml(style), iconSize: [12, 12], iconAnchor: [6, 6] }),
-          zIndexOffset: 500,
-        });
-        mk.bindPopup(opts.buildPopup(p));
-        group.addLayer(mk);
-      }
-      return;
-    }
-
-    const cells = new Map<string, { sx: number; sy: number; count: number; sample: any; styles: Array<{key:ProviderCategoryKey;label:string;color:string}> }>();
+    const cells = new Map<string, { sx: number; sy: number; count: number; colors: string[] }>();
     for (const p of visible) {
       const pt = map.project([p.lat, p.lng] as L.LatLngTuple, zoom);
       const key = `${Math.floor(pt.x / cellPx)}:${Math.floor(pt.y / cellPx)}`;
       const c = cells.get(key);
       const style = styleFor(p);
-      if (c) { c.sx += pt.x; c.sy += pt.y; c.count++; c.styles.push(style); }
-      else cells.set(key, { sx: pt.x, sy: pt.y, count: 1, sample: p, styles: [style] });
+      if (c) { c.sx += pt.x; c.sy += pt.y; c.count++; c.colors.push(style.color); }
+      else cells.set(key, { sx: pt.x, sy: pt.y, count: 1, colors: [style.color] });
     }
 
     cells.forEach(c => {
       const center = map.unproject([c.sx / c.count, c.sy / c.count] as L.PointTuple, zoom);
-      if (c.count === 1) {
-        const p = c.sample;
-        const style = styleFor(p);
-        const mk = L.marker([p.lat, p.lng], {
-          icon: L.divIcon({ className: '', html: dotHtml(style), iconSize: [12, 12], iconAnchor: [6, 6] }),
-          zIndexOffset: 500,
-        });
-        mk.bindPopup(opts.buildPopup(p));
-        group.addLayer(mk);
-      } else {
-        const size = c.count >= 1000 ? 64 : c.count >= 250 ? 52 : c.count >= 50 ? 40 : 30;
-        const mk = L.marker(center, {
-          icon: L.divIcon({ className: '', html: clusterHtml(c.count, c.styles), iconSize: [size, size], iconAnchor: [size / 2, size / 2] }),
-          zIndexOffset: 600,
-          title: `Provider density area`,
-        });
-        const mix = Array.from(c.styles.reduce((acc, style) => acc.set(style.label, (acc.get(style.label) || 0) + 1), new Map<string,number>()).entries()).sort((a,b)=>b[1]-a[1]).slice(0,5);
-        mk.bindPopup(`<strong>Provider density cluster</strong><br/>${c.count.toLocaleString()} providers in this area<br/>${mix.map(([label,count])=>`${label}: ${count}`).join('<br/>')}<br/><em>Zoom in for individual clinic dots.</em>`);
-        mk.on('click', () => map.flyTo(center, Math.min(map.getMaxZoom(), zoom + 2), { duration: 0.8 }));
-        group.addLayer(mk);
-      }
+      const intensity = Math.min(1, Math.log2(c.count + 1) / 5);
+      const dominantColor = c.colors[0] || opts.color;
+      group.addLayer(L.circleMarker(center, {
+        radius: 10 + intensity * 30,
+        stroke: false,
+        fillColor: dominantColor,
+        fillOpacity: 0.055 + intensity * (opts.glow ? 0.18 : 0.1),
+        interactive: false,
+        className: 'provider-density-field',
+      }));
     });
+
+    for (const p of visible) {
+      const style = styleFor(p);
+      const point = L.circleMarker([p.lat, p.lng], {
+        radius: 4,
+        color: 'rgba(255,255,255,.94)',
+        weight: 1,
+        fillColor: style.color,
+        fillOpacity: 0.9,
+        opacity: 0.96,
+        className: opts.glow ? 'provider-point provider-point-glow' : 'provider-point',
+      });
+      point.bindTooltip(style.label, { direction:'top', offset:[0,-5], opacity:0.9 });
+      point.bindPopup(opts.buildPopup(p));
+      group.addLayer(point);
+    }
   }
 
   render();
@@ -895,7 +896,7 @@ function generateInternationalReportHtml(data:ReportData):string {
     <div><div class="doc-date">${today}</div></div>
   </div>
   <div class="location-hero">
-    <div class="loc-badge">🌐 International</div>
+    <div class="loc-badge">International</div>
     <div class="loc-name">${data.locName}</div>
     <div class="loc-meta">Coordinates: ${coords}</div>
   </div>
@@ -987,7 +988,7 @@ function generateReportHtml(data:ReportData,evidence:EvidencePayload|null):strin
     <div><div class="doc-date">${today}</div><div class="doc-id">REF: CLA-${Math.random().toString(36).substr(2,8).toUpperCase()}</div></div>
   </div>
   <div class="location-hero">
-    <div class="loc-badge" style="background:${col}18;color:${col};border:1px solid ${col}44">${isGeo?'◈ GEOCODED ESTIMATE':'● VERIFIED DATASET'}</div>
+    <div class="loc-badge" style="background:${col}18;color:${col};border:1px solid ${col}44">${isGeo?'GEOCODED ESTIMATE':'VERIFIED DATASET'}</div>
     <div class="loc-name">${locName}</div>
     <div class="loc-meta">${stateCode}${tier?' · '+(tier===1?'MAJOR METRO':tier===2?'MID-SIZE CITY':tier===3?'SMALL CITY':'RURAL / REMOTE'):''} · EXAM: ${examLabel.toUpperCase()}</div>
     <div class="priority-flag" style="background:${urgencyColor}12;color:${urgencyColor};border:1px solid ${urgencyColor}33">
@@ -1011,7 +1012,7 @@ function generateReportHtml(data:ReportData,evidence:EvidencePayload|null):strin
   <div class="section">
     <div class="section-title">Operational Recommendation</div>
     <div class="rec-box" style="background:${col}08;border-left-color:${col}">${recText[ps.v]||recText[3]}</div>
-    ${isGeo?'<div class="geo-note">◈ Geocoded estimate shown. Use the verified provider evidence section below for source-backed outreach targets.</div>':''}
+    ${isGeo?'<div class="geo-note">Geocoded estimate shown. Use the verified provider evidence section below for source-backed outreach targets.</div>':''}
   </div>
   <div class="section">
     <div class="section-title">Full Service Scorecard</div>
@@ -1059,9 +1060,9 @@ export default function App() {
   const dropPinRef = useRef<L.Marker|null>(null);
   const popDensityLayerRef = useRef<L.LayerGroup|null>(null);
   const clinicLayerRef = useRef<L.LayerGroup|null>(null);
-  const blueHiveLayerRef = useRef<ReturnType<typeof createClusteredLayer>|null>(null);
-  const indexedProviderLayerRef = useRef<ReturnType<typeof createClusteredLayer>|null>(null);
-  const myClinicsLayerRef = useRef<ReturnType<typeof createClusteredLayer>|null>(null);
+  const blueHiveLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
+  const indexedProviderLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
+  const myClinicsLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
   const savedRadiusLayerRef = useRef<L.LayerGroup|null>(null);
   const rawStateFeaturesRef = useRef<any[]>([]);
   const clinicFileInputRef = useRef<HTMLInputElement>(null);
@@ -1167,22 +1168,23 @@ export default function App() {
   const [pendingMarkerColor, setPendingMarkerColor] = useState('#ef4444');
   const [multiDropMode, setMultiDropMode] = useState(false);
   const multiDropLayerRef = useRef<L.LayerGroup|null>(null);
-  const [showGlowPoints, setShowGlowPoints] = useState(false);
-  const [showBlueHive, setShowBlueHive] = useState(false);
+  const [showGlowPoints, setShowGlowPoints] = useState(true);
+  const [showBlueHive, setShowBlueHive] = useState(true);
   const [blueHiveData, setBlueHiveData] = useState<any[]>([]);
   const [inventoryData, setInventoryData] = useState<MapInventoryProvider[]>([]);
   const [inventoryLoading, setInventoryLoading] = useState(false);
   const [inventoryError, setInventoryError] = useState('');
   const [serviceInventoryEnabled, setServiceInventoryEnabled] = useState(false);
-  const inventoryLayerRef = useRef<ReturnType<typeof createClusteredLayer>|null>(null);
+  const inventoryLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
   const inventoryFetchRef = useRef<AbortController|null>(null);
-  const [showIndexedProviders, setShowIndexedProviders] = useState(false);
-  const [showDentists, setShowDentists] = useState(false);
+  const [showIndexedProviders, setShowIndexedProviders] = useState(true);
+  const [showDentists, setShowDentists] = useState(true);
   const [dentistData, setDentistData] = useState<any[]>([]);
-  const dentistLayerRef = useRef<ReturnType<typeof createClusteredLayer>|null>(null);
-  const [showMyClinicsLayer, setShowMyClinicsLayer] = useState(false);
+  const dentistLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
+  const [showMyClinicsLayer, setShowMyClinicsLayer] = useState(true);
   const [myClinicsData, setMyClinicsData] = useState<any[]>([]);
   const [showDatasetBrowser, setShowDatasetBrowser] = useState(false);
+  const [showProviderExplorerDrawer, setShowProviderExplorerDrawer] = useState(false);
   const [datasetStatus, setDatasetStatus] = useState<Record<DatasetKey, DatasetLoadState>>(INITIAL_DATASET_STATUS);
   const datasetRequestsRef = useRef<Partial<Record<DatasetKey, Promise<void>>>>({});
   const providerExplorerLayerRef = useRef<L.LayerGroup | null>(null);
@@ -1193,7 +1195,11 @@ export default function App() {
   const [providerExplorerMode, setProviderExplorerMode] = useState<ProviderExplorerMode>('density');
   const [providerExplorerStatus, setProviderExplorerStatus] = useState('Provider map explorer ready');
   const [providerExplorerLiveEnabled, setProviderExplorerLiveEnabled] = useState(false);
-  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({
+    servicePresence: true,
+    mapView: true,
+    usDiagnostics: true,
+  });
   const [indexedLayerData, setIndexedLayerData] = useState<any[]>([]);
   const [outreachNotes, setOutreachNotes] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_notes')||'{}'); } catch { return {}; } });
   const [outreachStatus, setOutreachStatus] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_status')||'{}'); } catch { return {}; } });
@@ -1597,7 +1603,7 @@ export default function App() {
     drawable.slice(0,1000).forEach(provider=>{
       const style = providerCategoryStyle(provider);
       const location = [provider.address,provider.city,provider.admin_area,provider.country].filter(Boolean).join(', ');
-      L.circleMarker([provider.lat, provider.lng], { radius: 6, color: '#ffffff', weight: 1, fillColor: style.color, fillOpacity: 0.92, opacity: 0.95 })
+      L.circleMarker([provider.lat, provider.lng], { radius: 4, color: '#ffffff', weight: 1, fillColor: style.color, fillOpacity: 0.92, opacity: 0.95, className:'provider-point provider-point-glow' })
         .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>${escapeHtml(provider.source)} · ${escapeHtml(provider.source_kind)}<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/>${escapeHtml(location)}${provider.website ? `<br/><a href="${escapeHtml(provider.website)}" target="_blank" rel="noreferrer">Website</a>` : ''}`)
         .addTo(layer);
     });
@@ -1615,13 +1621,63 @@ export default function App() {
     cells.forEach(cell=>{
       const count = Number(cell.count) || 0;
       const intensity = Math.max(0.18, Math.log(count + 1) / Math.log(max + 1));
-      const radius = mode === 'hex' ? 12000 + intensity * 52000 : 9000 + intensity * 42000;
       const color = mode === 'hex' ? '#7c3aed' : '#0891b2';
-      L.circle([cell.lat, cell.lng], { radius, color, weight: mode === 'hex' ? 2 : 0, fillColor: color, fillOpacity: Math.min(0.62, 0.16 + intensity * 0.44), opacity:0.7 })
-        .bindPopup(`<strong>${mode === 'hex' ? 'Hex/grid' : 'Density'} cell</strong><br/>${count.toLocaleString()} matching providers`)
-        .addTo(layer);
+      const pixelRadius = 10 + intensity * (mode === 'hex' ? 24 : 38);
+      const field = mode === 'hex'
+        ? L.polygon(Array.from({length:6},(_,index)=>{
+            const center = map.project([cell.lat,cell.lng],map.getZoom());
+            const angle = (Math.PI / 3) * index - Math.PI / 6;
+            return map.unproject([center.x + Math.cos(angle) * pixelRadius,center.y + Math.sin(angle) * pixelRadius],map.getZoom());
+          }), {
+            color,
+            weight:1.25,
+            fillColor:color,
+            fillOpacity:Math.min(0.3,0.07 + intensity * 0.2),
+            opacity:0.42,
+            className:'provider-density-field provider-hex-field',
+          })
+        : L.circleMarker([cell.lat, cell.lng], {
+            radius: pixelRadius,
+            color,
+            weight:0,
+            fillColor:color,
+            fillOpacity:Math.min(0.36,0.08 + intensity * 0.24),
+            opacity:0.48,
+            className:'provider-density-field',
+          });
+      field.bindTooltip(`${count.toLocaleString()} matching providers`, { direction:'top', opacity:0.92 });
+      field.addTo(layer);
     });
     return cells.length;
+  },[]);
+
+  const drawProviderDotDensity = useCallback((cells: ProviderDensityCell[]) => {
+    const map = mapRef.current;
+    if(!map) return 0;
+    if(!providerExplorerDensityLayerRef.current) providerExplorerDensityLayerRef.current = L.layerGroup().addTo(map);
+    const layer = providerExplorerDensityLayerRef.current;
+    layer.clearLayers();
+    let rendered = 0;
+    cells.forEach((cell,cellIndex)=>{
+      const count = Math.max(1,Number(cell.count)||1);
+      const dotCount = Math.min(14,Math.max(1,Math.ceil(Math.log2(count + 1))));
+      const center = map.project([cell.lat,cell.lng],map.getZoom());
+      for(let index=0;index<dotCount;index++) {
+        const angle = (cellIndex * 0.73) + index * 2.399963;
+        const distance = 3 + Math.sqrt(index + 1) * 4;
+        const point = map.unproject([center.x + Math.cos(angle) * distance,center.y + Math.sin(angle) * distance],map.getZoom());
+        L.circleMarker(point, {
+          radius:2.25,
+          stroke:false,
+          fillColor:'#087f9a',
+          fillOpacity:0.54,
+          interactive:false,
+          className:'provider-dot-density-point',
+        }).addTo(layer);
+        rendered++;
+      }
+    });
+    return rendered;
   },[]);
 
   const renderProviderExplorerMap = useCallback(async (mode: ProviderExplorerMode = providerExplorerMode, filters: ProviderExplorerFilters = providerExplorerFilters) => {
@@ -1637,9 +1693,11 @@ export default function App() {
         const resp = await fetch(`/api/provider-explorer/${aggregateMode}?${providerExplorerParams(filters, aggregateMode)}`);
         const data = await resp.json();
         const cells = Array.isArray(data.cells) ? data.cells as ProviderDensityCell[] : [];
-        const rendered = drawProviderDensity(cells, aggregateMode);
-        aggregateStatus = `${aggregateMode} view · ${Number(data.total || 0).toLocaleString()} matching records · ${rendered.toLocaleString()} aggregated cells`;
-        setProviderExplorerStatus(`${mode === 'dot-density' ? 'dot-density fallback · ' : ''}${aggregateStatus} · filters: ${filterSummary(filters).join(', ') || 'none'}`);
+        const rendered = mode === 'dot-density' ? drawProviderDotDensity(cells) : drawProviderDensity(cells, aggregateMode);
+        aggregateStatus = mode === 'dot-density'
+          ? `dot-density view · ${Number(data.total || 0).toLocaleString()} matching records · ${rendered.toLocaleString()} density dots`
+          : `${aggregateMode} view · ${Number(data.total || 0).toLocaleString()} matching records · ${rendered.toLocaleString()} aggregated cells`;
+        setProviderExplorerStatus(`${aggregateStatus} · filters: ${filterSummary(filters).join(', ') || 'none'}`);
       }
       if(mode === 'pins' || mode === 'density-pins') {
         const resp = await fetch(`/api/provider-explorer/map?${providerExplorerParams({...filters,useMapBounds:true}, 'pins')}`);
@@ -1652,7 +1710,7 @@ export default function App() {
     } catch(error) {
       setProviderExplorerStatus(error instanceof Error ? error.message : 'Provider map explorer failed');
     }
-  },[drawProviderDensity, drawProviderPins, providerExplorerFilters, providerExplorerMode, providerExplorerParams]);
+  },[drawProviderDensity, drawProviderDotDensity, drawProviderPins, providerExplorerFilters, providerExplorerMode, providerExplorerParams]);
 
   const showProviderExplorerRowsOnMap = useCallback((providers: ProviderFeature[], filters: ProviderExplorerFilters) => {
     setProviderExplorerFilters(filters);
@@ -1719,7 +1777,7 @@ export default function App() {
     try { const resp = await fetch(`/api/provider-explorer/live?${providerExplorerParams({...providerExplorerFilters, includeLive:true}, 'live')}`); const data = await resp.json(); if(Array.isArray(data.providers) && data.providers.length) providers = data.providers as ProviderFeature[]; } catch {}
     providers.filter((provider): provider is ProviderFeature & {lat:number; lng:number}=>typeof provider.lat === 'number' && typeof provider.lng === 'number').slice(0,1000).forEach(provider=>{
       const style = providerCategoryStyle(provider);
-      const marker = L.circleMarker([provider.lat, provider.lng], { radius:6, color:'#ffffff', weight:1, fillColor:style.color, fillOpacity:.92, opacity:.95 })
+      const marker = L.circleMarker([provider.lat, provider.lng], { radius:4, color:'#ffffff', weight:1, fillColor:style.color, fillOpacity:.92, opacity:.95, className:'provider-point provider-point-glow' })
         .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>Live discovery · not stored<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/><button class="provider-popup-save" data-provider-id="${escapeHtml(provider.id)}">Save candidate</button>`)
         .addTo(layer);
       marker.on('popupopen', () => {
@@ -1747,7 +1805,7 @@ export default function App() {
       const liveOnly = Array.isArray(data.live_only) ? data.live_only as ProviderFeature[] : [];
       liveOnly.filter((provider): provider is ProviderFeature & {lat:number; lng:number}=>typeof provider.lat === 'number' && typeof provider.lng === 'number').slice(0,500).forEach(provider=>{
         const style = providerCategoryStyle(provider);
-        L.circleMarker([provider.lat, provider.lng], { radius:7, color:'#ffffff', weight:2, fillColor:style.color, fillOpacity:.9, opacity:.98 })
+        L.circleMarker([provider.lat, provider.lng], { radius:4, color:'#ffffff', weight:1, fillColor:style.color, fillOpacity:.9, opacity:.98, className:'provider-point provider-point-gap' })
           .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>Live-only gap<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/>${escapeHtml(provider.match_reason || '')}`)
           .addTo(layer);
       });
@@ -1809,8 +1867,25 @@ export default function App() {
   },[masterProviderTypeFilter]);
 
   useEffect(()=>{
-    if(showMyClinicsLayer) void loadProviderDataset('myClinics');
-  },[masterProviderTypeFilter, showMyClinicsLayer, loadProviderDataset]);
+    const map = mapRef.current;
+    if(!map || !mapReady) return;
+    let timer: ReturnType<typeof setTimeout>|null = null;
+    const refreshVisibleProviderSources = () => {
+      if(timer) clearTimeout(timer);
+      timer = setTimeout(()=>{
+        if(showIndexedProviders) void loadProviderDataset('indexed');
+        if(showBlueHive) void loadProviderDataset('bluehive');
+        if(showDentists) void loadProviderDataset('dentists');
+        if(showMyClinicsLayer) void loadProviderDataset('myClinics');
+      }, 140);
+    };
+    refreshVisibleProviderSources();
+    map.on('moveend', refreshVisibleProviderSources);
+    return ()=>{
+      if(timer) clearTimeout(timer);
+      map.off('moveend', refreshVisibleProviderSources);
+    };
+  },[mapReady, showIndexedProviders, showBlueHive, showDentists, showMyClinicsLayer, loadProviderDataset]);
 
   // ── Map Inventory: load indexed providers from Neon on map load + pan/zoom ──
   useEffect(()=>{
@@ -2145,21 +2220,22 @@ export default function App() {
     if (clinicLayerRef.current) { map.removeLayer(clinicLayerRef.current); clinicLayerRef.current = null; }
     if (!showUploadedClinics || uploadedClinics.length===0) return;
     const grp = L.layerGroup();
-    uploadedClinics.forEach((c,i)=>{
+    uploadedClinics.forEach((c)=>{
       if (c.lat===null || c.lng===null) return;
       const col = c.color || '#f472b6';
-      const mk = L.marker([c.lat, c.lng], {
-        icon: L.divIcon({
-          className: '',
-          html: `<div style="width:18px;height:18px;border-radius:50%;background:${col};${showGlowPoints?`box-shadow:0 0 10px ${col},0 0 20px ${col}66,0 0 4px rgba(0,0,0,0.6);animation:clinic-pulse 2s ease-in-out ${(i*0.15).toFixed(1)}s infinite;`:'box-shadow:0 0 0 1px rgba(255,255,255,0.35);'}cursor:pointer;"></div>`,
-          iconSize: [18,18], iconAnchor: [9,9],
-        }),
-        zIndexOffset: 2000,
+      const mk = L.circleMarker([c.lat, c.lng], {
+        radius:4,
+        color:'#ffffff',
+        weight:1,
+        fillColor:col,
+        fillOpacity:.92,
+        opacity:.98,
+        className:showGlowPoints?'provider-point provider-point-glow':'provider-point',
       });
       mk.bindPopup(`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:170px;">
         <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${c.name}</div>
         ${c.address?`<div style="font-size:9.5px;color:#4a6888"> ${c.address}${c.city?', '+c.city:''}${c.state?' '+c.state:''}${c.zip?' '+c.zip:''}</div>`:''}
-        ${c.phone?`<div style="font-size:9.5px;color:#67e8f9;margin-top:2px">📞 <a href="tel:${c.phone}" style="color:#67e8f9;text-decoration:none">${c.phone}</a></div>`:''}
+        ${c.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${c.phone}">${c.phone}</a></div>`:''}
         ${c.notes?`<div style="font-size:9px;color:#3d5478;margin-top:3px">${c.notes}</div>`:''}
         <div style="margin-top:6px;display:flex;gap:5px">
           <div style="width:8px;height:8px;border-radius:50%;background:${col};box-shadow:0 0 6px ${col};flex-shrink:0;margin-top:2px"></div>
@@ -2173,13 +2249,13 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[uploadedClinics, showUploadedClinics, showGlowPoints]);
 
-  // ── BlueHive provider pins (clustered) ────────────────────────────────────
+  // ── BlueHive density field + provider points ──────────────────────────────
   useEffect(()=>{
     const map = mapRef.current;
     if (!map) return;
     if (blueHiveLayerRef.current) { blueHiveLayerRef.current.destroy(); blueHiveLayerRef.current = null; }
     if (!showBlueHive || blueHiveData.length===0) return;
-    blueHiveLayerRef.current = createClusteredLayer(map, blueHiveData, {
+    blueHiveLayerRef.current = createProviderFieldLayer(map, blueHiveData, {
       color: '#3b82f6',
       glow: showGlowPoints,
       getStyle: providerCategoryStyle,
@@ -2187,7 +2263,7 @@ export default function App() {
       buildPopup: (p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
         <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||'Unnamed'}</div>
         ${p.address_1?`<div style="font-size:9.5px;color:#4a6888"> ${p.address_1}${p.city?', '+p.city:''}${p.state?' '+p.state:''}${p.zip?' '+p.zip:''}</div>`:''}
-        ${p.phone?`<div style="font-size:9.5px;color:#67e8f9;margin-top:2px">📞 <a href="tel:${p.phone}" style="color:#67e8f9;text-decoration:none">${p.phone}</a></div>`:''}
+        ${p.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${p.phone}">${p.phone}</a></div>`:''}
         ${p.website?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px"><a href="${p.website}" target="_blank" style="color:#93c5fd">${p.website}</a></div>`:''}
         ${p.services?`<div style="font-size:8px;color:#3d5478;margin-top:3px">${p.services}</div>`:''}
         <div style="margin-top:6px;display:flex;gap:5px">
@@ -2200,13 +2276,13 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[showBlueHive, blueHiveData, showGlowPoints]);
 
-  // ── Dentist provider pins (clustered) ───────────────────────────────────────
+  // ── Dentist density field + provider points ───────────────────────────────
   useEffect(()=>{
     const map = mapRef.current;
     if (!map) return;
     if (dentistLayerRef.current) { dentistLayerRef.current.destroy(); dentistLayerRef.current = null; }
     if (!showDentists || dentistData.length===0) return;
-    dentistLayerRef.current = createClusteredLayer(map, dentistData, {
+    dentistLayerRef.current = createProviderFieldLayer(map, dentistData, {
       color: '#06b6d4',
       glow: showGlowPoints,
       getStyle: providerCategoryStyle,
@@ -2214,7 +2290,7 @@ export default function App() {
       buildPopup: (p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
         <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||'Unnamed'}</div>
         ${p.address_1?`<div style="font-size:9.5px;color:#4a6888"> ${p.address_1}${p.city?', '+p.city:''}${p.state?' '+p.state:''}${p.zip?' '+p.zip:''}</div>`:''}
-        ${p.phone?`<div style="font-size:9.5px;color:#67e8f9;margin-top:2px">📞 <a href="tel:${p.phone}" style="color:#67e8f9;text-decoration:none">${p.phone}</a></div>`:''}
+        ${p.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${p.phone}">${p.phone}</a></div>`:''}
         ${p.npi?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px">NPI: <a href="${p.source_url}" target="_blank" style="color:#93c5fd">${p.npi}</a></div>`:''}
         ${p.taxonomy_description?`<div style="font-size:8px;color:#3d5478;margin-top:3px">${p.taxonomy_description}</div>`:''}
         <div style="margin-top:6px;display:flex;gap:5px">
@@ -2227,14 +2303,14 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[showDentists, dentistData, showGlowPoints]);
 
-  // ── Service Presence inventory pins (clustered) ────────────────────────────
+  // ── Service Presence density field + provider points ──────────────────────
   useEffect(()=>{
     const map = mapRef.current;
     if (!map) return;
     if (inventoryLayerRef.current) { inventoryLayerRef.current.destroy(); inventoryLayerRef.current = null; }
     if (inventoryData.length===0) return;
     const trustColor = (t:string)=>t==='verified'?'#34d399':t==='registry'?'#60a5fa':t==='directory'?'#a78bfa':'#94a3b8';
-    inventoryLayerRef.current = createClusteredLayer(map, inventoryData, {
+    inventoryLayerRef.current = createProviderFieldLayer(map, inventoryData, {
       color: '#10b981',
       glow: showGlowPoints,
       getStyle: providerCategoryStyle,
@@ -2244,7 +2320,7 @@ export default function App() {
         return `<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:210px;max-width:280px;">
         <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.name||'Unnamed'}</div>
         ${p.address?`<div style="font-size:9.5px;color:#4a6888"> ${p.address}${p.city?', '+p.city:''}${p.state?' '+p.state:''}</div>`:''}
-        ${p.phone?`<div style="font-size:9.5px;color:#67e8f9;margin-top:2px">📞 <a href="tel:${p.phone}" style="color:#67e8f9;text-decoration:none">${p.phone}</a></div>`:''}
+        ${p.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${p.phone}">${p.phone}</a></div>`:''}
         ${p.website?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px"><a href="${p.website}" target="_blank" style="color:#93c5fd">${p.website}</a></div>`:''}
         ${p.npi?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px">NPI: <a href="https://npiregistry.cms.hhs.gov/provider-view/${p.npi}" target="_blank" style="color:#93c5fd">${p.npi}</a></div>`:''}
         ${p.services.length>0?`<div style="font-size:8px;color:#3d5478;margin-top:3px">${p.services.join(', ')}</div>`:''}
@@ -2260,13 +2336,13 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[inventoryData, showGlowPoints]);
 
-  // ── Full indexed provider layer (clustered) ────────────────────────────────
+  // ── Full indexed provider density field + points ──────────────────────────
   useEffect(()=>{
     const map = mapRef.current;
     if(!map) return;
     if(indexedProviderLayerRef.current) { indexedProviderLayerRef.current.destroy(); indexedProviderLayerRef.current = null; }
     if(!showIndexedProviders || indexedLayerData.length===0) return;
-    indexedProviderLayerRef.current = createClusteredLayer(map, indexedLayerData, {
+    indexedProviderLayerRef.current = createProviderFieldLayer(map, indexedLayerData, {
       color:'#10b981',
       glow:showGlowPoints,
       getStyle: providerCategoryStyle,
@@ -2281,13 +2357,13 @@ export default function App() {
     return ()=>{ if(indexedProviderLayerRef.current) { indexedProviderLayerRef.current.destroy(); indexedProviderLayerRef.current = null; } };
   },[showIndexedProviders,indexedLayerData,showGlowPoints]);
 
-  // ── Persisted My Clinics provider layer (clustered) ────────────────────────
+  // ── Persisted My Clinics density field + points ───────────────────────────
   useEffect(()=>{
     const map = mapRef.current;
     if(!map) return;
     if(myClinicsLayerRef.current) { myClinicsLayerRef.current.destroy(); myClinicsLayerRef.current = null; }
     if(!showMyClinicsLayer || myClinicsData.length===0) return;
-    myClinicsLayerRef.current = createClusteredLayer(map, myClinicsData, {
+    myClinicsLayerRef.current = createProviderFieldLayer(map, myClinicsData, {
       color:'#8b5cf6',
       glow:showGlowPoints,
       getStyle: providerCategoryStyle,
@@ -2343,7 +2419,7 @@ export default function App() {
       setShowMyClinicsLayer(true);
       setDatasetStatus(prev=>({...prev,myClinics:{loading:false,error:'',loaded:false}}));
       await loadProviderDataset('myClinics');
-      setUploadProgress(`✓ Backend ingest complete: ${summary.rawRows} raw rows · ${summary.stagedRows} staged · ${summary.masteredRows} map-ready · ${summary.needsGeocodeRows} needs geocode · ${summary.errorRows} errors.`);
+      setUploadProgress(`Backend ingest complete: ${summary.rawRows} raw rows · ${summary.stagedRows} staged · ${summary.masteredRows} map-ready · ${summary.needsGeocodeRows} needs geocode · ${summary.errorRows} errors.`);
     } catch(err:any) {
       setUploadProgress(`Error: ${err.message||'Could not upload file'}`);
     } finally {
@@ -2595,7 +2671,7 @@ export default function App() {
           {MLBL[rpExam]}: <strong>{DLBL[v]}</strong> — Score {v}/5
         </div>
         <ScoreCard scores={ALL_METRICS.map(m=>({key:m,v:getVal(match,m),hl:m===rpExam}))}/>
-        <div className="rp-rec">▸ {buildRecText(v)}</div>
+        <div className="rp-rec">{buildRecText(v)}</div>
         {nearby.length>0&&<div className="rp-nearby">
           <div className="rp-nearby-ttl">Nearest Markets</div>
           {nearby.map((n,i)=><div key={i} className="rp-nearby-item">
@@ -2609,7 +2685,7 @@ export default function App() {
         <ProviderBox data={provData} examKey={rpExam} cityName={`${name}, ${state}`} locIdx={LOCS.indexOf(match)} onPin={pinCity}/>
         <DriveTimeBox fromLat={lat} fromLng={lng} fromName={`${name}, ${state}`} locB={null}/>
         {nearerItems.length>0&&<NearestEasier items={nearerItems} onFly={flyToNearer}/>}
-        <button className="export-btn" onClick={()=>doExportReport(rd)}>↓ EXPORT PDF REPORT</button>
+        <button className="export-btn" onClick={()=>doExportReport(rd)}><Download size={15}/>Export PDF report</button>
       </div>
     );
   }
@@ -2637,7 +2713,7 @@ export default function App() {
       <div className="fadein">
         <div className="rp-divider"/>
         <div className="rp-city-name">{city||display}</div>
-        <div className="rp-city-meta" style={{marginBottom:4}}>{state}{zip?' · ZIP '+zip:''} · <span style={{color:'#3b82f6'}}>◈ GEOCODED ESTIMATE</span></div>
+        <div className="rp-city-meta" style={{marginBottom:4}}>{state}{zip?' · ZIP '+zip:''} · <span style={{color:'#3b82f6'}}>Geocoded estimate</span></div>
         <div style={{fontSize:'9.5px',color:'#3d5478',marginBottom:8,padding:'5px 8px',background:'rgba(59,130,246,0.06)',borderRadius:5,lineHeight:1.5}}>
           Interpolated from nearest data points{stD?` · State baseline: <strong style="color:${DCOL[getVal(stD,rpExam)]}">${DLBL[getVal(stD,rpExam)]}</strong>`:''}
         </div>
@@ -2645,7 +2721,7 @@ export default function App() {
           {MLBL[rpExam]}: <strong>{DLBL[v]}</strong> difficulty (est. {v}/5)
         </div>
         <GeoScoreCard lat={lat} lng={lng} examKey={rpExam}/>
-        <div className="rp-rec">▸ {buildRecText(v)}</div>
+        <div className="rp-rec">{buildRecText(v)}</div>
         {nearby.length>0&&<div className="rp-nearby">
           <div className="rp-nearby-ttl">Nearest Markets</div>
           {nearby.map((n,i)=><div key={i} className="rp-nearby-item">
@@ -2659,7 +2735,7 @@ export default function App() {
         <ProviderBox data={provData} examKey={rpExam} cityName={`${city}, ${state}`} locIdx={geoLocIdx} onPin={pinCity}/>
         <DriveTimeBox fromLat={lat} fromLng={lng} fromName={`${city}, ${state}`} locB={null}/>
         {nearerItems.length>0&&<NearestEasier items={nearerItems} onFly={flyToNearer}/>}
-        <button className="export-btn" onClick={()=>doExportReport(rd)}>↓ EXPORT PDF REPORT</button>
+        <button className="export-btn" onClick={()=>doExportReport(rd)}><Download size={15}/>Export PDF report</button>
       </div>
     );
   }
@@ -2692,7 +2768,7 @@ export default function App() {
         </div>
         <button className="export-btn" style={{marginBottom:8}} onClick={()=>{ setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder'); doLiveSearch(lat,lng,undefined,label,'explicit_google'); }}>SEARCH LIVE PROVIDERS</button>
         <DriveTimeBox fromLat={lat} fromLng={lng} fromName={label} locB={null}/>
-        <button className="export-btn" onClick={()=>doExportReport(rd)}>↓ EXPORT LOCATION REPORT</button>
+        <button className="export-btn" onClick={()=>doExportReport(rd)}><Download size={15}/>Export location report</button>
       </div>
     );
   }
@@ -3162,25 +3238,24 @@ export default function App() {
     liveGrp.clearLayers();
     const config=NPI_CATEGORY_MAP[category];
     const color=config?.color||'#22d3ee';
-    const icon=config?.icon||'\u26A1';
     const label=config?.label||'Provider';
 
-    results.forEach((p,i)=>{
+    results.forEach((p)=>{
       // Only render map pins for providers with verified coordinates (imported or geocoded)
       if(p.lat==null||p.lng==null) return;
       if((p as any).coordinateStatus==='unverified') return;
       const lat=p.lat;
       const lng=p.lng;
-      // Internal map pin: show provider name
-      const mk=L.marker([lat,lng],{
-        icon:L.divIcon({
-          className:'',
-          html:`<div style="width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(4,10,22,0.92);border:2px solid ${color};${showGlowPoints?`box-shadow:0 0 8px ${color}44,0 2px 6px rgba(0,0,0,0.6);`:'box-shadow:0 0 0 1px rgba(255,255,255,0.18);'}font-size:12px;cursor:pointer;">${icon}</div>`,
-          iconSize:[28,28],
-          iconAnchor:[14,14],
-        }),
-        zIndexOffset:1200+i,
+      const mk=L.circleMarker([lat,lng],{
+        radius:4,
+        color:'#ffffff',
+        weight:1,
+        fillColor:color,
+        fillOpacity:.92,
+        opacity:.98,
+        className:showGlowPoints?'provider-point provider-point-glow':'provider-point',
       });
+      mk.bindTooltip(`${label} presence`,{direction:'top',offset:[0,-5]});
       // Internal popup: full provider details
       const badgesHtml=(p.badges||[]).map((b)=>`<span style="display:inline-block;font-size:7.5px;padding:1px 5px;border-radius:3px;background:${color}22;border:1px solid ${color}44;color:${color};margin-right:3px;">${b}</span>`).join('');
       const evidenceHtml=p.evidence&&p.evidence.length>0
@@ -3188,13 +3263,13 @@ export default function App() {
         : '';
       const confidenceColor=p.confidence==='high'?'#34d399':p.confidence==='medium'?'#fbbf24':'#fca5a5';
       const popupHtml=`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:210px;max-width:280px;">
-        <div style="display:flex;gap:7px;align-items:flex-start;margin-bottom:6px;"><span style="font-size:16px">${icon}</span>
-        <div><div style="font-size:12px;font-weight:700;color:#e2f0ff;line-height:1.3">${p.name}</div>
-        <div style="font-size:8px;font-weight:700;font-family:'IBM Plex Mono',monospace;color:${color};letter-spacing:1px;text-transform:uppercase;margin-top:2px">${label}</div></div></div>
+        <div style="margin-bottom:6px;"><div style="font-size:12px;font-weight:700;color:#e2f0ff;line-height:1.3">${p.name}</div>
+        <div style="font-size:8px;font-weight:700;font-family:'IBM Plex Mono',monospace;color:${color};letter-spacing:1px;text-transform:uppercase;margin-top:2px">${label}</div></div>
+        <div style="font-size:8px;color:#667d8e;margin-bottom:5px;">NPI-listed provider presence. Verify clinic availability before outreach.</div>
         <div style="font-size:9px;color:#4a6888;margin-bottom:4px;">${p.address}</div>
-        ${p.phone?`<div style="font-size:9px;color:#67e8f9;margin-bottom:3px;">📞 <a href="tel:${p.phone}" style="color:#67e8f9;text-decoration:none">${p.phone}</a></div>`:''}
+        ${p.phone?`<div style="font-size:9px;margin-bottom:3px;">Phone: <a href="tel:${p.phone}">${p.phone}</a></div>`:''}
         ${p.website?`<div style="font-size:8.5px;color:#3d5478;margin-bottom:3px;"><a href="${p.website}" target="_blank" rel="noopener" style="color:#93c5fd">${p.website}</a></div>`:''}
-        ${p.sourceUrl?`<div style="font-size:8px;color:#3d5478;margin-bottom:4px;"><a href="${p.sourceUrl}" target="_blank" rel="noopener" style="color:#93c5fd">${p.source} ↗</a></div>`:''}
+        ${p.sourceUrl?`<div style="font-size:8px;color:#3d5478;margin-bottom:4px;"><a href="${p.sourceUrl}" target="_blank" rel="noopener">${p.source}</a></div>`:''}
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
           <span style="font-size:8px;font-family:'IBM Plex Mono',monospace;color:${confidenceColor};font-weight:700;">${p.confidence?.toUpperCase()}</span>
           <span style="font-size:8px;font-family:'IBM Plex Mono',monospace;color:#89d4fe;">Score ${p.score}</span>
@@ -3215,17 +3290,17 @@ export default function App() {
     liveGrp.clearLayers();
     const filtered=liveFilter==='all'?results:results.filter(r=>r.cat===liveFilter);
     const markerRows = filtered.slice(0, 750);
-    markerRows.forEach((r:any,i:number)=>{
+    markerRows.forEach((r:any)=>{
       const c=CATS[r.cat]||CATS.clinic;
       const gmUrl=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name+(r.addr?' '+r.addr:''))}`;
-      const mk=L.marker([r.lat,r.lng],{icon:L.divIcon({className:'',html:`<div style="width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(4,10,22,0.92);border:2px solid ${c.col};${showGlowPoints?`box-shadow:0 0 8px ${c.col}44,0 2px 6px rgba(0,0,0,0.6);`:'box-shadow:0 0 0 1px rgba(255,255,255,0.18);'}font-size:13px;cursor:pointer;">${c.ico}</div>`,iconSize:[28,28],iconAnchor:[14,14]}),zIndexOffset:1000+i});
+      const mk=L.circleMarker([r.lat,r.lng],{radius:4,color:'#ffffff',weight:1,fillColor:c.col,fillOpacity:.92,opacity:.98,className:showGlowPoints?'provider-point provider-point-glow':'provider-point'});
+      mk.bindTooltip(c.lbl,{direction:'top',offset:[0,-5]});
       mk.bindPopup(`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:190px;">
-        <div style="display:flex;gap:7px;align-items:flex-start;margin-bottom:6px;"><span style="font-size:16px">${c.ico}</span>
-        <div><div style="font-size:12.5px;font-weight:700;color:#e2f0ff;line-height:1.3">${r.name}</div>
-        <div style="font-size:8.5px;font-weight:700;font-family:'IBM Plex Mono',monospace;color:${c.col};letter-spacing:1px;text-transform:uppercase;margin-top:2px">${c.lbl}</div></div></div>
+        <div style="margin-bottom:6px;"><div style="font-size:12.5px;font-weight:700;color:#e2f0ff;line-height:1.3">${r.name}</div>
+        <div style="font-size:8.5px;font-weight:700;font-family:'IBM Plex Mono',monospace;color:${c.col};letter-spacing:1px;text-transform:uppercase;margin-top:2px">${c.lbl}</div></div>
         ${r.addr?`<div style="font-size:9.5px;color:#4a6888;margin-bottom:3px;"> ${r.addr}</div>`:''}
-        ${r.phone?`<div style="font-size:9.5px;color:#4a6888;margin-bottom:3px;">📞 <a href="tel:${r.phone}" style="color:#67e8f9;text-decoration:none">${r.phone}</a></div>`:''}
-        ${r.hours?`<div style="font-size:9px;color:#3d5478;margin-bottom:5px;">🕐 ${r.hours}</div>`:''}
+        ${r.phone?`<div style="font-size:9.5px;margin-bottom:3px;">Phone: <a href="tel:${r.phone}">${r.phone}</a></div>`:''}
+        ${r.hours?`<div style="font-size:9px;margin-bottom:5px;">Hours: ${r.hours}</div>`:''}
         <div style="font-size:8.5px;color:#2d3f55;margin-bottom:7px;">~${fmtDist(r.dist)} away</div>
         <div style="display:flex;gap:4px;">
           <a href="${gmUrl}" target="_blank" rel="noopener" style="flex:1;text-align:center;padding:5px;border-radius:3px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.25);color:#93c5fd;font-size:8.5px;font-family:'IBM Plex Mono',monospace;font-weight:700;text-decoration:none;">GOOGLE MAPS</a>
@@ -3373,61 +3448,112 @@ export default function App() {
   const selectedService = SERVICE_PRESENCE_OPTIONS.find(service=>service.key===metric) || SERVICE_PRESENCE_OPTIONS[0];
   const hasRadiusCenter = !!dropCenter || (lastRadiusLatRef.current!==null && lastRadiusLngRef.current!==null);
   const usLayerStatus = showUsDiagnostics ? (stateGeoRef.current ? 'Available' : 'Loading U.S. map data…') : 'Enable U.S. Diagnostics first';
+  const activeProviderSourceCount = [showIndexedProviders,showBlueHive,showDentists,showMyClinicsLayer].filter(Boolean).length;
+  const loadedProviderCount = indexedLayerData.length + blueHiveData.length + dentistData.length + myClinicsData.length;
+  const toggleSection = (section:string) => setCollapsedSections(prev=>({...prev,[section]:!prev[section]}));
+  const toggleCommandTool = (tool:Exclude<ActiveTool,null>) => {
+    setActiveTool(current=>current===tool?null:tool);
+    setMobileSidebarOpen(false);
+  };
 
   return (
     <div className="app-wrap">
       <div className="cursor-light" />
-
-      
-
-      {/* ── BODY ── */}
-      <div className="app-body">
-        {/* Mobile sidebar toggle */}
+      <header className="command-header">
         <button
-          onClick={()=>setMobileSidebarOpen(v=>!v)}
-          style={{
-            position:'fixed', top:10, left:10, zIndex:2100,
-            display: window.innerWidth <= 768 ? 'flex' : 'none',
-            alignItems:'center', justifyContent:'center',
-            width:40, height:40, borderRadius:10,
-            background:'rgba(13,18,30,0.85)', backdropFilter:'blur(12px)',
-            border:'1px solid rgba(255,255,255,0.18)', color:'#e8eef8',
-            fontSize:18, cursor:'pointer',
-          }}
-        >{mobileSidebarOpen ? '✕' : '☰'}</button>
-        {/* Mobile backdrop */}
-        {mobileSidebarOpen && window.innerWidth <= 768 && (
-          <div onClick={()=>setMobileSidebarOpen(false)}
-            style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:1900}} />
-        )}
-        {/* ── SIDEBAR ── */}
-        <aside className={`sidebar${mobileSidebarOpen ? ' mobile-open' : ''}`} onClick={(e)=>{ if (window.innerWidth <= 768 && (e.target as HTMLElement).tagName === 'BUTTON') setMobileSidebarOpen(false); }}>
+          className="mobile-menu-button"
+          aria-label={mobileSidebarOpen ? 'Close navigation' : 'Open navigation'}
+          onClick={()=>setMobileSidebarOpen(value=>!value)}
+        >
+          {mobileSidebarOpen ? <X size={20}/> : <Menu size={20}/>}
+        </button>
+        <div className="command-brand">
+          <span className="command-brand-mark"><Globe2 size={20}/></span>
+          <span>
+            <strong>Occu-Med</strong>
+            <small>Network Command Center</small>
+          </span>
+        </div>
+        <div className="command-search" ref={addrSearchRef}>
+          <Search size={18} aria-hidden="true"/>
+          <input
+            value={addrSearch}
+            onChange={event=>handleAddrInput(event.target.value)}
+            onKeyDown={event=>{ if(event.key==='Escape'){setAddrSearch('');setAddrSuggestions([]);} }}
+            placeholder="Search any address, city, or landmark"
+            aria-label="Search map"
+          />
+          {addrLoading && <LoaderCircle className="command-spin" size={17} aria-label="Searching"/>}
+          {addrSearch && !addrLoading && (
+            <button className="command-search-clear" aria-label="Clear map search" onClick={()=>{setAddrSearch('');setAddrSuggestions([]);}}><X size={16}/></button>
+          )}
+          {addrSuggestions.length>0 && (
+            <div className="command-search-results">
+              {addrSuggestions.map((suggestion,index)=>(
+                <button key={`${suggestion.lat}-${suggestion.lon}-${index}`} onClick={()=>jumpToAddr(suggestion.lat,suggestion.lon,suggestion.display_name)}>
+                  <strong>{suggestion.display_name.split(',')[0]}</strong>
+                  <span>{suggestion.display_name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="command-header-actions">
+          <div className="provider-source-health" title={`${loadedProviderCount.toLocaleString()} provider records loaded in this viewport`}>
+            <span className="source-health-dot"/>
+            <strong>{activeProviderSourceCount}/4</strong>
+            <span>sources active</span>
+          </div>
+          <button className={`command-action${showProviderExplorerDrawer?' active':''}`} aria-expanded={showProviderExplorerDrawer} onClick={()=>{setShowProviderExplorerDrawer(value=>!value);if(activeTool==='liveFinder')setActiveTool(null);}}>
+            <SlidersHorizontal size={16}/><span>Provider Explorer</span>
+          </button>
+          <button className={`command-action${activeTool==='liveFinder'?' active':''}`} aria-expanded={activeTool==='liveFinder'} onClick={()=>{setShowProviderExplorerDrawer(false);setActiveTool(activeTool==='liveFinder'?null:'liveFinder');}}>
+            <PanelRightOpen size={16}/><span>Analysis</span>
+          </button>
+        </div>
+      </header>
+
+      <div className="app-body">
+        {mobileSidebarOpen && <button className="mobile-sidebar-backdrop" aria-label="Close navigation" onClick={()=>setMobileSidebarOpen(false)}/>}
+        <aside className={`sidebar${mobileSidebarOpen ? ' mobile-open' : ''}`}>
           <div className="hero-card">
-            <div className="hero-title">Occu-Med Network Command</div>
-
-          <div className="sb-section">
-            <div className="sb-lbl">NETWORK TOOLS</div>
-            <button className={`mbtn${activeTool === 'coverage' ? ' active' : ''}`} title="U.S. coverage diagnostics — population density, territory gap analysis" onClick={() => setActiveTool(activeTool === 'coverage' ? null : 'coverage')}>Coverage</button>
-            <button className={`mbtn${activeTool === 'liveFinder' ? ' active' : ''}`} title="Search for healthcare facilities near any map location" onClick={() => setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder')}>Live Finder</button>
-            <button className={`mbtn${activeTool === 'radius' ? ' active' : ''}`} title="Draw a radius circle and extract facilities within it" onClick={() => setActiveTool(activeTool === 'radius' ? null : 'radius')}>Radius Tool</button>
-            <button className={`mbtn workflow-directory-btn${activeTool === 'directories' ? ' active' : ''}`} title="Browse provider source categories and network directories" onClick={() => setActiveTool(activeTool === 'directories' ? null : 'directories')}>⌕ Provider Directories</button>
-            <button className={`mbtn workflow-upload-btn${activeTool === 'myClinics' ? ' active' : ''}`} title="Import your own clinic list from CSV or Excel" onClick={() => setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>↑ Upload Clinics</button>
-            <button className={`mbtn${activeTool === 'compare' ? ' active' : ''}`} title="Compare provider coverage across locations" onClick={() => setActiveTool(activeTool === 'compare' ? null : 'compare')}>Compare</button>
+            <div className="hero-eyebrow">Global provider workspace</div>
+            <div className="hero-title">Provider intelligence at map speed</div>
+            <div className="hero-sub">Search, inspect density, find live facilities, and build coverage without leaving the map.</div>
+            <div className="hero-source-summary"><span>{activeProviderSourceCount} sources on</span><strong>{loadedProviderCount.toLocaleString()} visible records</strong></div>
           </div>
-          <div className="sb-divider"/>
 
-            <div className="hero-sub">Find occupational providers, compare prices, and build smarter coverage faster.</div>
-            <div className="hero-actions">
-              <button className={`hero-btn${showUsDiagnostics?' active':''}`} onClick={()=>setShowUsDiagnostics(v=>!v)}>U.S. Diagnostics</button>
-              <button className="hero-btn workflow-upload-btn" onClick={()=>setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>Upload Clinics</button>
+          <section className="sb-section command-section">
+            <div className="command-section-title"><Radar size={15}/><span>Workflows</span></div>
+            <div className="command-tool-grid">
+              <button className={activeTool==='liveFinder'?'active':''} onClick={()=>{setShowProviderExplorerDrawer(false);toggleCommandTool('liveFinder');}}><Radar size={16}/><span>Live Finder</span></button>
+              <button className={activeTool==='radius'?'active':''} onClick={()=>toggleCommandTool('radius')}><Crosshair size={16}/><span>Radius Tool</span></button>
+              <button className={activeTool==='coverage'?'active':''} onClick={()=>toggleCommandTool('coverage')}><Activity size={16}/><span>Coverage</span></button>
+              <button className={activeTool==='directories'?'active':''} onClick={()=>toggleCommandTool('directories')}><Database size={16}/><span>Directories</span></button>
+              <button className={activeTool==='myClinics'?'active':''} onClick={()=>toggleCommandTool('myClinics')}><Upload size={16}/><span>My Clinics</span></button>
+              <button className={activeTool==='compare'?'active':''} onClick={()=>toggleCommandTool('compare')}><GitCompareArrows size={16}/><span>Compare</span></button>
             </div>
-          </div>
-          <div className="sb-section">
-            <div className="sb-lbl" style={{cursor:'pointer',userSelect:'none'}} onClick={()=>setCollapsedSections(p=>({...p,servicePresence:!p.servicePresence}))}>SERVICE PRESENCE {collapsedSections.servicePresence ? '▸' : '▾'}</div>
+          </section>
+
+          <section className="sb-section command-section">
+            <div className="command-section-title"><Layers3 size={15}/><span>Provider Layers</span><small>All on by default</small></div>
+            <div className="workflow-layer-list">
+              <LayerToggle label="Indexed Providers" checked={showIndexedProviders} onChange={checked=>toggleProviderLayer('indexed',checked)} disabled={datasetStatus.indexed.loading} status={providerLayerStatus('indexed',indexedLayerData.length,'No indexed providers in view',showIndexedProviders)}/>
+              <LayerToggle label="BlueHive Providers" checked={showBlueHive} onChange={checked=>toggleProviderLayer('bluehive',checked)} disabled={datasetStatus.bluehive.loading} status={providerLayerStatus('bluehive',blueHiveData.length,'No BlueHive providers in view',showBlueHive)}/>
+              <LayerToggle label="Dental Examiner Presence" checked={showDentists} onChange={checked=>toggleProviderLayer('dentists',checked)} disabled={datasetStatus.dentists.loading} status={providerLayerStatus('dentists',dentistData.length,'No NPI-derived dental presence in view',showDentists)}/>
+              <LayerToggle label="My Clinics" checked={showMyClinicsLayer} onChange={checked=>toggleProviderLayer('myClinics',checked)} disabled={datasetStatus.myClinics.loading} status={providerLayerStatus('myClinics',myClinicsData.length,'No saved clinics in view',showMyClinicsLayer)}/>
+              <LayerToggle label="Upload Preview" checked={showUploadedClinics} onChange={setShowUploadedClinics} disabled={clinicGroups.length===0} status={clinicGroups.length ? `${uploadedClinics.length.toLocaleString()} uploaded rows` : 'Upload a clinic file to enable'}/>
+              <LayerToggle label="Luminous Density" checked={showGlowPoints} onChange={setShowGlowPoints} status={showGlowPoints?'Density halos and point glow active':'Low-glow point styling'}/>
+            </div>
+            <button className="provider-explorer-launch" onClick={()=>{setShowProviderExplorerDrawer(true);setMobileSidebarOpen(false);if(activeTool==='liveFinder')setActiveTool(null);}}><SlidersHorizontal size={16}/><span>Open Provider Explorer</span><ChevronRight size={16}/></button>
+          </section>
+
+          <section className="sb-section command-section">
+            <button className="command-section-toggle" onClick={()=>toggleSection('servicePresence')} aria-expanded={!collapsedSections.servicePresence}>
+              <span><CircleDot size={15}/>Service Presence</span>{collapsedSections.servicePresence?<ChevronRight size={15}/>:<ChevronDown size={15}/>}
+            </button>
             {!collapsedSections.servicePresence && (<>
-            <div style={{fontSize:'8.5px',color:'var(--muted)',marginBottom:'8px',lineHeight:'1.3'}}>
-              Shows indexed provider locations from the database for the selected service type.
-            </div>
+            <p className="command-section-help">Filter indexed providers by the service you need in the current viewport.</p>
             <div className="workflow-service-grid">
             {SERVICE_PRESENCE_OPTIONS.map(s=>(
               <button key={s.key} title={`Service keys: ${s.serviceKeys.join(', ')}`} className={`mbtn${metric===s.key?' active':''}`} onClick={()=>{setMetric(s.key);setServiceInventoryEnabled(true);}}>
@@ -3448,111 +3574,54 @@ export default function App() {
               {inventoryError && <span className="workflow-status-detail">{inventoryError}</span>}
             </div>
             </>)}
-          </div>
-          <div className="sb-divider"/>
-          <div className="sb-section">
-            <div className="sb-lbl" style={{cursor:'pointer',userSelect:'none'}} onClick={()=>setCollapsedSections(p=>({...p,viewPresets:!p.viewPresets}))}>VIEW PRESETS {collapsedSections.viewPresets ? '▸' : '▾'}</div>
-            {!collapsedSections.viewPresets && (
-            <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+          </section>
+
+          <section className="sb-section command-section">
+            <button className="command-section-toggle" onClick={()=>toggleSection('mapView')} aria-expanded={!collapsedSections.mapView}>
+              <span><MapIcon size={15}/>Map View</span>{collapsedSections.mapView?<ChevronRight size={15}/>:<ChevronDown size={15}/>}
+            </button>
+            {!collapsedSections.mapView && <div className="map-view-presets">
               {(['world','us','east','central','west'] as const).map(v=>(
-                <button key={v} className={`vbtn${view===v?' active':''}`} onClick={()=>flyToView(v)}>{v.toUpperCase()}</button>
+                <button key={v} className={`vbtn${view===v?' active':''}`} onClick={()=>{flyToView(v);setMobileSidebarOpen(false);}}>{v==='us'?'United States':v[0].toUpperCase()+v.slice(1)}</button>
               ))}
+            </div>}
+          </section>
+
+          <section className={`sb-section command-section diagnostics-section${showUsDiagnostics?' active':''}`}>
+            <div className="diagnostics-heading">
+              <div><strong>U.S. Diagnostics</strong><span>Optional domestic overlays</span></div>
+              <button className={`diagnostics-toggle${showUsDiagnostics?' active':''}`} onClick={()=>setShowUsDiagnostics(value=>!value)}>{showUsDiagnostics?'On':'Off'}</button>
             </div>
-            )}
-          </div>
-          <div className="sb-divider"/>
-          <div className="sb-section">
-            <div className="sb-lbl" style={{cursor:'pointer',userSelect:'none'}} onClick={()=>setCollapsedSections(p=>({...p,layers:!p.layers}))}>LAYERS {collapsedSections.layers ? '▸' : '▾'}</div>
-            {!collapsedSections.layers && <div className="workflow-layer-list">
+            {showUsDiagnostics && <>
+              <button className="command-section-toggle diagnostics-details-toggle" onClick={()=>toggleSection('usDiagnostics')} aria-expanded={!collapsedSections.usDiagnostics}>
+                <span><Activity size={15}/>Diagnostic Layers</span>{collapsedSections.usDiagnostics?<ChevronRight size={15}/>:<ChevronDown size={15}/>}
+              </button>
+              {!collapsedSections.usDiagnostics && <div className="workflow-layer-list diagnostics-layer-list">
               <LayerToggle label="State Labels" checked={showLabels} onChange={setShowLabels} disabled={!showUsDiagnostics} status={showLabels?'State labels visible':usLayerStatus}/>
               <LayerToggle label="Timezone Overlay" checked={showTZ} onChange={setShowTZ} disabled={!showUsDiagnostics} status={showTZ?'Timezone overlay visible':usLayerStatus}/>
               <LayerToggle label="Population Density" checked={showPopDensity} onChange={setShowPopDensity} disabled={!showUsDiagnostics} status={showPopDensity?'Population density visible':usLayerStatus}/>
               <LayerToggle label="State Color Fill" checked={showStateColors} onChange={setShowStateColors} disabled={!showUsDiagnostics} status={showStateColors?'State colors visible':usLayerStatus}/>
               <LayerToggle label="Radius Ring" checked={showRadius} onChange={setShowRadius} disabled={!showUsDiagnostics||!hasRadiusCenter} status={!showUsDiagnostics?'Enable U.S. Diagnostics first':!hasRadiusCenter?'Select a location first':showRadius?'70 mile radius visible':'Ready'}/>
-              <LayerToggle label="Glow Effects" checked={showGlowPoints} onChange={setShowGlowPoints} status={showGlowPoints?'Glow styling active':'Standard marker styling'}/>
               <LayerToggle label="City Dots" checked={showCityDots} onChange={setShowCityDots} disabled={!showUsDiagnostics} status={showCityDots?'City dots visible':usLayerStatus}/>
-              <LayerToggle label="Indexed Providers" checked={showIndexedProviders} onChange={checked=>toggleProviderLayer('indexed',checked)} disabled={datasetStatus.indexed.loading} status={providerLayerStatus('indexed',indexedLayerData.length,'0 loaded',showIndexedProviders)}/>
-              <LayerToggle label="BlueHive Providers" checked={showBlueHive} onChange={checked=>toggleProviderLayer('bluehive',checked)} disabled={datasetStatus.bluehive.loading} status={providerLayerStatus('bluehive',blueHiveData.length,'0 loaded',showBlueHive)}/>
-              <LayerToggle label="Dentists" checked={showDentists} onChange={checked=>toggleProviderLayer('dentists',checked)} disabled={datasetStatus.dentists.loading} status={providerLayerStatus('dentists',dentistData.length,'0 loaded',showDentists)}/>
-              <LayerToggle label="My Clinics" checked={showMyClinicsLayer} onChange={checked=>toggleProviderLayer('myClinics',checked)} disabled={datasetStatus.myClinics.loading} status={providerLayerStatus('myClinics',myClinicsData.length,'No uploaded clinics yet',showMyClinicsLayer)}/>
-              <button className="workflow-dataset-button" onClick={()=>setShowDatasetBrowser(true)}>▦ Provider Explorer</button>
-              <div className="provider-map-panel">
-                <div className="provider-map-panel-head"><strong>Provider Map Explorer</strong><span>{providerExplorerMode}</span></div>
-                <div className="provider-map-mode-row">
-                  {(['density','hex','pins','density-pins','dot-density'] as ProviderExplorerMode[]).map(mode=><button key={mode} className={providerExplorerMode===mode?'active':''} onClick={()=>void renderProviderExplorerMap(mode)}>{mode === 'density-pins' ? 'density + pins' : mode}</button>)}
-                </div>
-                <div className="provider-map-mode-row">
-                  <button onClick={useCurrentProviderMapBoundsInDatabase}>Use current map bounds in database</button>
-                  <button onClick={useCurrentProviderRadiusInDatabase}>Use current radius in database</button>
-                  <button onClick={()=>setShowDatasetBrowser(true)}>Open matching records in database</button>
-                  <button onClick={()=>void compareProviderExplorerArea(providerExplorerFilters)}>Compare stored vs live</button><button onClick={()=>void compareProviderExplorerArea(providerExplorerFilters)}>Show live-only gaps</button><button onClick={()=>void renderProviderExplorerLiveLayer()}>Refresh live layer</button><button onClick={()=>void renderProviderExplorerMap(providerExplorerMode, providerExplorerFilters)}>Refresh layer</button>
-                  <button onClick={()=>{ clearProviderExplorerMap(); setProviderExplorerFilters(INITIAL_PROVIDER_EXPLORER_FILTERS); setProviderExplorerStatus('Provider map/database filters cleared'); }}>Clear shared filters</button>
-                </div>
-                <label className="provider-live-toggle"><input type="checkbox" checked={providerExplorerLiveEnabled} onChange={e=>setProviderExplorerLiveEnabled(e.target.checked)} /> Live discovery layer <span>{liveResults.length.toLocaleString()} not stored</span></label>
-                <div className="provider-category-legend">{PROVIDER_CATEGORY_LEGEND.map(key=><span key={key}><i style={{background:PROVIDER_CATEGORY_STYLES[key].color}} />{PROVIDER_CATEGORY_STYLES[key].label}</span>)}</div>
-                <select className="provider-type-filter" value={masterProviderTypeFilter} onChange={e=>{setMasterProviderTypeFilter(e.target.value); setDatasetStatus(prev=>({...prev,myClinics:{loading:false,error:'',loaded:false}}));}}>
-                  {MASTER_PROVIDER_TYPE_OPTIONS.map(([value,label])=><option key={value} value={value}>{label}</option>)}
-                </select>
-                <div className="provider-map-status">{providerExplorerStatus}</div>
-                <div className="provider-map-status warning">Candidate save persists selected records; live results are never imported unless explicitly saved.</div>
-              </div>
-            </div>}
-          </div>
-          {showUsDiagnostics && (<>
-          <div className="sb-divider"/>
-          <div className="sb-section">
-            <div className="sb-lbl" style={{cursor:'pointer',userSelect:'none'}} onClick={()=>setCollapsedSections(p=>({...p,filters:!p.filters}))}>FILTER CITIES (U.S.) {collapsedSections.filters ? '▸' : '▾'}</div>
-            {!collapsedSections.filters && (<>
-            <div style={{display:'flex',gap:3,flexWrap:'wrap',marginBottom:8}}>
+              </div>}
+              <div className="diagnostic-city-filter">
+                <span>Difficulty filter</span>
               <button className={`fbtn${filterDiff===null?' active':''}`} onClick={()=>setFilterDiff(null)}>ALL</button>
               {[1,2,3,4,5].map(v=>(
                 <button key={v} className={`fbtn${filterDiff===v?' active':''}`} style={{color:DCOL[v]}} onClick={()=>setFilterDiff(filterDiff===v?null:v)}>{DLBL[v]}</button>
               ))}
-            </div>
-            </>
-            )}
-          </div>
-          <div className="sb-divider"/>
-          <div className="sb-section" style={{paddingBottom:10}}>
-            <div className="sb-lbl" style={{cursor:'pointer',userSelect:'none'}} onClick={()=>setCollapsedSections(p=>({...p,distribution:!p.distribution}))}>DISTRIBUTION (U.S.) {collapsedSections.distribution ? '▸' : '▾'}</div>
-            {!collapsedSections.distribution && (<>
-            {dist.map(d=>(
-              <div key={d.v} className="br">
-                <div className="br-hdr">
-                  <span style={{fontSize:9.5,color:DCOL[d.v],fontFamily:'IBM Plex Mono, monospace',fontWeight:700}}>{DLBL[d.v]}</span>
-                  <span style={{fontSize:9,color:'#3d5478'}}>{d.count}</span>
-                </div>
-                <div className="br-track"><div className="br-fill" style={{width:`${(d.count/maxDist)*100}%`,background:DCOL[d.v]}}/></div>
               </div>
-            ))}
-            </>)}
-          </div>
-          <div className="sb-divider"/>
-          <div className="sb-section" style={{paddingBottom:12}}>
-            <div className="sb-lbl" style={{cursor:'pointer',userSelect:'none'}} onClick={()=>setCollapsedSections(p=>({...p,legend:!p.legend}))}>LEGEND (U.S. DIFFICULTY) {collapsedSections.legend ? '▸' : '▾'}</div>
-            {!collapsedSections.legend && (<>
-            {[1,2,3,4,5].map(v=>(
-              <div key={v} className="legend-row">
-                <div className="legend-dot" style={{background:DCOL[v]}}/>
-                <span className="legend-lbl">{v} — {DLBL[v]}</span>
-              </div>
-            ))}
-            </>)}
-          </div>
-          </>)}
-        
+            </>}
+          </section>
+
           {activeTool === 'coverage' && (
-            <div className="sb-divider"/>
-          )}
-          {activeTool === 'coverage' && (
-            <div className="sb-section" style={{paddingBottom: 20}}>
-              
+            <section className="sb-section command-section tool-detail-section">
               <div className="rp-header">
-                <span className="rp-title"> Coverage Request</span>
+                <span className="rp-title">Coverage Request</span>
                 <button className="rp-close" onClick={()=>setActiveTool(activeTool === 'coverage' ? null : 'coverage')}>Close</button>
               </div>
               <div className="rp-field" style={{position:'relative'}}>
-                <label>CITY / ADDRESS / ZIP</label>
+                <label>City, address, or ZIP</label>
                 <input
                   className="rp-input"
                   placeholder="e.g. Birmingham AL"
@@ -3572,33 +3641,21 @@ export default function App() {
                 )}
               </div>
               <div className="rp-field">
-                <label>EXAM / SERVICE TYPE</label>
+                <label>Exam or service type</label>
                 <select className="rp-select" value={rpExam} onChange={e=>setRpExam(e.target.value)}>
                   {ALL_METRICS.map(m=><option key={m} value={m}>{MLBL[m]}</option>)}
                 </select>
               </div>
-              <button className="rp-run-btn" onClick={runLookup}>▶ ASSESS COVERAGE</button>
+              <button className="rp-run-btn" onClick={runLookup}><Activity size={15}/>Assess Coverage</button>
               {rpResult}
-            </div>
-          )}
-          {activeTool === 'liveFinder' && (
-            <div className="sb-divider"/>
-          )}
-          {activeTool === 'liveFinder' && (
-            <div className="sb-section" style={{paddingBottom: 20}}>
-              
-            </div>
+            </section>
           )}
           {activeTool === 'radius' && (
-            <div className="sb-divider"/>
+            <section className="sb-section command-section tool-detail-section">
+              <div className="command-section-title"><Crosshair size={15}/><span>Radius Tool</span></div>
+              <p className="command-section-help">Click anywhere on the map to set the extraction center. The radius controls stay visible over the map.</p>
+            </section>
           )}
-          {activeTool === 'radius' && (
-            <div className="sb-section" style={{paddingBottom: 20}}>
-              <span className="sb-lbl">RADIUS TOOL</span>
-              <div style={{fontSize: 11, color: 'var(--muted)', marginBottom: 10}}>Click anywhere on the map to set a radius search center.</div>
-            </div>
-          )}
-
         </aside>
 
         {/* ── DATASET BROWSER MODAL ── */}
@@ -3621,71 +3678,79 @@ export default function App() {
           onOpenMatchingInDatabase={(filters)=>{ setProviderExplorerFilters(filters); setShowDatasetBrowser(true); }}
         />
 
+        {showProviderExplorerDrawer && <button className="provider-drawer-backdrop" aria-label="Close Provider Explorer" onClick={()=>setShowProviderExplorerDrawer(false)}/>}
+        <aside
+          className={`provider-explorer-drawer${showProviderExplorerDrawer?' open':''}`}
+          role="dialog"
+          aria-label="Provider Explorer"
+          aria-modal={showProviderExplorerDrawer || undefined}
+          aria-hidden={!showProviderExplorerDrawer}
+          inert={!showProviderExplorerDrawer}
+        >
+          <div className="provider-drawer-header">
+            <div className="provider-drawer-title">
+              <span><SlidersHorizontal size={18}/></span>
+              <div><strong>Provider Explorer</strong><small>Map visualization and database scope</small></div>
+            </div>
+            <button aria-label="Close Provider Explorer" onClick={()=>setShowProviderExplorerDrawer(false)}><X size={18}/></button>
+          </div>
+          <div className="provider-drawer-body">
+            <section className="provider-drawer-section">
+              <div className="provider-drawer-section-title"><span>Visualization</span><small>{providerExplorerMode.replace('-', ' + ')}</small></div>
+              <div className="provider-visualization-grid">
+                {([
+                  ['density','Density'],
+                  ['hex','Hex field'],
+                  ['pins','8px points'],
+                  ['density-pins','Density + points'],
+                  ['dot-density','Dot density'],
+                ] as Array<[ProviderExplorerMode,string]>).map(([mode,label])=>(
+                  <button key={mode} className={providerExplorerMode===mode?'active':''} onClick={()=>void renderProviderExplorerMap(mode)}>{label}</button>
+                ))}
+              </div>
+            </section>
+
+            <section className="provider-drawer-section">
+              <label className="provider-field-label" htmlFor="provider-type-filter">Provider type</label>
+              <select id="provider-type-filter" className="provider-type-filter" value={masterProviderTypeFilter} onChange={event=>{setMasterProviderTypeFilter(event.target.value);setDatasetStatus(prev=>({...prev,myClinics:{loading:false,error:'',loaded:false}}));}}>
+                {MASTER_PROVIDER_TYPE_OPTIONS.map(([value,label])=><option key={value} value={value}>{label}</option>)}
+              </select>
+              <label className="provider-live-toggle">
+                <input type="checkbox" checked={providerExplorerLiveEnabled} onChange={event=>setProviderExplorerLiveEnabled(event.target.checked)}/>
+                <span><strong>Live discovery overlay</strong><small>{liveResults.length.toLocaleString()} results are not stored</small></span>
+              </label>
+            </section>
+
+            <section className="provider-drawer-section">
+              <div className="provider-drawer-section-title"><span>Database scope</span></div>
+              <div className="provider-action-list">
+                <button onClick={useCurrentProviderMapBoundsInDatabase}><MapIcon size={15}/><span><strong>Current map view</strong><small>Open records inside the visible bounds</small></span><ChevronRight size={15}/></button>
+                <button onClick={useCurrentProviderRadiusInDatabase}><Crosshair size={15}/><span><strong>Current radius</strong><small>{hasRadiusCenter?'Use the active center and distance':'Select a map or radius center first'}</small></span><ChevronRight size={15}/></button>
+                <button onClick={()=>setShowDatasetBrowser(true)}><Database size={15}/><span><strong>Matching records</strong><small>Browse, filter, and inspect source data</small></span><ChevronRight size={15}/></button>
+              </div>
+            </section>
+
+            <section className="provider-drawer-section">
+              <div className="provider-secondary-actions">
+                <button onClick={()=>void compareProviderExplorerArea(providerExplorerFilters)}><GitCompareArrows size={15}/>Compare stored and live</button>
+                <button onClick={()=>void renderProviderExplorerMap(providerExplorerMode,providerExplorerFilters)}><RefreshCw size={15}/>Refresh map</button>
+                <button disabled={!providerExplorerLiveEnabled} onClick={()=>void renderProviderExplorerLiveLayer()}><Radar size={15}/>Refresh live</button>
+                <button onClick={()=>{clearProviderExplorerMap();setProviderExplorerFilters(INITIAL_PROVIDER_EXPLORER_FILTERS);setProviderExplorerStatus('Provider map and database filters cleared');}}><X size={15}/>Clear filters</button>
+              </div>
+            </section>
+
+            <details className="provider-legend">
+              <summary>Provider category colors</summary>
+              <div className="provider-category-legend">{PROVIDER_CATEGORY_LEGEND.map(key=><span key={key}><i style={{background:PROVIDER_CATEGORY_STYLES[key].color}}/>{PROVIDER_CATEGORY_STYLES[key].label}</span>)}</div>
+            </details>
+            <div className="provider-map-status" role="status">{providerExplorerStatus}</div>
+            <div className="provider-persistence-note">Live results remain separate until you explicitly save a candidate.</div>
+          </div>
+        </aside>
+
         {/* ── MAP ── */}
         <div className="map-wrap">
           <div id="map" ref={mapDivRef}/>
-
-          {/* ── FLOATING ADDRESS SEARCH ── */}
-          <div ref={addrSearchRef} style={{
-            position:'absolute', top:14, left:'50%', transform:'translateX(-50%)',
-            zIndex:1500, width:440, maxWidth:'90vw',
-            pointerEvents:'none',
-          }}>
-            <div style={{
-              background:'linear-gradient(145deg,rgba(255,255,255,0.10),rgba(255,255,255,0.03)),rgba(8,18,42,0.82)',
-              border:'1px solid rgba(123,215,255,0.32)',
-              borderRadius:18,
-              backdropFilter:'blur(28px) saturate(180%)',
-              boxShadow:'inset 0 1.5px 0 rgba(255,255,255,0.18),0 16px 48px rgba(0,0,0,0.55),0 0 28px rgba(123,215,255,0.12)',
-              display:'flex', alignItems:'center', gap:8, padding:'0 14px',
-              pointerEvents:'auto',
-            }}>
-              <span style={{fontSize:14, opacity:0.6, flexShrink:0}}></span>
-              <input
-                value={addrSearch}
-                onChange={e=>handleAddrInput(e.target.value)}
-                onKeyDown={e=>{ if(e.key==='Escape'){setAddrSearch('');setAddrSuggestions([]);} }}
-                placeholder="Search any address, city, or landmark…"
-                style={{
-                  flex:1, background:'transparent', border:'none', outline:'none',
-                  color:'#e8f4ff', fontSize:12, padding:'11px 0',
-                  fontFamily:"'Inter',sans-serif",
-                }}
-              />
-              {addrLoading && <div className="lp-spin" style={{width:14,height:14,flexShrink:0}}/>}
-              {addrSearch && !addrLoading && (
-                <button onClick={()=>{setAddrSearch('');setAddrSuggestions([]);}} style={{background:'transparent',border:'none',color:'rgba(180,215,255,0.5)',cursor:'pointer',fontSize:16,flexShrink:0,padding:0,lineHeight:1,pointerEvents:'auto'}}>Close</button>
-              )}
-            </div>
-            {addrSuggestions.length>0 && (
-              <div style={{
-                marginTop:6,
-                background:'linear-gradient(145deg,rgba(14,28,52,0.97),rgba(8,18,38,0.95))',
-                border:'1px solid rgba(123,215,255,0.22)',
-                borderRadius:14,
-                overflow:'hidden',
-                backdropFilter:'blur(24px)',
-                boxShadow:'0 16px 48px rgba(0,0,0,0.70)',
-                pointerEvents:'auto',
-              }}>
-                {addrSuggestions.map((s,i)=>(
-                  <div key={i}
-                    onClick={()=>jumpToAddr(s.lat,s.lon,s.display_name)}
-                    style={{
-                      padding:'9px 14px', cursor:'pointer',
-                      borderBottom: i<addrSuggestions.length-1 ? '1px solid rgba(123,215,255,0.06)' : 'none',
-                      transition:'background 0.14s',
-                    }}
-                    onMouseEnter={e=>(e.currentTarget.style.background='rgba(123,215,255,0.08)')}
-                    onMouseLeave={e=>(e.currentTarget.style.background='transparent')}
-                  >
-                    <div style={{fontSize:11.5,color:'#e8f4ff',fontWeight:500}}>{s.display_name.split(',')[0]}</div>
-                    <div style={{fontSize:9,color:'rgba(180,215,255,0.5)',marginTop:2,fontFamily:"'IBM Plex Mono',monospace",overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.display_name}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
 
           {localPopInfo&&isUsPoint(localPopInfo.lat,localPopInfo.lng)&&(
             <div className="local-pop-card">
@@ -3815,16 +3880,16 @@ export default function App() {
                 }}
               >
                 <div className="sheet-handle-bar" />
-                <div className="sheet-handle-label">LIVE HEALTHCARE FINDER</div>
+                <div className="sheet-handle-label">Analysis Inspector</div>
               </div>
               <div className="lp-panel-header" style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                <span className="lp-title" style={{display: sheetState === 'collapsed' ? 'none' : undefined}}> LIVE HEALTHCARE FINDER</span>
+                <div className="analysis-panel-title" style={{display: sheetState === 'collapsed' ? 'none' : undefined}}><span className="lp-title">Analysis Inspector</span><small>Live provider finder</small></div>
                 <div style={{display:'flex',gap:6,alignItems:'center'}}>
                   <button
                     onClick={exportOutreachCsv}
                     style={{fontSize:8,padding:'4px 7px',borderRadius:4,border:'1px solid rgba(52,211,153,0.28)',background:'rgba(52,211,153,0.1)',color:'#34d399',fontFamily:"'IBM Plex Mono',monospace",cursor:'pointer'}}
                   >
-                    EXPORT CSV
+                    <Download size={13}/> Export CSV
                   </button>
                   <button className="rp-close" onClick={()=>{setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder');setSheetState('default');}}>Close</button>
                 </div>
@@ -3835,7 +3900,7 @@ export default function App() {
                   onClick={exportLeadershipPackage}
                   style={{fontSize:8,padding:'4px 7px',borderRadius:4,border:'1px solid rgba(56,189,248,0.28)',background:'rgba(56,189,248,0.1)',color:'#38bdf8',fontFamily:"'IBM Plex Mono',monospace",cursor:'pointer'}}
                 >
-                  LEADERSHIP EXPORT
+                  <Download size={13}/> Leadership export
                 </button>
               </div>
               <div style={{fontSize:10,color:'#3d5478',lineHeight:1.5}}>
@@ -4031,7 +4096,7 @@ export default function App() {
                     onClick={doCustomNpiSearch}
                     disabled={npiLoading}
                   >
-                    {npiLoading ? '⏳ SEARCHING...' : ' SEARCH NPI REGISTRY'}
+                    {npiLoading ? <><LoaderCircle className="command-spin" size={14}/>Searching</> : <><Search size={14}/>Search NPI Registry</>}
                   </button>
                 </div>
               )}
@@ -4056,7 +4121,7 @@ export default function App() {
                   <div style={{color:'#89d4fe',marginBottom:3}}>ADAPTER STATUS</div>
                   {npiUnifiedResponse.sourceResults.map((sr)=> (
                     <div key={sr.sourceId} style={{display:'flex',gap:6}}>
-                      <span style={{color:sr.ok?'#34d399':'#fca5a5'}}>{sr.ok?'✓':'✗'}</span>
+                      <span style={{color:sr.ok?'#1c8f6d':'#b42318'}}>{sr.ok?<Check size={13}/>:<X size={13}/>}</span>
                       <span>{sr.sourceLabel}: {sr.count}{sr.error ? ` · ${sr.error}` : ''}</span>
                     </div>
                   ))}
@@ -4090,7 +4155,7 @@ export default function App() {
               {!liveLoading&&liveError&&(
                 <div style={{padding:14,textAlign:'center',fontSize:10.5,color:'#ef4444',lineHeight:1.9}}>
                   {liveError}
-                  <br/><button style={{marginTop:8,padding:'4px 12px',borderRadius:3,background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',color:'#ef4444',fontFamily:"'IBM Plex Mono',monospace",fontSize:9,cursor:'pointer'}} onClick={()=>{if(lastRadiusRef.current)doLiveSearch(lastRadiusRef.current.lat,lastRadiusRef.current.lng);}}>↺ RETRY</button>
+                  <br/><button style={{marginTop:8,padding:'4px 12px',borderRadius:3,background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',color:'#ef4444',fontFamily:"'IBM Plex Mono',monospace",fontSize:9,cursor:'pointer'}} onClick={()=>{if(lastRadiusRef.current)doLiveSearch(lastRadiusRef.current.lat,lastRadiusRef.current.lng);}}><RefreshCw size={13}/>Retry</button>
                 </div>
               )}
               {npiCategory && npiResults.length > 0
@@ -4129,9 +4194,9 @@ export default function App() {
                           </div>
                         )}
                         <div className="lp-acts">
-                          {p.sourceUrl&&<a href={p.sourceUrl} target="_blank" rel="noopener" className="lp-act pri" onClick={e=>e.stopPropagation()}>{p.source} ↗</a>}
+                          {p.sourceUrl&&<a href={p.sourceUrl} target="_blank" rel="noopener" className="lp-act pri" onClick={e=>e.stopPropagation()}>{p.source}</a>}
                           {p.phone&&<a href={`tel:${p.phone}`} className="lp-act" onClick={e=>e.stopPropagation()}>Call</a>}
-                          {p.website&&<a href={p.website} target="_blank" rel="noopener" className="lp-act" onClick={e=>e.stopPropagation()}>Website ↗</a>}
+                          {p.website&&<a href={p.website} target="_blank" rel="noopener" className="lp-act" onClick={e=>e.stopPropagation()}>Website</a>}
                         </div>
                       </div>
                     );
@@ -4151,7 +4216,7 @@ export default function App() {
                         <div className="lp-tags">
                           <span className="lp-tag" style={{color:c.col,borderColor:c.col+'30',background:c.col+'0d'}}>{c.lbl}</span>
                           {r.hours&&<span className="lp-tag">{r.hours.substring(0,30)}</span>}
-                          {r.phone&&<span className="lp-tag">📞</span>}
+                          {r.phone&&<span className="lp-tag"><Phone size={11}/>Phone</span>}
                         </div>
                         {NATIVE_DRIVE_TIME_ENABLED&&resultEta&&(
                           <ProviderEtaBadge
@@ -4163,8 +4228,8 @@ export default function App() {
                           />
                         )}
                         <div className="lp-acts">
-                          <a href={gm} target="_blank" rel="noopener" className="lp-act pri" onClick={e=>e.stopPropagation()}>Google Maps ↗</a>
-                          {r.website&&<a href={r.website} target="_blank" rel="noopener" className="lp-act" onClick={e=>e.stopPropagation()}>Website ↗</a>}
+                          <a href={gm} target="_blank" rel="noopener" className="lp-act pri" onClick={e=>e.stopPropagation()}>Google Maps</a>
+                          {r.website&&<a href={r.website} target="_blank" rel="noopener" className="lp-act" onClick={e=>e.stopPropagation()}>Website</a>}
                           {r.phone&&<a href={`tel:${r.phone}`} className="lp-act" onClick={e=>e.stopPropagation()}>Call</a>}
                         </div>
                         <div style={{marginTop:6,display:'grid',gap:5}} onClick={e=>e.stopPropagation()}>
@@ -4199,7 +4264,7 @@ export default function App() {
       <div className={`modal-backdrop${activeTool==='directories'?' open':''}`} onClick={()=>setActiveTool(activeTool === 'directories' ? null : 'directories')}>
         <div className="modal-box workflow-modal workflow-directory-modal" style={{width:640}} onClick={e=>e.stopPropagation()}>
           <div className="modal-header">
-            <div><span className="modal-title">⌕ Provider Directories</span><div className="workflow-modal-description">Browse provider source categories and network directories.</div></div>
+            <div><span className="modal-title">Provider Directories</span><div className="workflow-modal-description">Browse provider source categories and network directories.</div></div>
             <button className="modal-close" onClick={()=>setActiveTool(activeTool === 'directories' ? null : 'directories')}>Close</button>
           </div>
           <div className="modal-body">
@@ -4207,7 +4272,7 @@ export default function App() {
             <div className="dir-grid">
               {PROVIDER_DIRS.map((d,i)=>(
                 <a key={i} className="dir-app" href={d.url} target="_blank" rel="noopener noreferrer">
-                  <div style={{fontSize:18}}>🔗</div>
+                  <ExternalLink size={18} aria-hidden="true"/>
                   <div className="dir-app-name">{d.name}</div>
                   <div className="dir-app-tag">{d.tag}</div>
                 </a>
@@ -4222,7 +4287,7 @@ export default function App() {
         <div className="modal-backdrop open" onClick={()=>setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>
           <div className="modal-box workflow-modal workflow-upload-modal" style={{width:680,maxHeight:'85vh',display:'flex',flexDirection:'column'}} onClick={e=>e.stopPropagation()}>
             <div className="modal-header">
-              <div><span className="modal-title">↑ Upload Clinics</span><div className="workflow-modal-description">Import your own clinic list from CSV or Excel.</div></div>
+              <div><span className="modal-title">Upload Clinics</span><div className="workflow-modal-description">Import your own clinic list from CSV or Excel.</div></div>
               <button className="modal-close" onClick={()=>setActiveTool(activeTool === 'myClinics' ? null : 'myClinics')}>Close</button>
             </div>
             <div className="modal-body" style={{flex:1,overflowY:'auto',padding:'16px 20px'}}>
@@ -4256,14 +4321,14 @@ export default function App() {
                       style={{padding:'8px 18px',background:'rgba(244,114,182,0.12)',borderColor:'rgba(244,114,182,0.3)',color:'#f472b6',opacity:uploadLoading?0.6:1}}
                       disabled={uploadLoading}
                       onClick={()=>clinicFileInputRef.current?.click()}>
-                      {uploadLoading ? '⏳ PROCESSING...' : ' CHOOSE FILE (.xlsx / .csv)'}
+                      {uploadLoading ? <><LoaderCircle className="command-spin" size={14}/>Processing</> : <><Upload size={14}/>Choose file (.xlsx / .csv)</>}
                     </button>
                     <input ref={clinicFileInputRef} type="file" accept=".xlsx,.xls,.csv" style={{display:'none'}}
                       onChange={handleClinicUpload} />
                   </div>
                 </div>
                 {uploadProgress && (
-                  <div style={{fontSize:9,color:uploadProgress.startsWith('✓')?'#34d399':uploadProgress.startsWith('Error')?'#fca5a5':'#67e8f9',fontFamily:"'IBM Plex Mono',monospace",lineHeight:1.5}}>
+                  <div style={{fontSize:9,color:uploadProgress.startsWith('Backend ingest complete')?'#1c8f6d':uploadProgress.startsWith('Error')?'#b42318':'#087f9a',fontFamily:"'IBM Plex Mono',monospace",lineHeight:1.5}}>
                     {uploadProgress}
                   </div>
                 )}
@@ -4311,7 +4376,7 @@ export default function App() {
                           <div style={{fontSize:12,fontWeight:700,color:'#eef4ff'}}>{p[0]}</div>
                           <div style={{fontSize:9,color:'#3d5478',fontFamily:'IBM Plex Mono,monospace',marginTop:2}}>{p[1]} · {p[4]===1?'Major':p[4]===2?'Mid-Size':'Small'}</div>
                           <div style={{display:'inline-block',padding:'2px 6px',borderRadius:2,fontSize:8.5,fontWeight:700,fontFamily:'IBM Plex Mono,monospace',marginTop:4,background:`${DCOL[v]}22`,color:DCOL[v],border:`1px solid ${DCOL[v]}44`}}>{DLBL[v]}</div>
-                          {dt&&<div style={{fontSize:9,color:'#34d399',marginTop:4,fontFamily:'IBM Plex Mono,monospace'}}>🚗 {dt.timeStr} · {dt.miles}mi</div>}
+                          {dt&&<div style={{fontSize:9,color:'#1c8f6d',marginTop:4,fontFamily:'IBM Plex Mono,monospace'}}>Drive: {dt.timeStr} · {dt.miles}mi</div>}
                           <div style={{fontSize:9,color:'#3d5478',marginTop:3}}>{p[16]} prov/100k · ~{p[17]}d</div>
                           <button onClick={()=>setPinnedCities(prev=>prev.filter((_,j)=>j!==i))} style={{marginTop:5,padding:'2px 8px',background:'transparent',border:'1px solid rgba(255,255,255,0.08)',color:'#3d5478',borderRadius:2,fontSize:8.5,cursor:'pointer',fontFamily:'IBM Plex Mono,monospace'}}>remove</button>
                         </th>;
@@ -4330,7 +4395,7 @@ export default function App() {
                       </tr>
                       {ALL_METRICS.map(m=>(
                         <tr key={m}>
-                          <td className="metric-label" style={{color:m===metric?'#93c5fd':'',fontWeight:m===metric?700:400}}>{m===metric?'▶ ':''}{MLBL[m]}</td>
+                          <td className="metric-label" style={{color:m===metric?'#087f9a':'',fontWeight:m===metric?700:400}}>{MLBL[m]}</td>
                           {pinnedCities.map((p,i)=>{
                             const v=getVal(p,m);
                             return <td key={i} style={{textAlign:'center'}}>
@@ -4353,10 +4418,10 @@ export default function App() {
       {showPdf&&(
         <div className="pdf-modal-wrap" onClick={()=>setShowPdf(false)}>
           <div className="pdf-toolbar" onClick={e=>e.stopPropagation()}>
-            <span style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:9,color:'#3b82f6',letterSpacing:3,textTransform:'uppercase'}}>◈ Report Preview</span>
+            <span style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:9,color:'#087f9a',letterSpacing:2,textTransform:'uppercase'}}>Report Preview</span>
             <div style={{display:'flex',gap:10}}>
-              <button style={{padding:'7px 18px',borderRadius:3,fontFamily:"'IBM Plex Mono',monospace",fontSize:9,fontWeight:700,cursor:'pointer',letterSpacing:1.5,textTransform:'uppercase',border:'1px solid rgba(6,182,212,0.4)',background:'rgba(6,182,212,0.15)',color:'#89d4fe'}} onClick={()=>{const b=new Blob([pdfHtml],{type:'text/html'});const u=URL.createObjectURL(b);window.open(u,'_blank');}}>↗ OPEN IN NEW TAB</button>
-              <button style={{padding:'7px 18px',borderRadius:3,fontFamily:"'IBM Plex Mono',monospace",fontSize:9,fontWeight:700,cursor:'pointer',letterSpacing:1.5,textTransform:'uppercase',border:'1px solid rgba(59,130,246,0.4)',background:'rgba(59,130,246,0.15)',color:'#93c5fd'}} onClick={()=>{const b=new Blob([pdfHtml],{type:'text/html'});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=pdfDlName;document.body.appendChild(a);a.click();setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(u);},1000);}}>↓ DOWNLOAD HTML</button>
+              <button style={{padding:'7px 18px',borderRadius:8,fontSize:9,fontWeight:700,cursor:'pointer',border:'1px solid rgba(8,127,154,.25)',background:'#e5f6f8',color:'#075b72',display:'inline-flex',alignItems:'center',gap:6}} onClick={()=>{const b=new Blob([pdfHtml],{type:'text/html'});const u=URL.createObjectURL(b);window.open(u,'_blank');}}><ExternalLink size={14}/>Open in new tab</button>
+              <button style={{padding:'7px 18px',borderRadius:8,fontSize:9,fontWeight:700,cursor:'pointer',border:'1px solid rgba(8,127,154,.25)',background:'#e5f6f8',color:'#075b72',display:'inline-flex',alignItems:'center',gap:6}} onClick={()=>{const b=new Blob([pdfHtml],{type:'text/html'});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=pdfDlName;document.body.appendChild(a);a.click();setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(u);},1000);}}><Download size={14}/>Download HTML</button>
               <button style={{padding:'7px 14px',background:'transparent',color:'#4a6888',border:'1px solid rgba(255,255,255,0.08)',borderRadius:3,fontFamily:"'IBM Plex Mono',monospace",fontSize:9,cursor:'pointer'}} onClick={()=>setShowPdf(false)}>Close</button>
             </div>
           </div>
@@ -4413,7 +4478,13 @@ function ProviderBox({data,examKey,cityName,locIdx,onPin}:{data:any;examKey:stri
       <div className="prov-stat"><div className="prov-stat-v">{data.citiesInRadius}</div><div className="prov-stat-l">Cities / Markets<br/><span style={{fontSize:8.5}}>in coverage zone</span></div></div>
       <div className="prov-stat"><div className="prov-stat-v" style={{color:DCOL[Math.round(parseFloat(data.avgDifficulty))||3]}}>{data.avgDifficulty}</div><div className="prov-stat-l">Avg Difficulty</div></div>
       {hasPin&&(
-        <button className="prov-pin-btn" style={pinned?{background:'rgba(16,185,129,0.08)',border:'1px solid rgba(16,185,129,0.3)',color:'#10b981'}:{background:'rgba(167,139,250,0.1)',border:'1px solid rgba(167,139,250,0.25)',color:'#a78bfa'}} onClick={()=>{if(!pinned){onPin(locIdx);setPinned(true);}}}>{pinned?'✓ PINNED':'+ PIN TO COMPARE'}</button>
+        <button
+          className="prov-pin-btn"
+          style={pinned?{background:'rgba(16,185,129,0.08)',border:'1px solid rgba(16,185,129,0.3)',color:'#10b981'}:{background:'rgba(8,127,154,.08)',border:'1px solid rgba(8,127,154,.25)',color:'#087f9a'}}
+          onClick={()=>{if(!pinned){onPin(locIdx);setPinned(true);}}}
+        >
+          {pinned?<><Check size={13}/>Pinned</>:<>Pin to compare</>}
+        </button>
       )}
     </div>
   );
@@ -4454,7 +4525,7 @@ function DriveTimeBox({fromLat,fromLng,fromName,locB}:{fromLat:number;fromLng:nu
 
   return (
     <div className="drivetime-box">
-      <div className="drivetime-lbl">🚗 DRIVE TIME FROM HERE</div>
+      <div className="drivetime-lbl">Drive time from here</div>
       {destBLoading&&(
         <div style={{fontSize:10,color:'#89d4fe',marginBottom:6}}>Calculating route...</div>
       )}
@@ -4498,7 +4569,6 @@ function NearestEasier({items,onFly}:{items:any[];onFly:(lat:number,lng:number,n
       <div style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:8.5,color:'#3d5478',letterSpacing:1.5,marginBottom:7}}>NEAREST EASIER CITIES</div>
       {items.map((r,i)=>{
         const col=DCOL[r.v];
-        const tierIcon=r.tier===1?'◉':r.tier===2?'':'○';
         return (
           <div key={i} className="nearer-row" onClick={()=>onFly(r.lat,r.lng,r.name,r.state,r.v,'primaryCare')}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
@@ -4506,7 +4576,7 @@ function NearestEasier({items,onFly}:{items:any[];onFly:(lat:number,lng:number,n
               <span style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:9,color:'rgba(99,179,237,0.7)'}}>{r.dist} mi</span>
             </div>
             <div style={{display:'flex',alignItems:'center',gap:8,marginTop:3}}>
-              <span style={{fontSize:9,color:'#3d5478'}}>{tierIcon} {r.tier===1?'Major Metro':r.tier===2?'Mid-Size':'Small City'}</span>
+              <span style={{fontSize:9,color:'#3d5478'}}>{r.tier===1?'Major Metro':r.tier===2?'Mid-Size':'Small City'}</span>
               <span style={{fontFamily:"'IBM Plex Mono',monospace",fontSize:9,color:col,fontWeight:600}}>{DLBL[r.v]}</span>
             </div>
           </div>

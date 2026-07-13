@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { createHash } from "node:crypto";
 import { getPool } from "@workspace/db";
 import { isPersistenceConfigured } from "../lib/networkMapPersistence";
+import { hasValidCoordinates, parseOptionalNumber } from "../lib/providerCoordinates";
 
 const router = Router();
 const SOURCE_KEY = "my_clinics_upload";
@@ -48,21 +49,12 @@ function first(row: IncomingClinicRow, ...keys: string[]): string {
   return "";
 }
 
-function numberOrNull(value: unknown): number | null {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
 function normalizeName(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function contentHash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
-}
-
-function validCoordinate(lat: number | null, lng: number | null): lat is number {
-  return lat !== null && lng !== null && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 && (lat !== 0 || lng !== 0);
 }
 
 function classify(row: IncomingClinicRow, name: string, notes: string, taxonomy: string): { primaryProviderType: string; capabilityTags: string[] } {
@@ -105,12 +97,12 @@ function normalizeRow(row: IncomingClinicRow, index: number): NormalizedClinicRo
   const npi = first(row, "npi", "npiNumber", "npi_number");
   const taxonomyCode = first(row, "taxonomyCode", "taxonomy_code");
   const taxonomyDescription = first(row, "taxonomyDescription", "taxonomy_description", "taxonomy");
-  const lat = numberOrNull(first(row, "lat", "latitude"));
-  const lng = numberOrNull(first(row, "lng", "lon", "long", "longitude"));
+  const lat = parseOptionalNumber(first(row, "lat", "latitude"));
+  const lng = parseOptionalNumber(first(row, "lng", "lon", "long", "longitude"));
   const { primaryProviderType, capabilityTags } = classify(row, name, notes, taxonomyDescription);
   const normalizedName = normalizeName(name);
   const sourceRecordId = first(row, "id", "sourceId", "source_id") || contentHash({ name, address, city, state, postalCode, npi }).slice(0, 24);
-  const qualityScore = validCoordinate(lat, lng) ? 0.95 : 0.55;
+  const qualityScore = hasValidCoordinates(lat, lng) ? 0.95 : 0.55;
   return { sourceRecordId, fileRowNumber: index + 1, name, normalizedName, address, city, state, postalCode, countryCode, lat, lng, phone, website, notes, npi, taxonomyCode, taxonomyDescription, primaryProviderType, capabilityTags, qualityScore, raw: row };
 }
 
@@ -181,11 +173,11 @@ router.post("/my-clinics/upload", async (req: Request, res: Response) => {
         ) VALUES (
           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24::jsonb
         ) RETURNING id`,
-        [raw.rows[0].id, batchId, SOURCE_KEY, normalized.sourceRecordId, normalized.name, normalized.normalizedName, normalized.address, normalized.address, normalized.city, normalized.state, normalized.postalCode, normalized.countryCode, normalized.lat, normalized.lng, normalized.phone, normalized.website, normalized.npi || null, normalized.taxonomyCode || null, normalized.taxonomyDescription || null, normalized.primaryProviderType, normalized.capabilityTags, normalized.qualityScore, validCoordinate(normalized.lat, normalized.lng) ? "staged" : "needs_geocode", JSON.stringify(normalized)],
+        [raw.rows[0].id, batchId, SOURCE_KEY, normalized.sourceRecordId, normalized.name, normalized.normalizedName, normalized.address, normalized.address, normalized.city, normalized.state, normalized.postalCode, normalized.countryCode, normalized.lat, normalized.lng, normalized.phone, normalized.website, normalized.npi || null, normalized.taxonomyCode || null, normalized.taxonomyDescription || null, normalized.primaryProviderType, normalized.capabilityTags, normalized.qualityScore, hasValidCoordinates(normalized.lat, normalized.lng) ? "staged" : "needs_geocode", JSON.stringify(normalized)],
       );
       stagedRows += 1;
 
-      if (!validCoordinate(normalized.lat, normalized.lng)) continue;
+      if (!hasValidCoordinates(normalized.lat, normalized.lng)) continue;
 
       const masterKey = masterKeyFor(normalized);
       const master = await client.query(

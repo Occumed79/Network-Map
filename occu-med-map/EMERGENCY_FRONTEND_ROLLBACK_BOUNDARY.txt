@@ -1,0 +1,1 @@
+Rollback scope: production frontend entrypoint only. P1 and P3 backend work stays in place. No Neon, Render, or provider data changes.

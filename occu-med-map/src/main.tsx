@@ -1,7 +1,5 @@
 import { createRoot } from "react-dom/client";
 import "./adminApiRuntime";
-import "./providerLayerRequestRuntime";
-import "./providerLayerTelemetryRuntime";
 import "./mapboxLeafletRuntime";
 import "./mapToolsCommandPanel";
 import "./rightPanelCompactor";
@@ -27,4 +25,33 @@ import "./app-shell-layout.css";
 import "./workflow-ui.css";
 import "./network-command-center.css";
 
-createRoot(document.getElementById("root")!).render(<App />);
+const root = createRoot(document.getElementById("root")!);
+const phaseTwoPreview = new URLSearchParams(window.location.search).get("p2-preview") === "1";
+
+async function boot() {
+  if (!phaseTwoPreview) {
+    await Promise.all([
+      import("./providerLayerRequestRuntime"),
+      import("./providerLayerTelemetryRuntime"),
+    ]);
+    root.render(<App />);
+    return;
+  }
+
+  await Promise.all([
+    import("./phaseTwoPreviewIsolation"),
+    import("./phaseTwoMapBridge"),
+    import("./phase-two-shell.css"),
+  ]);
+  const { default: PhaseTwoShell } = await import("./PhaseTwoShell");
+  root.render(
+    <PhaseTwoShell>
+      <App />
+    </PhaseTwoShell>,
+  );
+}
+
+void boot().catch((error) => {
+  console.error("Network Map startup failed", error);
+  root.render(<App />);
+});

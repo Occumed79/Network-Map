@@ -188,6 +188,15 @@ export default function PhaseTwoShell({ children }: PhaseTwoShellProps) {
     overlayRef.current = null;
   }, []);
 
+  const resetViewportResults = useCallback((nextStatus: string) => {
+    clearOverlay();
+    setProviders([]);
+    setTotal(0);
+    setListHasMore(false);
+    setWarning('');
+    setStatus(nextStatus);
+  }, [clearOverlay]);
+
   const installOverlay = useCallback((layers: L.Layer[]) => {
     const map = window.__occumedPhaseTwoMap;
     if (!map) return;
@@ -305,26 +314,21 @@ export default function PhaseTwoShell({ children }: PhaseTwoShellProps) {
 
   const refreshViewport = useCallback(async (current: PhaseTwoMapSnapshot) => {
     requestRef.current?.abort();
-    const controller = new AbortController();
-    requestRef.current = controller;
+    requestRef.current = null;
 
     if (!layersEnabled) {
-      clearOverlay();
-      setProviders([]);
-      setTotal(0);
-      setStatus('P2 provider layers are paused.');
-      setWarning('');
+      setLoading(false);
+      resetViewportResults('P2 provider layers are paused.');
       return;
     }
     if (!filters.includeStored && !filters.includeSaved && !filters.includeCandidates && !filters.includeLive) {
-      clearOverlay();
-      setProviders([]);
-      setTotal(0);
-      setStatus('Enable at least one data layer.');
-      setWarning('');
+      setLoading(false);
+      resetViewportResults('Enable at least one data layer.');
       return;
     }
 
+    const controller = new AbortController();
+    requestRef.current = controller;
     setLoading(true);
     setWarning('');
     setStatus(`Loading ${modeLabel(visualization).toLowerCase()} for the current viewport…`);
@@ -370,16 +374,32 @@ export default function PhaseTwoShell({ children }: PhaseTwoShellProps) {
       setStatus(`${Number(aggregateData.total || 0).toLocaleString()} providers represented by ${cells.length.toLocaleString()} viewport cells.`);
     } catch (error) {
       if (controller.signal.aborted) return;
-      clearOverlay();
-      setProviders([]);
-      setTotal(0);
-      setListHasMore(false);
-      setStatus('P2 provider layer request failed.');
+      resetViewportResults('P2 provider layer request failed.');
       setWarning(error instanceof Error ? error.message : 'Unknown provider layer error');
     } finally {
-      if (!controller.signal.aborted) setLoading(false);
+      if (requestRef.current === controller) {
+        requestRef.current = null;
+        setLoading(false);
+      }
     }
-  }, [clearOverlay, drawDensity, drawGrid, drawPins, fetchAllPins, fetchRecordPage, filters, layersEnabled, listPage, visualization]);
+  }, [drawDensity, drawGrid, drawPins, fetchAllPins, fetchRecordPage, filters, layersEnabled, listPage, resetViewportResults, visualization]);
+
+  const toggleProviderIntelligence = useCallback(() => {
+    const nextEnabled = !layersEnabled;
+    requestRef.current?.abort();
+    requestRef.current = null;
+    setLoading(false);
+    setLayersEnabled(nextEnabled);
+
+    if (!nextEnabled) {
+      resetViewportResults('P2 provider layers are paused.');
+      return;
+    }
+
+    setStatus(snapshot ? 'Starting provider intelligence for the current viewport…' : 'Waiting for the map…');
+    setWarning('');
+    setRefreshToken((token) => token + 1);
+  }, [layersEnabled, resetViewportResults, snapshot]);
 
   useEffect(() => {
     const receive = (event: Event) => {
@@ -420,6 +440,8 @@ export default function PhaseTwoShell({ children }: PhaseTwoShellProps) {
 
   useEffect(() => () => {
     requestRef.current?.abort();
+    requestRef.current = null;
+    setLoading(false);
     clearOverlay();
   }, [clearOverlay]);
 
@@ -471,10 +493,15 @@ export default function PhaseTwoShell({ children }: PhaseTwoShellProps) {
 
       <section className="p2-console-section p2-layer-section">
         <div className="p2-section-heading"><Layers3 size={15} /><strong>Layer Manager</strong><span>{snapshot ? `Zoom ${snapshot.zoom}` : 'Map connecting'}</span></div>
-        <label className="p2-master-toggle">
-          <input type="checkbox" checked={layersEnabled} onChange={(event) => setLayersEnabled(event.target.checked)} />
-          <span><strong>Provider intelligence</strong><small>{layersEnabled ? `${displayedMode} enabled` : 'Paused'}</small></span>
-        </label>
+        <button
+          type="button"
+          className={`p2-master-toggle${layersEnabled ? ' enabled' : ' paused'}`}
+          aria-pressed={layersEnabled}
+          onClick={toggleProviderIntelligence}
+        >
+          <span className="p2-master-toggle-copy"><strong>Provider intelligence</strong><small>{layersEnabled ? `${displayedMode} enabled` : 'Paused'}</small></span>
+          <span className="p2-master-toggle-action">{loading && layersEnabled ? 'Loading…' : layersEnabled ? 'Pause' : 'Start'}</span>
+        </button>
         <div className="p2-toggle-grid">
           <label><input type="checkbox" checked={filters.includeStored} onChange={(event) => updateFilter('includeStored', event.target.checked)} /><span className="p2-dot stored" />Stored</label>
           <label><input type="checkbox" checked={filters.includeSaved} onChange={(event) => updateFilter('includeSaved', event.target.checked)} /><span className="p2-dot saved" />My Clinics</label>
@@ -509,13 +536,13 @@ export default function PhaseTwoShell({ children }: PhaseTwoShellProps) {
         <div className="p2-section-heading">
           <LocateFixed size={15} />
           <strong>Viewport Results</strong>
-          <button type="button" onClick={() => setRefreshToken((token) => token + 1)} disabled={loading} aria-label="Refresh viewport results"><RefreshCw size={14} className={loading ? 'spin' : ''} /></button>
+          <button type="button" onClick={() => setRefreshToken((token) => token + 1)} disabled={loading && layersEnabled} aria-label="Refresh viewport results"><RefreshCw size={14} className={loading && layersEnabled ? 'spin' : ''} /></button>
         </div>
         <div className="p2-result-summary">
           <strong>{total.toLocaleString()}</strong>
           <span>{displayedMode} · current map viewport</span>
         </div>
-        <div className={`p2-status${warning ? ' warning' : ''}`}><span>{status}</span>{warning && <small>{warning}</small>}</div>
+        <div className={`p2-status${warning ? ' warning' : ''}`} aria-live="polite"><span>{status}</span>{warning && <small>{warning}</small>}</div>
         <div className="p2-results-list">
           {!loading && providers.length === 0 && <div className="p2-empty">No matching providers in this viewport.</div>}
           {providers.map((provider) => <button type="button" className="p2-result-card" key={provider.id} onClick={() => flyToProvider(provider)}>

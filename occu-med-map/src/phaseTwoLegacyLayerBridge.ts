@@ -25,6 +25,7 @@ type P2ExplorerPayload = {
 };
 
 let fetchInstalled = false;
+let retirementQueued = false;
 
 function requestMethod(input: RequestInfo | URL, init?: RequestInit): string {
   if (init?.method) return init.method.toUpperCase();
@@ -236,21 +237,47 @@ function retireLegacyProviderControls(): void {
   forceIndividualModeForDynamicSources();
 }
 
+function scheduleLegacyRetirement(): void {
+  if (retirementQueued) return;
+  retirementQueued = true;
+  const run = () => {
+    retirementQueued = false;
+    retireLegacyProviderControls();
+  };
+  if (document.visibilityState === 'hidden') window.setTimeout(run, 32);
+  else window.requestAnimationFrame(run);
+}
+
 export function installPhaseTwoLegacyLayerBridge(): void {
   installFetchGuard();
 
-  const run = () => retireLegacyProviderControls();
+  const run = () => scheduleLegacyRetirement();
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run, { once: true });
   else window.setTimeout(run, 0);
 
-  const observer = new MutationObserver(run);
+  // React and Leaflet create many nodes during startup. Observe structural changes
+  // only and coalesce them to one scan per animation frame. Watching every class,
+  // value, checked, and disabled mutation created a self-amplifying main-thread loop.
+  const observer = new MutationObserver(scheduleLegacyRetirement);
   observer.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['checked', 'disabled', 'class', 'value'],
     childList: true,
     subtree: true,
   });
-  window.setTimeout(() => observer.disconnect(), 30_000);
+
+  const onControlChange = (event: Event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest('.p2-layer-console, .workflow-layer, .provider-explorer-drawer')) {
+      scheduleLegacyRetirement();
+    }
+  };
+  document.addEventListener('change', onControlChange, true);
+
+  const retryTimers = [250, 1000, 2500].map((delay) => window.setTimeout(scheduleLegacyRetirement, delay));
+  window.setTimeout(() => {
+    observer.disconnect();
+    retryTimers.forEach((timer) => window.clearTimeout(timer));
+  }, 5000);
 }
 
 installPhaseTwoLegacyLayerBridge();

@@ -97,11 +97,21 @@ assert.doesNotMatch(shell, /visibleCapped:\s*true/);
 const bridge = readFileSync(resolve(here, '../src/phaseTwoMapBridge.ts'), 'utf8');
 assert.match(bridge, /occumed:p2-map-change/);
 assert.match(bridge, /moveend zoomend resize/);
+assert.match(bridge, /registerMap\(map\);/);
+assert.doesNotMatch(bridge, /setTimeout\(\(\) => registerMap\(map\),\s*0\)/);
 
 const legacyBridge = readFileSync(resolve(here, '../src/phaseTwoLegacyLayerBridge.ts'), 'utf8');
 assert.match(legacyBridge, /url\.searchParams\.get\(P2_REQUEST_MARKER\)/);
 assert.match(legacyBridge, /Indexed Providers/);
 assert.match(legacyBridge, /Provider Layers/);
 assert.match(legacyBridge, /input\.click\(\)/);
+assert.match(legacyBridge, /scheduleLegacyRetirement/);
+assert.match(legacyBridge, /requestAnimationFrame\(run\)/);
+assert.doesNotMatch(legacyBridge, /attributes:\s*true/);
+assert.doesNotMatch(legacyBridge, /attributeFilter:/);
+
+const diagnosticsGate = readFileSync(resolve(here, '../src/usDiagnosticsGate.ts'), 'utf8');
+assert.match(diagnosticsGate, /scheduleDiagnosticsSync/);
+assert.match(diagnosticsGate, /clearTimeout\(syncTimer\)/);
 
 console.log('P2 map and unified layer-manager smoke tests passed');

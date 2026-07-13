@@ -17,6 +17,7 @@ declare global {
 }
 
 const INSTALL_KEY = '__occumedPhaseTwoMapBridgeInstalled';
+const REGISTERED_KEY = '__occumedPhaseTwoMapBridgeRegistered';
 const leafletRuntime = L as typeof L & Record<string, unknown>;
 
 function snapshot(map: L.Map): PhaseTwoMapSnapshot {
@@ -37,6 +38,10 @@ function emitMapState(map: L.Map, eventName: string): void {
 }
 
 function registerMap(map: L.Map): void {
+  const registeredMap = map as L.Map & Record<string, unknown>;
+  if (registeredMap[REGISTERED_KEY]) return;
+  registeredMap[REGISTERED_KEY] = true;
+
   window.__occumedPhaseTwoMap = map;
   emitMapState(map, 'occumed:p2-map-ready');
   const emitChange = () => emitMapState(map, 'occumed:p2-map-change');
@@ -54,7 +59,9 @@ export function installPhaseTwoMapBridge(): void {
   const currentMapFactory = L.map;
   (L as typeof L & { map: typeof L.map }).map = (...args: Parameters<typeof L.map>) => {
     const map = currentMapFactory(...args);
-    window.setTimeout(() => registerMap(map), 0);
+    // Register immediately. Deferring this with setTimeout(0) allowed startup DOM
+    // work to starve the timer, leaving the UI permanently at “Map connecting”.
+    registerMap(map);
     return map;
   };
 }

@@ -1,6 +1,14 @@
-type ProviderCoordinate = {
-  lat: number;
-  lng: number;
+type ProviderCoordinate = { lat: number; lng: number };
+
+type Viewport = {
+  centerLat: number;
+  centerLng: number;
+  latSpan: number;
+  lngSpan: number;
+  north: number;
+  south: number;
+  east: number;
+  west: number;
 };
 
 type CachedResponse = {
@@ -18,30 +26,16 @@ type CachedResponse = {
   pagesLoaded: number;
 };
 
-type Viewport = {
-  centerLat: number;
-  centerLng: number;
-  latSpan: number;
-  lngSpan: number;
-  north: number;
-  south: number;
-  east: number;
-  west: number;
-};
-
-type CaptureResult = {
-  entry: CachedResponse | null;
-  warning: string;
-};
+type CaptureResult = { entry: CachedResponse | null; warning: string };
 
 const EXACT_CACHE_MS = 45_000;
 const MATERIAL_VIEWPORT_REUSE_MS = 5 * 60_000;
 const STALE_FALLBACK_MS = 15 * 60_000;
 const MAX_CACHE_ENTRIES = 80;
 const MAX_CONCURRENT_SOURCE_LOADS = 2;
-// Page size only. Provider toggles are never capped at this value: every page
-// for the active viewport is fetched and combined before App.tsx sees it.
-const PAGE_SIZE = 2000;
+// These values are database page sizes only. Every page for the active
+// viewport is combined before App.tsx receives the response.
+const DEFAULT_PAGE_SIZE = 2000;
 const MAX_PAGE_SIZE = 5000;
 
 const cacheByRequest = new Map<string, CachedResponse>();
@@ -53,8 +47,9 @@ let activeNetworkLoads = 0;
 
 function asUrl(input: RequestInfo | URL): URL | null {
   try {
-    if (input instanceof Request) return new URL(input.url, window.location.origin);
-    return new URL(input.toString(), window.location.origin);
+    return input instanceof Request
+      ? new URL(input.url, window.location.origin)
+      : new URL(input.toString(), window.location.origin);
   } catch {
     return null;
   }
@@ -66,8 +61,10 @@ function requestMethod(input: RequestInfo | URL, init?: RequestInit): string {
 
 function pageSize(value: string | null): number {
   const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return PAGE_SIZE;
-  return Math.min(Math.max(Math.trunc(parsed), PAGE_SIZE), MAX_PAGE_SIZE);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_PAGE_SIZE;
+  // Respect a valid caller-supplied page size. This is not a visible-record cap
+  // because fetchAllProviderPages continues until all matching rows are loaded.
+  return Math.min(Math.max(Math.trunc(parsed), 1), MAX_PAGE_SIZE);
 }
 
 function normalizeProviderLayerUrl(url: URL): URL {
@@ -75,10 +72,9 @@ function normalizeProviderLayerUrl(url: URL): URL {
   next.searchParams.set("all", "false");
   next.searchParams.set("limit", String(pageSize(next.searchParams.get("limit"))));
   next.searchParams.set("page", "1");
-  const hasBounds = ["north", "south", "east", "west"].every((key) => {
-    const value = Number(next.searchParams.get(key));
-    return Number.isFinite(value);
-  });
+  const hasBounds = ["north", "south", "east", "west"].every((key) =>
+    Number.isFinite(Number(next.searchParams.get(key))),
+  );
   if (hasBounds && !next.searchParams.has("useBounds") && !next.searchParams.has("bounds")) {
     next.searchParams.set("useBounds", "true");
   }
@@ -144,11 +140,11 @@ function longitudeInViewport(lng: number, viewport: Viewport): boolean {
 
 function countRenderable(coordinates: ProviderCoordinate[], viewport: Viewport | null): number {
   if (!viewport) return coordinates.length;
-  return coordinates.filter(({ lat, lng }) => (
+  return coordinates.filter(({ lat, lng }) =>
     lat >= viewport.south &&
     lat <= viewport.north &&
-    longitudeInViewport(lng, viewport)
-  )).length;
+    longitudeInViewport(lng, viewport),
+  ).length;
 }
 
 function responseFromCache(entry: CachedResponse, stale = false): Response {
@@ -207,7 +203,7 @@ function dispatchFailure(source: string, warning: string): void {
 }
 
 function transientFailureResponse(source: string, warning: string): Response {
-  const body = {
+  return new Response(JSON.stringify({
     providers: [],
     count: 0,
     loaded: 0,
@@ -218,13 +214,14 @@ function transientFailureResponse(source: string, warning: string): Response {
     warning,
     transientFailure: true,
     visibleCapped: false,
-  };
-  const headers = new Headers({
-    "content-type": "application/json; charset=utf-8",
-    "X-Network-Map-Transient-Failure": "true",
-    "X-Network-Map-Visible-Cap": "none",
+  }), {
+    status: 200,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "X-Network-Map-Transient-Failure": "true",
+      "X-Network-Map-Visible-Cap": "none",
+    },
   });
-  return new Response(JSON.stringify(body), { status: 200, headers });
 }
 
 function asPayload(value: unknown): Record<string, unknown> | null {
@@ -242,14 +239,11 @@ function providerCoordinates(payload: Record<string, unknown>): ProviderCoordina
     const lat = Number(row.lat);
     const lng = Number(row.lng);
     if (
-      Number.isFinite(lat) &&
-      Number.isFinite(lng) &&
+      Number.isFinite(lat) && Number.isFinite(lng) &&
       lat >= -90 && lat <= 90 &&
       lng >= -180 && lng <= 180 &&
       (lat !== 0 || lng !== 0)
-    ) {
-      coordinates.push({ lat, lng });
-    }
+    ) coordinates.push({ lat, lng });
   }
   return coordinates;
 }
@@ -290,7 +284,7 @@ async function fetchAllProviderPages(url: URL, init?: RequestInit): Promise<Resp
 
   const providers: unknown[] = [...firstPayload.providers];
   const total = Math.max(Number(firstPayload.total ?? providers.length) || providers.length, providers.length);
-  const limit = Math.max(Number(url.searchParams.get("limit")) || PAGE_SIZE, 1);
+  const limit = Math.max(Number(url.searchParams.get("limit")) || DEFAULT_PAGE_SIZE, 1);
   let page = 1;
   let hasMore = Boolean(firstPayload.hasMore) || providers.length < total;
 
@@ -311,8 +305,8 @@ async function fetchAllProviderPages(url: URL, init?: RequestInit): Promise<Resp
     providers.push(...pageProviders);
     hasMore = Boolean(pagePayload.hasMore) || providers.length < total;
 
-    // This guard is derived from the database-reported total and only protects
-    // against a malformed endpoint repeating the same page forever.
+    // The guard is derived from the database-reported total. It prevents a
+    // malformed endpoint from repeating pages forever without capping valid rows.
     const expectedPages = Math.ceil(total / limit);
     if (page > expectedPages + 1) break;
   }
@@ -352,9 +346,8 @@ async function captureResponse(
   if (!response.ok) {
     return { entry: null, warning: `Provider layer request failed with HTTP ${response.status}` };
   }
-  const clone = response.clone();
-  const body = await clone.text();
-  let payload: Record<string, unknown> = {};
+  const body = await response.clone().text();
+  let payload: Record<string, unknown>;
   try {
     payload = body ? JSON.parse(body) as Record<string, unknown> : {};
   } catch {
@@ -391,13 +384,10 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const originalUrl = asUrl(input);
   const method = requestMethod(input, init);
   if (
-    !originalUrl ||
-    method !== "GET" ||
+    !originalUrl || method !== "GET" ||
     originalUrl.origin !== window.location.origin ||
     !originalUrl.pathname.startsWith("/api/provider-layers/")
-  ) {
-    return nativeFetch(input, init);
-  }
+  ) return nativeFetch(input, init);
 
   const url = normalizeProviderLayerUrl(originalUrl);
   const source = sourceFromUrl(url);
@@ -415,8 +405,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 
   const latest = latestBySource.get(source);
   if (
-    latest &&
-    latest.filterKey === currentFilterKey &&
+    latest && latest.filterKey === currentFilterKey &&
     now - latest.storedAt <= MATERIAL_VIEWPORT_REUSE_MS &&
     materiallySameViewport(latest.viewport, viewport)
   ) {
@@ -431,12 +420,23 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       dispatchStatus(shared.entry, true, false, viewport);
       return responseFromCache(shared.entry);
     }
+    if (latest && now - latest.storedAt <= STALE_FALLBACK_MS) {
+      dispatchStatus(latest, true, true, viewport, shared.warning);
+      return responseFromCache(latest, true);
+    }
+    const warning = shared.warning || "Provider layer temporarily unavailable";
+    dispatchFailure(source, warning);
+    return transientFailureResponse(source, warning);
   }
 
   const request = withNetworkSlot(async () => {
     try {
-      const response = await fetchAllProviderPages(url, init);
-      return await captureResponse(response, source, viewport, currentFilterKey);
+      return await captureResponse(
+        await fetchAllProviderPages(url, init),
+        source,
+        viewport,
+        currentFilterKey,
+      );
     } catch (error) {
       return {
         entry: null,
@@ -461,8 +461,8 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 
   const warning = result.warning || "Provider layer temporarily unavailable";
   dispatchFailure(source, warning);
-  // Always return a valid temporary response. App.tsx therefore preserves the
-  // user's enabled toggle instead of switching it off after a transient outage.
+  // Return a valid temporary payload so App.tsx preserves the user's enabled
+  // toggle and retries later instead of switching the source off.
   return transientFailureResponse(source, warning);
 }) as typeof window.fetch;
 

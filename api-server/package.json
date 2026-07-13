@@ -10,7 +10,8 @@
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "pnpm --filter @workspace/db exec tsc -p tsconfig.json && tsc -p tsconfig.json --noEmit",
     "test:provider-explorer": "node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/provider-explorer-smoke.ts",
-    "test:p1-data": "node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/p1-data-stabilization-smoke.ts"
+    "test:p1-data": "node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/p1-data-stabilization-smoke.ts",
+    "test:p3-npi": "node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/p3-central-npi-smoke.ts"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",

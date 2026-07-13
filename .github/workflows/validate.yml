@@ -52,6 +52,9 @@ jobs:
       - name: Run P2 map and layer-manager smoke tests
         run: pnpm --filter @workspace/occu-med-map test:p2-map
 
+      - name: Run P3 central NPI adapter smoke tests
+        run: pnpm --filter @workspace/api-server test:p3-npi
+
       - name: Build frontend
         run: pnpm --filter @workspace/occu-med-map build
 

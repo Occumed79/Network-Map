@@ -77,6 +77,13 @@ function installFetchGuard(): void {
   };
 }
 
+function hide(node: HTMLElement | null): void {
+  if (!node) return;
+  node.hidden = true;
+  node.setAttribute('aria-hidden', 'true');
+  node.classList.add('p2-legacy-provider-controls');
+}
+
 function retireLegacyProviderControls(): void {
   for (const label of LEGACY_PROVIDER_LABELS) {
     const input = document.querySelector<HTMLInputElement>(`input[type="checkbox"][aria-label="${label}"]`);
@@ -85,19 +92,15 @@ function retireLegacyProviderControls(): void {
 
   document.querySelectorAll<HTMLElement>('.command-section-title').forEach((heading) => {
     if ((heading.textContent || '').includes('Provider Layers')) {
-      heading.closest<HTMLElement>('.command-section')?.classList.add('p2-legacy-provider-controls');
+      hide(heading.closest<HTMLElement>('.command-section'));
     }
   });
 
   document.querySelectorAll<HTMLButtonElement>('.command-action, .provider-explorer-launch').forEach((button) => {
-    if ((button.textContent || '').includes('Provider Explorer')) {
-      button.classList.add('p2-legacy-provider-controls');
-    }
+    if ((button.textContent || '').includes('Provider Explorer')) hide(button);
   });
 
-  document.querySelectorAll<HTMLElement>('.provider-explorer-drawer, .provider-drawer-backdrop').forEach((node) => {
-    node.classList.add('p2-legacy-provider-controls');
-  });
+  document.querySelectorAll<HTMLElement>('.provider-explorer-drawer, .provider-drawer-backdrop').forEach(hide);
 }
 
 export function installPhaseTwoLegacyLayerBridge(): void {
@@ -108,8 +111,13 @@ export function installPhaseTwoLegacyLayerBridge(): void {
   else window.setTimeout(run, 0);
 
   const observer = new MutationObserver(run);
-  observer.observe(document.documentElement, { childList: true, subtree: true });
-  window.setTimeout(() => observer.disconnect(), 15_000);
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['checked', 'disabled', 'class'],
+    childList: true,
+    subtree: true,
+  });
+  window.setTimeout(() => observer.disconnect(), 30_000);
 }
 
 installPhaseTwoLegacyLayerBridge();

@@ -49,6 +49,9 @@ jobs:
       - name: Run P1 data stabilization smoke tests
         run: pnpm --filter @workspace/api-server test:p1-data
 
+      - name: Run P2 map and layer-manager smoke tests
+        run: pnpm --filter @workspace/occu-med-map test:p2-map
+
       - name: Build frontend
         run: pnpm --filter @workspace/occu-med-map build
 

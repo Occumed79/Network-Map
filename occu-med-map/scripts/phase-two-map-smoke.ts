@@ -102,13 +102,22 @@ assert.doesNotMatch(bridge, /setTimeout\(\(\) => registerMap\(map\),\s*0\)/);
 
 const legacyBridge = readFileSync(resolve(here, '../src/phaseTwoLegacyLayerBridge.ts'), 'utf8');
 assert.match(legacyBridge, /url\.searchParams\.get\(P2_REQUEST_MARKER\)/);
+assert.match(legacyBridge, /\/api\/provider-layers\//);
+assert.match(legacyBridge, /emptyLegacyProviderLayerPayload/);
+assert.match(legacyBridge, /X-Network-Map-Legacy-Layer/);
 assert.match(legacyBridge, /Indexed Providers/);
 assert.match(legacyBridge, /Provider Layers/);
 assert.match(legacyBridge, /input\.click\(\)/);
 assert.match(legacyBridge, /scheduleLegacyRetirement/);
 assert.match(legacyBridge, /requestAnimationFrame\(run\)/);
+assert.doesNotMatch(legacyBridge, /new MutationObserver/);
 assert.doesNotMatch(legacyBridge, /attributes:\s*true/);
 assert.doesNotMatch(legacyBridge, /attributeFilter:/);
+
+const main = readFileSync(resolve(here, '../src/main.tsx'), 'utf8');
+assert.doesNotMatch(main, /providerLayerRequestRuntime/);
+assert.doesNotMatch(main, /providerLayerTelemetryRuntime/);
+assert.match(main, /phaseTwoLegacyLayerBridge/);
 
 const diagnosticsGate = readFileSync(resolve(here, '../src/usDiagnosticsGate.ts'), 'utf8');
 assert.match(diagnosticsGate, /scheduleDiagnosticsSync/);

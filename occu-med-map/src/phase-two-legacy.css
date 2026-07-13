@@ -1,0 +1,11 @@
+.p2-legacy-provider-controls,
+.p2-legacy-provider-controls[hidden] {
+  display: none !important;
+}
+
+/* The Phase 2 console owns provider-layer state and counts. The former counters
+   described the retired four-toggle implementation and would be misleading. */
+.phase-two-shell .provider-source-health,
+.phase-two-shell .hero-source-summary {
+  display: none !important;
+}

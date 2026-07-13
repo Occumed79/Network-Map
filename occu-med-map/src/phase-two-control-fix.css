@@ -1,0 +1,53 @@
+.p2-master-toggle {
+  width: 100%;
+  justify-content: space-between;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+}
+
+.p2-master-toggle:hover {
+  border-color: rgba(103, 232, 249, 0.48);
+  background: rgba(20, 49, 82, 0.72);
+}
+
+.p2-master-toggle.enabled {
+  border-color: rgba(52, 211, 153, 0.34);
+}
+
+.p2-master-toggle.paused {
+  border-color: rgba(251, 191, 36, 0.3);
+}
+
+.p2-master-toggle .p2-master-toggle-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.p2-master-toggle .p2-master-toggle-action {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-width: 54px;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid rgba(125, 211, 252, 0.24);
+  border-radius: 8px;
+  color: #dff7ff;
+  background: rgba(14, 58, 91, 0.62);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.p2-master-toggle.paused .p2-master-toggle-action {
+  color: #fff6d6;
+  border-color: rgba(251, 191, 36, 0.3);
+  background: rgba(120, 73, 10, 0.32);
+}

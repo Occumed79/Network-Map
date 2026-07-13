@@ -14,8 +14,8 @@ BEGIN
   BEGIN
     CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
   EXCEPTION
-    WHEN insufficient_privilege OR feature_not_supported THEN
-      RAISE NOTICE 'pg_stat_statements is unavailable in this environment';
+    WHEN OTHERS THEN
+      RAISE NOTICE 'pg_stat_statements is unavailable in this environment: %', SQLERRM;
   END;
 END
 $$;
@@ -197,10 +197,16 @@ DECLARE
   affected integer := 0;
 BEGIN
   WITH candidates AS (
-    SELECT source_table, source_pk, reason_codes, record_snapshot
-    FROM public.provider_quarantine_candidates
-    WHERE cardinality(reason_codes) > 0
-    ORDER BY source_pk::bigint
+    SELECT c.source_table, c.source_pk, c.reason_codes, c.record_snapshot
+    FROM public.provider_quarantine_candidates c
+    WHERE cardinality(c.reason_codes) > 0
+      AND NOT EXISTS (
+        SELECT 1
+        FROM public.provider_quarantine q
+        WHERE q.source_table = c.source_table
+          AND q.source_pk = c.source_pk
+      )
+    ORDER BY c.source_pk::bigint
     LIMIT GREATEST(COALESCE(p_limit, 10000), 1)
   )
   INSERT INTO public.provider_quarantine (
@@ -305,22 +311,17 @@ SELECT
     ELSE 'unknown'
   END AS primary_provider_type,
   ARRAY[
-    CASE
-      WHEN lower(COALESCE(mp.category, '') || ' ' || COALESCE(array_to_string(mp.types, ' '), '')) ~ 'dent' THEN 'dental'
-      ELSE NULL
-    END,
-    CASE
-      WHEN lower(COALESCE(mp.category, '') || ' ' || COALESCE(array_to_string(mp.types, ' '), '')) ~ 'urgent|walk.?in|immediate care' THEN 'urgent_care'
-      ELSE NULL
-    END,
-    CASE
-      WHEN lower(COALESCE(mp.category, '') || ' ' || COALESCE(array_to_string(mp.types, ' '), '')) ~ 'occupational|employee health|workers.? comp' THEN 'occupational_health_clinic'
-      ELSE NULL
-    END,
-    CASE
-      WHEN lower(COALESCE(mp.category, '') || ' ' || COALESCE(array_to_string(mp.types, ' '), '')) ~ 'lab|toxicology|drug|specimen' THEN 'lab'
-      ELSE NULL
-    END
+    CASE WHEN lower(COALESCE(mp.category, '') || ' ' || COALESCE(array_to_string(mp.types, ' '), '')) ~ 'dent' THEN 'dental' END,
+    CASE WHEN lower(COALESCE(mp.category, '') || ' ' || COALESCE(array_to_string(mp.types, ' '), '')) ~ '\bdot\b|cdl|medical examiner' THEN 'dot_provider' END,
+    CASE WHEN lower(COALESCE(mp.category, '') || ' ' || COALESCE(array_to_string(mp.types, ' '), '')) ~ '\bfaa\b|aviation|\bame\b' THEN 'faa_provider' END,
+    CASE WHEN lower(COALESCE(mp.category, '') || ' ' || COALESCE(array_to_string(mp.types, ' '), '')) ~ 'urgent|walk.?in|immediate care' THEN 'urgent_care' END,
+    CASE WHEN lower(COALESCE(mp.category, '') || ' ' || COALESCE(array_to_string(mp.types, ' '), '')) ~ 'occupational|employee health|workers.? comp' THEN 'occupational_health_clinic' END,
+    CASE WHEN lower(COALESCE(mp.category, '') || ' ' || COALESCE(array_to_string(mp.types, ' '), '')) ~ 'lab|toxicology|drug|specimen' THEN 'lab' END,
+    CASE WHEN lower(COALESCE(mp.category, '') || ' ' || COALESCE(array_to_string(mp.types, ' '), '')) ~ 'imag|radiolog|x.?ray|mammogram|ultrasound|mri|ct scan' THEN 'imaging' END,
+    CASE WHEN lower(COALESCE(mp.category, '') || ' ' || COALESCE(array_to_string(mp.types, ' '), '')) ~ 'pharmacy|vaccin|immuni' THEN 'pharmacy_vaccination' END,
+    CASE WHEN lower(COALESCE(mp.category, '') || ' ' || COALESCE(array_to_string(mp.types, ' '), '')) ~ 'hospital|medical center|emergency' THEN 'hospital' END,
+    CASE WHEN lower(COALESCE(mp.category, '') || ' ' || COALESCE(array_to_string(mp.types, ' '), '')) ~ 'family medicine|internal medicine|primary care|general practice' THEN 'general_practitioner' END,
+    CASE WHEN lower(COALESCE(mp.category, '') || ' ' || COALESCE(array_to_string(mp.types, ' '), '')) ~ 'cardiolog|pulmonary|orthopedic|neurolog|special' THEN 'specialist' END
   ]::text[] AS raw_capability_tags,
   CASE lower(btrim(COALESCE(mp.data_source, '')))
     WHEN 'bluehive' THEN 'bluehive'
@@ -338,6 +339,51 @@ SELECT
   COALESCE(mp.updated_at, mp.scraped_at, now()::timestamp) AS last_seen_at
 FROM public.provider_map_eligible mp;
 
+CREATE OR REPLACE VIEW public.provider_master_map_view AS
+SELECT
+  pm.id::text AS id,
+  pm.master_key,
+  pm.name,
+  pm.normalized_name,
+  pm.formatted_address AS address,
+  pm.city,
+  pm.state_region AS admin_area,
+  pm.country_code AS country,
+  pm.postal_code,
+  pm.lat,
+  pm.lng,
+  pm.phone,
+  pm.website,
+  pm.primary_source_key AS source,
+  pm.primary_provider_type AS clinic_type,
+  pm.capability_tags AS services,
+  pm.capability_tags AS categories,
+  pm.quality_score AS confidence_score,
+  CASE WHEN pm.primary_source_key = 'my_clinics_upload' THEN 'saved' ELSE 'stored' END AS source_kind,
+  pm.active,
+  pm.last_seen_at,
+  pm.created_at,
+  pm.updated_at,
+  pm.formatted_address AS address_1,
+  pm.state_region AS state,
+  pm.country_code,
+  pm.postal_code AS zip,
+  pm.npi,
+  pm.primary_source_key AS source_key,
+  pm.primary_source_key,
+  pm.primary_provider_type,
+  pm.capability_tags,
+  pm.quality_score
+FROM public.provider_master pm
+WHERE pm.active = true
+  AND pm.lat IS NOT NULL
+  AND pm.lng IS NOT NULL
+  AND pm.lat BETWEEN -90 AND 90
+  AND pm.lng BETWEEN -180 AND 180
+  AND (pm.lat <> 0 OR pm.lng <> 0)
+  AND NULLIF(btrim(pm.name), '') IS NOT NULL
+  AND lower(btrim(pm.name)) NOT IN ('nan', 'null', 'none', 'n/a', 'na', 'unnamed', 'unnamed clinic');
+
 CREATE OR REPLACE FUNCTION public.network_map_migrate_legacy_batch(p_limit integer DEFAULT 1000)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -348,6 +394,8 @@ DECLARE
   last_id bigint := 0;
   canonical_count bigint := 0;
   eligible_count bigint := 0;
+  lineage_count bigint := 0;
+  migration_done boolean := false;
 BEGIN
   SELECT migration_after_legacy_id
     INTO cursor_id
@@ -368,18 +416,28 @@ BEGIN
   IF processed = 0 THEN
     SELECT count(*) INTO eligible_count FROM public.provider_map_eligible;
     SELECT count(*) INTO canonical_count FROM public.provider_master_map_view;
+    SELECT count(*)
+      INTO lineage_count
+      FROM public.provider_master_sources
+     WHERE raw_payload ? '_legacy_medical_provider_id';
+    SELECT NOT EXISTS (
+      SELECT 1 FROM public.provider_legacy_normalized WHERE legacy_id > cursor_id
+    ) INTO migration_done;
+
     UPDATE public.provider_schema_state
        SET expected_eligible_rows = eligible_count,
-           migrated_eligible_rows = canonical_count,
-           migration_completed_at = CASE WHEN canonical_count >= eligible_count THEN now() ELSE migration_completed_at END,
+           migrated_eligible_rows = lineage_count,
+           migration_completed_at = CASE WHEN migration_done THEN COALESCE(migration_completed_at, now()) ELSE NULL END,
            updated_at = now()
      WHERE id = 1;
+
     RETURN jsonb_build_object(
       'processed', 0,
       'afterLegacyId', cursor_id,
       'eligibleLegacyRows', eligible_count,
       'canonicalMapRows', canonical_count,
-      'complete', canonical_count >= eligible_count
+      'sourceLineageRows', lineage_count,
+      'complete', migration_done
     );
   END IF;
 
@@ -463,6 +521,7 @@ BEGIN
         FROM unnest(provider_master.capability_tags || EXCLUDED.capability_tags) value
         WHERE value IS NOT NULL AND value <> ''
       ),
+      primary_source_key = COALESCE(provider_master.primary_source_key, EXCLUDED.primary_source_key),
       quality_score = GREATEST(COALESCE(provider_master.quality_score, 0), COALESCE(EXCLUDED.quality_score, 0)),
       active = true,
       last_seen_at = GREATEST(provider_master.last_seen_at, EXCLUDED.last_seen_at),
@@ -483,7 +542,7 @@ BEGIN
     n.source_record_id,
     COALESCE(n.website, n.raw_payload->>'source_url', n.raw_payload->>'url'),
     n.quality_score,
-    n.raw_payload,
+    n.raw_payload || jsonb_build_object('_legacy_medical_provider_id', n.legacy_id),
     now()
   FROM (
     SELECT *
@@ -530,11 +589,18 @@ BEGIN
 
   SELECT count(*) INTO eligible_count FROM public.provider_map_eligible;
   SELECT count(*) INTO canonical_count FROM public.provider_master_map_view;
+  SELECT count(*)
+    INTO lineage_count
+    FROM public.provider_master_sources
+   WHERE raw_payload ? '_legacy_medical_provider_id';
+  SELECT NOT EXISTS (
+    SELECT 1 FROM public.provider_legacy_normalized WHERE legacy_id > last_id
+  ) INTO migration_done;
 
   UPDATE public.provider_schema_state
      SET expected_eligible_rows = eligible_count,
-         migrated_eligible_rows = canonical_count,
-         migration_completed_at = CASE WHEN canonical_count >= eligible_count THEN now() ELSE migration_completed_at END,
+         migrated_eligible_rows = lineage_count,
+         migration_completed_at = CASE WHEN migration_done THEN COALESCE(migration_completed_at, now()) ELSE NULL END,
          updated_at = now()
    WHERE id = 1;
 
@@ -543,55 +609,11 @@ BEGIN
     'afterLegacyId', last_id,
     'eligibleLegacyRows', eligible_count,
     'canonicalMapRows', canonical_count,
-    'complete', canonical_count >= eligible_count
+    'sourceLineageRows', lineage_count,
+    'complete', migration_done
   );
 END
 $$;
-
-CREATE OR REPLACE VIEW public.provider_master_map_view AS
-SELECT
-  pm.id::text AS id,
-  pm.master_key,
-  pm.name,
-  pm.normalized_name,
-  pm.formatted_address AS address,
-  pm.city,
-  pm.state_region AS admin_area,
-  pm.country_code AS country,
-  pm.postal_code,
-  pm.lat,
-  pm.lng,
-  pm.phone,
-  pm.website,
-  pm.primary_source_key AS source,
-  pm.primary_provider_type AS clinic_type,
-  pm.capability_tags AS services,
-  pm.capability_tags AS categories,
-  pm.quality_score AS confidence_score,
-  CASE WHEN pm.primary_source_key = 'my_clinics_upload' THEN 'saved' ELSE 'stored' END AS source_kind,
-  pm.active,
-  pm.last_seen_at,
-  pm.created_at,
-  pm.updated_at,
-  pm.formatted_address AS address_1,
-  pm.state_region AS state,
-  pm.country_code,
-  pm.postal_code AS zip,
-  pm.npi,
-  pm.primary_source_key AS source_key,
-  pm.primary_source_key,
-  pm.primary_provider_type,
-  pm.capability_tags,
-  pm.quality_score
-FROM public.provider_master pm
-WHERE pm.active = true
-  AND pm.lat IS NOT NULL
-  AND pm.lng IS NOT NULL
-  AND pm.lat BETWEEN -90 AND 90
-  AND pm.lng BETWEEN -180 AND 180
-  AND (pm.lat <> 0 OR pm.lng <> 0)
-  AND NULLIF(btrim(pm.name), '') IS NOT NULL
-  AND lower(btrim(pm.name)) NOT IN ('nan', 'null', 'none', 'n/a', 'na', 'unnamed', 'unnamed clinic');
 
 CREATE OR REPLACE VIEW public.provider_data_quality_metrics AS
 SELECT 'legacy_total'::text AS metric, count(*)::bigint AS value FROM public.medical_providers
@@ -618,7 +640,11 @@ SELECT 'quarantined_rows', count(*)::bigint FROM public.provider_quarantine
 UNION ALL
 SELECT 'canonical_total', count(*)::bigint FROM public.provider_master
 UNION ALL
-SELECT 'canonical_map_eligible', count(*)::bigint FROM public.provider_master_map_view;
+SELECT 'canonical_map_eligible', count(*)::bigint FROM public.provider_master_map_view
+UNION ALL
+SELECT 'legacy_source_lineage_rows', count(*)::bigint
+FROM public.provider_master_sources
+WHERE raw_payload ? '_legacy_medical_provider_id';
 
 DO $$
 BEGIN

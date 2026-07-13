@@ -1,3 +1,8 @@
+type ProviderCoordinate = {
+  lat: number;
+  lng: number;
+};
+
 type CachedResponse = {
   body: string;
   status: number;
@@ -9,6 +14,8 @@ type CachedResponse = {
   total: number;
   viewport: Viewport | null;
   filterKey: string;
+  coordinates: ProviderCoordinate[];
+  pagesLoaded: number;
 };
 
 type Viewport = {
@@ -16,18 +23,33 @@ type Viewport = {
   centerLng: number;
   latSpan: number;
   lngSpan: number;
+  north: number;
+  south: number;
+  east: number;
+  west: number;
 };
 
-const CACHE_FRESH_MS = 45_000;
-const CACHE_STALE_MS = 5 * 60_000;
-// Page size only. Provider toggles are not capped at this value: every page
+type CaptureResult = {
+  entry: CachedResponse | null;
+  warning: string;
+};
+
+const EXACT_CACHE_MS = 45_000;
+const MATERIAL_VIEWPORT_REUSE_MS = 5 * 60_000;
+const STALE_FALLBACK_MS = 15 * 60_000;
+const MAX_CACHE_ENTRIES = 80;
+const MAX_CONCURRENT_SOURCE_LOADS = 2;
+// Page size only. Provider toggles are never capped at this value: every page
 // for the active viewport is fetched and combined before App.tsx sees it.
 const PAGE_SIZE = 2000;
 const MAX_PAGE_SIZE = 5000;
+
 const cacheByRequest = new Map<string, CachedResponse>();
 const latestBySource = new Map<string, CachedResponse>();
-const inFlight = new Map<string, Promise<CachedResponse | null>>();
+const inFlight = new Map<string, Promise<CaptureResult>>();
+const networkWaiters: Array<() => void> = [];
 const nativeFetch = window.fetch.bind(window);
+let activeNetworkLoads = 0;
 
 function asUrl(input: RequestInfo | URL): URL | null {
   try {
@@ -50,9 +72,6 @@ function pageSize(value: string | null): number {
 
 function normalizeProviderLayerUrl(url: URL): URL {
   const next = new URL(url.toString());
-  // The route remains paginated for database stability, but the browser
-  // transparently loads every page. "all=false" no longer means only the
-  // first page is displayed.
   next.searchParams.set("all", "false");
   next.searchParams.set("limit", String(pageSize(next.searchParams.get("limit"))));
   next.searchParams.set("page", "1");
@@ -82,6 +101,10 @@ function viewportFromUrl(url: URL): Viewport | null {
     centerLng,
     latSpan: Math.max(Math.abs(north - south), 0.0001),
     lngSpan: Math.max(Math.abs(lngSpan), 0.0001),
+    north,
+    south,
+    east,
+    west,
   };
 }
 
@@ -101,7 +124,8 @@ function filterKey(url: URL): string {
 function materiallySameViewport(previous: Viewport | null, next: Viewport | null): boolean {
   if (!previous || !next) return previous === next;
   const latShift = Math.abs(previous.centerLat - next.centerLat);
-  const lngShift = Math.abs(previous.centerLng - next.centerLng);
+  const rawLngShift = Math.abs(previous.centerLng - next.centerLng);
+  const lngShift = Math.min(rawLngShift, 360 - rawLngShift);
   const latScale = next.latSpan / previous.latSpan;
   const lngScale = next.lngSpan / previous.lngSpan;
   return (
@@ -112,9 +136,25 @@ function materiallySameViewport(previous: Viewport | null, next: Viewport | null
   );
 }
 
+function longitudeInViewport(lng: number, viewport: Viewport): boolean {
+  return viewport.west <= viewport.east
+    ? lng >= viewport.west && lng <= viewport.east
+    : lng >= viewport.west || lng <= viewport.east;
+}
+
+function countRenderable(coordinates: ProviderCoordinate[], viewport: Viewport | null): number {
+  if (!viewport) return coordinates.length;
+  return coordinates.filter(({ lat, lng }) => (
+    lat >= viewport.south &&
+    lat <= viewport.north &&
+    longitudeInViewport(lng, viewport)
+  )).length;
+}
+
 function responseFromCache(entry: CachedResponse, stale = false): Response {
   const headers = new Headers(entry.headers);
   headers.set("X-Network-Map-Cache", stale ? "stale" : "hit");
+  headers.set("X-Network-Map-Visible-Cap", "none");
   return new Response(entry.body, {
     status: entry.status,
     statusText: entry.statusText,
@@ -122,23 +162,122 @@ function responseFromCache(entry: CachedResponse, stale = false): Response {
   });
 }
 
-function dispatchStatus(entry: CachedResponse, fromCache: boolean, stale = false): void {
+function dispatchStatus(
+  entry: CachedResponse,
+  fromCache: boolean,
+  stale = false,
+  requestedViewport: Viewport | null = entry.viewport,
+  warning = "",
+): void {
   window.dispatchEvent(new CustomEvent("network-map:provider-layer-status", {
     detail: {
       source: entry.source,
       loaded: entry.loaded,
       total: entry.total,
+      rendered: countRenderable(entry.coordinates, requestedViewport),
+      successfullyLoaded: true,
+      transientFailure: false,
       fromCache,
       stale,
+      warning,
+      pagesLoaded: entry.pagesLoaded,
+      visibleCapped: false,
       timestamp: Date.now(),
     },
   }));
+}
+
+function dispatchFailure(source: string, warning: string): void {
+  window.dispatchEvent(new CustomEvent("network-map:provider-layer-status", {
+    detail: {
+      source,
+      loaded: 0,
+      total: 0,
+      rendered: 0,
+      successfullyLoaded: false,
+      transientFailure: true,
+      fromCache: false,
+      stale: false,
+      warning,
+      pagesLoaded: 0,
+      visibleCapped: false,
+      timestamp: Date.now(),
+    },
+  }));
+}
+
+function transientFailureResponse(source: string, warning: string): Response {
+  const body = {
+    providers: [],
+    count: 0,
+    loaded: 0,
+    total: 0,
+    source,
+    all: false,
+    hasMore: false,
+    warning,
+    transientFailure: true,
+    visibleCapped: false,
+  };
+  const headers = new Headers({
+    "content-type": "application/json; charset=utf-8",
+    "X-Network-Map-Transient-Failure": "true",
+    "X-Network-Map-Visible-Cap": "none",
+  });
+  return new Response(JSON.stringify(body), { status: 200, headers });
 }
 
 function asPayload(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+function providerCoordinates(payload: Record<string, unknown>): ProviderCoordinate[] {
+  if (!Array.isArray(payload.providers)) return [];
+  const coordinates: ProviderCoordinate[] = [];
+  for (const provider of payload.providers) {
+    if (!provider || typeof provider !== "object") continue;
+    const row = provider as Record<string, unknown>;
+    const lat = Number(row.lat);
+    const lng = Number(row.lng);
+    if (
+      Number.isFinite(lat) &&
+      Number.isFinite(lng) &&
+      lat >= -90 && lat <= 90 &&
+      lng >= -180 && lng <= 180 &&
+      (lat !== 0 || lng !== 0)
+    ) {
+      coordinates.push({ lat, lng });
+    }
+  }
+  return coordinates;
+}
+
+async function withNetworkSlot<T>(task: () => Promise<T>): Promise<T> {
+  if (activeNetworkLoads >= MAX_CONCURRENT_SOURCE_LOADS) {
+    await new Promise<void>((resolve) => networkWaiters.push(resolve));
+  }
+  activeNetworkLoads += 1;
+  try {
+    return await task();
+  } finally {
+    activeNetworkLoads = Math.max(0, activeNetworkLoads - 1);
+    networkWaiters.shift()?.();
+  }
+}
+
+function pruneCaches(): void {
+  const oldestAllowed = Date.now() - STALE_FALLBACK_MS;
+  for (const [key, entry] of cacheByRequest.entries()) {
+    if (entry.storedAt < oldestAllowed) cacheByRequest.delete(key);
+  }
+  while (cacheByRequest.size > MAX_CACHE_ENTRIES) {
+    const oldest = [...cacheByRequest.entries()]
+      .sort((left, right) => left[1].storedAt - right[1].storedAt)[0]?.[0];
+    if (!oldest) break;
+    cacheByRequest.delete(oldest);
+  }
 }
 
 async function fetchAllProviderPages(url: URL, init?: RequestInit): Promise<Response> {
@@ -172,8 +311,8 @@ async function fetchAllProviderPages(url: URL, init?: RequestInit): Promise<Resp
     providers.push(...pageProviders);
     hasMore = Boolean(pagePayload.hasMore) || providers.length < total;
 
-    // Guard only against a malformed API that repeats pages forever. This is
-    // derived from the database-reported total and does not cap valid rows.
+    // This guard is derived from the database-reported total and only protects
+    // against a malformed endpoint repeating the same page forever.
     const expectedPages = Math.ceil(total / limit);
     if (page > expectedPages + 1) break;
   }
@@ -209,30 +348,42 @@ async function captureResponse(
   source: string,
   viewport: Viewport | null,
   currentFilterKey: string,
-): Promise<CachedResponse | null> {
-  if (!response.ok) return null;
+): Promise<CaptureResult> {
+  if (!response.ok) {
+    return { entry: null, warning: `Provider layer request failed with HTTP ${response.status}` };
+  }
   const clone = response.clone();
   const body = await clone.text();
   let payload: Record<string, unknown> = {};
   try {
     payload = body ? JSON.parse(body) as Record<string, unknown> : {};
   } catch {
-    return null;
+    return { entry: null, warning: "Provider layer returned invalid JSON" };
   }
-  if (payload.transientFailure || payload.error) return null;
+  if (payload.transientFailure || payload.error) {
+    return {
+      entry: null,
+      warning: String(payload.warning || payload.error || "Provider layer temporarily unavailable"),
+    };
+  }
   const loaded = Number(payload.loaded ?? payload.count ?? 0) || 0;
   const total = Number(payload.total ?? loaded) || loaded;
   return {
-    body,
-    status: response.status,
-    statusText: response.statusText,
-    headers: Array.from(response.headers.entries()),
-    storedAt: Date.now(),
-    source,
-    loaded,
-    total,
-    viewport,
-    filterKey: currentFilterKey,
+    warning: "",
+    entry: {
+      body,
+      status: response.status,
+      statusText: response.statusText,
+      headers: Array.from(response.headers.entries()),
+      storedAt: Date.now(),
+      source,
+      loaded,
+      total,
+      viewport,
+      filterKey: currentFilterKey,
+      coordinates: providerCoordinates(payload),
+      pagesLoaded: Number(payload.pagesLoaded ?? 1) || 1,
+    },
   };
 }
 
@@ -254,10 +405,11 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const currentFilterKey = filterKey(url);
   const requestKey = url.toString();
   const now = Date.now();
-  const exact = cacheByRequest.get(requestKey);
+  pruneCaches();
 
-  if (exact && now - exact.storedAt <= CACHE_FRESH_MS) {
-    dispatchStatus(exact, true);
+  const exact = cacheByRequest.get(requestKey);
+  if (exact && now - exact.storedAt <= EXACT_CACHE_MS) {
+    dispatchStatus(exact, true, false, viewport);
     return responseFromCache(exact);
   }
 
@@ -265,47 +417,53 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (
     latest &&
     latest.filterKey === currentFilterKey &&
-    now - latest.storedAt <= CACHE_FRESH_MS &&
+    now - latest.storedAt <= MATERIAL_VIEWPORT_REUSE_MS &&
     materiallySameViewport(latest.viewport, viewport)
   ) {
-    dispatchStatus(latest, true);
+    dispatchStatus(latest, true, false, viewport);
     return responseFromCache(latest);
   }
 
   const existingRequest = inFlight.get(requestKey);
   if (existingRequest) {
     const shared = await existingRequest;
-    if (shared) {
-      dispatchStatus(shared, true);
-      return responseFromCache(shared);
+    if (shared.entry) {
+      dispatchStatus(shared.entry, true, false, viewport);
+      return responseFromCache(shared.entry);
     }
   }
 
-  const request = (async () => {
+  const request = withNetworkSlot(async () => {
     try {
       const response = await fetchAllProviderPages(url, init);
-      const captured = await captureResponse(response, source, viewport, currentFilterKey);
-      if (captured) {
-        cacheByRequest.set(requestKey, captured);
-        latestBySource.set(source, captured);
-        dispatchStatus(captured, false);
-      }
-      return captured;
-    } catch {
-      return null;
+      return await captureResponse(response, source, viewport, currentFilterKey);
+    } catch (error) {
+      return {
+        entry: null,
+        warning: error instanceof Error ? error.message : "Provider layer request failed",
+      };
     }
-  })();
+  });
 
   inFlight.set(requestKey, request);
-  const captured = await request.finally(() => inFlight.delete(requestKey));
-  if (captured) return responseFromCache(captured);
+  const result = await request.finally(() => inFlight.delete(requestKey));
+  if (result.entry) {
+    cacheByRequest.set(requestKey, result.entry);
+    latestBySource.set(source, result.entry);
+    dispatchStatus(result.entry, false, false, viewport);
+    return responseFromCache(result.entry);
+  }
 
-  if (latest && now - latest.storedAt <= CACHE_STALE_MS) {
-    dispatchStatus(latest, true, true);
+  if (latest && now - latest.storedAt <= STALE_FALLBACK_MS) {
+    dispatchStatus(latest, true, true, viewport, result.warning);
     return responseFromCache(latest, true);
   }
 
-  return fetchAllProviderPages(url, init);
+  const warning = result.warning || "Provider layer temporarily unavailable";
+  dispatchFailure(source, warning);
+  // Always return a valid temporary response. App.tsx therefore preserves the
+  // user's enabled toggle instead of switching it off after a transient outage.
+  return transientFailureResponse(source, warning);
 }) as typeof window.fetch;
 
 export {};

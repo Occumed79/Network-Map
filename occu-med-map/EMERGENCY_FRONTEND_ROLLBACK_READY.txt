@@ -1,0 +1,1 @@
+Emergency rollback branch prepared from current main. Production entrypoint boots App directly and no longer mounts the Phase 2 shell or bridges.

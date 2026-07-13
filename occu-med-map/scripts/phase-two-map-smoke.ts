@@ -115,12 +115,15 @@ assert.doesNotMatch(legacyBridge, /attributes:\s*true/);
 assert.doesNotMatch(legacyBridge, /attributeFilter:/);
 
 const main = readFileSync(resolve(here, '../src/main.tsx'), 'utf8');
-assert.doesNotMatch(main, /providerLayerRequestRuntime/);
-assert.doesNotMatch(main, /providerLayerTelemetryRuntime/);
-assert.match(main, /phaseTwoLegacyLayerBridge/);
+assert.match(main, /providerLayerRequestRuntime/);
+assert.match(main, /providerLayerTelemetryRuntime/);
+assert.doesNotMatch(main, /phaseTwoMapBridge/);
+assert.doesNotMatch(main, /phaseTwoLegacyLayerBridge/);
+assert.doesNotMatch(main, /PhaseTwoShell/);
+assert.match(main, /render\(<App \/>\)/);
 
 const diagnosticsGate = readFileSync(resolve(here, '../src/usDiagnosticsGate.ts'), 'utf8');
 assert.match(diagnosticsGate, /scheduleDiagnosticsSync/);
 assert.match(diagnosticsGate, /clearTimeout\(syncTimer\)/);
 
-console.log('P2 map and unified layer-manager smoke tests passed');
+console.log('P2 code retained but production frontend rollback is active and smoke-tested');

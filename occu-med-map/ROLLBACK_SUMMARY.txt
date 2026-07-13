@@ -1,0 +1,1 @@
+Production entrypoint restored to App-only boot. Phase Two shell and bridges are not mounted. Existing P0 paging, P1 data work, and P3 backend NPI work remain.

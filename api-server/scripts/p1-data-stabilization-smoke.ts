@@ -41,15 +41,38 @@ assert.match(canonicalSql, /pm\.active = true/);
 assert.match(canonicalSql, /placeholder|unnamed clinic/);
 
 const here = dirname(fileURLToPath(import.meta.url));
-const migration = readFileSync(resolve(here, "../src/db/migrations/20260713_p1_data_stabilization.sql"), "utf8");
-assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.provider_schema_state/);
-assert.match(migration, /canonical_read_enabled boolean NOT NULL DEFAULT false/);
-assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.provider_quarantine/);
-assert.match(migration, /CREATE OR REPLACE VIEW public\.provider_map_eligible/);
-assert.match(migration, /CREATE OR REPLACE VIEW public\.provider_duplicate_candidates/);
-assert.match(migration, /CREATE OR REPLACE FUNCTION public\.network_map_migrate_legacy_batch/);
-assert.match(migration, /pg_stat_statements/);
-assert.doesNotMatch(migration, /DELETE FROM public\.medical_providers/i);
-assert.doesNotMatch(migration, /DROP TABLE public\.medical_providers/i);
+const migrationRoot = resolve(here, "../src/db/migrations");
+const schemaMigration = readFileSync(
+  resolve(migrationRoot, "20260713_p1_data_stabilization_01_schema.sql"),
+  "utf8",
+);
+const quarantineFunction = readFileSync(
+  resolve(migrationRoot, "20260713_p1_data_stabilization_02_quarantine_function.sql"),
+  "utf8",
+);
+const migrateFunction = readFileSync(
+  resolve(migrationRoot, "20260713_p1_data_stabilization_03_migrate_function.sql"),
+  "utf8",
+);
+const monitoringMigration = readFileSync(
+  resolve(migrationRoot, "20260713_p1_data_stabilization_04_query_monitoring.sql"),
+  "utf8",
+);
+const allMigrations = [schemaMigration, quarantineFunction, migrateFunction, monitoringMigration].join("\n");
+
+assert.match(schemaMigration, /CREATE TABLE IF NOT EXISTS public\.provider_schema_state/);
+assert.match(schemaMigration, /canonical_read_enabled boolean NOT NULL DEFAULT false/);
+assert.match(schemaMigration, /CREATE TABLE IF NOT EXISTS public\.provider_quarantine/);
+assert.match(schemaMigration, /CREATE OR REPLACE VIEW public\.provider_map_eligible/);
+assert.match(schemaMigration, /CREATE OR REPLACE VIEW public\.provider_duplicate_candidates/);
+assert.match(quarantineFunction, /CREATE OR REPLACE FUNCTION public\.network_map_refresh_quarantine/);
+assert.match(quarantineFunction, /\$network_map_refresh_quarantine\$/);
+assert.match(migrateFunction, /CREATE OR REPLACE FUNCTION public\.network_map_migrate_legacy_batch/);
+assert.match(migrateFunction, /DISTINCT ON \(master_key\)/);
+assert.match(migrateFunction, /DISTINCT ON \(source_key, source_record_id\)/);
+assert.match(monitoringMigration, /pg_stat_statements/);
+assert.doesNotMatch(allMigrations, /DO \$\$/);
+assert.doesNotMatch(allMigrations, /DELETE FROM public\.medical_providers/i);
+assert.doesNotMatch(allMigrations, /DROP TABLE public\.medical_providers/i);
 
 console.log("P1 data stabilization smoke tests passed");

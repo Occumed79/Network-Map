@@ -100,30 +100,25 @@ assert.match(bridge, /moveend zoomend resize/);
 assert.match(bridge, /registerMap\(map\);/);
 assert.doesNotMatch(bridge, /setTimeout\(\(\) => registerMap\(map\),\s*0\)/);
 
-const legacyBridge = readFileSync(resolve(here, '../src/phaseTwoLegacyLayerBridge.ts'), 'utf8');
-assert.match(legacyBridge, /url\.searchParams\.get\(P2_REQUEST_MARKER\)/);
-assert.match(legacyBridge, /\/api\/provider-layers\//);
-assert.match(legacyBridge, /emptyLegacyProviderLayerPayload/);
-assert.match(legacyBridge, /X-Network-Map-Legacy-Layer/);
-assert.match(legacyBridge, /Indexed Providers/);
-assert.match(legacyBridge, /Provider Layers/);
-assert.match(legacyBridge, /input\.click\(\)/);
-assert.match(legacyBridge, /scheduleLegacyRetirement/);
-assert.match(legacyBridge, /requestAnimationFrame\(run\)/);
-assert.doesNotMatch(legacyBridge, /new MutationObserver/);
-assert.doesNotMatch(legacyBridge, /attributes:\s*true/);
-assert.doesNotMatch(legacyBridge, /attributeFilter:/);
+const previewIsolation = readFileSync(resolve(here, '../src/phaseTwoPreviewIsolation.ts'), 'utf8');
+assert.match(previewIsolation, /p2-preview/);
+assert.match(previewIsolation, /\/api\/provider-layers\//);
+assert.match(previewIsolation, /url\.searchParams\.get\('p2'\) !== '1'/);
+assert.doesNotMatch(previewIsolation, /MutationObserver/);
+assert.doesNotMatch(previewIsolation, /document\.querySelector/);
 
 const main = readFileSync(resolve(here, '../src/main.tsx'), 'utf8');
-assert.match(main, /providerLayerRequestRuntime/);
-assert.match(main, /providerLayerTelemetryRuntime/);
-assert.doesNotMatch(main, /phaseTwoMapBridge/);
+assert.match(main, /p2-preview/);
+assert.match(main, /import\("\.\/providerLayerRequestRuntime"\)/);
+assert.match(main, /import\("\.\/providerLayerTelemetryRuntime"\)/);
+assert.match(main, /import\("\.\/phaseTwoPreviewIsolation"\)/);
+assert.match(main, /import\("\.\/phaseTwoMapBridge"\)/);
+assert.match(main, /import\("\.\/PhaseTwoShell"\)/);
 assert.doesNotMatch(main, /phaseTwoLegacyLayerBridge/);
-assert.doesNotMatch(main, /PhaseTwoShell/);
-assert.match(main, /render\(<App \/>\)/);
+assert.match(main, /root\.render\(<App \/>\)/);
 
 const diagnosticsGate = readFileSync(resolve(here, '../src/usDiagnosticsGate.ts'), 'utf8');
 assert.match(diagnosticsGate, /scheduleDiagnosticsSync/);
 assert.match(diagnosticsGate, /clearTimeout\(syncTimer\)/);
 
-console.log('P2 code retained but production frontend rollback is active and smoke-tested');
+console.log('P2 preview is opt-in, isolated, and leaves the stable production boot unchanged');

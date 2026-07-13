@@ -200,12 +200,16 @@ function hide(node: HTMLElement | null): void {
 }
 
 function forceIndividualModeForDynamicSources(): void {
-  const dynamicEnabled = Array.from(document.querySelectorAll<HTMLLabelElement>('.p2-toggle-grid label')).some((label) => {
+  const dynamicToggleEnabled = Array.from(document.querySelectorAll<HTMLLabelElement>('.p2-toggle-grid label')).some((label) => {
     const text = (label.textContent || '').trim();
     const input = label.querySelector<HTMLInputElement>('input[type="checkbox"]');
     return Boolean(input?.checked && (text.includes('Candidates') || text.includes('Live')));
   });
-  if (!dynamicEnabled) return;
+  const sourceSelect = Array.from(document.querySelectorAll<HTMLLabelElement>('.p2-filter-grid label'))
+    .find((label) => (label.querySelector('span')?.textContent || '').trim() === 'Source')
+    ?.querySelector<HTMLSelectElement>('select');
+  const dynamicSourceSelected = sourceSelect?.value === 'live' || sourceSelect?.value === 'candidates';
+  if (!dynamicToggleEnabled && !dynamicSourceSelected) return;
 
   const providerMode = Array.from(document.querySelectorAll<HTMLButtonElement>('.p2-mode-row button'))
     .find((button) => (button.textContent || '').trim() === 'Providers');
@@ -242,7 +246,7 @@ export function installPhaseTwoLegacyLayerBridge(): void {
   const observer = new MutationObserver(run);
   observer.observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ['checked', 'disabled', 'class'],
+    attributeFilter: ['checked', 'disabled', 'class', 'value'],
     childList: true,
     subtree: true,
   });

@@ -1,7 +1,10 @@
 import type { RequestHandler } from "express";
 
-const DEFAULT_LIMIT = 1000;
-const MAX_LIMIT = 2000;
+// These values control the size of each database page only. They are not a
+// cap on how many matching providers may be displayed; the frontend loads all
+// pages for the active viewport and combines them before rendering.
+const DEFAULT_LIMIT = 2000;
+const MAX_LIMIT = 5000;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 60;
 
@@ -131,8 +134,9 @@ export const stabilizeProviderLayerRequests: RequestHandler = (req, res, next) =
         requestScope: {
           all: text(query.all) === "true",
           boundsApplied: text(query.useBounds) === "true" || text(query.bounds) === "true",
-          limit: Number(text(query.limit)) || DEFAULT_LIMIT,
+          pageSize: Number(text(query.limit)) || DEFAULT_LIMIT,
           page: Number(text(query.page)) || 1,
+          totalCapped: false,
         },
       };
       const cached = { storedAt: Date.now(), body: safeBody };

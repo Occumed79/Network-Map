@@ -91,6 +91,13 @@ assert.match(shell, /Pagination stopped because the server returned no new provi
 assert.match(shell, /Grid cells are coordinate bins—not hexagons/);
 assert.match(shell, /Trust filters use individual provider mode/);
 assert.match(shell, /Viewport Results/);
+assert.match(shell, /const toggleProviderIntelligence = useCallback/);
+assert.match(shell, /aria-pressed=\{layersEnabled\}/);
+assert.match(shell, /layersEnabled \? 'Pause' : 'Start'/);
+assert.match(shell, /setLoading\(false\);\s+resetViewportResults\('P2 provider layers are paused\.'/);
+assert.match(shell, /if \(requestRef\.current === controller\)/);
+assert.match(shell, /requestRef\.current = null;\s+setLoading\(false\);/);
+assert.doesNotMatch(shell, /<label className="p2-master-toggle">/);
 assert.doesNotMatch(shell, /slice\(0,\s*1000\)/);
 assert.doesNotMatch(shell, /visibleCapped:\s*true/);
 
@@ -115,6 +122,7 @@ assert.match(main, /import\("\.\/providerLayerRequestRuntime"\)/);
 assert.match(main, /import\("\.\/providerLayerTelemetryRuntime"\)/);
 assert.match(main, /import\("\.\/phaseTwoPreviewIsolation"\)/);
 assert.match(main, /import\("\.\/phaseTwoMapBridge"\)/);
+assert.match(main, /import\("\.\/phase-two-control-fix\.css"\)/);
 assert.match(main, /import\("\.\/PhaseTwoShell"\)/);
 assert.doesNotMatch(main, /phaseTwoLegacyLayerBridge/);
 assert.match(main, /root\.render\(<App \/>\)/);
@@ -123,4 +131,4 @@ const diagnosticsGate = readFileSync(resolve(here, '../src/usDiagnosticsGate.ts'
 assert.match(diagnosticsGate, /scheduleDiagnosticsSync/);
 assert.match(diagnosticsGate, /clearTimeout\(syncTimer\)/);
 
-console.log('P2 preview observer loop is blocked, paging remains uncapped, and stable production boot is unchanged');
+console.log('P2 preview toggle is explicit, aborted loading clears, paging remains uncapped, and stable production boot is unchanged');

@@ -104,7 +104,9 @@ const previewIsolation = readFileSync(resolve(here, '../src/phaseTwoPreviewIsola
 assert.match(previewIsolation, /p2-preview/);
 assert.match(previewIsolation, /\/api\/provider-layers\//);
 assert.match(previewIsolation, /url\.searchParams\.get\('p2'\) !== '1'/);
-assert.doesNotMatch(previewIsolation, /MutationObserver/);
+assert.match(previewIsolation, /PreviewNoopMutationObserver/);
+assert.match(previewIsolation, /window as Window & \{ MutationObserver/);
+assert.match(previewIsolation, /disablePreviewMutationObservers\(\)/);
 assert.doesNotMatch(previewIsolation, /document\.querySelector/);
 
 const main = readFileSync(resolve(here, '../src/main.tsx'), 'utf8');
@@ -121,4 +123,4 @@ const diagnosticsGate = readFileSync(resolve(here, '../src/usDiagnosticsGate.ts'
 assert.match(diagnosticsGate, /scheduleDiagnosticsSync/);
 assert.match(diagnosticsGate, /clearTimeout\(syncTimer\)/);
 
-console.log('P2 preview is opt-in, isolated, and leaves the stable production boot unchanged');
+console.log('P2 preview observer loop is blocked, paging remains uncapped, and stable production boot is unchanged');

@@ -1,0 +1,1 @@
+The emergency rollback restores the last known working App frontend and keeps the P0 provider paging runtime. Database page sizes remain transport batches only and are not visible-provider caps. Phase 2 code stays in the repository but is not mounted in production until it is repaired and browser-tested.

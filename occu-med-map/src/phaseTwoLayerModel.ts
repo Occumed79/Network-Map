@@ -1,4 +1,5 @@
 export type PhaseTwoVisualization = 'density' | 'grid' | 'pins';
+export type PhaseTwoSourceKind = 'stored' | 'saved' | 'candidate' | 'live';
 
 export type ViewportBounds = {
   north: number;
@@ -34,12 +35,28 @@ export function autoVisualizationForZoom(zoom: number): PhaseTwoVisualization {
   return 'pins';
 }
 
+export function selectedSourceKinds(filters: PhaseTwoLayerFilters): PhaseTwoSourceKind[] {
+  if (filters.source === 'live') return ['live'];
+  if (filters.source === 'saved' || filters.source === 'my-clinics') return ['saved'];
+  if (filters.source === 'candidates') return ['candidate'];
+  if (filters.source !== 'all') return ['stored'];
+
+  const kinds: PhaseTwoSourceKind[] = [];
+  if (filters.includeStored) kinds.push('stored');
+  if (filters.includeSaved) kinds.push('saved');
+  if (filters.includeCandidates) kinds.push('candidate');
+  if (filters.includeLive) kinds.push('live');
+  return kinds;
+}
+
 export function effectiveVisualization(
   requested: 'auto' | PhaseTwoVisualization,
   zoom: number,
   trustTier: string,
+  sourceKinds: PhaseTwoSourceKind[] = [],
 ): PhaseTwoVisualization {
   if (trustTier && trustTier !== 'all') return 'pins';
+  if (sourceKinds.includes('candidate') || sourceKinds.includes('live')) return 'pins';
   return requested === 'auto' ? autoVisualizationForZoom(zoom) : requested;
 }
 
@@ -51,6 +68,7 @@ export function buildViewportParams(
   limit = 100,
 ): URLSearchParams {
   const params = new URLSearchParams({
+    p2: '1',
     mode,
     page: String(Math.max(1, page)),
     limit: String(Math.max(1, limit)),
@@ -65,6 +83,8 @@ export function buildViewportParams(
     includeLive: String(filters.includeLive),
   });
 
+  const kinds = selectedSourceKinds(filters);
+  if (kinds.length === 1) params.set('source_kind', kinds[0]);
   if (filters.source && filters.source !== 'all') params.set('source', filters.source);
   if (filters.query.trim()) params.set('q', filters.query.trim());
   if (filters.country.trim()) params.set('country', filters.country.trim());
@@ -77,6 +97,15 @@ export function buildViewportParams(
 export function providerMatchesTrustTier(provider: MinimalProvider, trustTier: string): boolean {
   if (!trustTier || trustTier === 'all') return true;
   return String(provider.trust_tier || '').toLowerCase() === trustTier.toLowerCase();
+}
+
+export function providerMatchesSourceKind(provider: MinimalProvider, kind: PhaseTwoSourceKind): boolean {
+  const sourceKind = String(provider.source_kind || '').toLowerCase();
+  const source = String(provider.source || '').toLowerCase();
+  if (kind === 'saved') return sourceKind === 'saved' || source.includes('my clinics');
+  if (kind === 'candidate') return sourceKind === 'candidate';
+  if (kind === 'live') return sourceKind === 'live' || source.includes('openstreetmap') || source.includes('overpass');
+  return sourceKind === 'stored' && !source.includes('my clinics');
 }
 
 export function uniqueProviders<T extends MinimalProvider>(providers: T[]): T[] {

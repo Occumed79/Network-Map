@@ -61,4 +61,5 @@ export function getDb() {
   return db;
 }
 
+export type { PoolClient } from "pg";
 export * from "./schema";

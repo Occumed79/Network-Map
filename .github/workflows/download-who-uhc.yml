@@ -47,6 +47,17 @@ jobs:
           cat /tmp/who-uhc-download.log
           exit 0
 
+      - name: Resolve verified Neon endpoint hosts
+        run: |
+          mkdir -p data/generated/who-uhc
+          for host in \
+            ep-autumn-hill-atgvqg3e-pooler.c-9.us-east-1.aws.neon.tech \
+            ep-autumn-hill-atgvqg3e.c-9.us-east-1.aws.neon.tech; do
+            echo "[$host]" >> data/generated/who-uhc/neon-host-ips.txt
+            getent ahostsv4 "$host" | awk '{print $1}' | sort -u >> data/generated/who-uhc/neon-host-ips.txt || true
+          done
+          cat data/generated/who-uhc/neon-host-ips.txt
+
       - name: Upload WHO UHC dataset
         if: always()
         uses: actions/upload-artifact@v4

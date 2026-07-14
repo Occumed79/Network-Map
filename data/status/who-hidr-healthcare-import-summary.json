@@ -1,0 +1,5 @@
+{
+  "status": "FAILED",
+  "error": "No database URL found in any of: DATABASE_URL, NEON_DATABASE_URL, POSTGRES_URL, POSTGRES_DATABASE_URL",
+  "generated_at": "2026-07-14T19:30:29.525369+00:00"
+}

@@ -1,0 +1,64 @@
+name: Exact provider geocoding pilot
+
+on:
+  push:
+    branches:
+      - agent/exact-provider-geocoding
+    paths:
+      - scripts/exact-geocode-provider-batch.mjs
+      - data/geocoding/provider-import-batch-001.jsonl
+      - .github/workflows/exact-provider-geocoding.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  geocode-exact:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out exact-geocoding branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/exact-provider-geocoding
+          fetch-depth: 1
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Geocode first approved batch with strict rejection rules
+        run: |
+          node scripts/exact-geocode-provider-batch.mjs \
+            --input=data/geocoding/provider-import-batch-001.jsonl \
+            --output=data/geocoding/results/provider-geocoded-batch-001.csv \
+            --unresolved=data/geocoding/results/provider-unresolved-batch-001.csv \
+            --audit=data/geocoding/results/provider-geocode-audit-batch-001.jsonl \
+            --limit=10 \
+            --delayMs=1250
+
+      - name: Publish exact-match and unresolved results
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/geocoding/results
+          if git diff --cached --quiet; then
+            echo "No geocoding result changes"
+            exit 0
+          fi
+          git commit -m "data: publish exact geocoding batch 001 [skip ci]"
+          git push origin HEAD:agent/exact-provider-geocoding
+
+      - name: Upload geocoding audit artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exact-provider-geocoding-batch-001
+          path: data/geocoding/results
+          if-no-files-found: error
+          retention-days: 14

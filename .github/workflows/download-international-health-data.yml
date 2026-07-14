@@ -5,13 +5,13 @@ on:
     branches:
       - data/international-source-bootstrap
     paths:
-      - scripts/bootstrap-international-health-data.mjs
+      - scripts/bootstrap-world-bank-health-data.mjs
       - .github/workflows/download-international-health-data.yml
   pull_request:
     branches:
       - main
     paths:
-      - scripts/bootstrap-international-health-data.mjs
+      - scripts/bootstrap-world-bank-health-data.mjs
       - .github/workflows/download-international-health-data.yml
   workflow_dispatch:
 
@@ -22,7 +22,7 @@ jobs:
   download-and-normalize:
     if: github.actor != 'github-actions[bot]' && (github.event_name != 'pull_request' || github.head_ref == 'data/international-source-bootstrap')
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
 
     steps:
       - name: Check out source branch
@@ -36,8 +36,8 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Download and normalize official data
-        run: node scripts/bootstrap-international-health-data.mjs
+      - name: Download World Bank health baseline
+        run: node scripts/bootstrap-world-bank-health-data.mjs
 
       - name: Commit generated SQL and manifest
         run: |
@@ -48,5 +48,5 @@ jobs:
             echo "No generated-data changes"
             exit 0
           fi
-          git commit -m "data: refresh international health baseline [skip ci]"
+          git commit -m "data: refresh World Bank international health baseline [skip ci]"
           git push origin HEAD:data/international-source-bootstrap

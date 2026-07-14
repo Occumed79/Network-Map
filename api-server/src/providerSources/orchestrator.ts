@@ -61,7 +61,7 @@ async function searchRapidApiFromOrchestrator(params: SearchParams): Promise<Pro
     radiusMiles,
     serviceKeywords: [serviceType],
     city,
-    state,
+    adminArea: state,
     limit: 20,
   });
 
@@ -70,16 +70,16 @@ async function searchRapidApiFromOrchestrator(params: SearchParams): Promise<Pro
     name: p.name,
     address: p.address || "",
     city: p.city || city,
-    state: p.state || state,
+    state: p.adminArea || state,
     postalCode: p.postalCode || "",
     phone: p.phone || "",
     website: p.website || "",
-    lat: p.lat,
-    lng: p.lng,
+    lat: p.lat ?? undefined,
+    lng: p.lng ?? undefined,
     coordinateStatus: "geocoded" as const,
     source: "rapidapi",
     sourceDetail: result.debug.succeeded || "rapidapi",
-    sourceUrl: p.sourceUrl,
+    sourceUrl: p.sourceUrl ?? undefined,
     confidence: p.confidence >= 75 ? "high" : p.confidence >= 50 ? "medium" : "low",
     trustTier: "directory" as const,
     score: p.confidence,
@@ -91,7 +91,7 @@ async function searchRapidApiFromOrchestrator(params: SearchParams): Promise<Pro
       confidence: p.confidence,
       source: "rapidapi",
     })),
-    distanceMiles: p.distanceMiles,
+    distanceMiles: p.distanceMiles ?? undefined,
     _rawSources: ["rapidapi"],
   }));
 }

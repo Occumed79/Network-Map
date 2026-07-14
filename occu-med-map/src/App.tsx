@@ -1183,6 +1183,13 @@ export default function App() {
   const dentistLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
   const [showMyClinicsLayer, setShowMyClinicsLayer] = useState(true);
   const [myClinicsData, setMyClinicsData] = useState<any[]>([]);
+  // NACCHO Local Health Department layer — Issue #37
+  const [showNacchoLayer, setShowNacchoLayer] = useState(false);
+  const [nacchoData, setNacchoData] = useState<any[]>([]);
+  const [nacchoLoading, setNacchoLoading] = useState(false);
+  const [nacchoError, setNacchoError] = useState('');
+  const nacchoLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
+  const nacchoFetchRef = useRef<AbortController|null>(null);
   const [showDatasetBrowser, setShowDatasetBrowser] = useState(false);
   const [showProviderExplorerDrawer, setShowProviderExplorerDrawer] = useState(false);
   const [datasetStatus, setDatasetStatus] = useState<Record<DatasetKey, DatasetLoadState>>(INITIAL_DATASET_STATUS);
@@ -1939,6 +1946,83 @@ export default function App() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[mapReady, metric, serviceInventoryEnabled]);
+
+  // ── NACCHO LHD layer: load + render on map bounds change ─────────────────
+  useEffect(()=>{
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    if (!showNacchoLayer) {
+      // Clear the layer when disabled
+      if (nacchoLayerRef.current) { nacchoLayerRef.current.destroy(); nacchoLayerRef.current = null; }
+      nacchoFetchRef.current?.abort();
+      nacchoFetchRef.current = null;
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout>|null = null;
+    const reload = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(async ()=>{
+        nacchoFetchRef.current?.abort();
+        const ac = new AbortController();
+        nacchoFetchRef.current = ac;
+        setNacchoLoading(true);
+        setNacchoError('');
+        try {
+          const bounds = map.getBounds();
+          const params = new URLSearchParams({
+            useBounds: 'true',
+            north: String(bounds.getNorth()),
+            south: String(bounds.getSouth()),
+            east: String(bounds.getEast()),
+            west: String(bounds.getWest()),
+            limit: '1000',
+          });
+          const resp = await fetch(`/api/naccho-lhd?${params}`, { signal: ac.signal });
+          if (ac.signal.aborted) return;
+          const data = await resp.json().catch(()=>({providers:[]}));
+          if (ac.signal.aborted) return;
+          const providers = Array.isArray(data.providers) ? data.providers : [];
+          setNacchoData(providers);
+          // Render on map
+          if (nacchoLayerRef.current) { nacchoLayerRef.current.destroy(); nacchoLayerRef.current = null; }
+          nacchoLayerRef.current = createProviderFieldLayer(map, providers, {
+            color: '#34d399',
+            glow: false,
+            cellPx: 52,
+            badgeLabel: 'Local Health Dept',
+            buildPopup: (p:any) => {
+              const services = Array.isArray(p.public_health_services) ? p.public_health_services : (p.services || []);
+              const svcHtml = services.length ? `<div style="font-size:9px;color:#6ee7b7;margin-top:4px;">${services.slice(0,5).join(', ')}</div>` : '';
+              return `<div style="font-family:Inter,sans-serif;padding:10px 12px;max-width:270px;">
+                <div style="font-size:12px;font-weight:700;color:#e2f0ff;">${p.name||'Local Health Department'}</div>
+                <div style="font-size:9px;font-family:'IBM Plex Mono',monospace;color:#34d399;letter-spacing:1px;text-transform:uppercase;margin:2px 0 4px;">NACCHO LHD Directory</div>
+                <div style="font-size:9px;color:#4a6888;margin-bottom:4px;">${[p.address,p.city,p.admin_area,p.country].filter(Boolean).join(', ')||'Address unavailable'}</div>
+                ${p.phone ? `<div style="font-size:9px;margin-bottom:3px;"><a href="tel:${p.phone}">${p.phone}</a></div>` : ''}
+                ${p.website ? `<div style="font-size:8.5px;margin-bottom:3px;"><a href="${p.website}" target="_blank" rel="noreferrer">${p.website}</a></div>` : ''}
+                ${svcHtml}
+                <div style="font-size:8px;color:#94a3b8;margin-top:5px;border-top:1px solid rgba(255,255,255,0.08);padding-top:4px;">External directory record · not a confirmed service provider</div>
+                <div style="font-size:8px;color:#64748b;margin-top:2px;"><a href="https://www.naccho.org/membership/lhd-directory" target="_blank" rel="noreferrer">naccho.org/membership/lhd-directory</a></div>
+              </div>`;
+            },
+          });
+        } catch (err:any) {
+          if (!ac.signal.aborted) setNacchoError(err?.message || 'NACCHO layer failed');
+        } finally {
+          if (!ac.signal.aborted) setNacchoLoading(false);
+        }
+      }, 400);
+    };
+    reload();
+    map.on('moveend', reload);
+    return ()=>{
+      if (timer) clearTimeout(timer);
+      map.off('moveend', reload);
+      nacchoFetchRef.current?.abort();
+      nacchoFetchRef.current = null;
+      if (nacchoLayerRef.current) { nacchoLayerRef.current.destroy(); nacchoLayerRef.current = null; }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[mapReady, showNacchoLayer]);
 
   const activeToolRef = React.useRef(activeTool);
   React.useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
@@ -2740,10 +2824,10 @@ export default function App() {
     );
   }
 
-  // International (non-U.S.) coverage lookup. The U.S.-only difficulty model,
-  // scorecard, nearest markets, provider density, and nearest-easier suggestions
-  // are intentionally NOT computed or shown here — only geocode, map fly-to, pin,
-  // and a Live Finder handoff are offered.
+  // International (non-U.S.) coverage lookup.
+  // The U.S.-only difficulty model and LOCS dataset are not used here.
+  // Instead, confidence and availability signals come from the Live Finder
+  // (OpenStreetMap/Overpass) so the user gets real, actionable information.
   function renderInternationalResult(geo:any) {
     const {lat,lng,city,state,zip,display}=geo;
     const label=`${city||display}${state?', '+state:''}`;
@@ -2753,20 +2837,25 @@ export default function App() {
     if(map){ map.flyTo([lat,lng],11,{duration:1.2}); drawRadiusCircle(lat,lng); }
     placeCustomPin(lat,lng,`${city||display}${zip?', '+zip:''}`,'#89d4fe');
     setDriveLocA(a=>{ setDriveLocB(a||null); return {name:label,lat,lng}; });
+    // Kick off a live search immediately so the user gets real provider data.
+    void doLiveSearch(lat,lng,undefined,label,'explicit_google');
     setRpResult(
       <div className="fadein">
         <div className="rp-divider"/>
         <div className="rp-city-name">{city||display}</div>
-        <div className="rp-city-meta" style={{marginBottom:4}}>{state}{zip?' · '+zip:''} · <span style={{color:'var(--accent2)'}}>INTERNATIONAL LOCATION</span></div>
-        <div className="rp-alert" style={{background:'rgba(196,168,255,0.10)',border:'1px solid rgba(196,168,255,0.30)',color:'var(--accent2)'}}>
-          {INTL_COVERAGE_NOTICE}
+        <div className="rp-city-meta" style={{marginBottom:4}}>
+          {[state,zip?'ZIP '+zip:null].filter(Boolean).join(' · ')}
+          {state||zip?' · ':''}<span style={{color:'var(--accent2)'}}>INTERNATIONAL LOCATION</span>
+        </div>
+        <div className="rp-alert" style={{background:'rgba(137,212,254,0.08)',border:'1px solid rgba(137,212,254,0.22)',color:'#89d4fe'}}>
+          U.S. difficulty scoring does not apply to international locations.
+          Live Finder results below show real nearby facilities via OpenStreetMap.
         </div>
         <div style={{fontSize:'9.5px',color:'#8fb3d8',marginBottom:8,padding:'6px 9px',background:'rgba(137,212,254,0.06)',borderRadius:5,lineHeight:1.55}}>
-          Difficulty scores, provider density, and nearest-market suggestions are
-          built from U.S.-only datasets and are not shown outside the United States.
-          Use Live Finder below to search real facilities here via OpenStreetMap.
+          Coordinates: {lat.toFixed(5)}, {lng.toFixed(5)}.
+          Searching facilities within {liveRadius} miles via Overpass/OpenStreetMap.
+          Confidence and availability are based on live data, not pre-scored datasets.
         </div>
-        <button className="export-btn" style={{marginBottom:8}} onClick={()=>{ setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder'); doLiveSearch(lat,lng,undefined,label,'explicit_google'); }}>SEARCH LIVE PROVIDERS</button>
         <DriveTimeBox fromLat={lat} fromLng={lng} fromName={label} locB={null}/>
         <button className="export-btn" onClick={()=>doExportReport(rd)}><Download size={15}/>Export location report</button>
       </div>
@@ -3542,6 +3631,13 @@ export default function App() {
               <LayerToggle label="BlueHive Providers" checked={showBlueHive} onChange={checked=>toggleProviderLayer('bluehive',checked)} disabled={datasetStatus.bluehive.loading} status={providerLayerStatus('bluehive',blueHiveData.length,'No BlueHive providers in view',showBlueHive)}/>
               <LayerToggle label="Dental Examiner Presence" checked={showDentists} onChange={checked=>toggleProviderLayer('dentists',checked)} disabled={datasetStatus.dentists.loading} status={providerLayerStatus('dentists',dentistData.length,'No NPI-derived dental presence in view',showDentists)}/>
               <LayerToggle label="My Clinics" checked={showMyClinicsLayer} onChange={checked=>toggleProviderLayer('myClinics',checked)} disabled={datasetStatus.myClinics.loading} status={providerLayerStatus('myClinics',myClinicsData.length,'No saved clinics in view',showMyClinicsLayer)}/>
+              <LayerToggle
+                label="NACCHO Local Health Depts"
+                checked={showNacchoLayer}
+                onChange={setShowNacchoLayer}
+                disabled={nacchoLoading}
+                status={nacchoLoading ? 'Loading LHD data…' : nacchoError ? nacchoError : showNacchoLayer ? `${nacchoData.length.toLocaleString()} LHDs in view · directory records` : 'Toggle on to load'}
+              />
               <LayerToggle label="Upload Preview" checked={showUploadedClinics} onChange={setShowUploadedClinics} disabled={clinicGroups.length===0} status={clinicGroups.length ? `${uploadedClinics.length.toLocaleString()} uploaded rows` : 'Upload a clinic file to enable'}/>
               <LayerToggle label="Luminous Density" checked={showGlowPoints} onChange={setShowGlowPoints} status={showGlowPoints?'Density halos and point glow active':'Low-glow point styling'}/>
             </div>

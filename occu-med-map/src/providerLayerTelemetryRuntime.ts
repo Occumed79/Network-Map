@@ -1,3 +1,13 @@
+/**
+ * Provider layer telemetry runtime.
+ *
+ * Listens for `network-map:provider-layer-status` CustomEvents dispatched by
+ * providerLayerRequestRuntime and updates telemetry-driven UI elements.
+ *
+ * This module does NOT monkey-patch window.fetch. It uses a narrow
+ * MutationObserver scoped only to the provider source health header.
+ */
+
 type ProviderLayerStatusDetail = {
   source?: string;
   loaded?: number;
@@ -48,18 +58,8 @@ declare global {
 const SOURCE_KEYS = ["indexed", "bluehive", "dentists", "my-clinics"] as const;
 const sourceMetrics = new Map<string, SourceMetric>();
 const overlayMetrics = new Map<string, OverlayMetric>();
-const delegatedFetch = window.fetch.bind(window);
 let updateTimer: number | null = null;
-let mutationObserver: MutationObserver | null = null;
-
-function asUrl(input: RequestInfo | URL): URL | null {
-  try {
-    if (input instanceof Request) return new URL(input.url, window.location.origin);
-    return new URL(input.toString(), window.location.origin);
-  } catch {
-    return null;
-  }
-}
+let headerObserver: MutationObserver | null = null;
 
 function normalizeSourceKey(value: string): string | null {
   const normalized = value.trim().toLowerCase().replace(/[_\s]+/g, "-");
@@ -125,6 +125,7 @@ function clearOverlay(label: string): void {
 function overlayLabelForUrl(url: URL): string | null {
   if (url.pathname.startsWith("/api/provider-explorer/")) return "Provider Explorer";
   if (url.pathname.startsWith("/api/map-inventory")) return "Service Presence";
+  if (url.pathname.startsWith("/api/naccho-lhd")) return "NACCHO LHD";
   if (
     url.pathname.startsWith("/api/live-finder") ||
     url.pathname.startsWith("/api/provider-sources/search") ||
@@ -145,6 +146,7 @@ function recordsFromPayload(payload: Record<string, unknown>): number {
   return 0;
 }
 
+/** Track overlay responses via a patched XHR / fetch observing the custom event. */
 async function observeOverlayResponse(url: URL, response: Response): Promise<void> {
   const label = overlayLabelForUrl(url);
   if (!label || !response.ok) return;
@@ -160,11 +162,20 @@ async function observeOverlayResponse(url: URL, response: Response): Promise<voi
   }
 }
 
+// Wrap fetch once at module init to observe overlay (non-provider-layer) responses.
+// This is the only window.fetch wrapping in this module.
+const _baseFetch = window.fetch.bind(window);
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-  const response = await delegatedFetch(input, init);
-  const url = asUrl(input);
-  if (url && !url.pathname.startsWith("/api/provider-layers/")) {
-    void observeOverlayResponse(url, response);
+  const response = await _baseFetch(input, init);
+  try {
+    const url = input instanceof Request
+      ? new URL(input.url, window.location.origin)
+      : new URL(input.toString(), window.location.origin);
+    if (!url.pathname.startsWith("/api/provider-layers/")) {
+      void observeOverlayResponse(url, response);
+    }
+  } catch {
+    // URL parse failure — not a local API call, ignore
   }
   return response;
 }) as typeof window.fetch;
@@ -350,6 +361,7 @@ document.addEventListener("change", (event) => {
   if (sourceKey) scheduleUpdate();
   const label = (target.getAttribute("aria-label") || "").toLowerCase();
   if (label.includes("service presence") && !target.checked) clearOverlay("Service Presence");
+  if (label.includes("naccho") && !target.checked) clearOverlay("NACCHO LHD");
 });
 
 document.addEventListener("click", (event) => {
@@ -369,18 +381,32 @@ document.addEventListener("click", (event) => {
 function start(): void {
   ensureStyles();
   scheduleUpdate();
+
+  // Observe only the provider source health header for class changes so the
+  // enabled/loaded counts stay fresh when React re-renders the sidebar.
+  // This is deliberately scoped to avoid scanning the entire body.
+  const connectHeader = () => {
+    const header = document.querySelector(".provider-source-health");
+    if (!header) return;
+    headerObserver?.disconnect();
+    headerObserver = new MutationObserver(() => scheduleUpdate());
+    headerObserver.observe(header, { childList: true, subtree: true });
+  };
+
   if (!document.body) {
-    window.addEventListener("DOMContentLoaded", start, { once: true });
+    window.addEventListener("DOMContentLoaded", () => { connectHeader(); scheduleUpdate(); }, { once: true });
     return;
   }
-  mutationObserver?.disconnect();
-  mutationObserver = new MutationObserver(() => scheduleUpdate());
-  mutationObserver.observe(document.body, {
-    subtree: true,
-    childList: true,
-    attributes: true,
-    attributeFilter: ["class", "aria-expanded"],
+  connectHeader();
+  // Single lightweight body observer only to detect when the header mounts.
+  const mountObserver = new MutationObserver(() => {
+    if (document.querySelector(".provider-source-health")) {
+      mountObserver.disconnect();
+      connectHeader();
+      scheduleUpdate();
+    }
   });
+  mountObserver.observe(document.body, { childList: true, subtree: false });
 }
 
 start();

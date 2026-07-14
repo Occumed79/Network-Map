@@ -21,6 +21,7 @@ import googlePlacesRouter from "./googlePlaces";
 import enhancedSearchRouter from "./enhancedSearch";
 import providerExplorerRouter from "./providerExplorer";
 import myClinicsUploadRouter from "./myClinicsUpload";
+import nacchoLhdRouter from "./nacchoLhd";
 import { stabilizeProviderLayerRequests } from "../middleware/providerLayerContract";
 
 const router: IRouter = Router();
@@ -37,6 +38,7 @@ router.use(sourceStatusRouter);
 router.use(browserExtractionRouter);
 router.use(vectorIndexRouter);
 router.use(providerExplorerRouter);
+router.use(nacchoLhdRouter);
 router.use(stabilizeProviderLayerRequests);
 router.use(providerLayersRouter);
 router.use(myClinicsUploadRouter);

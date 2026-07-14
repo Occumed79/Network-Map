@@ -1,11 +1,10 @@
-name: Import WHO HIDR healthcare inequality data
+name: Resolve WHO HIDR download host
 
 on:
   push:
     branches:
       - data/international-source-bootstrap
     paths:
-      - scripts/import-who-hidr-healthcare.py
       - .github/workflows/download-who-hidr-healthcare.yml
   workflow_dispatch:
 
@@ -13,10 +12,10 @@ permissions:
   contents: write
 
 jobs:
-  import:
+  resolve:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 10
 
     steps:
       - name: Check out data branch
@@ -25,40 +24,25 @@ jobs:
           ref: data/international-source-bootstrap
           fetch-depth: 1
 
-      - name: Use Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      - name: Resolve official WHO HIDR host
+        run: |
+          set -euo pipefail
+          mkdir -p data/status
+          host="datasafe-h5afbhf4gwctabaa.z01.azurefd.net"
+          {
+            echo "[$host]"
+            getent ahostsv4 "$host" | awk '{print $1}' | sort -u
+          } > data/status/who-hidr-host-ips.txt
+          cat data/status/who-hidr-host-ips.txt
 
-      - name: Install importer dependencies
-        run: python -m pip install --disable-pip-version-check requests openpyxl "psycopg[binary]"
-
-      - name: Download, normalize, and import official WHO HIDR healthcare datasets
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
-          POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
-          POSTGRES_DATABASE_URL: ${{ secrets.POSTGRES_DATABASE_URL }}
-        run: python scripts/import-who-hidr-healthcare.py
-
-      - name: Publish verified import status
-        if: always()
+      - name: Publish resolved host addresses
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/status/who-hidr-healthcare-import-summary.json data/status/who-hidr-healthcare-import-status.txt
+          git add data/status/who-hidr-host-ips.txt
           if git diff --cached --quiet; then
             exit 0
           fi
-          git commit -m "data: publish WHO HIDR healthcare import status [skip ci]"
+          git commit -m "data: publish WHO HIDR host addresses [skip ci]"
           git push origin HEAD:data/international-source-bootstrap
-
-      - name: Upload WHO HIDR healthcare import diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: who-hidr-healthcare-import
-          path: data/generated/who-hidr-healthcare
-          if-no-files-found: warn
-          retention-days: 7

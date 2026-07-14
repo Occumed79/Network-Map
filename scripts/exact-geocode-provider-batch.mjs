@@ -42,7 +42,7 @@ function exactTextMatch(a, b) {
   const left = normalize(a);
   const right = normalize(b);
   if (!left || !right) return false;
-  return left === right || (left.length >= 8 && right.length >= 8 && (left.includes(right) || right.includes(left)));
+  return left === right;
 }
 
 function extractExplicitHouseNumber(address) {

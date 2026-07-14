@@ -18,6 +18,7 @@ const delayMs = Math.max(1100, Number(args.delayMs || 1250));
 const limit = Math.max(1, Number(args.limit || 10));
 
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
+const ARCGIS_URL = 'https://geocode-api.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates';
 const USER_AGENT = 'Occu-Med-Network-Map/1.0 (exact-provider-geocoding; https://github.com/Occumed79/Network-Map)';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -134,6 +135,95 @@ function evaluateCandidate(source, result) {
   };
 }
 
+function evaluateArcgisCandidate(source, candidate) {
+  const attributes = candidate.attributes || {};
+  const reasons = [];
+  const score = Number(candidate.score);
+  const addrType = String(attributes.Addr_type || '').toLowerCase();
+  const exactTypes = new Set(['poi', 'pointaddress', 'subaddress']);
+
+  if (score !== 100) reasons.push('arcgis_score_not_100');
+  if (!exactTypes.has(addrType)) reasons.push('result_is_not_poi_rooftop_or_subaddress');
+
+  const returnedCountryName = attributes.CntryName || attributes.CountryName || '';
+  if (!exactTextMatch(source.country, returnedCountryName)) reasons.push('country_not_exact');
+
+  if (source.city) {
+    const expectedCity = normalize(source.city);
+    const returnedCities = [attributes.City, attributes.District, attributes.Subregion].filter(Boolean).map(normalize);
+    if (!returnedCities.includes(expectedCity)) reasons.push('city_not_exact');
+  }
+
+  if (source.postalCode) {
+    const expectedPostal = normalizePostal(source.postalCode);
+    const returnedPostal = normalizePostal(attributes.Postal || attributes.PostalExt);
+    if (!returnedPostal || returnedPostal !== expectedPostal) reasons.push('postal_code_not_exact');
+  }
+
+  const sourceHouse = extractExplicitHouseNumber(source.address);
+  const returnedHouse = String(attributes.AddNum || '').toUpperCase().replace(/\s+/g, '');
+  const returnedName = attributes.PlaceName || attributes.ShortLabel || attributes.Match_addr?.split(',')[0] || '';
+  const exactName = exactTextMatch(source.name, returnedName);
+
+  if (sourceHouse) {
+    const normalizedSourceHouse = sourceHouse.replace(/\s+/g, '');
+    if (!returnedHouse || returnedHouse !== normalizedSourceHouse) reasons.push('house_number_not_exact');
+  } else if (!exactName) {
+    reasons.push('no_exact_house_number_or_exact_facility_name');
+  }
+
+  const lat = Number(candidate.location?.y);
+  const lng = Number(candidate.location?.x);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) reasons.push('invalid_coordinates');
+
+  return {
+    accepted: reasons.length === 0,
+    reasons,
+    matchBasis: sourceHouse ? 'arcgis_score_100_exact_house_city_country' : 'arcgis_score_100_exact_poi_name_city_country',
+    exactName,
+    sourceHouse,
+    resultHouse: returnedHouse,
+    lat,
+    lng,
+  };
+}
+
+async function searchArcgis(query) {
+  const url = new URL(ARCGIS_URL);
+  url.searchParams.set('SingleLine', query);
+  url.searchParams.set('f', 'json');
+  url.searchParams.set('outFields', '*');
+  url.searchParams.set('maxLocations', '10');
+  url.searchParams.set('forStorage', 'false');
+  url.searchParams.set('matchOutOfRange', 'false');
+
+  let lastError;
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 45_000);
+    try {
+      const response = await fetch(url, {
+        headers: { Accept: 'application/json', 'User-Agent': USER_AGENT },
+        signal: controller.signal,
+      });
+      if (response.status === 429 || response.status >= 500) {
+        await sleep(attempt * 5000);
+        continue;
+      }
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      const payload = await response.json();
+      if (payload.error) throw new Error(payload.error.message || 'ArcGIS geocoder error');
+      return Array.isArray(payload.candidates) ? payload.candidates : [];
+    } catch (error) {
+      lastError = error;
+      if (attempt < 4) await sleep(attempt * 4000);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  throw lastError || new Error('ArcGIS request failed');
+}
+
 async function searchNominatim(query, countryCode) {
   const url = new URL(NOMINATIM_URL);
   url.searchParams.set('q', query);
@@ -220,7 +310,7 @@ for (const [index, source] of sources.entries()) {
       })) });
       const acceptedCandidate = evaluated.find(({ evaluation }) => evaluation.accepted);
       if (acceptedCandidate) {
-        bestAccepted = { query, ...acceptedCandidate };
+        bestAccepted = { provider: 'OpenStreetMap Nominatim', query, ...acceptedCandidate };
         break;
       }
     } catch (error) {
@@ -229,8 +319,35 @@ for (const [index, source] of sources.entries()) {
     }
   }
 
+  if (!bestAccepted) {
+    for (const query of queries) {
+      if (requestCount > 0) await sleep(delayMs);
+      requestCount += 1;
+      try {
+        const candidates = await searchArcgis(query);
+        const evaluated = candidates.map((result) => ({ result, evaluation: evaluateArcgisCandidate(source, result) }));
+        attempts.push({ provider: 'ArcGIS World Geocoding Service', query, resultCount: candidates.length, evaluated: evaluated.map(({ result, evaluation }) => ({
+          display_name: result.attributes?.LongLabel || result.attributes?.Match_addr || result.address,
+          score: result.score,
+          address_type: result.attributes?.Addr_type,
+          accepted: evaluation.accepted,
+          reasons: evaluation.reasons,
+        })) });
+        const acceptedCandidate = evaluated.find(({ evaluation }) => evaluation.accepted);
+        if (acceptedCandidate) {
+          bestAccepted = { provider: 'ArcGIS World Geocoding Service', query, ...acceptedCandidate };
+          break;
+        }
+      } catch (error) {
+        requestError = String(error?.message || error);
+        attempts.push({ provider: 'ArcGIS World Geocoding Service', query, error: requestError });
+      }
+    }
+  }
+
   if (bestAccepted) {
-    const { result, evaluation, query } = bestAccepted;
+    const { result, evaluation, query, provider } = bestAccepted;
+    const isArcgis = provider === 'ArcGIS World Geocoding Service';
     accepted.push({
       sourceRecordId: source.sourceRecordId,
       name: source.name,
@@ -245,10 +362,10 @@ for (const [index, source] of sources.entries()) {
       geocodeStatus: 'exact_match',
       matchBasis: evaluation.matchBasis,
       matchedQuery: query,
-      matchedDisplayName: result.display_name,
-      osmType: result.osm_type,
-      osmId: result.osm_id,
-      geocoder: 'OpenStreetMap Nominatim',
+      matchedDisplayName: isArcgis ? (result.attributes?.LongLabel || result.attributes?.Match_addr || result.address) : result.display_name,
+      osmType: isArcgis ? '' : result.osm_type,
+      osmId: isArcgis ? '' : result.osm_id,
+      geocoder: provider,
       geocodedAt: new Date().toISOString(),
     });
   } else {
@@ -267,7 +384,7 @@ for (const [index, source] of sources.entries()) {
       geocodeStatus: requestError ? 'request_error' : 'unresolved_no_exact_match',
       rejectionReasons: rejectionReasons.join('; '),
       requestError,
-      geocoder: 'OpenStreetMap Nominatim',
+      geocoder: 'OpenStreetMap Nominatim + ArcGIS World Geocoding Service',
       checkedAt: new Date().toISOString(),
     });
   }

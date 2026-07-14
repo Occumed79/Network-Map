@@ -161,6 +161,26 @@ jobs:
           cat /tmp/hhfa-sara.log
           exit 0
 
+      - name: Publish WHO HHFA and SARA discovery status
+        if: always()
+        run: |
+          set -euo pipefail
+          status_dir="data/status"
+          source_dir="data/generated/who-hhfa-sara"
+          mkdir -p "$status_dir"
+          cp "$source_dir/summary.json" "$status_dir/who-hhfa-sara-summary.json" 2>/dev/null || true
+          cp "$source_dir/report-extraction-candidates.json" "$status_dir/who-hhfa-sara-candidates.json" 2>/dev/null || true
+          cp "$source_dir/catalog.json" "$status_dir/who-hhfa-sara-catalog.json" 2>/dev/null || true
+          cp "$source_dir/run.exit-code" "$status_dir/who-hhfa-sara-exit-code.txt" 2>/dev/null || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$status_dir"
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "data: publish WHO HHFA SARA discovery [skip ci]"
+          git push origin HEAD:data/international-source-bootstrap
+
       - name: Upload WHO HHFA and SARA discovery
         if: always()
         uses: actions/upload-artifact@v4

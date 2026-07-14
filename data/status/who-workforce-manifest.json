@@ -1,0 +1,249 @@
+{
+  "generated_at": "2026-07-14T12:25:01.382Z",
+  "source": "WHO Global Health Observatory / National Health Workforce Accounts",
+  "api_root": "https://ghoapi.azureedge.net/api",
+  "destination_table": "public.international_health_indicators",
+  "strategy": "latest numeric country-level observation per curated workforce indicator; aggregate dimensions preferred",
+  "total_rows": 3200,
+  "indicators_requested": 20,
+  "counts_by_indicator": {
+    "HWF_0001": 194,
+    "HWF_0002": 194,
+    "HWF_0006": 194,
+    "HWF_0007": 194,
+    "HWF_0008": 194,
+    "HWF_0009": 179,
+    "HWF_0010": 193,
+    "HWF_0011": 193,
+    "HWF_0014": 191,
+    "HWF_0015": 191,
+    "HWF_0016": 129,
+    "HWF_0017": 125,
+    "HWF_0018": 86,
+    "HWF_0019": 110,
+    "HWF_0020": 136,
+    "HWF_0021": 174,
+    "HWF_0022": 91,
+    "HWF_0024": 108,
+    "HWF_0025": 156,
+    "HWF_0026": 168
+  },
+  "diagnostics": {
+    "HWF_0001": {
+      "source_rows": 3693,
+      "usable_rows": 3682,
+      "countries": 194,
+      "newest_year": 2024,
+      "oldest_selected_year": 2015
+    },
+    "HWF_0002": {
+      "source_rows": 4293,
+      "usable_rows": 4293,
+      "countries": 194,
+      "newest_year": 2024,
+      "oldest_selected_year": 2015
+    },
+    "HWF_0006": {
+      "source_rows": 3593,
+      "usable_rows": 3582,
+      "countries": 194,
+      "newest_year": 2024,
+      "oldest_selected_year": 2014
+    },
+    "HWF_0007": {
+      "source_rows": 3859,
+      "usable_rows": 3859,
+      "countries": 194,
+      "newest_year": 2024,
+      "oldest_selected_year": 2014
+    },
+    "HWF_0008": {
+      "source_rows": 3859,
+      "usable_rows": 3859,
+      "countries": 194,
+      "newest_year": 2024,
+      "oldest_selected_year": 2014
+    },
+    "HWF_0009": {
+      "source_rows": 2529,
+      "usable_rows": 2529,
+      "countries": 179,
+      "newest_year": 2024,
+      "oldest_selected_year": 2000
+    },
+    "HWF_0010": {
+      "source_rows": 3348,
+      "usable_rows": 3337,
+      "countries": 193,
+      "newest_year": 2024,
+      "oldest_selected_year": 2004
+    },
+    "HWF_0011": {
+      "source_rows": 3791,
+      "usable_rows": 3791,
+      "countries": 193,
+      "newest_year": 2024,
+      "oldest_selected_year": 2004
+    },
+    "HWF_0014": {
+      "source_rows": 3085,
+      "usable_rows": 3074,
+      "countries": 191,
+      "newest_year": 2024,
+      "oldest_selected_year": 2001
+    },
+    "HWF_0015": {
+      "source_rows": 3458,
+      "usable_rows": 3458,
+      "countries": 191,
+      "newest_year": 2024,
+      "oldest_selected_year": 2001
+    },
+    "HWF_0016": {
+      "source_rows": 610,
+      "usable_rows": 610,
+      "countries": 129,
+      "newest_year": 2024,
+      "oldest_selected_year": 1992
+    },
+    "HWF_0017": {
+      "source_rows": 517,
+      "usable_rows": 517,
+      "countries": 125,
+      "newest_year": 2024,
+      "oldest_selected_year": 1992
+    },
+    "HWF_0018": {
+      "source_rows": 268,
+      "usable_rows": 268,
+      "countries": 86,
+      "newest_year": 2024,
+      "oldest_selected_year": 2004
+    },
+    "HWF_0019": {
+      "source_rows": 481,
+      "usable_rows": 481,
+      "countries": 110,
+      "newest_year": 2024,
+      "oldest_selected_year": 1992
+    },
+    "HWF_0020": {
+      "source_rows": 662,
+      "usable_rows": 662,
+      "countries": 136,
+      "newest_year": 2024,
+      "oldest_selected_year": 1998
+    },
+    "HWF_0021": {
+      "source_rows": 2041,
+      "usable_rows": 2041,
+      "countries": 174,
+      "newest_year": 2024,
+      "oldest_selected_year": 2003
+    },
+    "HWF_0022": {
+      "source_rows": 322,
+      "usable_rows": 322,
+      "countries": 91,
+      "newest_year": 2024,
+      "oldest_selected_year": 1991
+    },
+    "HWF_0024": {
+      "source_rows": 495,
+      "usable_rows": 495,
+      "countries": 108,
+      "newest_year": 2024,
+      "oldest_selected_year": 2001
+    },
+    "HWF_0025": {
+      "source_rows": 3406,
+      "usable_rows": 3406,
+      "countries": 156,
+      "newest_year": 2024,
+      "oldest_selected_year": 2004
+    },
+    "HWF_0026": {
+      "source_rows": 1906,
+      "usable_rows": 1906,
+      "countries": 168,
+      "newest_year": 2024,
+      "oldest_selected_year": 2009
+    }
+  },
+  "sql_files": [
+    {
+      "file": "who_workforce_001.sql",
+      "rows": 200
+    },
+    {
+      "file": "who_workforce_002.sql",
+      "rows": 200
+    },
+    {
+      "file": "who_workforce_003.sql",
+      "rows": 200
+    },
+    {
+      "file": "who_workforce_004.sql",
+      "rows": 200
+    },
+    {
+      "file": "who_workforce_005.sql",
+      "rows": 200
+    },
+    {
+      "file": "who_workforce_006.sql",
+      "rows": 200
+    },
+    {
+      "file": "who_workforce_007.sql",
+      "rows": 200
+    },
+    {
+      "file": "who_workforce_008.sql",
+      "rows": 200
+    },
+    {
+      "file": "who_workforce_009.sql",
+      "rows": 200
+    },
+    {
+      "file": "who_workforce_010.sql",
+      "rows": 200
+    },
+    {
+      "file": "who_workforce_011.sql",
+      "rows": 200
+    },
+    {
+      "file": "who_workforce_012.sql",
+      "rows": 200
+    },
+    {
+      "file": "who_workforce_013.sql",
+      "rows": 200
+    },
+    {
+      "file": "who_workforce_014.sql",
+      "rows": 200
+    },
+    {
+      "file": "who_workforce_015.sql",
+      "rows": 200
+    },
+    {
+      "file": "who_workforce_016.sql",
+      "rows": 200
+    }
+  ],
+  "safeguards": [
+    "Official WHO API only",
+    "No webpage scraping",
+    "No frontend data bundle",
+    "No credentials in generated files",
+    "Missing observations omitted rather than converted to zero",
+    "Country-level records only",
+    "Source dimensions retained in metadata",
+    "Idempotent upsert into Neon"
+  ]
+}

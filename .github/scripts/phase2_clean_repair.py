@@ -157,7 +157,7 @@ for path, forbidden in {
         if token in source:
             raise RuntimeError(f"Forbidden token {token!r} remains in {path}")
 
-for root in (Path("occu-med-map"), Path("api-server")):
+for root in (Path("occu-med-map/src"), Path("api-server/src")):
     for path in root.rglob("*"):
         if not path.is_file() or "node_modules" in path.parts:
             continue

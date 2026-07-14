@@ -7,6 +7,12 @@ on:
     paths:
       - scripts/discover-who-uhc-indicators.mjs
       - .github/workflows/discover-who-uhc.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - scripts/discover-who-uhc-indicators.mjs
+      - .github/workflows/discover-who-uhc.yml
   workflow_dispatch:
 
 permissions:
@@ -14,7 +20,7 @@ permissions:
 
 jobs:
   discover:
-    if: github.actor != 'github-actions[bot]'
+    if: github.actor != 'github-actions[bot]' && (github.event_name != 'pull_request' || github.head_ref == 'data/international-source-bootstrap')
     runs-on: ubuntu-latest
     timeout-minutes: 15
 

@@ -47,6 +47,14 @@ jobs:
           cat /tmp/international-download.log
           exit 0
 
+      - name: Resolve Neon production host
+        run: |
+          getent ahostsv4 ep-autumn-hill-atgvqg3e-pooler.c-9.us-east-1.aws.neon.tech \
+            | awk '{print $1}' \
+            | sort -u \
+            > data/generated/international/neon-host-ips.txt
+          cat data/generated/international/neon-host-ips.txt
+
       - name: Upload generated data and diagnostics
         uses: actions/upload-artifact@v4
         with:

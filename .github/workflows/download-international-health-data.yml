@@ -37,9 +37,16 @@ jobs:
           node-version: '22'
 
       - name: Download World Bank health baseline
-        run: node scripts/bootstrap-world-bank-health-data.mjs
+        run: |
+          mkdir -p data/generated/international
+          set +e
+          node scripts/bootstrap-world-bank-health-data.mjs > data/generated/international/download.log 2>&1
+          status=$?
+          echo "$status" > data/generated/international/download.exit-code
+          cat data/generated/international/download.log
+          exit 0
 
-      - name: Commit generated SQL and manifest
+      - name: Commit generated SQL, manifest, and diagnostics
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

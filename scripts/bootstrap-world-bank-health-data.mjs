@@ -79,7 +79,7 @@ async function main() {
   const countryRows = Array.isArray(countryPayload?.[1]) ? countryPayload[1] : [];
   const countries = new Map(
     countryRows
-      .filter((row) => row?.region?.id && /^[A-Z]{3}$/.test(row?.id || ""))
+      .filter((row) => row?.region?.id && row.region.id !== "NA" && /^[A-Z]{3}$/.test(row?.id || ""))
       .map((row) => [row.id, row.name]),
   );
 
@@ -163,7 +163,7 @@ async function main() {
     source: "World Bank Indicators API",
     official_api_documentation: "https://datahelpdesk.worldbank.org/knowledgebase/articles/889392-about-the-indicators-api-documentation",
     destination_table: "public.international_health_indicators",
-    strategy: "latest non-null country-level value per indicator",
+    strategy: "latest non-null country-level value per indicator; aggregate regions excluded",
     total_rows: normalized.length,
     eligible_countries: countries.size,
     counts_by_indicator: counts,
@@ -171,6 +171,7 @@ async function main() {
     sql_files: sqlFiles,
     safeguards: [
       "No webpage scraping",
+      "World Bank aggregate regions excluded",
       "No frontend data bundle",
       "No credentials in generated files",
       "Missing observations omitted rather than converted to zero",

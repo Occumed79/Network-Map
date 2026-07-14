@@ -5,16 +5,6 @@ on:
     branches:
       - data/international-source-bootstrap
     paths:
-      - scripts/bootstrap-world-bank-health-data.mjs
-      - scripts/discover-who-workforce-indicators.mjs
-      - scripts/bootstrap-who-workforce-data.mjs
-      - .github/workflows/download-international-health-data.yml
-  pull_request:
-    branches:
-      - main
-    paths:
-      - scripts/bootstrap-world-bank-health-data.mjs
-      - scripts/discover-who-workforce-indicators.mjs
       - scripts/bootstrap-who-workforce-data.mjs
       - .github/workflows/download-international-health-data.yml
   workflow_dispatch:
@@ -24,9 +14,9 @@ permissions:
 
 jobs:
   download-and-normalize:
-    if: github.actor != 'github-actions[bot]' && (github.event_name != 'pull_request' || github.head_ref == 'data/international-source-bootstrap')
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 40
 
     steps:
       - name: Check out source branch
@@ -40,28 +30,6 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Download World Bank health baseline
-        run: |
-          set +e
-          node scripts/bootstrap-world-bank-health-data.mjs > /tmp/international-download.log 2>&1
-          status=$?
-          mkdir -p data/generated/international
-          cp /tmp/international-download.log data/generated/international/download.log
-          echo "$status" > data/generated/international/download.exit-code
-          cat /tmp/international-download.log
-          exit 0
-
-      - name: Discover WHO workforce indicator catalog
-        run: |
-          set +e
-          node scripts/discover-who-workforce-indicators.mjs > /tmp/who-workforce-discovery.log 2>&1
-          status=$?
-          mkdir -p data/generated/who-workforce
-          cp /tmp/who-workforce-discovery.log data/generated/who-workforce/discovery.log
-          echo "$status" > data/generated/who-workforce/discovery.exit-code
-          cat /tmp/who-workforce-discovery.log
-          exit 0
-
       - name: Download and normalize WHO GHO and NHWA workforce data
         run: |
           set +e
@@ -73,7 +41,7 @@ jobs:
           cat /tmp/who-workforce-download.log
           exit 0
 
-      - name: Import official datasets into verified Map Neon database
+      - name: Import WHO workforce data into verified Map Neon database
         env:
           DATABASE_URL_CANDIDATE: ${{ secrets.DATABASE_URL }}
           NEON_DATABASE_URL_CANDIDATE: ${{ secrets.NEON_DATABASE_URL }}
@@ -81,7 +49,6 @@ jobs:
           POSTGRES_DATABASE_URL_CANDIDATE: ${{ secrets.POSTGRES_DATABASE_URL }}
         run: |
           set -euo pipefail
-          world_bank_dir="data/generated/international"
           who_dir="data/generated/who-workforce"
           db_url=""
           secret_name=""
@@ -96,59 +63,45 @@ jobs:
           done
 
           if [ -z "$db_url" ]; then
-            echo "NO_DATABASE_SECRET" > "$world_bank_dir/import-status.txt"
             echo "NO_DATABASE_SECRET" > "$who_dir/import-status.txt"
+            echo "No supported repository database secret was available." > "$who_dir/import-details.txt"
             exit 0
           fi
 
           identity="$(psql "$db_url" -v ON_ERROR_STOP=1 -Atc "SELECT current_database() || '|' || COALESCE(to_regclass('public.medical_providers')::text,'') || '|' || COALESCE(to_regclass('public.international_health_indicators')::text,'');")"
-          echo "$identity" > "$world_bank_dir/database-identity.txt"
           echo "$identity" > "$who_dir/database-identity.txt"
 
           IFS='|' read -r database_name medical_table international_table <<< "$identity"
           if [ "$database_name" != "neondb" ] || [ "$medical_table" != "medical_providers" ] || [ "$international_table" != "international_health_indicators" ]; then
-            echo "DATABASE_IDENTITY_REJECTED" > "$world_bank_dir/import-status.txt"
             echo "DATABASE_IDENTITY_REJECTED" > "$who_dir/import-status.txt"
+            echo "The available secret did not point to the verified Network Map database." > "$who_dir/import-details.txt"
+            exit 0
+          fi
+
+          if [ "$(cat "$who_dir/download.exit-code")" != "0" ]; then
+            echo "DOWNLOAD_FAILED" > "$who_dir/import-status.txt"
             exit 0
           fi
 
           shopt -s nullglob
-
-          if [ "$(cat "$world_bank_dir/download.exit-code")" = "0" ]; then
-            world_bank_files=("$world_bank_dir"/world_bank_health_*.sql)
-            for sql_file in "${world_bank_files[@]}"; do
-              psql "$db_url" -v ON_ERROR_STOP=1 -f "$sql_file"
-            done
-            psql "$db_url" -v ON_ERROR_STOP=1 -Atc "SELECT indicator_code || '|' || count(*) FROM public.international_health_indicators WHERE source_name='World Bank Indicators API' GROUP BY indicator_code ORDER BY indicator_code;" > "$world_bank_dir/import-counts.txt"
-            echo "IMPORTED" > "$world_bank_dir/import-status.txt"
-          else
-            echo "DOWNLOAD_FAILED" > "$world_bank_dir/import-status.txt"
+          who_files=("$who_dir"/who_workforce_*.sql)
+          if [ "${#who_files[@]}" -eq 0 ]; then
+            echo "NO_SQL_FILES" > "$who_dir/import-status.txt"
+            exit 0
           fi
 
-          if [ "$(cat "$who_dir/download.exit-code")" = "0" ]; then
-            who_files=("$who_dir"/who_workforce_*.sql)
-            if [ "${#who_files[@]}" -eq 0 ]; then
-              echo "NO_SQL_FILES" > "$who_dir/import-status.txt"
-            else
-              for sql_file in "${who_files[@]}"; do
-                psql "$db_url" -v ON_ERROR_STOP=1 -f "$sql_file"
-              done
-              psql "$db_url" -v ON_ERROR_STOP=1 -Atc "SELECT indicator_code || '|' || count(*) FROM public.international_health_indicators WHERE source_name='WHO Global Health Observatory / National Health Workforce Accounts' GROUP BY indicator_code ORDER BY indicator_code;" > "$who_dir/import-counts.txt"
-              echo "IMPORTED" > "$who_dir/import-status.txt"
-            fi
-          else
-            echo "DOWNLOAD_FAILED" > "$who_dir/import-status.txt"
-          fi
+          for sql_file in "${who_files[@]}"; do
+            psql "$db_url" -v ON_ERROR_STOP=1 -f "$sql_file"
+          done
 
-          echo "Imported using verified repository secret $secret_name." > "$world_bank_dir/import-details.txt"
+          psql "$db_url" -v ON_ERROR_STOP=1 -Atc "SELECT indicator_code || '|' || count(*) FROM public.international_health_indicators WHERE source_name='WHO Global Health Observatory / National Health Workforce Accounts' GROUP BY indicator_code ORDER BY indicator_code;" > "$who_dir/import-counts.txt"
+          echo "IMPORTED" > "$who_dir/import-status.txt"
           echo "Imported using verified repository secret $secret_name." > "$who_dir/import-details.txt"
 
-      - name: Upload generated data and diagnostics
+      - name: Upload WHO workforce diagnostics
         uses: actions/upload-artifact@v4
         with:
-          name: international-health-baseline
-          path: |
-            data/generated/international
-            data/generated/who-workforce
+          name: who-workforce-import
+          path: data/generated/who-workforce
           if-no-files-found: error
           retention-days: 7

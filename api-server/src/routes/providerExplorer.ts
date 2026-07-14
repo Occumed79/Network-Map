@@ -178,6 +178,8 @@ function selectSql(schema: ProviderSchema) {
   return `SELECT p.id::text AS id, p.name, lower(regexp_replace(COALESCE(p.name,''),'[^a-zA-Z0-9]+',' ','g')) normalized_name, pl.address, pl.city, pl.state AS admin_area, COALESCE(psrc.raw_data->>'country','US') AS country, pl.postal_code, pl.lat, pl.lng, pc.phone, pc.website, psrc.source_label AS source, CASE WHEN psrc.source_label='My Clinics' THEN 'saved' ELSE 'stored' END source_kind, psrc.source_url, NULL::numeric AS confidence_score, NULL::text AS category, svc.services, svc.services AS categories, psrc.raw_data AS raw_source_data, psrc.created_at AS imported_at, psrc.fetched_at AS last_seen, psrc.trust_tier, NULL::text status`;
 }
 
+export function legacyProviderSelectForTest(): string { return selectSql("legacy"); }
+
 function addSharedFilters(where: string[], params: unknown[], ctx: QueryContext, expr: {name:string; city:string; admin:string; postal:string; country:string; service:string; lat:string; lng:string; geog?:string}, spatialEngine: SpatialEngine) {
   if (ctx.country) where.push(`LOWER(COALESCE(${expr.country}, 'US')) = LOWER(${addParam(params, ctx.country)})`);
   if (ctx.adminArea) where.push(`LOWER(${expr.admin}) = LOWER(${addParam(params, ctx.adminArea)})`);

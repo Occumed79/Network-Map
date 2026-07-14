@@ -1,0 +1,51 @@
+name: Discover WHO UHC indicators
+
+on:
+  push:
+    branches:
+      - data/international-source-bootstrap
+    paths:
+      - scripts/discover-who-uhc-indicators.mjs
+      - .github/workflows/discover-who-uhc.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source branch
+        uses: actions/checkout@v4
+        with:
+          ref: data/international-source-bootstrap
+          fetch-depth: 1
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Discover WHO UHC service-coverage indicators
+        run: |
+          set +e
+          node scripts/discover-who-uhc-indicators.mjs > /tmp/who-uhc-discovery.log 2>&1
+          status=$?
+          mkdir -p data/generated/who-uhc
+          cp /tmp/who-uhc-discovery.log data/generated/who-uhc/discovery.log
+          echo "$status" > data/generated/who-uhc/discovery.exit-code
+          cat /tmp/who-uhc-discovery.log
+          exit 0
+
+      - name: Upload WHO UHC discovery
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: who-uhc-discovery
+          path: data/generated/who-uhc
+          if-no-files-found: error
+          retention-days: 7

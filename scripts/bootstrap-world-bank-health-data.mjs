@@ -86,10 +86,21 @@ async function main() {
   const retrievedAt = new Date().toISOString();
   const normalized = [];
   const counts = {};
+  const failures = {};
 
   for (const [indicatorCode, [indicatorName, unit]] of Object.entries(INDICATORS)) {
     const sourceUrl = `https://api.worldbank.org/v2/country/all/indicator/${indicatorCode}?format=json&per_page=1000&mrv=1`;
-    const payload = await fetchJson(sourceUrl);
+    let payload;
+    try {
+      payload = await fetchJson(sourceUrl);
+    } catch (error) {
+      const message = String(error?.message || error);
+      counts[indicatorCode] = 0;
+      failures[indicatorCode] = message;
+      console.error(`${indicatorCode}: unavailable after retries — ${message}`);
+      continue;
+    }
+
     const observations = Array.isArray(payload) ? payload[1] : [];
     const latest = new Map();
 
@@ -128,6 +139,10 @@ async function main() {
     console.log(`${indicatorCode}: ${latest.size} countries`);
   }
 
+  if (!normalized.length) {
+    throw new Error(`No World Bank indicators downloaded. Failures: ${JSON.stringify(failures)}`);
+  }
+
   normalized.sort((a, b) => a.indicator_code.localeCompare(b.indicator_code) || a.country_code.localeCompare(b.country_code));
   const sqlFiles = [];
   for (let offset = 0; offset < normalized.length; offset += CHUNK_SIZE) {
@@ -146,12 +161,14 @@ async function main() {
     total_rows: normalized.length,
     eligible_countries: countries.size,
     counts_by_indicator: counts,
+    failed_indicators: failures,
     sql_files: sqlFiles,
     safeguards: [
       "No webpage scraping",
       "No frontend data bundle",
       "No credentials in generated files",
       "Missing observations omitted rather than converted to zero",
+      "Failed indicators are reported and do not block successful sources",
       "Idempotent upsert into Neon",
     ],
   };

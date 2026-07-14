@@ -6,12 +6,16 @@ on:
       - data/international-source-bootstrap
     paths:
       - scripts/bootstrap-world-bank-health-data.mjs
+      - scripts/discover-who-workforce-indicators.mjs
+      - scripts/bootstrap-who-workforce-data.mjs
       - .github/workflows/download-international-health-data.yml
   pull_request:
     branches:
       - main
     paths:
       - scripts/bootstrap-world-bank-health-data.mjs
+      - scripts/discover-who-workforce-indicators.mjs
+      - scripts/bootstrap-who-workforce-data.mjs
       - .github/workflows/download-international-health-data.yml
   workflow_dispatch:
 
@@ -22,7 +26,7 @@ jobs:
   download-and-normalize:
     if: github.actor != 'github-actions[bot]' && (github.event_name != 'pull_request' || github.head_ref == 'data/international-source-bootstrap')
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Check out source branch
@@ -47,7 +51,18 @@ jobs:
           cat /tmp/international-download.log
           exit 0
 
-      - name: Import into verified Map Neon database when repository secret exists
+      - name: Discover WHO workforce indicator catalog
+        run: |
+          set +e
+          node scripts/discover-who-workforce-indicators.mjs > /tmp/who-workforce-discovery.log 2>&1
+          status=$?
+          mkdir -p data/generated/who-workforce
+          cp /tmp/who-workforce-discovery.log data/generated/who-workforce/discovery.log
+          echo "$status" > data/generated/who-workforce/discovery.exit-code
+          cat /tmp/who-workforce-discovery.log
+          exit 0
+
+      - name: Import World Bank data into verified Map Neon database when repository secret exists
         env:
           DATABASE_URL_CANDIDATE: ${{ secrets.DATABASE_URL }}
           NEON_DATABASE_URL_CANDIDATE: ${{ secrets.NEON_DATABASE_URL }}
@@ -90,7 +105,9 @@ jobs:
             exit 0
           fi
 
-          for sql_file in "$output_dir"/world_bank_health_*.sql; do
+          shopt -s nullglob
+          sql_files=("$output_dir"/world_bank_health_*.sql)
+          for sql_file in "${sql_files[@]}"; do
             psql "$db_url" -v ON_ERROR_STOP=1 -f "$sql_file"
           done
 
@@ -102,6 +119,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: international-health-baseline
-          path: data/generated/international
+          path: |
+            data/generated/international
+            data/generated/who-workforce
           if-no-files-found: error
           retention-days: 7

@@ -113,7 +113,9 @@ async function main() {
     for (const observation of observations) {
       const countryCode = String(observation?.countryiso3code || "").toUpperCase();
       const year = Number(observation?.date);
-      const value = Number(observation?.value);
+      const rawValue = observation?.value;
+      if (rawValue === null || rawValue === undefined || rawValue === "") continue;
+      const value = Number(rawValue);
       if (!countries.has(countryCode) || !Number.isInteger(year) || !Number.isFinite(value)) continue;
       const existing = latest.get(countryCode);
       if (!existing || year > existing.year) latest.set(countryCode, { observation, year, value });
@@ -174,7 +176,7 @@ async function main() {
       "World Bank aggregate regions excluded",
       "No frontend data bundle",
       "No credentials in generated files",
-      "Missing observations omitted rather than converted to zero",
+      "Null and empty observations omitted rather than converted to zero",
       "Failed indicators are reported and do not block successful sources",
       "Idempotent upsert into Neon",
     ],

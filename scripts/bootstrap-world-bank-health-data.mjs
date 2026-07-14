@@ -5,6 +5,7 @@ import path from "node:path";
 
 const OUTPUT_DIR = path.resolve("data/generated/international");
 const CHUNK_SIZE = 250;
+const PAGE_SIZE = 5000;
 
 const INDICATORS = {
   "SH.MED.PHYS.ZS": ["Physicians (per 1,000 people)", "per 1,000 people"],
@@ -19,9 +20,9 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function fetchJson(url) {
   let lastError;
-  for (let attempt = 1; attempt <= 6; attempt += 1) {
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 60_000);
+    const timer = setTimeout(() => controller.abort(), 90_000);
     try {
       const response = await fetch(url, {
         headers: { "User-Agent": "Occu-Med-Network-Map/1.0 official-data-import" },
@@ -31,12 +32,31 @@ async function fetchJson(url) {
       return await response.json();
     } catch (error) {
       lastError = error;
-      if (attempt < 6) await sleep(attempt * 2000);
+      if (attempt < 5) await sleep(attempt * 2000);
     } finally {
       clearTimeout(timer);
     }
   }
   throw lastError;
+}
+
+async function fetchIndicatorHistory(indicatorCode) {
+  const makeUrl = (page) => `https://api.worldbank.org/v2/country/all/indicator/${indicatorCode}?format=json&per_page=${PAGE_SIZE}&page=${page}`;
+  const firstPayload = await fetchJson(makeUrl(1));
+  const metadata = Array.isArray(firstPayload) ? firstPayload[0] : null;
+  const records = Array.isArray(firstPayload?.[1]) ? [...firstPayload[1]] : [];
+  const totalPages = Math.max(1, Number(metadata?.pages) || 1);
+
+  for (let page = 2; page <= totalPages; page += 1) {
+    const payload = await fetchJson(makeUrl(page));
+    if (Array.isArray(payload?.[1])) records.push(...payload[1]);
+  }
+
+  return {
+    records,
+    sourceUrl: `https://api.worldbank.org/v2/country/all/indicator/${indicatorCode}?format=json`,
+    pages: totalPages,
+  };
 }
 
 function sqlString(value) {
@@ -87,12 +107,12 @@ async function main() {
   const normalized = [];
   const counts = {};
   const failures = {};
+  const pagesByIndicator = {};
 
   for (const [indicatorCode, [indicatorName, unit]] of Object.entries(INDICATORS)) {
-    const sourceUrl = `https://api.worldbank.org/v2/country/all/indicator/${indicatorCode}?format=json&per_page=1000&mrnev=1`;
-    let payload;
+    let download;
     try {
-      payload = await fetchJson(sourceUrl);
+      download = await fetchIndicatorHistory(indicatorCode);
     } catch (error) {
       const message = String(error?.message || error);
       counts[indicatorCode] = 0;
@@ -101,7 +121,8 @@ async function main() {
       continue;
     }
 
-    const observations = Array.isArray(payload?.[1]) ? payload[1] : [];
+    const observations = download.records;
+    pagesByIndicator[indicatorCode] = download.pages;
     if (!observations.length) {
       counts[indicatorCode] = 0;
       failures[indicatorCode] = "No observation array returned by the World Bank API";
@@ -131,20 +152,20 @@ async function main() {
         year: selected.year,
         value: selected.value,
         unit: selected.observation?.unit || unit,
-        source_url: sourceUrl,
+        source_url: download.sourceUrl,
         retrieved_at: retrievedAt,
         metadata: {
           original_indicator_id: selected.observation?.indicator?.id || indicatorCode,
           observation_status: selected.observation?.obs_status || null,
           decimal: selected.observation?.decimal ?? null,
-          retrieval_mode: "most_recent_non_empty_country_value",
+          retrieval_mode: "latest_non_null_country_value_from_paginated_history",
           source_dataset: "World Development Indicators",
           source_attribution: "World Bank; underlying health-workforce and capacity data may originate from WHO/OECD/country reporting",
           license: "CC BY 4.0",
         },
       });
     }
-    console.log(`${indicatorCode}: ${latest.size} countries`);
+    console.log(`${indicatorCode}: ${latest.size} countries from ${download.pages} page(s)`);
   }
 
   if (!normalized.length) {
@@ -165,10 +186,11 @@ async function main() {
     source: "World Bank Indicators API",
     official_api_documentation: "https://datahelpdesk.worldbank.org/knowledgebase/articles/889392-about-the-indicators-api-documentation",
     destination_table: "public.international_health_indicators",
-    strategy: "most recent non-empty country-level value per indicator; aggregate regions excluded",
+    strategy: "latest non-null country-level value from paginated history; aggregate regions excluded",
     total_rows: normalized.length,
     eligible_countries: countries.size,
     counts_by_indicator: counts,
+    pages_by_indicator: pagesByIndicator,
     failed_indicators: failures,
     sql_files: sqlFiles,
     safeguards: [
@@ -177,6 +199,7 @@ async function main() {
       "No frontend data bundle",
       "No credentials in generated files",
       "Null and empty observations omitted rather than converted to zero",
+      "Historical pages searched so older valid values are retained",
       "Failed indicators are reported and do not block successful sources",
       "Idempotent upsert into Neon",
     ],

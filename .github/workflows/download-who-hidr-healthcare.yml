@@ -1,10 +1,11 @@
-name: Download WHO HIDR healthcare inequality data
+name: Import WHO HIDR healthcare inequality data
 
 on:
   push:
     branches:
       - data/international-source-bootstrap
     paths:
+      - scripts/import-who-hidr-healthcare.py
       - .github/workflows/download-who-hidr-healthcare.yml
   workflow_dispatch:
 
@@ -12,10 +13,10 @@ permissions:
   contents: write
 
 jobs:
-  download:
+  import:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Check out data branch
@@ -29,89 +30,35 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install workbook tools
-        run: python -m pip install --disable-pip-version-check requests openpyxl
+      - name: Install importer dependencies
+        run: python -m pip install --disable-pip-version-check requests openpyxl "psycopg[binary]"
 
-      - name: Download official WHO Health Inequality Data Repository healthcare datasets
-        run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          import requests
-          from openpyxl import load_workbook
+      - name: Download, normalize, and import official WHO HIDR healthcare datasets
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+          POSTGRES_DATABASE_URL: ${{ secrets.POSTGRES_DATABASE_URL }}
+        run: python scripts/import-who-hidr-healthcare.py
 
-          out = Path('data/generated/who-hidr-healthcare')
-          out.mkdir(parents=True, exist_ok=True)
-
-          datasets = {
-              'rep_gho_hc': 'https://datasafe-h5afbhf4gwctabaa.z01.azurefd.net/api/Download/TOP/rep_gho_hc/data',
-              'rep_dhs_hca': 'https://datasafe-h5afbhf4gwctabaa.z01.azurefd.net/api/Download/TOP/rep_dhs_hca/data',
-              'rep_oecd_hc': 'https://datasafe-h5afbhf4gwctabaa.z01.azurefd.net/api/Download/TOP/rep_oecd_hc/data',
-              'rep_eurostat_hc': 'https://datasafe-h5afbhf4gwctabaa.z01.azurefd.net/api/Download/TOP/rep_eurostat_hc/data',
-          }
-
-          summary = {
-              'source': 'WHO Health Inequality Data Repository',
-              'source_page': 'https://www.who.int/data/inequality-monitor/data',
-              'api_instructions': 'https://www.who.int/data/inequality-monitor/data/hidr-api',
-              'datasets': {},
-          }
-
-          session = requests.Session()
-          session.headers['User-Agent'] = 'Occu-Med-Network-Map/1.0 WHO-HIDR-healthcare-import'
-
-          for dataset_id, url in datasets.items():
-              response = session.get(url, timeout=180)
-              response.raise_for_status()
-              file_path = out / f'{dataset_id}.xlsx'
-              file_path.write_bytes(response.content)
-
-              workbook = load_workbook(file_path, read_only=True, data_only=True)
-              workbook_info = {
-                  'url': url,
-                  'bytes': file_path.stat().st_size,
-                  'sheets': [],
-              }
-              for sheet in workbook.worksheets:
-                  iterator = sheet.iter_rows(values_only=True)
-                  rows = []
-                  for _ in range(8):
-                      try:
-                          rows.append(next(iterator))
-                      except StopIteration:
-                          break
-                  headers = [str(value).strip() if value is not None else '' for value in (rows[0] if rows else [])]
-                  workbook_info['sheets'].append({
-                      'name': sheet.title,
-                      'max_row': sheet.max_row,
-                      'max_column': sheet.max_column,
-                      'headers': headers,
-                      'sample_rows': [list(row) for row in rows[1:]],
-                  })
-              summary['datasets'][dataset_id] = workbook_info
-
-          (out / 'workbook-summary.json').write_text(json.dumps(summary, indent=2, default=str), encoding='utf-8')
-          print(json.dumps(summary, indent=2, default=str))
-          PY
-
-      - name: Publish workbook schema summary
+      - name: Publish verified import status
+        if: always()
         run: |
           set -euo pipefail
-          mkdir -p data/status
-          cp data/generated/who-hidr-healthcare/workbook-summary.json data/status/who-hidr-healthcare-workbook-summary.json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/status/who-hidr-healthcare-workbook-summary.json
+          git add data/status/who-hidr-healthcare-import-summary.json data/status/who-hidr-healthcare-import-status.txt
           if git diff --cached --quiet; then
             exit 0
           fi
-          git commit -m "data: publish WHO HIDR workbook summary [skip ci]"
+          git commit -m "data: publish WHO HIDR healthcare import status [skip ci]"
           git push origin HEAD:data/international-source-bootstrap
 
-      - name: Upload WHO HIDR healthcare workbooks and schema summary
+      - name: Upload WHO HIDR healthcare import diagnostics
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: who-hidr-healthcare
+          name: who-hidr-healthcare-import
           path: data/generated/who-hidr-healthcare
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7

@@ -7,6 +7,7 @@ on:
     paths:
       - scripts/bootstrap-who-uhc-data.mjs
       - scripts/discover-who-hhfa-sara-reports.mjs
+      - scripts/extract-who-hhfa-readiness-pages.mjs
       - .github/workflows/download-who-uhc.yml
   pull_request:
     branches:
@@ -14,6 +15,7 @@ on:
     paths:
       - scripts/bootstrap-who-uhc-data.mjs
       - scripts/discover-who-hhfa-sara-reports.mjs
+      - scripts/extract-who-hhfa-readiness-pages.mjs
       - .github/workflows/download-who-uhc.yml
   workflow_dispatch:
 
@@ -108,5 +110,47 @@ jobs:
         with:
           name: who-hhfa-sara-discovery
           path: data/generated/who-hhfa-sara
+          if-no-files-found: error
+          retention-days: 7
+
+  extract-hhfa-readiness-pages:
+    if: github.actor != 'github-actions[bot]' && (github.event_name != 'pull_request' || github.head_ref == 'data/international-source-bootstrap')
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+
+    steps:
+      - name: Check out source branch
+        uses: actions/checkout@v4
+        with:
+          ref: data/international-source-bootstrap
+          fetch-depth: 1
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install PDF text tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y poppler-utils
+
+      - name: Extract exact readiness report pages
+        run: |
+          set +e
+          node scripts/extract-who-hhfa-readiness-pages.mjs > /tmp/hhfa-readiness.log 2>&1
+          status=$?
+          mkdir -p data/generated/who-hhfa-readiness-pages
+          cp /tmp/hhfa-readiness.log data/generated/who-hhfa-readiness-pages/run.log
+          echo "$status" > data/generated/who-hhfa-readiness-pages/run.exit-code
+          cat /tmp/hhfa-readiness.log
+          exit 0
+
+      - name: Upload exact HHFA readiness pages
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: who-hhfa-readiness-pages
+          path: data/generated/who-hhfa-readiness-pages
           if-no-files-found: error
           retention-days: 7

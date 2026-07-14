@@ -1,0 +1,46 @@
+name: Download international health data
+
+on:
+  push:
+    branches:
+      - data/international-source-bootstrap
+    paths:
+      - scripts/bootstrap-international-health-data.mjs
+      - .github/workflows/download-international-health-data.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  download-and-normalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source branch
+        uses: actions/checkout@v4
+        with:
+          ref: data/international-source-bootstrap
+          fetch-depth: 0
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download and normalize official data
+        run: node scripts/bootstrap-international-health-data.mjs
+
+      - name: Commit generated SQL and manifest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/generated/international
+          if git diff --cached --quiet; then
+            echo "No generated-data changes"
+            exit 0
+          fi
+          git commit -m "data: refresh international health baseline [skip ci]"
+          git push origin HEAD:data/international-source-bootstrap

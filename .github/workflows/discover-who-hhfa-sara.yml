@@ -1,0 +1,56 @@
+name: Discover WHO HHFA and SARA reports
+
+on:
+  push:
+    branches:
+      - data/international-source-bootstrap
+    paths:
+      - scripts/discover-who-hhfa-sara-reports.mjs
+      - .github/workflows/discover-who-hhfa-sara.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+
+    steps:
+      - name: Check out source branch
+        uses: actions/checkout@v4
+        with:
+          ref: data/international-source-bootstrap
+          fetch-depth: 1
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install PDF text tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y poppler-utils
+
+      - name: Inventory archive and extract report candidates
+        run: |
+          set +e
+          node scripts/discover-who-hhfa-sara-reports.mjs > /tmp/hhfa-sara.log 2>&1
+          status=$?
+          mkdir -p data/generated/who-hhfa-sara
+          cp /tmp/hhfa-sara.log data/generated/who-hhfa-sara/run.log
+          echo "$status" > data/generated/who-hhfa-sara/run.exit-code
+          cat /tmp/hhfa-sara.log
+          exit 0
+
+      - name: Upload WHO HHFA and SARA discovery
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: who-hhfa-sara-discovery
+          path: data/generated/who-hhfa-sara
+          if-no-files-found: error
+          retention-days: 7

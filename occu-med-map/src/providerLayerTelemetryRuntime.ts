@@ -37,17 +37,11 @@ type SourceMetric = {
   updatedAt: number;
 };
 
-type OverlayMetric = {
-  label: string;
-  records: number;
-  updatedAt: number;
-};
-
 declare global {
   interface Window {
     __networkMapProviderMetrics?: {
       sources: Record<string, SourceMetric>;
-      overlays: Record<string, OverlayMetric>;
+      overlays: Record<string, never>;
       enabledSources: string[];
       loadedRecords: number;
       renderedRecords: number;
@@ -57,7 +51,6 @@ declare global {
 
 const SOURCE_KEYS = ["indexed", "bluehive", "dentists", "my-clinics"] as const;
 const sourceMetrics = new Map<string, SourceMetric>();
-const overlayMetrics = new Map<string, OverlayMetric>();
 let updateTimer: number | null = null;
 let headerObserver: MutationObserver | null = null;
 
@@ -109,76 +102,10 @@ function scheduleUpdate(): void {
   }, 60);
 }
 
-function markOverlay(label: string, records = 0): void {
-  overlayMetrics.set(label, {
-    label,
-    records: safeNumber(records),
-    updatedAt: Date.now(),
-  });
-  scheduleUpdate();
-}
-
 function clearOverlay(label: string): void {
-  if (overlayMetrics.delete(label)) scheduleUpdate();
+  scheduleUpdate();
+  void label; // kept for call-site compatibility; overlay metrics removed
 }
-
-function overlayLabelForUrl(url: URL): string | null {
-  if (url.pathname.startsWith("/api/provider-explorer/")) return "Provider Explorer";
-  if (url.pathname.startsWith("/api/map-inventory")) return "Service Presence";
-  if (url.pathname.startsWith("/api/naccho-lhd")) return "NACCHO LHD";
-  if (
-    url.pathname.startsWith("/api/live-finder") ||
-    url.pathname.startsWith("/api/provider-sources/search") ||
-    url.hostname.includes("overpass")
-  ) return "Live Finder";
-  return null;
-}
-
-function recordsFromPayload(payload: Record<string, unknown>): number {
-  const direct = [payload.total, payload.count, payload.loaded, payload.stored_count, payload.live_count]
-    .map(safeNumber)
-    .find((value) => value > 0);
-  if (direct) return direct;
-  for (const key of ["providers", "results", "cells", "live_only", "clinics"]) {
-    const value = payload[key];
-    if (Array.isArray(value)) return value.length;
-  }
-  return 0;
-}
-
-/** Track overlay responses via a patched XHR / fetch observing the custom event. */
-async function observeOverlayResponse(url: URL, response: Response): Promise<void> {
-  const label = overlayLabelForUrl(url);
-  if (!label || !response.ok) return;
-  try {
-    const payload = await response.clone().json() as unknown;
-    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-      markOverlay(label, recordsFromPayload(payload as Record<string, unknown>));
-    } else {
-      markOverlay(label, 0);
-    }
-  } catch {
-    markOverlay(label, 0);
-  }
-}
-
-// Wrap fetch once at module init to observe overlay (non-provider-layer) responses.
-// This is the only window.fetch wrapping in this module.
-const _baseFetch = window.fetch.bind(window);
-window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-  const response = await _baseFetch(input, init);
-  try {
-    const url = input instanceof Request
-      ? new URL(input.url, window.location.origin)
-      : new URL(input.toString(), window.location.origin);
-    if (!url.pathname.startsWith("/api/provider-layers/")) {
-      void observeOverlayResponse(url, response);
-    }
-  } catch {
-    // URL parse failure — not a local API call, ignore
-  }
-  return response;
-}) as typeof window.fetch;
 
 function ensureStyles(): void {
   if (document.getElementById("provider-layer-telemetry-styles")) return;
@@ -236,7 +163,6 @@ function ensureCounterGrid(heroSummary: Element): HTMLElement {
     ["loaded", "Loaded sources"],
     ["records", "Loaded records"],
     ["rendered", "Rendered in viewport"],
-    ["overlays", "Independent overlays"],
   ];
   for (const [key, label] of metrics) {
     const metric = document.createElement("div");
@@ -295,9 +221,6 @@ function updateUi(): void {
   const successfullyLoaded = enabledMetrics.filter((metric) => metric.successfullyLoaded && !metric.transientFailure);
   const loadedRecords = successfullyLoaded.reduce((sum, metric) => sum + metric.loaded, 0);
   const renderedRecords = successfullyLoaded.reduce((sum, metric) => sum + metric.rendered, 0);
-  const activeOverlays = [...overlayMetrics.values()];
-  const overlayNames = activeOverlays.map((overlay) => overlay.label).join(", ") || "None";
-
   const header = document.querySelector<HTMLElement>(".provider-source-health");
   if (header) {
     setText(header.querySelector("strong"), `${enabled.size} enabled`);
@@ -308,7 +231,6 @@ function updateUi(): void {
       `${successfullyLoaded.length} successfully loaded`,
       `${formatNumber(loadedRecords)} records loaded`,
       `${formatNumber(renderedRecords)} records rendered in the viewport`,
-      `${activeOverlays.length} independent overlays: ${overlayNames}`,
     ].join(" · ");
   }
 
@@ -321,13 +243,12 @@ function updateUi(): void {
     updateMetric(grid, "loaded", String(successfullyLoaded.length), successfullyLoaded.map((metric) => metric.source).join(", ") || "No sources loaded yet");
     updateMetric(grid, "records", formatNumber(loadedRecords), "Provider records fetched for enabled source layers");
     updateMetric(grid, "rendered", formatNumber(renderedRecords), "Valid provider records inside the current viewport");
-    updateMetric(grid, "overlays", String(activeOverlays.length), overlayNames);
   }
 
   updateSourceRows(enabled);
   window.__networkMapProviderMetrics = {
     sources: Object.fromEntries(sourceMetrics.entries()),
-    overlays: Object.fromEntries(overlayMetrics.entries()),
+    overlays: {},
     enabledSources: [...enabled],
     loadedRecords,
     renderedRecords,

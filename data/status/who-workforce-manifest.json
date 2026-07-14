@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-14T18:01:21.871Z",
+  "generated_at": "2026-07-14T18:02:32.128Z",
   "source": "WHO Global Health Observatory / National Health Workforce Accounts",
   "api_root": "https://ghoapi.azureedge.net/api",
   "destination_table": "public.international_health_indicators",

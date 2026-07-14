@@ -38,12 +38,13 @@ jobs:
 
       - name: Download World Bank health baseline
         run: |
-          mkdir -p data/generated/international
           set +e
-          node scripts/bootstrap-world-bank-health-data.mjs > data/generated/international/download.log 2>&1
+          node scripts/bootstrap-world-bank-health-data.mjs > /tmp/international-download.log 2>&1
           status=$?
+          mkdir -p data/generated/international
+          cp /tmp/international-download.log data/generated/international/download.log
           echo "$status" > data/generated/international/download.exit-code
-          cat data/generated/international/download.log
+          cat /tmp/international-download.log
           exit 0
 
       - name: Upload generated data and diagnostics

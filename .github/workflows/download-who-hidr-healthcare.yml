@@ -35,6 +35,9 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install download dependency
+        run: python -m pip install --disable-pip-version-check requests
+
       - name: Download official WHO HIDR healthcare workbooks
         run: |
           python - <<'PY'

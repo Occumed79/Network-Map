@@ -1,0 +1,40 @@
+name: Discover WHO workforce indicators
+
+on:
+  push:
+    branches:
+      - data/international-source-bootstrap
+    paths:
+      - scripts/discover-who-workforce-indicators.mjs
+      - .github/workflows/discover-who-workforce-indicators.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source branch
+        uses: actions/checkout@v4
+        with:
+          ref: data/international-source-bootstrap
+          fetch-depth: 1
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download WHO GHO indicator catalog
+        run: node scripts/discover-who-workforce-indicators.mjs
+
+      - name: Upload workforce indicator catalog
+        uses: actions/upload-artifact@v4
+        with:
+          name: who-workforce-indicator-catalog
+          path: data/generated/who-workforce
+          if-no-files-found: error
+          retention-days: 7

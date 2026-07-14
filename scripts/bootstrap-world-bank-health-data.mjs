@@ -76,7 +76,7 @@ async function main() {
   await fs.mkdir(OUTPUT_DIR, { recursive: true });
 
   const countryPayload = await fetchJson("https://api.worldbank.org/v2/country?format=json&per_page=400");
-  const countryRows = Array.isArray(countryPayload) ? countryPayload[1] : [];
+  const countryRows = Array.isArray(countryPayload?.[1]) ? countryPayload[1] : [];
   const countries = new Map(
     countryRows
       .filter((row) => row?.region?.id && /^[A-Z]{3}$/.test(row?.id || ""))
@@ -101,9 +101,15 @@ async function main() {
       continue;
     }
 
-    const observations = Array.isArray(payload) ? payload[1] : [];
-    const latest = new Map();
+    const observations = Array.isArray(payload?.[1]) ? payload[1] : [];
+    if (!observations.length) {
+      counts[indicatorCode] = 0;
+      failures[indicatorCode] = "No observation array returned by the World Bank API";
+      console.error(`${indicatorCode}: no observations returned`);
+      continue;
+    }
 
+    const latest = new Map();
     for (const observation of observations) {
       const countryCode = String(observation?.countryiso3code || "").toUpperCase();
       const year = Number(observation?.date);

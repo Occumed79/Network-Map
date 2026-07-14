@@ -89,7 +89,7 @@ async function main() {
   const failures = {};
 
   for (const [indicatorCode, [indicatorName, unit]] of Object.entries(INDICATORS)) {
-    const sourceUrl = `https://api.worldbank.org/v2/country/all/indicator/${indicatorCode}?format=json&per_page=1000&mrv=1`;
+    const sourceUrl = `https://api.worldbank.org/v2/country/all/indicator/${indicatorCode}?format=json&per_page=1000&mrnev=1`;
     let payload;
     try {
       payload = await fetchJson(sourceUrl);
@@ -137,7 +137,7 @@ async function main() {
           original_indicator_id: selected.observation?.indicator?.id || indicatorCode,
           observation_status: selected.observation?.obs_status || null,
           decimal: selected.observation?.decimal ?? null,
-          retrieval_mode: "latest_non_null_country_value",
+          retrieval_mode: "most_recent_non_empty_country_value",
           source_dataset: "World Development Indicators",
           source_attribution: "World Bank; underlying health-workforce and capacity data may originate from WHO/OECD/country reporting",
           license: "CC BY 4.0",
@@ -165,7 +165,7 @@ async function main() {
     source: "World Bank Indicators API",
     official_api_documentation: "https://datahelpdesk.worldbank.org/knowledgebase/articles/889392-about-the-indicators-api-documentation",
     destination_table: "public.international_health_indicators",
-    strategy: "latest non-null country-level value per indicator; aggregate regions excluded",
+    strategy: "most recent non-empty country-level value per indicator; aggregate regions excluded",
     total_rows: normalized.length,
     eligible_countries: countries.size,
     counts_by_indicator: counts,

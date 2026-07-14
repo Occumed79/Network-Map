@@ -7,6 +7,12 @@ on:
     paths:
       - scripts/bootstrap-international-health-data.mjs
       - .github/workflows/download-international-health-data.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - scripts/bootstrap-international-health-data.mjs
+      - .github/workflows/download-international-health-data.yml
   workflow_dispatch:
 
 permissions:
@@ -14,7 +20,7 @@ permissions:
 
 jobs:
   download-and-normalize:
-    if: github.actor != 'github-actions[bot]'
+    if: github.actor != 'github-actions[bot]' && (github.event_name != 'pull_request' || github.head_ref == 'data/international-source-bootstrap')
     runs-on: ubuntu-latest
     timeout-minutes: 30
 

@@ -1,0 +1,57 @@
+name: Download WHO UHC service coverage
+
+on:
+  push:
+    branches:
+      - data/international-source-bootstrap
+    paths:
+      - scripts/bootstrap-who-uhc-data.mjs
+      - .github/workflows/download-who-uhc.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - scripts/bootstrap-who-uhc-data.mjs
+      - .github/workflows/download-who-uhc.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  download:
+    if: github.actor != 'github-actions[bot]' && (github.event_name != 'pull_request' || github.head_ref == 'data/international-source-bootstrap')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source branch
+        uses: actions/checkout@v4
+        with:
+          ref: data/international-source-bootstrap
+          fetch-depth: 1
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download and normalize WHO UHC service coverage data
+        run: |
+          set +e
+          node scripts/bootstrap-who-uhc-data.mjs > /tmp/who-uhc-download.log 2>&1
+          status=$?
+          mkdir -p data/generated/who-uhc
+          cp /tmp/who-uhc-download.log data/generated/who-uhc/download.log
+          echo "$status" > data/generated/who-uhc/download.exit-code
+          cat /tmp/who-uhc-download.log
+          exit 0
+
+      - name: Upload WHO UHC dataset
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: who-uhc-service-coverage
+          path: data/generated/who-uhc
+          if-no-files-found: error
+          retention-days: 7

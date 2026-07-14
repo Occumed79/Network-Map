@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import { classifyProvider } from '../src/lib/providerClassifier';
 import { hasValidCoordinates, parseOptionalNumber } from '../src/lib/providerCoordinates';
-import { buildLiveCacheKeyForTest, buildStoredWhereForTest } from '../src/routes/providerExplorer';
-import { p2LegacyProviderSelectForTest } from '../src/routes/providerExplorerP2Read';
+import { buildLiveCacheKeyForTest, buildStoredWhereForTest, legacyProviderSelectForTest } from '../src/routes/providerExplorer';
 import { mergeMyClinicsLayerProviders } from '../src/routes/providerLayers';
 
 assert.equal(classifyProvider({ name: 'AFC Urgent Care' }), 'urgentCare');
@@ -35,7 +34,7 @@ assert.equal(parseOptionalNumber('   '), null);
 assert.equal(parseOptionalNumber('0'), 0);
 assert.equal(hasValidCoordinates(parseOptionalNumber(''), parseOptionalNumber('-118.25')), false);
 
-const legacyProjection = p2LegacyProviderSelectForTest();
+const legacyProjection = legacyProviderSelectForTest();
 assert.match(legacyProjection, /COALESCE\(mp\.scraped_at, mp\.updated_at\) AS imported_at/);
 assert.doesNotMatch(legacyProjection, /mp\.created_at/);
 assert.match(legacyProjection, /COALESCE\(NULLIF\(mp\.source_id, ''\), 'legacy:' \|\| mp\.id::text\) AS id/);

@@ -68,7 +68,6 @@ export function buildViewportParams(
   limit = 100,
 ): URLSearchParams {
   const params = new URLSearchParams({
-    p2: '1',
     mode,
     page: String(Math.max(1, page)),
     limit: String(Math.max(1, limit)),

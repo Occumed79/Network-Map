@@ -45,7 +45,7 @@ const params = buildViewportParams(
   2,
   5000,
 );
-assert.equal(params.get('p2'), '1');
+assert.equal(params.get('p2'), null);
 assert.equal(params.get('north'), '37');
 assert.equal(params.get('south'), '36');
 assert.equal(params.get('east'), '-119');
@@ -100,6 +100,9 @@ assert.match(shell, /requestRef\.current = null;\s+setLoading\(false\);/);
 assert.doesNotMatch(shell, /<label className="p2-master-toggle">/);
 assert.doesNotMatch(shell, /slice\(0,\s*1000\)/);
 assert.doesNotMatch(shell, /visibleCapped:\s*true/);
+assert.doesNotMatch(shell, /retitleLegacyMapTools/);
+assert.doesNotMatch(shell, /createTreeWalker/);
+assert.doesNotMatch(shell, /new MutationObserver/);
 
 const bridge = readFileSync(resolve(here, '../src/phaseTwoMapBridge.ts'), 'utf8');
 assert.match(bridge, /occumed:p2-map-change/);
@@ -107,28 +110,27 @@ assert.match(bridge, /moveend zoomend resize/);
 assert.match(bridge, /registerMap\(map\);/);
 assert.doesNotMatch(bridge, /setTimeout\(\(\) => registerMap\(map\),\s*0\)/);
 
-const previewIsolation = readFileSync(resolve(here, '../src/phaseTwoPreviewIsolation.ts'), 'utf8');
-assert.match(previewIsolation, /p2-preview/);
-assert.match(previewIsolation, /\/api\/provider-layers\//);
-assert.match(previewIsolation, /url\.searchParams\.get\('p2'\) !== '1'/);
-assert.match(previewIsolation, /PreviewNoopMutationObserver/);
-assert.match(previewIsolation, /window as Window & \{ MutationObserver/);
-assert.match(previewIsolation, /disablePreviewMutationObservers\(\)/);
-assert.doesNotMatch(previewIsolation, /document\.querySelector/);
 
 const main = readFileSync(resolve(here, '../src/main.tsx'), 'utf8');
 assert.match(main, /p2-preview/);
 assert.match(main, /import\("\.\/providerLayerRequestRuntime"\)/);
 assert.match(main, /import\("\.\/providerLayerTelemetryRuntime"\)/);
-assert.match(main, /import\("\.\/phaseTwoPreviewIsolation"\)/);
+assert.doesNotMatch(main, /phaseTwoPreviewIsolation/);
 assert.match(main, /import\("\.\/phaseTwoMapBridge"\)/);
 assert.match(main, /import\("\.\/phase-two-control-fix\.css"\)/);
 assert.match(main, /import\("\.\/PhaseTwoShell"\)/);
 assert.doesNotMatch(main, /phaseTwoLegacyLayerBridge/);
 assert.match(main, /root\.render\(<App \/>\)/);
 
+const routeIndex = readFileSync(resolve(here, '../../api-server/src/routes/index.ts'), 'utf8');
+assert.doesNotMatch(routeIndex, /providerExplorerP2Read/);
+
+const providerExplorer = readFileSync(resolve(here, '../../api-server/src/routes/providerExplorer.ts'), 'utf8');
+assert.match(providerExplorer, /COALESCE\(mp\.scraped_at, mp\.updated_at\) AS imported_at/);
+assert.doesNotMatch(providerExplorer, /mp\.created_at AS imported_at/);
+
 const diagnosticsGate = readFileSync(resolve(here, '../src/usDiagnosticsGate.ts'), 'utf8');
 assert.match(diagnosticsGate, /scheduleDiagnosticsSync/);
 assert.match(diagnosticsGate, /clearTimeout\(syncTimer\)/);
 
-console.log('P2 preview toggle is explicit, aborted loading clears, paging remains uncapped, and stable production boot is unchanged');
+console.log('P2 preview uses the unified provider route, avoids global runtime patches, and keeps loading and pagination stable');

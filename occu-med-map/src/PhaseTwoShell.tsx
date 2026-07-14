@@ -138,25 +138,6 @@ function viewportParams(
   return buildViewportParams(snapshot.bounds, filters, mode, page, limit);
 }
 
-function retitleLegacyMapTools(): void {
-  document.querySelectorAll<HTMLElement>('.occumed-map-tools-panel .occumed-basemap-title').forEach((node) => {
-    node.textContent = 'Navigation & Routing';
-    node.closest('.occumed-map-tools-panel')?.classList.add('p2-navigation-tools');
-  });
-
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
-  let current = walker.nextNode();
-  while (current) {
-    const element = current as HTMLElement;
-    const text = element.children.length === 0 ? (element.textContent || '').trim() : '';
-    if (/map tools/i.test(text) && /hover\s*\/\s*focus/i.test(text)) {
-      element.textContent = 'Navigation & routing';
-      element.classList.add('p2-repurposed-map-tools-label');
-    }
-    current = walker.nextNode();
-  }
-}
-
 export default function PhaseTwoShell({ children }: PhaseTwoShellProps) {
   const [snapshot, setSnapshot] = useState<PhaseTwoMapSnapshot | null>(() => currentSnapshot());
   const [panelOpen, setPanelOpen] = useState(true);
@@ -416,16 +397,6 @@ export default function PhaseTwoShell({ children }: PhaseTwoShellProps) {
     };
   }, []);
 
-  useEffect(() => {
-    retitleLegacyMapTools();
-    const observer = new MutationObserver(() => retitleLegacyMapTools());
-    observer.observe(document.body, { childList: true, subtree: true });
-    const timeout = window.setTimeout(() => observer.disconnect(), 10_000);
-    return () => {
-      window.clearTimeout(timeout);
-      observer.disconnect();
-    };
-  }, []);
 
   useEffect(() => {
     if (!snapshot) return;

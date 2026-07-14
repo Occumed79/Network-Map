@@ -39,7 +39,6 @@ async function boot() {
   }
 
   await Promise.all([
-    import("./phaseTwoPreviewIsolation"),
     import("./phaseTwoMapBridge"),
     import("./phase-two-shell.css"),
     import("./phase-two-control-fix.css"),

@@ -19,7 +19,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function fetchJson(url) {
   let lastError;
-  for (let attempt = 1; attempt <= 4; attempt += 1) {
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 60_000);
     try {
@@ -31,7 +31,7 @@ async function fetchJson(url) {
       return await response.json();
     } catch (error) {
       lastError = error;
-      if (attempt < 4) await sleep(attempt * 1500);
+      if (attempt < 6) await sleep(attempt * 2000);
     } finally {
       clearTimeout(timer);
     }
@@ -88,7 +88,7 @@ async function main() {
   const counts = {};
 
   for (const [indicatorCode, [indicatorName, unit]] of Object.entries(INDICATORS)) {
-    const sourceUrl = `https://api.worldbank.org/v2/country/all/indicator/${indicatorCode}?format=json&per_page=20000`;
+    const sourceUrl = `https://api.worldbank.org/v2/country/all/indicator/${indicatorCode}?format=json&per_page=1000&mrv=1`;
     const payload = await fetchJson(sourceUrl);
     const observations = Array.isArray(payload) ? payload[1] : [];
     const latest = new Map();

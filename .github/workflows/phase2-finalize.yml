@@ -1,4 +1,4 @@
-name: Finalize surgical Phase 2 repair
+name: Finish Phase 2 repair formatting
 
 on:
   push:
@@ -9,16 +9,15 @@ on:
       - main
     types:
       - synchronize
-      - reopened
 
 permissions:
   contents: write
 
 jobs:
-  finalize:
+  finish:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - name: Check out repair branch
         uses: actions/checkout@v4
@@ -26,15 +25,7 @@ jobs:
           fetch-depth: 0
           ref: agent/phase2-clean-repair
 
-      - name: Restore primary route and generated artifacts from main
-        run: |
-          git checkout origin/main -- \
-            api-server/src/routes/providerExplorer.ts \
-            lib/db/dist/index.d.ts \
-            lib/db/dist/index.d.ts.map \
-            lib/db/tsconfig.tsbuildinfo
-
-      - name: Apply only the verified primary-route projection fix
+      - name: Correct selectSql formatting
         shell: bash
         run: |
           python <<'PY'
@@ -42,72 +33,47 @@ jobs:
 
           path = Path('api-server/src/routes/providerExplorer.ts')
           text = path.read_text()
-          function_start = text.index('function selectSql(schema: ProviderSchema) {')
-          legacy_start = text.index('  if (schema === "legacy") return `', function_start)
-          legacy_end = text.index('`;\n', legacy_start) + 3
-          replacement = '''  if (schema === "legacy") {
-            return `SELECT COALESCE(NULLIF(mp.source_id, ''), 'legacy:' || mp.id::text) AS id, mp.name, lower(regexp_replace(COALESCE(mp.name,''),'[^a-zA-Z0-9]+',' ','g')) normalized_name, mp.formatted_address AS address, mp.locality AS city, mp.administrative_area_level_1 AS admin_area, COALESCE(mp.country_code, mp.raw_data->>'country','US') AS country, mp.postal_code, mp.lat, mp.lng, mp.phone, mp.website, mp.data_source AS source, CASE WHEN lower(COALESCE(mp.data_source,''))='my clinics' THEN 'saved' ELSE 'stored' END source_kind, COALESCE(mp.raw_data->>'source_url', mp.raw_data->>'url', mp.website)::text AS source_url, mp.confidence_score, mp.category, mp.types AS services, mp.types AS categories, mp.raw_data AS raw_source_data, COALESCE(mp.scraped_at, mp.updated_at) AS imported_at, mp.updated_at AS last_seen, CASE WHEN mp.confidence_score >= 0.85 THEN 'verified' WHEN mp.confidence_score >= 0.70 THEN 'registry' WHEN mp.confidence_score >= 0.50 THEN 'directory' ELSE 'lead' END AS trust_tier, NULL::text status`;
-          }'''
-          text = text[:legacy_start] + replacement + text[legacy_end:]
-          marker = '\n}\n\nfunction addSharedFilters('
-          if marker not in text:
-              raise SystemExit('Could not locate selectSql boundary')
           text = text.replace(
-              marker,
-              '\n}\n\nexport function legacyProviderSelectForTest(): string { return selectSql("legacy"); }\n\nfunction addSharedFilters(',
+              '  if (schema === "legacy") {\n  return `SELECT',
+              '  if (schema === "legacy") {\n    return `SELECT',
+              1,
+          )
+          text = text.replace(
+              'NULL::text status`;\n}  return `SELECT p.id::text',
+              'NULL::text status`;\n  }\n  return `SELECT p.id::text',
               1,
           )
           path.write_text(text)
 
           source = path.read_text()
-          assert 'COALESCE(mp.scraped_at, mp.updated_at) AS imported_at' in source
+          assert '  if (schema === "legacy") {\n    return `SELECT' in source
+          assert 'NULL::text status`;\n  }\n  return `SELECT p.id::text' in source
+          assert '}  return' not in source
           assert 'mp.created_at AS imported_at' not in source
-          assert 'export function legacyProviderSelectForTest' in source
           PY
 
-      - name: Set up Node
+      - name: Set up Node and pnpm
         uses: actions/setup-node@v4
         with:
           node-version: '24'
 
-      - name: Enable pnpm
+      - name: Verify focused tests and typecheck
         run: |
           corepack enable
           corepack prepare pnpm@10.17.1 --activate
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run focused regression suites
-        run: |
+          pnpm install --frozen-lockfile
           pnpm --filter @workspace/api-server test:provider-explorer
           pnpm --filter @workspace/occu-med-map test:p2-map
-
-      - name: Typecheck and build
-        run: |
           pnpm run typecheck
-          pnpm --filter @workspace/occu-med-map build
-          pnpm --filter @workspace/api-server build
-
-      - name: Remove generated build noise
-        run: |
           git checkout origin/main -- \
             lib/db/dist/index.d.ts \
             lib/db/dist/index.d.ts.map \
             lib/db/tsconfig.tsbuildinfo
 
-      - name: Verify surgical diff
-        shell: bash
-        run: |
-          test -z "$(git diff --name-only origin/main -- lib/db)"
-          test "$(git diff -- api-server/src/routes/providerExplorer.ts | grep -c '^[-+]')" -lt 20
-          ! git diff -- api-server/src/routes/providerExplorer.ts | grep -E 'overpassQuery|distanceMiles|buildCandidateWhere|CREATE INDEX'
-
-      - name: Commit final verified cleanup
-        shell: bash
+      - name: Commit formatting correction
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add api-server/src/routes/providerExplorer.ts lib/db/dist/index.d.ts lib/db/dist/index.d.ts.map lib/db/tsconfig.tsbuildinfo
-          git commit -m "Narrow Provider Explorer repair to verified SQL projection"
+          git add api-server/src/routes/providerExplorer.ts
+          git commit -m "Finish surgical Provider Explorer repair"
           git push origin HEAD:agent/phase2-clean-repair

@@ -1,4 +1,4 @@
-name: Download WHO HIDR healthcare workbooks
+name: Resolve Map Neon host
 
 on:
   push:
@@ -6,22 +6,16 @@ on:
       - data/international-source-bootstrap
     paths:
       - .github/workflows/download-who-hidr-healthcare.yml
-  pull_request:
-    branches:
-      - main
-    paths:
-      - .github/workflows/download-who-hidr-healthcare.yml
-      - scripts/import-who-hidr-healthcare.py
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  download:
+  resolve:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
 
     steps:
       - name: Check out data branch
@@ -30,42 +24,25 @@ jobs:
           ref: data/international-source-bootstrap
           fetch-depth: 1
 
-      - name: Use Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install download dependency
-        run: python -m pip install --disable-pip-version-check requests
-
-      - name: Download official WHO HIDR healthcare workbooks
+      - name: Resolve Map production Neon host
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          import requests
+          set -euo pipefail
+          mkdir -p data/status
+          host="ep-autumn-hill-atgvqg3e-pooler.c-9.us-east-1.aws.neon.tech"
+          {
+            echo "[$host]"
+            getent ahostsv4 "$host" | awk '{print $1}' | sort -u
+          } > data/status/map-neon-host-ips.txt
+          cat data/status/map-neon-host-ips.txt
 
-          out = Path('data/generated/who-hidr-healthcare')
-          out.mkdir(parents=True, exist_ok=True)
-          datasets = {
-              'rep_gho_hc': 'https://datasafe-h5afbhf4gwctabaa.z01.azurefd.net/api/Download/TOP/rep_gho_hc/data',
-              'rep_dhs_hca': 'https://datasafe-h5afbhf4gwctabaa.z01.azurefd.net/api/Download/TOP/rep_dhs_hca/data',
-              'rep_oecd_hc': 'https://datasafe-h5afbhf4gwctabaa.z01.azurefd.net/api/Download/TOP/rep_oecd_hc/data',
-              'rep_eurostat_hc': 'https://datasafe-h5afbhf4gwctabaa.z01.azurefd.net/api/Download/TOP/rep_eurostat_hc/data',
-          }
-          session = requests.Session()
-          session.headers['User-Agent'] = 'Occu-Med-Network-Map/1.0 WHO-HIDR-healthcare-download'
-          for dataset_id, url in datasets.items():
-              response = session.get(url, timeout=240)
-              response.raise_for_status()
-              path = out / f'{dataset_id}.xlsx'
-              path.write_bytes(response.content)
-              print(dataset_id, path.stat().st_size)
-          PY
-
-      - name: Upload official WHO HIDR healthcare workbooks
-        uses: actions/upload-artifact@v4
-        with:
-          name: who-hidr-healthcare-workbooks
-          path: data/generated/who-hidr-healthcare/*.xlsx
-          if-no-files-found: error
-          retention-days: 3
+      - name: Publish resolved addresses
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/status/map-neon-host-ips.txt
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "data: publish Map Neon host addresses [skip ci]"
+          git push origin HEAD:data/international-source-bootstrap

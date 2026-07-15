@@ -1,4 +1,4 @@
-name: Package Source 5 repair datasets
+name: Verify Source 5 production repair deployment
 
 on:
   pull_request:
@@ -12,39 +12,42 @@ permissions:
   contents: read
 
 jobs:
-  package-source-five:
+  verify-production-deploy:
     if: github.event_name == 'workflow_dispatch' || github.head_ref == 'data/international-source-bootstrap'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 12
 
     steps:
-      - name: Check out complete temporary data branch history
-        uses: actions/checkout@v4
-        with:
-          ref: data/international-source-bootstrap
-          fetch-depth: 0
-
-      - name: Extract committed Albania, Andorra, and Angola datasets
+      - name: Wait for production API to deploy repair commit
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf /tmp/source5-repair
-          mkdir -p /tmp/source5-repair/AL /tmp/source5-repair/AD /tmp/source5-repair/AO
-          git archive 8da777f340b58ef705e5866674eb12afde71023b data/generated/global-health-facilities | tar -xf - -C /tmp/source5-repair/AL
-          git archive 03ec1b8c34ecb1dfaa6e25bd7d1567d8b2014f92 data/generated/global-health-facilities | tar -xf - -C /tmp/source5-repair/AD
-          git archive e03f8f7bd825f383430a108394cb5ea75b117e0b data/generated/global-health-facilities | tar -xf - -C /tmp/source5-repair/AO
-          test "$(jq -r '.countries_requested | join(",")' /tmp/source5-repair/AL/data/generated/global-health-facilities/manifest.json)" = "AL"
-          test "$(jq -r '.countries_requested | join(",")' /tmp/source5-repair/AD/data/generated/global-health-facilities/manifest.json)" = "AD"
-          test "$(jq -r '.countries_requested | join(",")' /tmp/source5-repair/AO/data/generated/global-health-facilities/manifest.json)" = "AO"
-          mkdir -p source5-repair-artifact
-          cp -R /tmp/source5-repair/AL source5-repair-artifact/
-          cp -R /tmp/source5-repair/AD source5-repair-artifact/
-          cp -R /tmp/source5-repair/AO source5-repair-artifact/
+          expected="6cfd39339f0be8d4d59427ca3ae7829fae598f8b"
+          mkdir -p source5-production-health
+          for attempt in $(seq 1 40); do
+            if curl --fail --silent --show-error --max-time 30 \
+              https://network-map-tool-mqib.onrender.com/api/health \
+              -o source5-production-health/health.json; then
+              cat source5-production-health/health.json
+              commit="$(jq -r '.commit // empty' source5-production-health/health.json)"
+              if [ "$commit" = "$expected" ]; then
+                echo "DEPLOYED" | tee source5-production-health/status.txt
+                exit 0
+              fi
+              echo "Attempt $attempt: production commit is $commit; waiting for $expected"
+            else
+              echo "Attempt $attempt: health endpoint unavailable"
+            fi
+            sleep 15
+          done
+          echo "TIMED_OUT" | tee source5-production-health/status.txt
+          exit 1
 
-      - name: Upload direct-import dataset
+      - name: Upload production health result
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: source5-al-ad-ao-direct-import
-          path: source5-repair-artifact
-          if-no-files-found: error
-          retention-days: 7
+          name: source5-production-health
+          path: source5-production-health
+          if-no-files-found: warn
+          retention-days: 1

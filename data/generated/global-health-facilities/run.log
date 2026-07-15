@@ -1,6 +1,6 @@
 Fetching AF from openstreetmap-overpass
 {
-  "generated_at": "2026-07-15T01:00:10.206Z",
+  "generated_at": "2026-07-15T01:01:59.452Z",
   "source_number": 5,
   "source": "OpenStreetMap via Overpass API",
   "source_key": "healthsites_osm",
@@ -26,15 +26,35 @@ Fetching AF from openstreetmap-overpass
   "sql_files": [
     {
       "file": "global_health_facilities_001.sql",
-      "rows": 150
+      "rows": 50
     },
     {
       "file": "global_health_facilities_002.sql",
-      "rows": 150
+      "rows": 50
     },
     {
       "file": "global_health_facilities_003.sql",
-      "rows": 80
+      "rows": 50
+    },
+    {
+      "file": "global_health_facilities_004.sql",
+      "rows": 50
+    },
+    {
+      "file": "global_health_facilities_005.sql",
+      "rows": 50
+    },
+    {
+      "file": "global_health_facilities_006.sql",
+      "rows": 50
+    },
+    {
+      "file": "global_health_facilities_007.sql",
+      "rows": 50
+    },
+    {
+      "file": "global_health_facilities_008.sql",
+      "rows": 30
     }
   ],
   "safeguards": [

@@ -1,27 +1,21 @@
-name: Repair Source 5 facilities in Neon
+name: Package Source 5 repair datasets
 
 on:
-  workflow_dispatch:
   pull_request:
     branches:
       - main
     paths:
       - .github/workflows/download-global-health-facilities.yml
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  repair-albania-andorra-angola:
+  package-source-five:
     if: github.event_name == 'workflow_dispatch' || github.head_ref == 'data/international-source-bootstrap'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    env:
-      DATABASE_URL_CANDIDATE: ${{ secrets.DATABASE_URL }}
-      NEON_DATABASE_URL_CANDIDATE: ${{ secrets.NEON_DATABASE_URL }}
-      POSTGRES_URL_CANDIDATE: ${{ secrets.POSTGRES_URL }}
-      POSTGRES_DATABASE_URL_CANDIDATE: ${{ secrets.POSTGRES_DATABASE_URL }}
-      NEON_CONNECTION_STRING_CANDIDATE: ${{ secrets.NEON_CONNECTION_STRING }}
+    timeout-minutes: 15
 
     steps:
       - name: Check out complete temporary data branch history
@@ -29,35 +23,6 @@ jobs:
         with:
           ref: data/international-source-bootstrap
           fetch-depth: 0
-
-      - name: Install PostgreSQL client
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y postgresql-client
-
-      - name: Resolve and verify production Map Neon connection
-        id: db
-        shell: bash
-        run: |
-          set -euo pipefail
-          db_url=""
-          for candidate_name in DATABASE_URL_CANDIDATE NEON_DATABASE_URL_CANDIDATE POSTGRES_URL_CANDIDATE POSTGRES_DATABASE_URL_CANDIDATE NEON_CONNECTION_STRING_CANDIDATE; do
-            candidate_value="${!candidate_name:-}"
-            if [ -n "$candidate_value" ]; then
-              db_url="$candidate_value"
-              break
-            fi
-          done
-          if [ -z "$db_url" ]; then
-            echo "::error::No supported Neon database secret is configured."
-            exit 1
-          fi
-          identity="$(psql "$db_url" -v ON_ERROR_STOP=1 -Atc "SELECT current_database() || '|' || COALESCE(to_regclass('public.provider_raw_records')::text,'') || '|' || COALESCE(to_regclass('public.provider_master')::text,'') || '|' || COALESCE(to_regclass('public.medical_providers')::text,'');")"
-          if [ "$identity" != "neondb|provider_raw_records|provider_master|medical_providers" ]; then
-            echo "::error::Configured secret does not point to the verified Network Map Neon database."
-            exit 1
-          fi
-          echo "url=$db_url" >> "$GITHUB_OUTPUT"
 
       - name: Extract committed Albania, Andorra, and Angola datasets
         shell: bash
@@ -71,55 +36,15 @@ jobs:
           test "$(jq -r '.countries_requested | join(",")' /tmp/source5-repair/AL/data/generated/global-health-facilities/manifest.json)" = "AL"
           test "$(jq -r '.countries_requested | join(",")' /tmp/source5-repair/AD/data/generated/global-health-facilities/manifest.json)" = "AD"
           test "$(jq -r '.countries_requested | join(",")' /tmp/source5-repair/AO/data/generated/global-health-facilities/manifest.json)" = "AO"
+          mkdir -p source5-repair-artifact
+          cp -R /tmp/source5-repair/AL source5-repair-artifact/
+          cp -R /tmp/source5-repair/AD source5-repair-artifact/
+          cp -R /tmp/source5-repair/AO source5-repair-artifact/
 
-      - name: Execute generated SQL directly and verify all canonical tables
-        env:
-          DB_URL: ${{ steps.db.outputs.url }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          import_country() {
-            local code="$1"
-            local root="/tmp/source5-repair/${code}/data/generated/global-health-facilities"
-            local expected
-            expected="$(jq -r '.total_rows' "$root/manifest.json")"
-
-            shopt -s nullglob
-            local files=("$root"/global_health_facilities_*.sql)
-            if [ "${#files[@]}" -eq 0 ]; then
-              echo "::error::No generated SQL files found for $code"
-              exit 1
-            fi
-
-            for file in "${files[@]}"; do
-              echo "Importing $code: $(basename "$file")"
-              psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$file" >/dev/null
-            done
-
-            local raw stage master lineage legacy invalid invalid_types
-            raw="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(DISTINCT r.source_record_id) FROM public.provider_raw_records r JOIN public.provider_stage_records s ON s.source_key=r.source_key AND s.source_record_id=r.source_record_id WHERE r.source_key='healthsites_osm' AND s.country_code='$code';")"
-            stage="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM public.provider_stage_records WHERE source_key='healthsites_osm' AND country_code='$code';")"
-            master="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM public.provider_master WHERE primary_source_key='healthsites_osm' AND country_code='$code';")"
-            lineage="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM public.provider_master_sources pms JOIN public.provider_master pm ON pm.id=pms.master_provider_id WHERE pms.source_key='healthsites_osm' AND pm.country_code='$code';")"
-            legacy="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM public.medical_providers WHERE data_source='Healthsites / OpenStreetMap' AND country_code='$code';")"
-            invalid="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM public.provider_master_sources pms JOIN public.provider_master pm ON pm.id=pms.master_provider_id WHERE pms.source_key='healthsites_osm' AND pm.country_code='$code' AND (pm.name IS NULL OR btrim(pm.name)='' OR pm.lat IS NULL OR pm.lng IS NULL OR pm.lat=0 OR pm.lng=0 OR pm.lat NOT BETWEEN -90 AND 90 OR pm.lng NOT BETWEEN -180 AND 180);")"
-            invalid_types="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM public.provider_master_types pmt JOIN public.provider_master pm ON pm.id=pmt.master_provider_id LEFT JOIN public.provider_type_catalog c ON c.type_key=pmt.type_key WHERE pmt.source_key='healthsites_osm' AND pm.country_code='$code' AND c.type_key IS NULL;")"
-
-            for actual in "$raw" "$stage" "$master" "$lineage" "$legacy"; do
-              if [ "$actual" != "$expected" ]; then
-                echo "::error::$code count $actual does not match manifest $expected"
-                exit 1
-              fi
-            done
-            if [ "$invalid" != "0" ] || [ "$invalid_types" != "0" ]; then
-              echo "::error::$code validation failed: invalid records=$invalid invalid types=$invalid_types"
-              exit 1
-            fi
-
-            echo "$code VERIFIED expected=$expected raw=$raw stage=$stage master=$master lineage=$lineage legacy=$legacy invalid=$invalid invalid_types=$invalid_types"
-          }
-
-          import_country AL
-          import_country AD
-          import_country AO
+      - name: Upload direct-import dataset
+        uses: actions/upload-artifact@v4
+        with:
+          name: source5-al-ad-ao-direct-import
+          path: source5-repair-artifact
+          if-no-files-found: error
+          retention-days: 7

@@ -1,87 +1,19 @@
-name: Download and repair global health facilities — Source 5
+name: Repair Source 5 facilities in Neon
 
 on:
-  push:
-    branches:
-      - data/international-source-bootstrap
-    paths:
-      - .github/workflows/download-global-health-facilities.yml
+  workflow_dispatch:
   pull_request:
     branches:
       - main
     paths:
       - .github/workflows/download-global-health-facilities.yml
-  workflow_dispatch:
-    inputs:
-      country_codes:
-        description: Comma-separated ISO alpha-2 country codes
-        required: false
-        default: AG
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  generate-source-five:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 55
-
-    steps:
-      - name: Check out international data branch
-        uses: actions/checkout@v4
-        with:
-          ref: data/international-source-bootstrap
-          fetch-depth: 1
-
-      - name: Use Node.js 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Validate Source 5 scripts
-        run: |
-          node --check scripts/bootstrap-global-health-facilities.mjs
-          node --check scripts/compact-source5-sql.mjs
-
-      - name: Download and normalize facility batch
-        env:
-          COUNTRY_CODES: ${{ inputs.country_codes || 'AG' }}
-          HEALTHSITES_API_KEY: ${{ secrets.HEALTHSITES_API_KEY }}
-          SQL_CHUNK_SIZE: '250'
-        run: |
-          set -euo pipefail
-          node scripts/bootstrap-global-health-facilities.mjs | tee /tmp/global-health-facilities.log
-          cp /tmp/global-health-facilities.log data/generated/global-health-facilities/run.log
-
-      - name: Generate compact transfer chunks
-        env:
-          COMPACT_CHUNK_SIZE: '250'
-        run: node scripts/compact-source5-sql.mjs
-
-      - name: Publish generated files
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/generated/global-health-facilities
-          if git diff --cached --quiet; then
-            exit 0
-          fi
-          git commit -m "data: generate Source 5 health facilities [skip ci]"
-          git push origin HEAD:data/international-source-bootstrap
-
-      - name: Upload Source 5 artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: global-health-facilities-source-5
-          path: data/generated/global-health-facilities
-          if-no-files-found: error
-          retention-days: 7
-
   repair-albania-andorra-angola:
-    if: github.event_name == 'pull_request' && github.head_ref == 'data/international-source-bootstrap'
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'data/international-source-bootstrap'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -92,7 +24,7 @@ jobs:
       NEON_CONNECTION_STRING_CANDIDATE: ${{ secrets.NEON_CONNECTION_STRING }}
 
     steps:
-      - name: Check out complete data-branch history
+      - name: Check out complete temporary data branch history
         uses: actions/checkout@v4
         with:
           ref: data/international-source-bootstrap
@@ -127,7 +59,7 @@ jobs:
           fi
           echo "url=$db_url" >> "$GITHUB_OUTPUT"
 
-      - name: Extract committed country datasets
+      - name: Extract committed Albania, Andorra, and Angola datasets
         shell: bash
         run: |
           set -euo pipefail
@@ -140,18 +72,15 @@ jobs:
           test "$(jq -r '.countries_requested | join(",")' /tmp/source5-repair/AD/data/generated/global-health-facilities/manifest.json)" = "AD"
           test "$(jq -r '.countries_requested | join(",")' /tmp/source5-repair/AO/data/generated/global-health-facilities/manifest.json)" = "AO"
 
-      - name: Execute generated SQL directly and verify every canonical table
+      - name: Execute generated SQL directly and verify all canonical tables
         env:
           DB_URL: ${{ steps.db.outputs.url }}
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p data/status /tmp/source5-results
-          : > /tmp/source5-results/counts.tsv
 
           import_country() {
             local code="$1"
-            local slug="$2"
             local root="/tmp/source5-repair/${code}/data/generated/global-health-facilities"
             local expected
             expected="$(jq -r '.total_rows' "$root/manifest.json")"
@@ -168,13 +97,12 @@ jobs:
               psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$file" >/dev/null
             done
 
-            local raw stage master lineage legacy type_links invalid invalid_types
+            local raw stage master lineage legacy invalid invalid_types
             raw="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(DISTINCT r.source_record_id) FROM public.provider_raw_records r JOIN public.provider_stage_records s ON s.source_key=r.source_key AND s.source_record_id=r.source_record_id WHERE r.source_key='healthsites_osm' AND s.country_code='$code';")"
             stage="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM public.provider_stage_records WHERE source_key='healthsites_osm' AND country_code='$code';")"
             master="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM public.provider_master WHERE primary_source_key='healthsites_osm' AND country_code='$code';")"
             lineage="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM public.provider_master_sources pms JOIN public.provider_master pm ON pm.id=pms.master_provider_id WHERE pms.source_key='healthsites_osm' AND pm.country_code='$code';")"
             legacy="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM public.medical_providers WHERE data_source='Healthsites / OpenStreetMap' AND country_code='$code';")"
-            type_links="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM public.provider_master_types pmt JOIN public.provider_master pm ON pm.id=pmt.master_provider_id WHERE pmt.source_key='healthsites_osm' AND pm.country_code='$code';")"
             invalid="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM public.provider_master_sources pms JOIN public.provider_master pm ON pm.id=pms.master_provider_id WHERE pms.source_key='healthsites_osm' AND pm.country_code='$code' AND (pm.name IS NULL OR btrim(pm.name)='' OR pm.lat IS NULL OR pm.lng IS NULL OR pm.lat=0 OR pm.lng=0 OR pm.lat NOT BETWEEN -90 AND 90 OR pm.lng NOT BETWEEN -180 AND 180);")"
             invalid_types="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM public.provider_master_types pmt JOIN public.provider_master pm ON pm.id=pmt.master_provider_id LEFT JOIN public.provider_type_catalog c ON c.type_key=pmt.type_key WHERE pmt.source_key='healthsites_osm' AND pm.country_code='$code' AND c.type_key IS NULL;")"
 
@@ -189,47 +117,9 @@ jobs:
               exit 1
             fi
 
-            cat > "data/status/source5-${slug}-neon-import-status.txt" <<EOF
-Source #5 — Healthsites / OpenStreetMap health facilities
-Country batch: ${slug} (${code})
-Status: COMPLETE IN PRODUCTION NEON
-Completed: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-
-Verified production Neon results:
-- Manifest records: ${expected}
-- provider_raw_records: ${raw}
-- provider_stage_records: ${stage}
-- provider_master: ${master}
-- provider_master_sources: ${lineage}
-- provider_master_types: ${type_links}
-- medical_providers legacy map mirror: ${legacy}
-
-Validation:
-- Invalid map records: ${invalid}
-- Invalid provider type links: ${invalid_types}
-- Country code: ${code} only
-- Source lineage retained
-- Original names and available contact fields preserved
-
-Backend storage: Neon canonical provider tables; no frontend data bundle
-GitHub PR #98 remains a temporary data-generation branch and must not be merged into main.
-EOF
-
-            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$code" "$expected" "$raw" "$stage" "$master" "$lineage" "$type_links" "$legacy" "$invalid" >> /tmp/source5-results/counts.tsv
+            echo "$code VERIFIED expected=$expected raw=$raw stage=$stage master=$master lineage=$lineage legacy=$legacy invalid=$invalid invalid_types=$invalid_types"
           }
 
-          import_country AL albania
-          import_country AD andorra
-          import_country AO angola
-          cat /tmp/source5-results/counts.tsv
-
-      - name: Publish corrected verified statuses
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/status/source5-albania-neon-import-status.txt \
-                  data/status/source5-andorra-neon-import-status.txt \
-                  data/status/source5-angola-neon-import-status.txt
-          git commit -m "data: verify repaired Source 5 AL AD AO imports [skip ci]"
-          git push origin HEAD:data/international-source-bootstrap
+          import_country AL
+          import_country AD
+          import_country AO

@@ -1,0 +1,70 @@
+{
+  "generated_at": "2026-07-15T01:05:31.609Z",
+  "total_rows": 380,
+  "files": [
+    {
+      "file": "source5_compact_001.sql",
+      "rows": 25
+    },
+    {
+      "file": "source5_compact_002.sql",
+      "rows": 25
+    },
+    {
+      "file": "source5_compact_003.sql",
+      "rows": 25
+    },
+    {
+      "file": "source5_compact_004.sql",
+      "rows": 25
+    },
+    {
+      "file": "source5_compact_005.sql",
+      "rows": 25
+    },
+    {
+      "file": "source5_compact_006.sql",
+      "rows": 25
+    },
+    {
+      "file": "source5_compact_007.sql",
+      "rows": 25
+    },
+    {
+      "file": "source5_compact_008.sql",
+      "rows": 25
+    },
+    {
+      "file": "source5_compact_009.sql",
+      "rows": 25
+    },
+    {
+      "file": "source5_compact_010.sql",
+      "rows": 25
+    },
+    {
+      "file": "source5_compact_011.sql",
+      "rows": 25
+    },
+    {
+      "file": "source5_compact_012.sql",
+      "rows": 25
+    },
+    {
+      "file": "source5_compact_013.sql",
+      "rows": 25
+    },
+    {
+      "file": "source5_compact_014.sql",
+      "rows": 25
+    },
+    {
+      "file": "source5_compact_015.sql",
+      "rows": 25
+    },
+    {
+      "file": "source5_compact_016.sql",
+      "rows": 5
+    }
+  ]
+}

@@ -53,7 +53,7 @@ jobs:
 
       - name: Generate compact Neon transfer chunks
         env:
-          COMPACT_CHUNK_SIZE: '25'
+          COMPACT_CHUNK_SIZE: '200'
         run: node scripts/compact-source5-sql.mjs
 
       - name: Publish reviewable SQL and manifest

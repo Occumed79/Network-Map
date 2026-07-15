@@ -6,6 +6,11 @@ on:
       - data/international-source-bootstrap
     paths:
       - .github/workflows/download-global-health-facilities.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/download-global-health-facilities.yml
   workflow_dispatch:
     inputs:
       country_codes:
@@ -76,7 +81,7 @@ jobs:
           retention-days: 7
 
   repair-albania-andorra-angola:
-    if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
+    if: github.event_name == 'pull_request' && github.head_ref == 'data/international-source-bootstrap'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:

@@ -13,7 +13,7 @@ on:
       country_codes:
         description: Comma-separated ISO alpha-2 country codes
         required: false
-        default: AF
+        default: AL
 
 permissions:
   contents: write
@@ -43,7 +43,7 @@ jobs:
 
       - name: Download and normalize facility batch
         env:
-          COUNTRY_CODES: ${{ inputs.country_codes || 'AF' }}
+          COUNTRY_CODES: ${{ inputs.country_codes || 'AL' }}
           HEALTHSITES_API_KEY: ${{ secrets.HEALTHSITES_API_KEY }}
           SQL_CHUNK_SIZE: '50'
         run: |

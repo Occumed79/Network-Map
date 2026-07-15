@@ -1,30 +1,29 @@
 Source #5 — Healthsites / OpenStreetMap health facilities
 Country batch: Angola (AO)
 Status: COMPLETE IN PRODUCTION NEON
-Completed: 2026-07-15 UTC
+Verified: 2026-07-15T11:21:58.932Z
 
-Verified production Neon results:
-- Generated source-record total matched the committed Angola manifest
-- provider_raw_records count matched the generated source-record total
-- provider_stage_records count matched the generated source-record total
-- provider_master primary-source count matched the generated source-record total
-- provider_master_sources lineage count matched the generated source-record total
-- medical_providers legacy map mirror count matched the generated source-record total
-- provider_master_types populated and validated against the provider type catalog
+Final production reconciliation:
+- Committed manifest records: 776
+- Linked provider_raw_records: 776
+- provider_stage_records: 776
+- Distinct source_record_id values: 776
+- provider_master primary-source records: 776
+- provider_master_sources lineage links: 776
+- provider_master_types links: 815
+- medical_providers legacy map mirror: 776
 
 Validation:
-- Distinct source records matched the generated manifest total
-- Invalid map records (blank name, missing coordinates, or zero coordinates): 0
+- Invalid map records: 0
+- Invalid provider type links: 0
 - Country code: AO only
 - Source lineage retained for every imported record
 - Original facility names and available contact fields preserved
 
 Source catalog key: healthsites_osm
 Source display name: Healthsites / OpenStreetMap health facilities
-Country code: AO
-Manifest: data/generated/global-health-facilities/manifest.json
-Compact transfer manifest: data/generated/global-health-facilities/compact/manifest.json
+Backend storage: Neon canonical provider tables; no frontend data bundle
 
-The transient import, request, and manifest-transfer tables were dropped after canonical ingestion and verification.
+All temporary reconciliation tables, staging tables, authorization artifacts, and temporary roles were removed after verification.
 
 GitHub PR #98 remains a temporary draft data-generation branch and must not be merged into main.

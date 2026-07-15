@@ -1,0 +1,30 @@
+Source #5 — Healthsites / OpenStreetMap health facilities
+Country batch: Algeria (DZ)
+Status: COMPLETE IN PRODUCTION NEON
+Completed: 2026-07-15 UTC
+
+Verified production Neon results:
+- Generated source-record total matched the committed Algeria manifest
+- provider_raw_records count matched the generated source-record total
+- provider_stage_records count matched the generated source-record total
+- provider_master primary-source count matched the generated source-record total
+- provider_master_sources lineage count matched the generated source-record total
+- medical_providers legacy map mirror count matched the generated source-record total
+- provider_master_types populated and validated against the provider type catalog
+
+Validation:
+- Distinct source records matched the generated manifest total
+- Invalid map records (blank name, missing coordinates, or zero coordinates): 0
+- Country code: DZ only
+- Source lineage retained for every imported record
+- Original facility names and available contact fields preserved
+
+Source catalog key: healthsites_osm
+Source display name: Healthsites / OpenStreetMap health facilities
+Country code: DZ
+Manifest: data/generated/global-health-facilities/manifest.json
+Compact transfer manifest: data/generated/global-health-facilities/compact/manifest.json
+
+The transient import, request, and manifest-transfer tables were dropped after canonical ingestion and verification.
+
+GitHub PR #98 remains a temporary draft data-generation branch and must not be merged into main.

@@ -1,27 +1,30 @@
 Source #5 — Healthsites / OpenStreetMap health facilities
 Country batch: Albania (AL)
 Status: COMPLETE IN PRODUCTION NEON
-Completed: 2026-07-15 UTC
+Verified: 2026-07-15T11:21:58.932Z
 
-Verified production Neon counts:
-- provider_raw_records: 1,105
+Final production reconciliation:
+- Committed manifest records: 1,105
+- Linked provider_raw_records: 1,105
 - provider_stage_records: 1,105
-- provider_master: 1,105 primary-source records
-- provider_master_sources: 1,105 lineage links
-- provider_master_types: populated and validated against the provider type catalog
+- Distinct source_record_id values: 1,105
+- provider_master primary-source records: 1,105
+- provider_master_sources lineage links: 1,105
+- provider_master_types links: 1,160
 - medical_providers legacy map mirror: 1,105
 
 Validation:
-- Distinct source records: 1,105
-- Invalid map records (blank name, missing coordinates, or zero coordinates): 0
+- Invalid map records: 0
+- Invalid provider type links: 0
+- Twenty-five records left from the earlier partial Albania dataset were identified by exact source_record_id comparison and removed before final verification.
 - Country code: AL only
-- Source lineage retained for every imported record
+- Source lineage retained for every final imported record
 - Original facility names and available contact fields preserved
 
 Source catalog key: healthsites_osm
 Source display name: Healthsites / OpenStreetMap health facilities
-Country code: AL
+Backend storage: Neon canonical provider tables; no frontend data bundle
 
-The transient source5_import_staging and source5_http_import_requests tables were dropped after canonical ingestion and verification.
+All temporary reconciliation tables, staging tables, authorization artifacts, and temporary roles were removed after verification.
 
 GitHub PR #98 remains a temporary draft data-generation branch and must not be merged into main.

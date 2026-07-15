@@ -1,23 +1,27 @@
-name: Exact provider geocoding pilot
+name: Exact provider geocoding full run
 
 on:
   push:
     branches:
       - agent/exact-provider-geocoding
     paths:
-      - scripts/exact-geocode-provider-batch.mjs
-      - data/geocoding/provider-import-batch-001.jsonl
+      - scripts/exact-geocode-provider-batch-fast.mjs
+      - data/geocoding/full-input/**
       - .github/workflows/exact-provider-geocoding.yml
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: exact-provider-geocoding-full
+  cancel-in-progress: true
+
 jobs:
   geocode-exact:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 90
 
     steps:
       - name: Check out exact-geocoding branch
@@ -31,34 +35,112 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Geocode first approved batch with strict rejection rules
+      - name: Reconstruct and verify all approved records
         run: |
-          node scripts/exact-geocode-provider-batch.mjs \
-            --input=data/geocoding/provider-import-batch-001.jsonl \
-            --output=data/geocoding/results/provider-geocoded-batch-001.csv \
-            --unresolved=data/geocoding/results/provider-unresolved-batch-001.csv \
-            --audit=data/geocoding/results/provider-geocode-audit-batch-001.jsonl \
-            --limit=10 \
-            --delayMs=1250
+          set -euo pipefail
+          mkdir -p /tmp/geocode-input /tmp/geocode-results
+          cat data/geocoding/full-input/provider-geocode-input.part-*.b64 \
+            | base64 --decode \
+            | gzip --decompress \
+            > /tmp/geocode-input/providers.jsonl
 
-      - name: Publish exact-match and unresolved results
+          rows="$(wc -l < /tmp/geocode-input/providers.jsonl | tr -d ' ')"
+          echo "Approved records reconstructed: $rows"
+          test "$rows" -eq 1431
+
+          split -d -a 3 -l 100 \
+            /tmp/geocode-input/providers.jsonl \
+            /tmp/geocode-input/batch-
+
+      - name: Run strict exact geocoding in parallel
+        run: |
+          set -euo pipefail
+          find /tmp/geocode-input -maxdepth 1 -type f -name 'batch-*' -print0 \
+            | sort -z \
+            | xargs -0 -n1 -P6 bash -c '
+                set -euo pipefail
+                input="$1"
+                batch="$(basename "$input")"
+                node scripts/exact-geocode-provider-batch-fast.mjs \
+                  --input="$input" \
+                  --outputPrefix="/tmp/geocode-results/$batch" \
+                  --concurrency=2
+              ' _
+
+      - name: Aggregate and verify full results
+        run: |
+          set -euo pipefail
+          out="data/geocoding/results/full-run"
+          rm -rf "$out"
+          mkdir -p "$out/batches"
+          cp /tmp/geocode-results/* "$out/batches/"
+
+          mapfile -t geocoded_csv < <(find /tmp/geocode-results -maxdepth 1 -name '*-geocoded.csv' | sort)
+          mapfile -t unresolved_csv < <(find /tmp/geocode-results -maxdepth 1 -name '*-unresolved.csv' | sort)
+          mapfile -t geocoded_jsonl < <(find /tmp/geocode-results -maxdepth 1 -name '*-geocoded.jsonl' | sort)
+          mapfile -t audit_jsonl < <(find /tmp/geocode-results -maxdepth 1 -name '*-audit.jsonl' | sort)
+          mapfile -t summaries < <(find /tmp/geocode-results -maxdepth 1 -name '*-summary.json' | sort)
+
+          {
+            head -n 1 "${geocoded_csv[0]}"
+            for file in "${geocoded_csv[@]}"; do
+              tail -n +2 "$file"
+            done
+          } > "$out/provider-geocoded-exact.csv"
+
+          cat "${geocoded_jsonl[@]}" > "$out/provider-geocoded-exact.jsonl"
+
+          {
+            head -n 1 "${unresolved_csv[0]}"
+            for file in "${unresolved_csv[@]}"; do
+              tail -n +2 "$file"
+            done
+          } > "$out/provider-unresolved.csv"
+
+          cat "${audit_jsonl[@]}" > "$out/provider-geocode-audit.jsonl"
+
+          exact="$(jq -s 'map(.exactMatches) | add' "${summaries[@]}")"
+          unresolved="$(jq -s 'map(.unresolved) | add' "${summaries[@]}")"
+          errors="$(jq -s 'map(.requestErrors) | add' "${summaries[@]}")"
+
+          test "$((exact + unresolved))" -eq 1431
+          test "$(wc -l < "$out/provider-geocode-audit.jsonl" | tr -d ' ')" -eq 1431
+
+          jq -n \
+            --argjson input 1431 \
+            --argjson exactMatches "$exact" \
+            --argjson unresolved "$unresolved" \
+            --argjson requestErrors "$errors" \
+            '{
+              input: $input,
+              exactMatches: $exactMatches,
+              unresolved: $unresolved,
+              requestErrors: $requestErrors,
+              approximationsAccepted: 0,
+              geocoder: "ArcGIS World Geocoding Service",
+              acceptancePolicy: "score 100 plus exact facility or exact street address; no centroids, roads, cities, postal approximations, or fuzzy substitutions"
+            }' > "$out/summary.json"
+
+          cat "$out/summary.json"
+
+      - name: Publish complete exact-match audit
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/geocoding/results
+          git add data/geocoding/results/full-run
           if git diff --cached --quiet; then
-            echo "No geocoding result changes"
+            echo "No full-run result changes"
             exit 0
           fi
-          git commit -m "data: publish exact geocoding batch 001 [skip ci]"
+          git commit -m "data: publish full exact provider geocoding [skip ci]"
           git push origin HEAD:agent/exact-provider-geocoding
 
-      - name: Upload geocoding audit artifact
+      - name: Upload complete audit artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: exact-provider-geocoding-batch-001
-          path: data/geocoding/results
+          name: exact-provider-geocoding-full-run
+          path: data/geocoding/results/full-run
           if-no-files-found: error
           retention-days: 14

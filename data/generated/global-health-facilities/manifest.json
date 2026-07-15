@@ -1,19 +1,19 @@
 {
-  "generated_at": "2026-07-15T01:27:14.861Z",
+  "generated_at": "2026-07-15T02:03:46.606Z",
   "source_number": 5,
   "source": "OpenStreetMap via Overpass API",
   "source_key": "healthsites_osm",
   "countries_requested": [
-    "AL"
+    "AD"
   ],
   "country_results": {
-    "AL": {
+    "AD": {
       "mode": "openstreetmap-overpass",
-      "accepted": 1105,
-      "fetched": 1105
+      "accepted": 44,
+      "fetched": 44
     }
   },
-  "total_rows": 1105,
+  "total_rows": 44,
   "destination_tables": [
     "public.provider_raw_records",
     "public.provider_stage_records",
@@ -25,95 +25,7 @@
   "sql_files": [
     {
       "file": "global_health_facilities_001.sql",
-      "rows": 50
-    },
-    {
-      "file": "global_health_facilities_002.sql",
-      "rows": 50
-    },
-    {
-      "file": "global_health_facilities_003.sql",
-      "rows": 50
-    },
-    {
-      "file": "global_health_facilities_004.sql",
-      "rows": 50
-    },
-    {
-      "file": "global_health_facilities_005.sql",
-      "rows": 50
-    },
-    {
-      "file": "global_health_facilities_006.sql",
-      "rows": 50
-    },
-    {
-      "file": "global_health_facilities_007.sql",
-      "rows": 50
-    },
-    {
-      "file": "global_health_facilities_008.sql",
-      "rows": 50
-    },
-    {
-      "file": "global_health_facilities_009.sql",
-      "rows": 50
-    },
-    {
-      "file": "global_health_facilities_010.sql",
-      "rows": 50
-    },
-    {
-      "file": "global_health_facilities_011.sql",
-      "rows": 50
-    },
-    {
-      "file": "global_health_facilities_012.sql",
-      "rows": 50
-    },
-    {
-      "file": "global_health_facilities_013.sql",
-      "rows": 50
-    },
-    {
-      "file": "global_health_facilities_014.sql",
-      "rows": 50
-    },
-    {
-      "file": "global_health_facilities_015.sql",
-      "rows": 50
-    },
-    {
-      "file": "global_health_facilities_016.sql",
-      "rows": 50
-    },
-    {
-      "file": "global_health_facilities_017.sql",
-      "rows": 50
-    },
-    {
-      "file": "global_health_facilities_018.sql",
-      "rows": 50
-    },
-    {
-      "file": "global_health_facilities_019.sql",
-      "rows": 50
-    },
-    {
-      "file": "global_health_facilities_020.sql",
-      "rows": 50
-    },
-    {
-      "file": "global_health_facilities_021.sql",
-      "rows": 50
-    },
-    {
-      "file": "global_health_facilities_022.sql",
-      "rows": 50
-    },
-    {
-      "file": "global_health_facilities_023.sql",
-      "rows": 5
+      "rows": 44
     }
   ],
   "safeguards": [

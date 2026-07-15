@@ -1,0 +1,415 @@
+name: Repair Source 5 Albania, Andorra, and Angola in Neon
+
+on:
+  push:
+    branches:
+      - data/international-source-bootstrap
+    paths:
+      - .github/workflows/repair-source5-al-ad-ao.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair-source-five:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      DATABASE_URL_CANDIDATE: ${{ secrets.DATABASE_URL }}
+      NEON_DATABASE_URL_CANDIDATE: ${{ secrets.NEON_DATABASE_URL }}
+      POSTGRES_URL_CANDIDATE: ${{ secrets.POSTGRES_URL }}
+      POSTGRES_DATABASE_URL_CANDIDATE: ${{ secrets.POSTGRES_DATABASE_URL }}
+      NEON_CONNECTION_STRING_CANDIDATE: ${{ secrets.NEON_CONNECTION_STRING }}
+
+    steps:
+      - name: Check out full temporary data branch history
+        uses: actions/checkout@v4
+        with:
+          ref: data/international-source-bootstrap
+          fetch-depth: 0
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client
+
+      - name: Resolve and verify the production Map Neon connection
+        id: db
+        shell: bash
+        run: |
+          set -euo pipefail
+          db_url=""
+          for candidate_name in DATABASE_URL_CANDIDATE NEON_DATABASE_URL_CANDIDATE POSTGRES_URL_CANDIDATE POSTGRES_DATABASE_URL_CANDIDATE NEON_CONNECTION_STRING_CANDIDATE; do
+            candidate_value="${!candidate_name:-}"
+            if [ -n "$candidate_value" ]; then
+              db_url="$candidate_value"
+              break
+            fi
+          done
+          if [ -z "$db_url" ]; then
+            echo "::error::No supported Neon database secret is configured."
+            exit 1
+          fi
+          identity="$(psql "$db_url" -v ON_ERROR_STOP=1 -Atc "SELECT current_database() || '|' || COALESCE(to_regclass('public.provider_raw_records')::text,'') || '|' || COALESCE(to_regclass('public.provider_master')::text,'') || '|' || COALESCE(to_regclass('public.medical_providers')::text,'');")"
+          if [ "$identity" != "neondb|provider_raw_records|provider_master|medical_providers" ]; then
+            echo "::error::The configured secret does not point to the verified Network Map Neon database."
+            exit 1
+          fi
+          echo "url=$db_url" >> "$GITHUB_OUTPUT"
+
+      - name: Extract the three committed country datasets
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/source5-repair
+          mkdir -p /tmp/source5-repair/AL /tmp/source5-repair/AD /tmp/source5-repair/AO
+          git archive 8da777f340b58ef705e5866674eb12afde71023b data/generated/global-health-facilities | tar -xf - -C /tmp/source5-repair/AL
+          git archive 03ec1b8c34ecb1dfaa6e25bd7d1567d8b2014f92 data/generated/global-health-facilities | tar -xf - -C /tmp/source5-repair/AD
+          git archive e03f8f7bd825f383430a108394cb5ea75b117e0b data/generated/global-health-facilities | tar -xf - -C /tmp/source5-repair/AO
+          test "$(jq -r '.countries_requested | join(",")' /tmp/source5-repair/AL/data/generated/global-health-facilities/manifest.json)" = "AL"
+          test "$(jq -r '.countries_requested | join(",")' /tmp/source5-repair/AD/data/generated/global-health-facilities/manifest.json)" = "AD"
+          test "$(jq -r '.countries_requested | join(",")' /tmp/source5-repair/AO/data/generated/global-health-facilities/manifest.json)" = "AO"
+
+      - name: Import and verify all three countries
+        env:
+          DB_URL: ${{ steps.db.outputs.url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/source5-results data/status
+
+          import_country() {
+            local code="$1"
+            local slug="$2"
+            local root="/tmp/source5-repair/${code}/data/generated/global-health-facilities"
+            local expected
+            expected="$(jq -r '.total_rows' "$root/manifest.json")"
+
+            psql "$DB_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          DROP TABLE IF EXISTS public.source5_import_staging;
+          CREATE TABLE public.source5_import_staging (
+            source_record_id text PRIMARY KEY,
+            source_url text,
+            name text NOT NULL,
+            normalized_name text,
+            address_line1 text,
+            formatted_address text,
+            city text,
+            state_region text,
+            postal_code text,
+            country_code text NOT NULL,
+            lat double precision NOT NULL,
+            lng double precision NOT NULL,
+            phone text,
+            website text,
+            email text,
+            primary_provider_type text,
+            capability_tags text[] NOT NULL DEFAULT ARRAY[]::text[],
+            quality_score numeric,
+            master_key text NOT NULL
+          );
+          SQL
+
+            shopt -s nullglob
+            local files=("$root"/compact/source5_compact_*.sql)
+            if [ "${#files[@]}" -eq 0 ]; then
+              echo "::error::No compact SQL chunks found for $code"
+              exit 1
+            fi
+            for file in "${files[@]}"; do
+              psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$file" >/dev/null
+            done
+
+            local staged
+            staged="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM public.source5_import_staging WHERE country_code='$code';")"
+            if [ "$staged" != "$expected" ]; then
+              echo "::error::$code staging count $staged does not match manifest $expected"
+              exit 1
+            fi
+
+            psql "$DB_URL" -v ON_ERROR_STOP=1 -v country="$code" <<'SQL'
+          BEGIN;
+
+          INSERT INTO public.provider_source_catalog
+            (source_key, display_name, source_kind, trust_tier, active, notes)
+          VALUES
+            ('healthsites_osm', 'Healthsites / OpenStreetMap health facilities', 'open_data', 'directory', true,
+             'International health-facility locations; backend ingestion only')
+          ON CONFLICT (source_key) DO UPDATE SET
+            display_name=EXCLUDED.display_name,
+            source_kind=EXCLUDED.source_kind,
+            trust_tier=EXCLUDED.trust_tier,
+            active=true,
+            notes=EXCLUDED.notes,
+            updated_at=now();
+
+          INSERT INTO public.provider_raw_records
+            (source_key, source_record_id, content_hash, raw_payload, raw_text, status)
+          SELECT
+            'healthsites_osm', t.source_record_id, md5(to_jsonb(t)::text),
+            to_jsonb(t), to_jsonb(t)::text, 'raw_loaded'
+          FROM public.source5_import_staging t
+          WHERE t.country_code=:'country'
+            AND NOT EXISTS (
+              SELECT 1 FROM public.provider_raw_records r
+              WHERE r.source_key='healthsites_osm' AND r.source_record_id=t.source_record_id
+            );
+
+          UPDATE public.provider_raw_records r
+          SET content_hash=md5(to_jsonb(t)::text),
+              raw_payload=to_jsonb(t),
+              raw_text=to_jsonb(t)::text,
+              status='raw_loaded'
+          FROM public.source5_import_staging t
+          WHERE t.country_code=:'country'
+            AND r.source_key='healthsites_osm'
+            AND r.source_record_id=t.source_record_id;
+
+          INSERT INTO public.provider_stage_records (
+            raw_record_id, source_key, source_record_id, name, normalized_name,
+            address_line1, formatted_address, city, state_region, postal_code,
+            country_code, lat, lng, phone, website, email, primary_provider_type,
+            capability_tags, confidence_score, normalization_status, normalized_payload
+          )
+          SELECT
+            r.id, 'healthsites_osm', t.source_record_id, t.name,
+            NULLIF(t.normalized_name,''), t.address_line1, t.formatted_address,
+            t.city, t.state_region, t.postal_code, t.country_code, t.lat, t.lng,
+            t.phone, t.website, t.email, t.primary_provider_type,
+            t.capability_tags, t.quality_score, 'staged', to_jsonb(t)
+          FROM public.source5_import_staging t
+          JOIN LATERAL (
+            SELECT id FROM public.provider_raw_records r
+            WHERE r.source_key='healthsites_osm' AND r.source_record_id=t.source_record_id
+            ORDER BY r.created_at ASC LIMIT 1
+          ) r ON true
+          WHERE t.country_code=:'country'
+            AND NOT EXISTS (
+              SELECT 1 FROM public.provider_stage_records s
+              WHERE s.source_key='healthsites_osm' AND s.source_record_id=t.source_record_id
+            );
+
+          UPDATE public.provider_stage_records s
+          SET name=t.name,
+              normalized_name=NULLIF(t.normalized_name,''),
+              address_line1=t.address_line1,
+              formatted_address=t.formatted_address,
+              city=t.city,
+              state_region=t.state_region,
+              postal_code=t.postal_code,
+              country_code=t.country_code,
+              lat=t.lat,
+              lng=t.lng,
+              phone=t.phone,
+              website=t.website,
+              email=t.email,
+              primary_provider_type=t.primary_provider_type,
+              capability_tags=t.capability_tags,
+              confidence_score=t.quality_score,
+              normalization_status='staged',
+              normalized_payload=to_jsonb(t)
+          FROM public.source5_import_staging t
+          WHERE t.country_code=:'country'
+            AND s.source_key='healthsites_osm'
+            AND s.source_record_id=t.source_record_id;
+
+          INSERT INTO public.provider_master (
+            master_key, name, normalized_name, address_line1, formatted_address,
+            city, state_region, postal_code, country_code, lat, lng, phone,
+            website, email, primary_provider_type, capability_tags,
+            primary_source_key, quality_score, active, last_seen_at, updated_at
+          )
+          SELECT
+            master_key, name, NULLIF(normalized_name,''), address_line1,
+            formatted_address, city, state_region, postal_code, country_code,
+            lat, lng, phone, website, email, primary_provider_type,
+            capability_tags, 'healthsites_osm', quality_score, true, now(), now()
+          FROM public.source5_import_staging
+          WHERE country_code=:'country'
+          ON CONFLICT (master_key) DO UPDATE SET
+            name=EXCLUDED.name,
+            normalized_name=COALESCE(EXCLUDED.normalized_name, provider_master.normalized_name),
+            address_line1=COALESCE(NULLIF(EXCLUDED.address_line1,''), provider_master.address_line1),
+            formatted_address=COALESCE(NULLIF(EXCLUDED.formatted_address,''), provider_master.formatted_address),
+            city=COALESCE(NULLIF(EXCLUDED.city,''), provider_master.city),
+            state_region=COALESCE(NULLIF(EXCLUDED.state_region,''), provider_master.state_region),
+            postal_code=COALESCE(NULLIF(EXCLUDED.postal_code,''), provider_master.postal_code),
+            country_code=EXCLUDED.country_code,
+            lat=EXCLUDED.lat,
+            lng=EXCLUDED.lng,
+            phone=COALESCE(NULLIF(EXCLUDED.phone,''), provider_master.phone),
+            website=COALESCE(NULLIF(EXCLUDED.website,''), provider_master.website),
+            email=COALESCE(NULLIF(EXCLUDED.email,''), provider_master.email),
+            primary_provider_type=CASE
+              WHEN provider_master.primary_provider_type IS NULL OR provider_master.primary_provider_type='unknown'
+              THEN EXCLUDED.primary_provider_type ELSE provider_master.primary_provider_type END,
+            capability_tags=ARRAY(
+              SELECT DISTINCT value
+              FROM unnest(provider_master.capability_tags || EXCLUDED.capability_tags) value
+              WHERE value IS NOT NULL AND value<>''
+            ),
+            primary_source_key=COALESCE(provider_master.primary_source_key, EXCLUDED.primary_source_key),
+            quality_score=GREATEST(COALESCE(provider_master.quality_score,0), COALESCE(EXCLUDED.quality_score,0)),
+            active=true,
+            last_seen_at=now(),
+            updated_at=now();
+
+          INSERT INTO public.provider_master_sources (
+            master_provider_id, stage_record_id, raw_record_id, source_key,
+            source_record_id, source_url, source_confidence_score, raw_payload
+          )
+          SELECT
+            pm.id, s.id, r.id, 'healthsites_osm', t.source_record_id,
+            t.source_url, t.quality_score, to_jsonb(t)
+          FROM public.source5_import_staging t
+          JOIN public.provider_master pm ON pm.master_key=t.master_key
+          LEFT JOIN LATERAL (
+            SELECT id FROM public.provider_raw_records r
+            WHERE r.source_key='healthsites_osm' AND r.source_record_id=t.source_record_id
+            ORDER BY r.created_at ASC LIMIT 1
+          ) r ON true
+          LEFT JOIN LATERAL (
+            SELECT id FROM public.provider_stage_records s
+            WHERE s.source_key='healthsites_osm' AND s.source_record_id=t.source_record_id
+            ORDER BY s.created_at ASC LIMIT 1
+          ) s ON true
+          WHERE t.country_code=:'country'
+          ON CONFLICT (master_provider_id, source_key, (COALESCE(source_record_id,''))) DO UPDATE SET
+            stage_record_id=EXCLUDED.stage_record_id,
+            raw_record_id=EXCLUDED.raw_record_id,
+            source_url=EXCLUDED.source_url,
+            source_confidence_score=GREATEST(
+              COALESCE(provider_master_sources.source_confidence_score,0),
+              COALESCE(EXCLUDED.source_confidence_score,0)
+            ),
+            raw_payload=EXCLUDED.raw_payload,
+            updated_at=now();
+
+          INSERT INTO public.provider_master_types
+            (master_provider_id, type_key, source_key, confidence_score)
+          SELECT DISTINCT
+            pm.id, type_key, 'healthsites_osm', t.quality_score
+          FROM public.source5_import_staging t
+          JOIN public.provider_master pm ON pm.master_key=t.master_key
+          CROSS JOIN LATERAL unnest(ARRAY[t.primary_provider_type] || t.capability_tags) type_key
+          WHERE t.country_code=:'country'
+            AND type_key IS NOT NULL AND type_key<>''
+            AND EXISTS (SELECT 1 FROM public.provider_type_catalog c WHERE c.type_key=type_key)
+          ON CONFLICT (master_provider_id, type_key) DO UPDATE SET
+            source_key=EXCLUDED.source_key,
+            confidence_score=GREATEST(
+              COALESCE(provider_master_types.confidence_score,0),
+              COALESCE(EXCLUDED.confidence_score,0)
+            );
+
+          INSERT INTO public.medical_providers (
+            place_id, name, formatted_address, lat, lng, types, category,
+            phone, website, country_code, locality, administrative_area_level_1,
+            postal_code, data_source, source_id, source_type, confidence_score,
+            raw_data, scraped_at, updated_at
+          )
+          SELECT
+            'healthsites_osm:' || source_record_id, name, formatted_address,
+            lat, lng, capability_tags, primary_provider_type, phone, website,
+            country_code, city, state_region, postal_code,
+            'Healthsites / OpenStreetMap', 'healthsites_osm:' || source_record_id,
+            'open_data', quality_score::double precision,
+            to_jsonb(t) || jsonb_build_object('provider_master_key',master_key,'source_key','healthsites_osm'),
+            now(), now()
+          FROM public.source5_import_staging t
+          WHERE t.country_code=:'country'
+          ON CONFLICT (source_id) DO UPDATE SET
+            name=EXCLUDED.name,
+            formatted_address=EXCLUDED.formatted_address,
+            lat=EXCLUDED.lat,
+            lng=EXCLUDED.lng,
+            types=EXCLUDED.types,
+            category=EXCLUDED.category,
+            phone=COALESCE(EXCLUDED.phone, medical_providers.phone),
+            website=COALESCE(EXCLUDED.website, medical_providers.website),
+            country_code=EXCLUDED.country_code,
+            locality=EXCLUDED.locality,
+            administrative_area_level_1=EXCLUDED.administrative_area_level_1,
+            postal_code=EXCLUDED.postal_code,
+            confidence_score=GREATEST(COALESCE(medical_providers.confidence_score,0), COALESCE(EXCLUDED.confidence_score,0)),
+            raw_data=EXCLUDED.raw_data,
+            updated_at=now();
+
+          COMMIT;
+          SQL
+
+            local raw normalized master lineage legacy type_links invalid invalid_types
+            raw="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM public.provider_raw_records WHERE source_key='healthsites_osm' AND raw_payload->>'country_code'='$code';")"
+            normalized="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM public.provider_stage_records WHERE source_key='healthsites_osm' AND country_code='$code';")"
+            master="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM public.provider_master WHERE primary_source_key='healthsites_osm' AND country_code='$code';")"
+            lineage="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM public.provider_master_sources pms JOIN public.provider_master pm ON pm.id=pms.master_provider_id WHERE pms.source_key='healthsites_osm' AND pm.country_code='$code';")"
+            legacy="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM public.medical_providers WHERE data_source='Healthsites / OpenStreetMap' AND country_code='$code';")"
+            type_links="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM public.provider_master_types pmt JOIN public.provider_master pm ON pm.id=pmt.master_provider_id WHERE pmt.source_key='healthsites_osm' AND pm.country_code='$code';")"
+            invalid="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM public.provider_master_sources pms JOIN public.provider_master pm ON pm.id=pms.master_provider_id WHERE pms.source_key='healthsites_osm' AND pm.country_code='$code' AND (pm.name IS NULL OR btrim(pm.name)='' OR pm.lat IS NULL OR pm.lng IS NULL OR pm.lat=0 OR pm.lng=0 OR pm.lat NOT BETWEEN -90 AND 90 OR pm.lng NOT BETWEEN -180 AND 180);")"
+            invalid_types="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM public.provider_master_types pmt JOIN public.provider_master pm ON pm.id=pmt.master_provider_id LEFT JOIN public.provider_type_catalog c ON c.type_key=pmt.type_key WHERE pmt.source_key='healthsites_osm' AND pm.country_code='$code' AND c.type_key IS NULL;")"
+
+            for actual in "$raw" "$normalized" "$master" "$lineage" "$legacy"; do
+              if [ "$actual" != "$expected" ]; then
+                echo "::error::$code canonical count $actual does not match manifest $expected"
+                exit 1
+              fi
+            done
+            if [ "$invalid" != "0" ] || [ "$invalid_types" != "0" ]; then
+              echo "::error::$code validation failed: invalid map records=$invalid invalid type links=$invalid_types"
+              exit 1
+            fi
+
+            cat > "data/status/source5-${slug}-neon-import-status.txt" <<EOF
+          Source #5 — Healthsites / OpenStreetMap health facilities
+          Country batch: ${slug} (${code})
+          Status: COMPLETE IN PRODUCTION NEON
+          Completed: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          Verified production Neon results:
+          - Manifest source records: ${expected}
+          - provider_raw_records: ${raw}
+          - provider_stage_records: ${normalized}
+          - provider_master: ${master}
+          - provider_master_sources: ${lineage}
+          - provider_master_types: ${type_links}
+          - medical_providers legacy map mirror: ${legacy}
+
+          Validation:
+          - Invalid map records: ${invalid}
+          - Invalid provider type links: ${invalid_types}
+          - Country code: ${code} only
+          - Source lineage retained for every imported record
+          - Original facility names and available contact fields preserved
+
+          Source catalog key: healthsites_osm
+          Source display name: Healthsites / OpenStreetMap health facilities
+          Backend storage: Neon canonical provider tables; no frontend data bundle
+
+          GitHub PR #98 remains a temporary data-generation branch and must not be merged into main.
+          EOF
+
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$code" "$expected" "$raw" "$normalized" "$master" "$lineage" "$type_links" "$legacy" "$invalid" >> /tmp/source5-results/counts.tsv
+          }
+
+          import_country AL albania
+          import_country AD andorra
+          import_country AO angola
+
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -c "DROP TABLE IF EXISTS public.source5_import_staging;"
+          cat /tmp/source5-results/counts.tsv
+
+      - name: Publish corrected verified statuses and remove obsolete import workflows
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -f .github/workflows/import-source5-albania-to-neon.yml 2>/dev/null || true
+          git rm -f .github/workflows/repair-source5-al-ad-ao.yml 2>/dev/null || true
+          git add data/status/source5-albania-neon-import-status.txt \
+                  data/status/source5-andorra-neon-import-status.txt \
+                  data/status/source5-angola-neon-import-status.txt
+          git commit -m "data: verify repaired Source 5 AL AD AO imports [skip ci]"
+          git push origin HEAD:data/international-source-bootstrap

@@ -6,6 +6,7 @@ on:
       - data/international-source-bootstrap
     paths:
       - scripts/bootstrap-global-health-facilities.mjs
+      - scripts/compact-source5-sql.mjs
       - .github/workflows/download-global-health-facilities.yml
   workflow_dispatch:
     inputs:
@@ -35,8 +36,10 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Validate Source 5 bootstrap syntax
-        run: node --check scripts/bootstrap-global-health-facilities.mjs
+      - name: Validate Source 5 scripts
+        run: |
+          node --check scripts/bootstrap-global-health-facilities.mjs
+          node --check scripts/compact-source5-sql.mjs
 
       - name: Download and normalize facility batch
         env:
@@ -47,6 +50,11 @@ jobs:
           set -euo pipefail
           node scripts/bootstrap-global-health-facilities.mjs | tee /tmp/global-health-facilities.log
           cp /tmp/global-health-facilities.log data/generated/global-health-facilities/run.log
+
+      - name: Generate compact Neon transfer chunks
+        env:
+          COMPACT_CHUNK_SIZE: '25'
+        run: node scripts/compact-source5-sql.mjs
 
       - name: Publish reviewable SQL and manifest
         run: |

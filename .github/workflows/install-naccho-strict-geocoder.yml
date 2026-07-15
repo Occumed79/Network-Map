@@ -1,0 +1,180 @@
+name: Install NACCHO strict geocoder
+
+on:
+  push:
+    paths:
+      - .github/workflows/install-naccho-strict-geocoder.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install strict geocoder
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('.')
+          route = root / 'api-server/src/routes/nacchoLhd.ts'
+          if not route.exists():
+              matches = list(root.glob('**/nacchoLhd.ts'))
+              if not matches:
+                  raise SystemExit('nacchoLhd.ts was not found')
+              route = matches[0]
+
+          route_text = route.read_text()
+          pool_line = None
+          pool_symbol = None
+          for line in route_text.splitlines():
+              if line.lstrip().startswith('import ') and re.search(r'\b(pool|db)\b', line) and ('db' in line.lower() or 'pool' in line.lower()):
+                  pool_line = line
+                  match = re.search(r'\b(pool|db)\b', line)
+                  pool_symbol = match.group(1) if match else None
+                  break
+          if not pool_line or not pool_symbol:
+              raise SystemExit('Could not locate the database pool import in nacchoLhd.ts')
+
+          jobs = route.parent.parent / 'jobs'
+          jobs.mkdir(parents=True, exist_ok=True)
+          job = jobs / 'geocodeNacchoLhd.ts'
+          code = f'''{pool_line}
+
+type Row = {{ lhd_id: string; name: string; address: string | null; state_code: string | null; postal_code: string | null }};
+type Verified = {{ lat: number; lng: number; formatted: string; placeId: string | null; evidence: Record<string, unknown> }};
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const zip5 = (value: string | null | undefined) => value?.match(/\\d{{5}}/)?.[0] ?? '';
+const norm = (value: string | null | undefined) => (value ?? '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+const streetNo = (value: string | null | undefined) => value?.trim().match(/^(\\d+[A-Za-z-]*)\\b/)?.[1] ?? '';
+
+async function exactGoogle(row: Row): Promise<Verified | null> {{
+  const key = process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_GEOCODING_API_KEY;
+  const expectedZip = zip5(row.postal_code);
+  const expectedState = (row.state_code ?? '').toUpperCase();
+  const expectedStreetNo = norm(streetNo(row.address));
+  if (!key || !row.address || !expectedZip || !expectedState || /\\bP\\.?\\s*O\\.?\\s*BOX\\b/i.test(row.address)) return null;
+
+  const query = `${{row.name}}, ${{row.address}}, ${{expectedState}} ${{row.postal_code ?? ''}}`;
+  const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
+  url.searchParams.set('address', query);
+  url.searchParams.set('components', `country:US|administrative_area:${{expectedState}}|postal_code:${{expectedZip}}`);
+  url.searchParams.set('key', key);
+  const response = await fetch(url, {{ signal: AbortSignal.timeout(15000) }});
+  if (!response.ok) return null;
+  const data: any = await response.json();
+
+  for (const result of data.results ?? []) {{
+    const parts = result.address_components ?? [];
+    const part = (type: string, field: 'short_name' | 'long_name' = 'short_name') =>
+      parts.find((item: any) => item.types?.includes(type))?.[field] ?? '';
+    const state = String(part('administrative_area_level_1')).toUpperCase();
+    const postal = zip5(String(part('postal_code')));
+    const returnedStreetNo = norm(String(part('street_number', 'long_name')));
+    const locationType = String(result.geometry?.location_type ?? '').toUpperCase();
+    const exactStreet = Boolean(expectedStreetNo) && returnedStreetNo === expectedStreetNo;
+    if (state !== expectedState || postal !== expectedZip || !exactStreet || locationType !== 'ROOFTOP') continue;
+    const lat = Number(result.geometry?.location?.lat);
+    const lng = Number(result.geometry?.location?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    return {{
+      lat,
+      lng,
+      formatted: result.formatted_address ?? query,
+      placeId: result.place_id ?? null,
+      evidence: {{ expectedState, state, expectedZip, postal, expectedStreetNo, returnedStreetNo, locationType }}
+    }};
+  }}
+  return null;
+}}
+
+let started = false;
+export function startNacchoLhdGeocoder(): void {{
+  if (started || process.env.NACCHO_STRICT_GEOCODER === 'false') return;
+  started = true;
+  setTimeout(() => void run().catch((error) => console.error('[naccho-geocoder] fatal', error)), 10000).unref?.();
+}}
+
+async function run(): Promise<void> {{
+  const lockClient = await {pool_symbol}.connect();
+  const lock = await lockClient.query(`SELECT pg_try_advisory_lock(hashtext('naccho_lhd_strict_geocoder')) AS acquired`);
+  if (!lock.rows[0]?.acquired) {{ lockClient.release(); return; }}
+  let processed = 0;
+  try {{
+    for (;;) {{
+      const batch = await {pool_symbol}.query<Row>(`
+        SELECT lhd_id, name, address, state_code, postal_code
+        FROM naccho_lhd
+        WHERE lat IS NULL
+          AND COALESCE(raw_data->>'geocode_status','') NOT IN ('rejected_no_exact_match','invalid_source_address')
+        ORDER BY NULLIF(raw_data->>'source_row','')::int NULLS LAST, lhd_id
+        LIMIT 20
+      `);
+      if (!batch.rows.length) break;
+      for (const row of batch.rows) {{
+        let verified: Verified | null = null;
+        try {{ verified = await exactGoogle(row); }} catch (error) {{ console.warn('[naccho-geocoder] request error', row.lhd_id, error); }}
+        if (verified) {{
+          await {pool_symbol}.query(
+            `UPDATE naccho_lhd SET lat=$2,lng=$3,raw_data=COALESCE(raw_data,'{{}}'::jsonb)||$4::jsonb,updated_at=now() WHERE lhd_id=$1 AND lat IS NULL`,
+            [row.lhd_id, verified.lat, verified.lng, JSON.stringify({{ geocode_status: 'verified', geocode_method: 'google_rooftop_exact', geocode_provider: 'google', geocode_precision: 'ROOFTOP', geocode_formatted_address: verified.formatted, geocode_place_id: verified.placeId, geocode_evidence: verified.evidence }})]
+          );
+        }} else {{
+          await {pool_symbol}.query(
+            `UPDATE naccho_lhd SET raw_data=COALESCE(raw_data,'{{}}'::jsonb)||$2::jsonb,updated_at=now() WHERE lhd_id=$1 AND lat IS NULL`,
+            [row.lhd_id, JSON.stringify({{ geocode_status: 'rejected_no_exact_match', geocode_attempted_at: new Date().toISOString() }})]
+          );
+        }}
+        processed += 1;
+        await wait(300);
+      }}
+      console.info(`[naccho-geocoder] processed ${{processed}}`);
+    }}
+  }} finally {{
+    try {{ await lockClient.query(`SELECT pg_advisory_unlock(hashtext('naccho_lhd_strict_geocoder'))`); }} finally {{ lockClient.release(); }}
+  }}
+}}
+'''
+          job.write_text(code)
+
+          marker = "import('../jobs/geocodeNacchoLhd')"
+          if marker not in route_text:
+              route_text += "\n\n// Restart-safe exact geocoding for unresolved county/local health departments.\nif (process.env.NACCHO_STRICT_GEOCODER !== 'false') {\n  void import('../jobs/geocodeNacchoLhd')\n    .then(({ startNacchoLhdGeocoder }) => startNacchoLhdGeocoder())\n    .catch((error) => console.error('[naccho-geocoder] failed to initialize', error));\n}\n"
+              route.write_text(route_text)
+          PY
+
+      - name: Validate API build
+        shell: bash
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            corepack enable
+            pnpm install --frozen-lockfile
+            pnpm --dir api-server run build --if-present
+          elif [ -f api-server/package-lock.json ]; then
+            npm --prefix api-server ci
+            npm --prefix api-server run build --if-present
+          else
+            npm --prefix api-server install
+            npm --prefix api-server run build --if-present
+          fi
+
+      - name: Commit installed geocoder
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add api-server/src/routes/nacchoLhd.ts api-server/src/jobs/geocodeNacchoLhd.ts
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Install strict NACCHO geocoder"
+          git push origin HEAD:main

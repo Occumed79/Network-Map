@@ -1,0 +1,70 @@
+name: Generate Source 5 Andorra facilities
+
+on:
+  push:
+    branches:
+      - data/international-source-bootstrap
+    paths:
+      - .github/workflows/source5-andorra.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate-andorra:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+
+    steps:
+      - name: Check out international data branch
+        uses: actions/checkout@v4
+        with:
+          ref: data/international-source-bootstrap
+          fetch-depth: 1
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate Source 5 scripts
+        run: |
+          node --check scripts/bootstrap-global-health-facilities.mjs
+          node --check scripts/compact-source5-sql.mjs
+
+      - name: Download and normalize Andorra facilities
+        env:
+          COUNTRY_CODES: AD
+          SQL_CHUNK_SIZE: '50'
+        run: |
+          set -euo pipefail
+          node scripts/bootstrap-global-health-facilities.mjs | tee /tmp/global-health-facilities.log
+          cp /tmp/global-health-facilities.log data/generated/global-health-facilities/run.log
+
+      - name: Generate compact Neon transfer chunks
+        env:
+          COMPACT_CHUNK_SIZE: '25'
+        run: node scripts/compact-source5-sql.mjs
+
+      - name: Publish reviewable SQL and manifest
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/generated/global-health-facilities
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "data: generate Source 5 Andorra facilities [skip ci]"
+          git push origin HEAD:data/international-source-bootstrap
+
+      - name: Upload Andorra artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: source5-andorra-facilities
+          path: data/generated/global-health-facilities
+          if-no-files-found: error
+          retention-days: 7

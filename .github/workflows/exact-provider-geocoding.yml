@@ -8,6 +8,13 @@ on:
       - scripts/exact-geocode-provider-batch-fast.mjs
       - data/geocoding/full-input/**
       - .github/workflows/exact-provider-geocoding.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - scripts/exact-geocode-provider-batch-fast.mjs
+      - data/geocoding/full-input/**
+      - .github/workflows/exact-provider-geocoding.yml
   workflow_dispatch:
 
 permissions:

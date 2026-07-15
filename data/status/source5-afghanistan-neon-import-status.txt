@@ -1,0 +1,26 @@
+Source #5 — Healthsites / OpenStreetMap health facilities
+Country batch: Afghanistan (AF)
+Status: COMPLETE IN PRODUCTION NEON
+Completed: 2026-07-15 UTC
+
+Verified production Neon counts:
+- provider_raw_records: 380
+- provider_stage_records: 380
+- provider_master: 380 primary-source records
+- provider_master_sources: 380 lineage links
+- provider_master_types: 412 type links
+- medical_providers legacy map mirror: 380
+
+Validation:
+- Distinct source records: 380
+- Invalid map records (blank name, missing/zero coordinates): 0
+- Records with at least one phone, website, or email: 16
+- Records without a Latin normalized_name: 240 (original names preserved)
+
+Source catalog key: healthsites_osm
+Source display name: Healthsites / OpenStreetMap health facilities
+Country code: AF
+
+The transient source5_import_staging table was dropped after canonical ingestion and verification.
+
+GitHub PR #98 remains a temporary draft data-generation branch and must not be merged into main.

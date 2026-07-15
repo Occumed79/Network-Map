@@ -42,7 +42,7 @@ jobs:
         env:
           COUNTRY_CODES: ${{ inputs.country_codes || 'AF' }}
           HEALTHSITES_API_KEY: ${{ secrets.HEALTHSITES_API_KEY }}
-          SQL_CHUNK_SIZE: '150'
+          SQL_CHUNK_SIZE: '50'
         run: |
           set -euo pipefail
           node scripts/bootstrap-global-health-facilities.mjs | tee /tmp/global-health-facilities.log

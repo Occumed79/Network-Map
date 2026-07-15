@@ -1,0 +1,219 @@
+name: Install complete county health department layer v3
+
+on:
+  push:
+    paths:
+      - .github/workflows/install-naccho-complete-v3.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download and verify all 3,410 source rows
+        shell: bash
+        run: |
+          mkdir -p api-server/data
+          curl --retry 5 --retry-delay 3 --fail-with-body \
+            https://filebin.net/occu-med-network-map-naccho-20260715-a3f19c/county-health-departments.jsonl \
+            -o api-server/data/county-health-departments.jsonl
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          rows = [json.loads(x) for x in Path('api-server/data/county-health-departments.jsonl').read_text().splitlines() if x.strip()]
+          assert len(rows) == 3410, len(rows)
+          assert rows[0]['source_row'] == 2 and rows[-1]['source_row'] == 3411
+          assert len({r['lhd_id'] for r in rows}) == 3410
+          PY
+
+      - name: Generate importer and strict geocoder
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import textwrap
+
+          route = Path('api-server/src/routes/nacchoLhd.ts')
+          if not route.exists():
+              found = list(Path('.').glob('**/nacchoLhd.ts'))
+              if not found:
+                  raise SystemExit('nacchoLhd.ts was not found')
+              route = found[0]
+          route_text = route.read_text()
+
+          pool_line = pool_symbol = None
+          for line in route_text.splitlines():
+              if line.lstrip().startswith('import ') and re.search(r'\b(pool|db)\b', line) and ('db' in line.lower() or 'pool' in line.lower()):
+                  pool_line = line
+                  m = re.search(r'\b(pool|db)\b', line)
+                  pool_symbol = m.group(1) if m else None
+                  break
+          if not pool_line or not pool_symbol:
+              raise SystemExit('Could not locate database pool import')
+
+          module_ext = '.js' if re.search(r"from\s+['\"][^'\"]+\.js['\"]", route_text) else ''
+          jobs = route.parent.parent / 'jobs'
+          jobs.mkdir(parents=True, exist_ok=True)
+
+          importer = f'''{pool_line}
+          import {{ existsSync, readFileSync }} from 'node:fs';
+          import {{ resolve }} from 'node:path';
+
+          type SourceRow = {{ lhd_id:string; name:string; agency_type:string; address:string; state_name:string; state_code:string; postal_code:string; phone:string|null; website:string|null; source_url:string; source_row:number }};
+          let started = false;
+
+          function dataPath(): string | null {{
+            return [
+              resolve(process.cwd(), 'api-server/data/county-health-departments.jsonl'),
+              resolve(process.cwd(), 'data/county-health-departments.jsonl'),
+              resolve(__dirname, '../../data/county-health-departments.jsonl')
+            ].find(existsSync) ?? null;
+          }}
+
+          export function startNacchoLhdImport(): void {{
+            if (started) return;
+            started = true;
+            setTimeout(() => void run().catch((e) => console.error('[naccho-import] fatal', e)), 1000).unref?.();
+          }}
+
+          async function run(): Promise<void> {{
+            const path = dataPath();
+            if (!path) throw new Error('county-health-departments.jsonl not found');
+            const rows = readFileSync(path, 'utf8').split(/\\r?\\n/).filter(Boolean).map((line) => JSON.parse(line) as SourceRow);
+            if (rows.length !== 3410) throw new Error(`Expected 3410 rows, found ${{rows.length}}`);
+            const client = await {pool_symbol}.connect();
+            try {{
+              const lock = await client.query(`SELECT pg_try_advisory_lock(hashtext('naccho_lhd_source_import')) AS acquired`);
+              if (!lock.rows[0]?.acquired) return;
+              await client.query('BEGIN');
+              for (let i=0; i<rows.length; i+=100) {{
+                const batch=rows.slice(i,i+100); const values:unknown[]=[];
+                const tuples=batch.map((r,j)=>{{
+                  const n=j*11;
+                  values.push(r.lhd_id,r.name,r.agency_type,r.address,r.state_code,r.postal_code,r.phone,r.website,r.source_url,r.source_row,r.state_name);
+                  return `($${{n+1}},$${{n+2}},$${{n+3}},$${{n+4}},$${{n+5}},$${{n+6}},$${{n+7}},$${{n+8}},$${{n+9}},jsonb_build_object('source_file','County Health Departments.xlsx','source_row',$${{n+10}}::int,'state_name',$${{n+11}},'original_address',$${{n+4}}))`;
+                }}).join(',');
+                await client.query(`INSERT INTO naccho_lhd(lhd_id,name,agency_type,address,state_code,postal_code,phone,website,source_url,raw_data)
+                  VALUES ${{tuples}}
+                  ON CONFLICT(lhd_id) DO UPDATE SET name=EXCLUDED.name,address=EXCLUDED.address,state_code=EXCLUDED.state_code,
+                  postal_code=EXCLUDED.postal_code,phone=EXCLUDED.phone,website=EXCLUDED.website,source_url=EXCLUDED.source_url,
+                  raw_data=COALESCE(naccho_lhd.raw_data,'{{}}'::jsonb)||EXCLUDED.raw_data,updated_at=now()`, values);
+              }}
+              await client.query(`WITH ranked AS (
+                SELECT lhd_id, first_value(lhd_id) OVER (PARTITION BY regexp_replace(lower(name),'[^a-z0-9]+','','g'),regexp_replace(lower(address),'[^a-z0-9]+','','g'),state_code,substring(postal_code from '[0-9]{{5}}') ORDER BY (raw_data->>'source_row')::int,lhd_id) AS keep_id,
+                row_number() OVER (PARTITION BY regexp_replace(lower(name),'[^a-z0-9]+','','g'),regexp_replace(lower(address),'[^a-z0-9]+','','g'),state_code,substring(postal_code from '[0-9]{{5}}') ORDER BY (raw_data->>'source_row')::int,lhd_id) AS rn
+                FROM naccho_lhd WHERE raw_data->>'source_file'='County Health Departments.xlsx')
+                UPDATE naccho_lhd n SET lat=NULL,lng=NULL,raw_data=COALESCE(n.raw_data,'{{}}'::jsonb)||jsonb_build_object('duplicate_of',r.keep_id,'geocode_status','duplicate_suppressed'),updated_at=now()
+                FROM ranked r WHERE n.lhd_id=r.lhd_id AND r.rn>1`);
+              await client.query('COMMIT');
+              console.info('[naccho-import] loaded 3410 source rows');
+            }} catch (e) {{ await client.query('ROLLBACK').catch(()=>undefined); throw e; }}
+            finally {{ await client.query(`SELECT pg_advisory_unlock(hashtext('naccho_lhd_source_import'))`).catch(()=>undefined); client.release(); }}
+          }}
+          '''
+
+          geocoder = f'''{pool_line}
+          type Row = {{ lhd_id:string; name:string; address:string|null; state_code:string|null; postal_code:string|null; raw_data:Record<string,unknown>|null }};
+          type Hit = {{ lat:number; lng:number; formatted:string; placeId:string|null; evidence:Record<string,unknown> }};
+          const wait=(ms:number)=>new Promise((r)=>setTimeout(r,ms));
+          const zip5=(v:string|null|undefined)=>v?.match(/\\d{{5}}/)?.[0]??'';
+          const norm=(v:string|null|undefined)=>(v??'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim();
+          const streetNo=(v:string|null|undefined)=>v?.trim().match(/^(\\d+[A-Za-z-]*)\\b/)?.[1]??'';
+
+          async function google(row:Row):Promise<Hit|null> {{
+            const key=process.env.GOOGLE_MAPS_API_KEY||process.env.GOOGLE_GEOCODING_API_KEY;
+            const state=(row.state_code??'').toUpperCase(), postal=zip5(row.postal_code), expectedNo=norm(streetNo(row.address));
+            if(!key||!row.address||!state||!postal||!expectedNo||/\\bP\\.?\\s*O\\.?\\s*BOX\\b/i.test(row.address)) return null;
+            const query=`${{row.name}}, ${{row.address}}, ${{state}} ${{row.postal_code??''}}`;
+            const url=new URL('https://maps.googleapis.com/maps/api/geocode/json');
+            url.searchParams.set('address',query); url.searchParams.set('components',`country:US|administrative_area:${{state}}|postal_code:${{postal}}`); url.searchParams.set('key',key);
+            const response=await fetch(url,{{signal:AbortSignal.timeout(15000)}}); if(!response.ok) throw new Error(`Google HTTP ${{response.status}}`);
+            const data:any=await response.json(); if(data.status&&data.status!=='OK'&&data.status!=='ZERO_RESULTS') throw new Error(`Google status ${{data.status}}`);
+            for(const result of data.results??[]) {{
+              const parts=result.address_components??[];
+              const part=(type:string,field:'short_name'|'long_name'='short_name')=>parts.find((x:any)=>x.types?.includes(type))?.[field]??'';
+              const gotState=String(part('administrative_area_level_1')).toUpperCase(), gotZip=zip5(String(part('postal_code'))), gotNo=norm(String(part('street_number','long_name'))), precision=String(result.geometry?.location_type??'').toUpperCase();
+              if(gotState!==state||gotZip!==postal||gotNo!==expectedNo||precision!=='ROOFTOP') continue;
+              const lat=Number(result.geometry?.location?.lat),lng=Number(result.geometry?.location?.lng); if(!Number.isFinite(lat)||!Number.isFinite(lng)) continue;
+              return {{lat,lng,formatted:result.formatted_address??query,placeId:result.place_id??null,evidence:{{state,gotState,postal,gotZip,expectedNo,gotNo,precision}}}};
+            }}
+            return null;
+          }}
+
+          let started=false;
+          export function startNacchoLhdGeocoder():void {{ if(started||process.env.NACCHO_STRICT_GEOCODER==='false') return; started=true; setTimeout(()=>void run().catch((e)=>console.error('[naccho-geocoder] fatal',e)),15000).unref?.(); }}
+
+          async function run():Promise<void> {{
+            const lockClient=await {pool_symbol}.connect();
+            const lock=await lockClient.query(`SELECT pg_try_advisory_lock(hashtext('naccho_lhd_strict_geocoder')) AS acquired`);
+            if(!lock.rows[0]?.acquired) {{ lockClient.release(); return; }}
+            try {{
+              for(;;) {{
+                const batch=await {pool_symbol}.query<Row>(`SELECT lhd_id,name,address,state_code,postal_code,raw_data FROM naccho_lhd
+                  WHERE lat IS NULL AND COALESCE(raw_data->>'geocode_status','') NOT IN ('rejected_no_exact_match','invalid_source_address','duplicate_suppressed','geocode_error')
+                  AND COALESCE((raw_data->>'geocode_attempt_count')::int,0)<3
+                  ORDER BY NULLIF(raw_data->>'source_row','')::int NULLS LAST,lhd_id LIMIT 20`);
+                if(!batch.rows.length) break;
+                for(const row of batch.rows) {{
+                  let hit:Hit|null=null;
+                  try {{ hit=await google(row); }} catch(e) {{
+                    await {pool_symbol}.query(`UPDATE naccho_lhd SET raw_data=COALESCE(raw_data,'{{}}'::jsonb)||jsonb_build_object('geocode_status',CASE WHEN COALESCE((raw_data->>'geocode_attempt_count')::int,0)+1>=3 THEN 'geocode_error' ELSE 'retry_pending' END,'geocode_attempt_count',COALESCE((raw_data->>'geocode_attempt_count')::int,0)+1,'geocode_error_message',$2),updated_at=now() WHERE lhd_id=$1 AND lat IS NULL`,[row.lhd_id,String(e)]);
+                    await wait(800); continue;
+                  }}
+                  if(hit) await {pool_symbol}.query(`UPDATE naccho_lhd SET lat=$2,lng=$3,raw_data=COALESCE(raw_data,'{{}}'::jsonb)||$4::jsonb,updated_at=now() WHERE lhd_id=$1 AND lat IS NULL`,[row.lhd_id,hit.lat,hit.lng,JSON.stringify({{geocode_status:'verified',geocode_method:'google_rooftop_exact',geocode_provider:'google',geocode_precision:'ROOFTOP',geocode_formatted_address:hit.formatted,geocode_place_id:hit.placeId,geocode_evidence:hit.evidence}})]);
+                  else await {pool_symbol}.query(`UPDATE naccho_lhd SET raw_data=COALESCE(raw_data,'{{}}'::jsonb)||jsonb_build_object('geocode_status','rejected_no_exact_match','geocode_attempted_at',now()),updated_at=now() WHERE lhd_id=$1 AND lat IS NULL`,[row.lhd_id]);
+                  await wait(300);
+                }}
+              }}
+            }} finally {{ try {{ await lockClient.query(`SELECT pg_advisory_unlock(hashtext('naccho_lhd_strict_geocoder'))`); }} finally {{ lockClient.release(); }} }}
+          }}
+          '''
+
+          def write_ts(path:Path, text:str):
+              first, rest = text.split('\n',1)
+              path.write_text(first+'\n'+textwrap.dedent(rest))
+          write_ts(jobs/'importNacchoLhd.ts', importer)
+          write_ts(jobs/'geocodeNacchoLhd.ts', geocoder)
+
+          import_target = f"../jobs/importNacchoLhd{module_ext}"
+          geo_target = f"../jobs/geocodeNacchoLhd{module_ext}"
+          if "startNacchoLhdImport" not in route_text:
+              route_text += f"\n\nvoid import('{import_target}').then((m) => m.startNacchoLhdImport()).catch((e) => console.error('[naccho-import] failed to initialize', e));\n"
+          if "startNacchoLhdGeocoder" not in route_text:
+              route_text += f"\nif (process.env.NACCHO_STRICT_GEOCODER !== 'false') void import('{geo_target}').then((m) => m.startNacchoLhdGeocoder()).catch((e) => console.error('[naccho-geocoder] failed to initialize', e));\n"
+          route.write_text(route_text)
+          PY
+
+      - name: Validate generated backend
+        shell: bash
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            corepack enable
+            pnpm install --frozen-lockfile
+            if node -e "const p=require('./package.json');process.exit(p.scripts&&p.scripts.build?0:1)"; then pnpm build; elif [ -f api-server/package.json ]; then pnpm --dir api-server run build; fi
+          elif [ -f package-lock.json ]; then
+            npm ci
+            npm run build --if-present
+            if [ -f api-server/package.json ]; then npm --prefix api-server run build --if-present; fi
+          else
+            npm --prefix api-server install
+            npm --prefix api-server run build --if-present
+          fi
+
+      - name: Commit complete layer
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add api-server/data/county-health-departments.jsonl api-server/src/jobs/importNacchoLhd.ts api-server/src/jobs/geocodeNacchoLhd.ts api-server/src/routes/nacchoLhd.ts
+          git diff --cached --quiet && exit 0
+          git commit -m "Install complete county health department layer"
+          git push origin HEAD:main

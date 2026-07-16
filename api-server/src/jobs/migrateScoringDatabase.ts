@@ -1,8 +1,9 @@
 import { getPool, getScoringPool } from "@workspace/db";
 import { logger } from "../lib/logger";
 
-const MIGRATION_KEY = "scoring-database-split-v1";
-const BATCH_SIZE = 250;
+const MIGRATION_KEY = "scoring-database-split-v2";
+const BATCH_SIZE = 100;
+const MAX_ATTEMPTS = 3;
 
 type TableConfig = {
   name: string;
@@ -112,39 +113,68 @@ async function ensureMigrationLog(): Promise<void> {
   `);
 }
 
-async function fingerprint(
+async function rowCount(
   pool: ReturnType<typeof getPool>,
   table: TableConfig,
-): Promise<{ rowCount: number; checksum: string }> {
-  const relation = tableIdentifier(table);
-  const result = await pool.query(`
-    SELECT
-      count(*)::int AS row_count,
-      md5(COALESCE(string_agg(md5(row_to_json(t)::text), '' ORDER BY id::text), '')) AS checksum
-    FROM ${relation} t
-  `);
-  return {
-    rowCount: Number(result.rows[0]?.row_count ?? 0),
-    checksum: String(result.rows[0]?.checksum ?? ""),
-  };
+): Promise<number> {
+  const result = await pool.query(
+    `SELECT count(*)::int AS row_count FROM ${tableIdentifier(table)}`,
+  );
+  return Number(result.rows[0]?.row_count ?? 0);
 }
 
-async function copyTable(table: TableConfig): Promise<void> {
+async function updateProgress(details: Record<string, unknown>): Promise<void> {
+  await getScoringPool().query(
+    `UPDATE public.scoring_migration_log
+     SET details = $2::jsonb, updated_at = now()
+     WHERE migration_key = $1`,
+    [MIGRATION_KEY, JSON.stringify(details)],
+  );
+}
+
+async function targetChecksums(
+  table: TableConfig,
+  ids: string[],
+): Promise<Map<string, string>> {
+  if (ids.length === 0) return new Map();
+  const result = await getScoringPool().query(
+    `SELECT id::text AS id, md5(row_to_json(t)::text) AS checksum
+     FROM ${tableIdentifier(table)} t
+     WHERE id = ANY($1::uuid[])
+     ORDER BY id`,
+    [ids],
+  );
+  return new Map(
+    result.rows.map((row) => [String(row.id), String(row.checksum)]),
+  );
+}
+
+async function copyTable(table: TableConfig): Promise<{ rows: number }> {
   const source = getPool();
   const target = getScoringPool();
   const relation = tableIdentifier(table);
   const quotedColumns = table.columns.map(identifier).join(", ");
-  const sourceFingerprint = await fingerprint(source, table);
+  const expectedRows = await rowCount(source, table);
+  let copiedRows = 0;
+  let lastId: string | null = null;
 
   logger.info(
-    { table: table.name, sourceRows: sourceFingerprint.rowCount },
+    { table: table.name, expectedRows },
     "Starting scoring table transfer",
   );
 
-  for (let offset = 0; offset < sourceFingerprint.rowCount; offset += BATCH_SIZE) {
+  while (true) {
     const selected = await source.query(
-      `SELECT ${quotedColumns} FROM ${relation} ORDER BY id LIMIT $1 OFFSET $2`,
-      [BATCH_SIZE, offset],
+      `SELECT s.*, md5(row_to_json(s)::text) AS __checksum
+       FROM (
+         SELECT ${quotedColumns}
+         FROM ${relation}
+         WHERE ($1::uuid IS NULL OR id > $1::uuid)
+         ORDER BY id
+         LIMIT $2
+       ) s
+       ORDER BY id`,
+      [lastId, BATCH_SIZE],
     );
     if (selected.rows.length === 0) break;
 
@@ -152,8 +182,9 @@ async function copyTable(table: TableConfig): Promise<void> {
     const tuples = selected.rows.map((row, rowIndex) => {
       const base = rowIndex * table.columns.length;
       for (const column of table.columns) values.push(row[column]);
-      const placeholders = table.columns.map((_, columnIndex) => `$${base + columnIndex + 1}`);
-      return `(${placeholders.join(", ")})`;
+      return `(${table.columns
+        .map((_, columnIndex) => `$${base + columnIndex + 1}`)
+        .join(", ")})`;
     });
 
     const updates = table.columns
@@ -166,31 +197,47 @@ async function copyTable(table: TableConfig): Promise<void> {
        ON CONFLICT (id) DO UPDATE SET ${updates}`,
       values,
     );
+
+    const ids = selected.rows.map((row) => String(row.id));
+    const targetHashById = await targetChecksums(table, ids);
+    for (const row of selected.rows) {
+      const id = String(row.id);
+      const sourceChecksum = String(row.__checksum);
+      const targetChecksum = targetHashById.get(id);
+      if (targetChecksum !== sourceChecksum) {
+        throw new Error(
+          `Row checksum mismatch in ${table.name} for id ${id}`,
+        );
+      }
+    }
+
+    copiedRows += selected.rows.length;
+    lastId = ids.at(-1) ?? null;
+    await updateProgress({
+      phase: "copying",
+      table: table.name,
+      copiedRows,
+      expectedRows,
+      lastId,
+    });
   }
 
-  const targetFingerprint = await fingerprint(target, table);
-  if (
-    sourceFingerprint.rowCount !== targetFingerprint.rowCount ||
-    sourceFingerprint.checksum !== targetFingerprint.checksum
-  ) {
+  const targetRows = await rowCount(target, table);
+  if (targetRows !== expectedRows || copiedRows !== expectedRows) {
     throw new Error(
-      `Scoring transfer verification failed for ${table.name}: ` +
-        `source=${sourceFingerprint.rowCount}/${sourceFingerprint.checksum}, ` +
-        `target=${targetFingerprint.rowCount}/${targetFingerprint.checksum}`,
+      `Scoring transfer count verification failed for ${table.name}: ` +
+        `source=${expectedRows}, copied=${copiedRows}, target=${targetRows}`,
     );
   }
 
   logger.info(
-    {
-      table: table.name,
-      rows: targetFingerprint.rowCount,
-      checksum: targetFingerprint.checksum,
-    },
+    { table: table.name, rows: targetRows },
     "Verified scoring table transfer",
   );
+  return { rows: targetRows };
 }
 
-async function runMigration(): Promise<void> {
+async function runMigration(attempt: number): Promise<void> {
   if (!process.env.DATABASE_URL_2?.trim()) {
     logger.warn("DATABASE_URL_2 is not configured; scoring database transfer was not started");
     return;
@@ -198,65 +245,59 @@ async function runMigration(): Promise<void> {
 
   await ensureMigrationLog();
   const target = getScoringPool();
-  const lockClient = await target.connect();
+
+  await target.query(
+    `INSERT INTO public.scoring_migration_log
+       (migration_key, status, details, started_at, completed_at, updated_at)
+     VALUES ($1, 'running', $2::jsonb, now(), NULL, now())
+     ON CONFLICT (migration_key) DO UPDATE SET
+       status = 'running', details = $2::jsonb, started_at = now(),
+       completed_at = NULL, updated_at = now()`,
+    [MIGRATION_KEY, JSON.stringify({ phase: "starting", attempt })],
+  );
 
   try {
-    const lockResult = await lockClient.query(
-      "SELECT pg_try_advisory_lock(hashtext($1)) AS acquired",
-      [MIGRATION_KEY],
-    );
-    if (!lockResult.rows[0]?.acquired) {
-      logger.info("Another instance is already running the scoring database transfer");
-      return;
-    }
-
-    await target.query(
-      `INSERT INTO public.scoring_migration_log
-         (migration_key, status, details, started_at, completed_at, updated_at)
-       VALUES ($1, 'running', '{}'::jsonb, now(), NULL, now())
-       ON CONFLICT (migration_key) DO UPDATE SET
-         status = 'running', started_at = now(), completed_at = NULL, updated_at = now()`,
-      [MIGRATION_KEY],
-    );
-
-    const details: Record<string, { rows: number; checksum: string }> = {};
+    const details: Record<string, { rows: number }> = {};
     for (const table of TABLES) {
-      await copyTable(table);
-      details[table.name] = await fingerprint(target, table);
+      details[table.name] = await copyTable(table);
     }
 
     await target.query(
       `UPDATE public.scoring_migration_log
-       SET status = 'complete', details = $2::jsonb, completed_at = now(), updated_at = now()
+       SET status = 'complete', details = $2::jsonb,
+           completed_at = now(), updated_at = now()
        WHERE migration_key = $1`,
       [MIGRATION_KEY, JSON.stringify(details)],
     );
 
     logger.info({ details }, "Scoring database transfer completed and verified");
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     await target
       .query(
         `UPDATE public.scoring_migration_log
-         SET status = 'failed', details = jsonb_build_object('error', $2), updated_at = now()
+         SET status = 'failed',
+             details = jsonb_build_object('attempt', $2, 'error', $3),
+             updated_at = now()
          WHERE migration_key = $1`,
-        [MIGRATION_KEY, error instanceof Error ? error.message : String(error)],
+        [MIGRATION_KEY, attempt, message],
       )
       .catch(() => undefined);
     throw error;
-  } finally {
-    await lockClient
-      .query("SELECT pg_advisory_unlock(hashtext($1))", [MIGRATION_KEY])
-      .catch(() => undefined);
-    lockClient.release();
   }
+}
+
+function runAttempt(attempt: number): void {
+  void runMigration(attempt).catch((error) => {
+    logger.error({ error, attempt }, "Scoring database transfer failed");
+    if (attempt < MAX_ATTEMPTS) {
+      setTimeout(() => runAttempt(attempt + 1), 30_000).unref();
+    }
+  });
 }
 
 export function startScoringDatabaseMigration(): void {
   if (started || process.env.SCORING_DATABASE_MIGRATION === "false") return;
   started = true;
-  setTimeout(() => {
-    void runMigration().catch((error) => {
-      logger.error({ error }, "Scoring database transfer failed");
-    });
-  }, 2_000).unref();
+  setTimeout(() => runAttempt(1), 2_000).unref();
 }

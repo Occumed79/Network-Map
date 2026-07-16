@@ -16,5 +16,6 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+  // Restart-safe scoring copy runs after every deployment and exits once verified.
   startScoringDatabaseMigration();
 });

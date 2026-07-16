@@ -1,5 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { startNacchoLhdImport } from "./jobs/importNacchoLhd";
+import { startNacchoLhdGeocoder } from "./jobs/geocodeNacchoLhd";
 
 const rawPort = process.env["PORT"] ?? "3000";
 const port = Number(rawPort);
@@ -15,4 +17,6 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+  startNacchoLhdImport();
+  startNacchoLhdGeocoder();
 });

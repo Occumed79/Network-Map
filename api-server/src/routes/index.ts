@@ -22,6 +22,7 @@ import enhancedSearchRouter from "./enhancedSearch";
 import providerExplorerRouter from "./providerExplorer";
 import myClinicsUploadRouter from "./myClinicsUpload";
 import nacchoLhdRouter from "./nacchoLhd";
+import nacchoRecoveryStatusRouter from "./nacchoRecoveryStatus";
 import scoringDatabaseRouter from "./scoringDatabase";
 import { stabilizeProviderLayerRequests } from "../middleware/providerLayerContract";
 
@@ -40,6 +41,7 @@ router.use(sourceStatusRouter);
 router.use(browserExtractionRouter);
 router.use(vectorIndexRouter);
 router.use(providerExplorerRouter);
+router.use(nacchoRecoveryStatusRouter);
 router.use(nacchoLhdRouter);
 router.use(stabilizeProviderLayerRequests);
 router.use(providerLayersRouter);

@@ -325,12 +325,16 @@ async function getCountryCounts(client: PoolClient, code: string): Promise<Count
   return row;
 }
 
-function isComplete(counts: CountryCounts, expected: number): boolean {
-  return Number(counts.raw_records) === expected
-    && Number(counts.stage_records) === expected
-    && Number(counts.master_records) === expected
-    && Number(counts.lineage_records) === expected
-    && Number(counts.legacy_records) === expected
+function isComplete(
+  counts: CountryCounts,
+  expectedSourceRecords: number,
+  expectedMasterRecords = expectedSourceRecords,
+): boolean {
+  return Number(counts.raw_records) === expectedSourceRecords
+    && Number(counts.stage_records) === expectedSourceRecords
+    && Number(counts.master_records) === expectedMasterRecords
+    && Number(counts.lineage_records) === expectedSourceRecords
+    && Number(counts.legacy_records) === expectedSourceRecords
     && Number(counts.invalid_records) === 0
     && Number(counts.invalid_type_links) === 0;
 }
@@ -389,6 +393,13 @@ async function loadCountryIntoStaging(client: PoolClient, job: ImportJob): Promi
 
 async function replaceAndPromoteCountry(client: PoolClient, job: ImportJob): Promise<CountryCounts> {
   const code = job.country_code.toUpperCase();
+  const expectedMasterResult = await client.query<{ count: string }>(
+    "SELECT COUNT(DISTINCT master_key) AS count FROM public.source5_import_staging",
+  );
+  const expectedMasterRecords = Number(expectedMasterResult.rows[0]?.count ?? 0);
+  if (!Number.isInteger(expectedMasterRecords) || expectedMasterRecords <= 0) {
+    throw new Error(`Unable to determine expected master-provider count for ${code}`);
+  }
   await client.query("BEGIN");
   try {
     await client.query(
@@ -448,8 +459,10 @@ async function replaceAndPromoteCountry(client: PoolClient, job: ImportJob): Pro
   }
 
   const counts = await getCountryCounts(client, code);
-  if (!isComplete(counts, job.expected_rows)) {
-    throw new Error(`Production reconciliation failed for ${code}: ${JSON.stringify(counts)}`);
+  if (!isComplete(counts, job.expected_rows, expectedMasterRecords)) {
+    throw new Error(
+      `Production reconciliation failed for ${code}: ${JSON.stringify({ counts, expectedMasterRecords })}`,
+    );
   }
   return counts;
 }

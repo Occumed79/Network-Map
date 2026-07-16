@@ -1,6 +1,5 @@
 import app from "./app";
 import { logger } from "./lib/logger";
-import { startScoringDatabaseMigration } from "./jobs/migrateScoringDatabase";
 
 const rawPort = process.env["PORT"] ?? "3000";
 const port = Number(rawPort);
@@ -16,6 +15,4 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
-  // Restart-safe scoring copy runs after every deployment and exits once verified.
-  startScoringDatabaseMigration();
 });

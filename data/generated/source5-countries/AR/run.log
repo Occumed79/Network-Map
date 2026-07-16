@@ -1,6 +1,6 @@
 Fetching AR from openstreetmap-overpass
 {
-  "generated_at": "2026-07-16T18:22:34.552Z",
+  "generated_at": "2026-07-16T18:27:58.721Z",
   "source_number": 5,
   "source": "OpenStreetMap via Overpass API",
   "source_key": "healthsites_osm",

@@ -1,9 +1,9 @@
-name: Generate next six Source 5 countries
+name: Generate Source 5 batch 02
 
 on:
-  push:
+  pull_request:
     branches:
-      - data/international-source-bootstrap
+      - main
     paths:
       - .github/workflows/source5-batch-next-six.yml
   workflow_dispatch:
@@ -13,10 +13,33 @@ permissions:
 
 env:
   SOURCE5_CODES: BS,BH,BD,BB,BY,BE
+  SOURCE5_MARKER: data/generated/source5-countries/batch-02-BS-BH-BD-BB-BY-BE.json
 
 jobs:
+  prepare:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'data/international-source-bootstrap'
+    runs-on: ubuntu-latest
+    outputs:
+      required: ${{ steps.check.outputs.required }}
+    steps:
+      - name: Check out temporary international data branch
+        uses: actions/checkout@v4
+        with:
+          ref: data/international-source-bootstrap
+          fetch-depth: 1
+      - name: Check batch marker
+        id: check
+        run: |
+          if [ -f "$SOURCE5_MARKER" ]; then
+            echo "required=false" >> "$GITHUB_OUTPUT"
+            echo "Batch 02 is already generated."
+          else
+            echo "required=true" >> "$GITHUB_OUTPUT"
+          fi
+
   generate:
-    if: github.actor != 'github-actions[bot]'
+    needs: prepare
+    if: needs.prepare.outputs.required == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -55,14 +78,14 @@ jobs:
       - name: Upload ${{ matrix.country }} generated dataset
         uses: actions/upload-artifact@v4
         with:
-          name: source5-country-${{ matrix.country }}
+          name: source5-batch02-${{ matrix.country }}
           path: /tmp/source5-output
           if-no-files-found: error
           retention-days: 7
 
   publish:
-    if: always() && github.actor != 'github-actions[bot]'
-    needs: generate
+    if: always() && needs.prepare.outputs.required == 'true'
+    needs: [prepare, generate]
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -76,11 +99,11 @@ jobs:
       - name: Download every successful country dataset
         uses: actions/download-artifact@v4
         with:
-          pattern: source5-country-*
+          pattern: source5-batch02-*
           path: data/generated/source5-countries
           merge-multiple: true
 
-      - name: Build batch manifest
+      - name: Build batch manifest and marker
         run: |
           set -euo pipefail
           node - <<'NODE'
@@ -102,14 +125,21 @@ jobs:
               compact_rows: compact.total_rows,
             }];
           });
-          fs.writeFileSync(path.join(root, 'batch-manifest.json'), JSON.stringify({
+          if (results.length !== requested.length) {
+            throw new Error(`Only ${results.length}/${requested.length} countries generated`);
+          }
+          const batch = {
+            batch: 2,
             requested,
             completed: results.map(result => result.country_code),
             results,
             generated_at: new Date().toISOString(),
-          }, null, 2) + '\n');
+          };
+          fs.mkdirSync(path.dirname(process.env.SOURCE5_MARKER), { recursive: true });
+          fs.writeFileSync(process.env.SOURCE5_MARKER, JSON.stringify(batch, null, 2) + '\n');
+          fs.writeFileSync(path.join(root, 'batch-manifest.json'), JSON.stringify(batch, null, 2) + '\n');
           NODE
-          cat data/generated/source5-countries/batch-manifest.json
+          cat "$SOURCE5_MARKER"
 
       - name: Publish country-specific datasets
         run: |
@@ -117,16 +147,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/generated/source5-countries
-          if git diff --cached --quiet; then
-            exit 0
-          fi
           git commit -m "data: generate Source 5 BS BH BD BB BY BE [skip ci]"
           git push origin HEAD:data/international-source-bootstrap
 
       - name: Upload consolidated batch
         uses: actions/upload-artifact@v4
         with:
-          name: source5-next-six-consolidated
+          name: source5-batch-02-consolidated
           path: data/generated/source5-countries
           if-no-files-found: error
           retention-days: 7

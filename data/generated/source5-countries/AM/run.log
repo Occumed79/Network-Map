@@ -1,6 +1,6 @@
 Fetching AM from openstreetmap-overpass
 {
-  "generated_at": "2026-07-16T18:44:06.750Z",
+  "generated_at": "2026-07-16T18:53:40.961Z",
   "source_number": 5,
   "source": "OpenStreetMap via Overpass API",
   "source_key": "healthsites_osm",

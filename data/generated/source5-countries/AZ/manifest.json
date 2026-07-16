@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-16T18:09:48.049Z",
+  "generated_at": "2026-07-16T18:14:18.731Z",
   "source_number": 5,
   "source": "OpenStreetMap via Overpass API",
   "source_key": "healthsites_osm",
@@ -9,11 +9,11 @@
   "country_results": {
     "AZ": {
       "mode": "openstreetmap-overpass",
-      "accepted": 2178,
-      "fetched": 2178
+      "accepted": 2198,
+      "fetched": 2198
     }
   },
-  "total_rows": 2178,
+  "total_rows": 2198,
   "destination_tables": [
     "public.provider_raw_records",
     "public.provider_stage_records",
@@ -65,7 +65,7 @@
     },
     {
       "file": "global_health_facilities_011.sql",
-      "rows": 178
+      "rows": 198
     }
   ],
   "safeguards": [

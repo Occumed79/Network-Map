@@ -1,0 +1,32 @@
+Source #5 — Healthsites / OpenStreetMap health facilities
+Batch 01 status: COMPLETE IN PRODUCTION NEON
+Verified: 2026-07-16 UTC
+
+Country  Source rows  Master rows  Raw  Stage  Lineage  Legacy mirror  Invalid map rows
+AG       38           38           38   38     38       38             0
+AM       919          919          919  919    919      919            0
+AR       17,390       17,389       17,390 17,390 17,390 17,390        0
+AT       13,478       13,476       13,478 13,478 13,478 13,478        0
+AU       13,591       13,589       13,591 13,591 13,591 13,591        0
+AZ       2,198        2,198        2,198 2,198 2,198 2,198           0
+
+Batch totals:
+- Source records: 47,614
+- Unique master providers: 47,609
+- All source records retained in raw, stage, lineage, and legacy map-mirror tables
+- Five duplicate location master keys were consolidated without removing source lineage
+- Invalid coordinates or blank provider names: 0
+- Invalid provider-type links: 0
+
+Database storage repair:
+- Removed redundant raw-payload and staging indexes that were not used by application queries
+- Compacted duplicated Source #5 payload copies while preserving source IDs, canonical fields, and lineage
+- Production database reduced from 463 MB after ingestion to 396 MB
+
+Cleanup:
+- Temporary import roles removed
+- Temporary authorization table and functions removed
+- Staging table empty
+- No import credential remains in the temporary data branch
+
+PR #98 remains a temporary draft data-generation branch and must not be merged into main.

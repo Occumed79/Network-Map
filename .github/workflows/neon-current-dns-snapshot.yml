@@ -1,0 +1,24 @@
+name: Snapshot current Neon endpoint addresses
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/neon-current-dns-snapshot.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'data/international-source-bootstrap'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Resolve current Neon endpoint
+        run: |
+          set -euo pipefail
+          dig +short A ep-autumn-hill-atgvqg3e-pooler.c-9.us-east-1.aws.neon.tech
+          getent ahostsv4 ep-autumn-hill-atgvqg3e-pooler.c-9.us-east-1.aws.neon.tech

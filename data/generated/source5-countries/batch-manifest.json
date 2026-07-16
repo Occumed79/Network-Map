@@ -18,46 +18,46 @@
   "results": [
     {
       "country_code": "AG",
-      "generated_at": "2026-07-16T19:00:20.920Z",
+      "generated_at": "2026-07-16T19:00:43.553Z",
       "rows": 38,
       "compact_files": 1,
       "compact_rows": 38
     },
     {
       "country_code": "AM",
-      "generated_at": "2026-07-16T18:59:54.785Z",
+      "generated_at": "2026-07-16T19:01:03.846Z",
       "rows": 919,
       "compact_files": 5,
       "compact_rows": 919
     },
     {
       "country_code": "AR",
-      "generated_at": "2026-07-16T18:59:49.455Z",
+      "generated_at": "2026-07-16T19:00:30.604Z",
       "rows": 17390,
       "compact_files": 87,
       "compact_rows": 17390
     },
     {
       "country_code": "AT",
-      "generated_at": "2026-07-16T18:59:44.902Z",
+      "generated_at": "2026-07-16T19:00:37.286Z",
       "rows": 13478,
       "compact_files": 68,
       "compact_rows": 13478
     },
     {
       "country_code": "AU",
-      "generated_at": "2026-07-16T19:00:23.999Z",
+      "generated_at": "2026-07-16T19:01:00.103Z",
       "rows": 13591,
       "compact_files": 68,
       "compact_rows": 13591
     },
     {
       "country_code": "AZ",
-      "generated_at": "2026-07-16T18:59:59.589Z",
+      "generated_at": "2026-07-16T19:00:29.561Z",
       "rows": 2198,
       "compact_files": 11,
       "compact_rows": 2198
     }
   ],
-  "generated_at": "2026-07-16T19:01:51.338Z"
+  "generated_at": "2026-07-16T19:02:20.786Z"
 }

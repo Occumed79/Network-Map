@@ -1,0 +1,73 @@
+name: Install permanent county health department source v4
+
+on:
+  push:
+    paths:
+      - .github/workflows/install-naccho-source-v4.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: install-naccho-source-v4
+  cancel-in-progress: false
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download and validate all 3,410 workbook rows
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p api-server/data
+          curl --retry 6 --retry-all-errors --retry-delay 5 --fail-with-body \
+            'https://filebin.net/occu-med-network-map-naccho-20260715-a3f19c/county-health-departments.jsonl' \
+            -o api-server/data/county-health-departments.jsonl
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path('api-server/data/county-health-departments.jsonl')
+          rows = [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines() if line.strip()]
+          assert len(rows) == 3410, f'Expected 3410 rows, got {len(rows)}'
+
+          def source_row(row):
+              raw = row.get('raw_data') or {}
+              return int(row.get('source_row', raw.get('source_row')))
+
+          source_rows = [source_row(row) for row in rows]
+          assert min(source_rows) == 2 and max(source_rows) == 3411
+          assert len(set(source_rows)) == 3410
+          assert len({row['lhd_id'] for row in rows}) == 3410
+          assert all(row.get('name') and row.get('address') and row.get('state_code') for row in rows)
+          print('Validated 3,410 distinct county/local health department records.')
+          PY
+
+      - name: Validate backend build
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm --dir api-server run build
+
+      - name: Commit permanent source file
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add api-server/data/county-health-departments.jsonl
+          if git diff --cached --quiet; then
+            echo 'Source file already committed.'
+            exit 0
+          fi
+          git commit -m 'Add complete county health department workbook source'
+          git pull --rebase origin main
+          git push origin HEAD:main

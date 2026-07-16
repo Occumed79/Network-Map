@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { saveSearchSnapshot } from "./lib/networkMapPersistence";
-import { scheduleSource5BatchImportWorker } from "./lib/source5BatchImportWorker";
 import { requireWriteAuth } from "./middleware/writeAuth";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -175,7 +174,5 @@ app.use(express.static(frontendDist));
 app.get("/{*path}", (_req, res) => {
   res.sendFile(path.join(frontendDist, "index.html"));
 });
-
-scheduleSource5BatchImportWorker();
 
 export default app;

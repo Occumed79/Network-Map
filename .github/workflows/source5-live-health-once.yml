@@ -1,0 +1,25 @@
+name: Snapshot live Network Map commit
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/source5-live-health-once.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'data/international-source-bootstrap'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Fetch production health
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --max-time 90 https://network-map-tool-mqib.onrender.com/api/health)"
+          echo "$response"
+          echo "production_commit=$(printf '%s' "$response" | jq -r '.commit // empty')"

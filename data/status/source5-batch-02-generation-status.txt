@@ -1,0 +1,17 @@
+Source #5 — Healthsites / OpenStreetMap health facilities
+Batch 02 generation status: COMPLETE
+Generated: 2026-07-16 UTC
+
+Country  Generated source rows  Compact files
+BS       107                    1
+BH       177                    1
+BD       7,516                  38
+BB       104                    1
+BY       6,455                  33
+BE       8,573                  43
+
+Batch total: 22,932 source records
+
+All six countries were generated in parallel and committed under country-specific directories in data/generated/source5-countries.
+The generated datasets have not yet been marked complete in production Neon; production completion requires canonical-table reconciliation after import.
+PR #98 remains a temporary draft data-generation branch and must not be merged into main.

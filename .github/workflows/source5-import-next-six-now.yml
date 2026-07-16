@@ -1,0 +1,55 @@
+name: Import next six Source 5 countries now
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/source5-import-next-six-now.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  import-next-six:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'data/international-source-bootstrap'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      DATABASE_URL: postgresql://source5_batch_runner_20260716:0d2b91d06437b64e207a3c1b68fecc24d94b65b81e01a0de@ep-autumn-hill-atgvqg3e-pooler.c-9.us-east-1.aws.neon.tech/neondb?channel_binding=require&sslmode=require
+
+    steps:
+      - name: Check out generated country datasets
+        uses: actions/checkout@v4
+        with:
+          ref: data/international-source-bootstrap
+          fetch-depth: 1
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client
+
+      - name: Import and verify six countries
+        shell: bash
+        run: |
+          set -euo pipefail
+          for code in AG AM AR AT AU AZ; do
+            root="data/generated/source5-countries/${code}"
+            test -f "$root/manifest.json"
+            expected="$(jq -r '.total_rows' "$root/manifest.json")"
+            echo "Preparing ${code}; expected rows=${expected}"
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "SELECT public.source5_prepare_import('${code}');"
+            shopt -s nullglob
+            files=("$root"/compact/source5_compact_*.sql)
+            test "${#files[@]}" -gt 0
+            index=0
+            for file in "${files[@]}"; do
+              index=$((index+1))
+              echo "${code}: loading chunk ${index}/${#files[@]}"
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$file" >/dev/null
+            done
+            echo "${code}: promoting and reconciling"
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "SELECT public.source5_finalize_import('${code}');"
+          done

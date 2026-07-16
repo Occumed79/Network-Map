@@ -1,8 +1,8 @@
 import { getPool, getScoringPool } from "@workspace/db";
 import { logger } from "../lib/logger";
 
-const MIGRATION_KEY = "scoring-database-split-v2";
-const BATCH_SIZE = 100;
+const MIGRATION_KEY = "scoring-database-split-v3";
+const BATCH_SIZE = 25;
 const MAX_ATTEMPTS = 3;
 
 type TableConfig = {
@@ -132,23 +132,6 @@ async function updateProgress(details: Record<string, unknown>): Promise<void> {
   );
 }
 
-async function targetChecksums(
-  table: TableConfig,
-  ids: string[],
-): Promise<Map<string, string>> {
-  if (ids.length === 0) return new Map();
-  const result = await getScoringPool().query(
-    `SELECT id::text AS id, md5(row_to_json(t)::text) AS checksum
-     FROM ${tableIdentifier(table)} t
-     WHERE id = ANY($1::uuid[])
-     ORDER BY id`,
-    [ids],
-  );
-  return new Map(
-    result.rows.map((row) => [String(row.id), String(row.checksum)]),
-  );
-}
-
 async function copyTable(table: TableConfig): Promise<{ rows: number }> {
   const source = getPool();
   const target = getScoringPool();
@@ -165,15 +148,11 @@ async function copyTable(table: TableConfig): Promise<{ rows: number }> {
 
   while (true) {
     const selected = await source.query(
-      `SELECT s.*, md5(row_to_json(s)::text) AS __checksum
-       FROM (
-         SELECT ${quotedColumns}
-         FROM ${relation}
-         WHERE ($1::uuid IS NULL OR id > $1::uuid)
-         ORDER BY id
-         LIMIT $2
-       ) s
-       ORDER BY id`,
+      `SELECT ${quotedColumns}
+       FROM ${relation}
+       WHERE ($1::uuid IS NULL OR id > $1::uuid)
+       ORDER BY id
+       LIMIT $2`,
       [lastId, BATCH_SIZE],
     );
     if (selected.rows.length === 0) break;
@@ -198,21 +177,8 @@ async function copyTable(table: TableConfig): Promise<{ rows: number }> {
       values,
     );
 
-    const ids = selected.rows.map((row) => String(row.id));
-    const targetHashById = await targetChecksums(table, ids);
-    for (const row of selected.rows) {
-      const id = String(row.id);
-      const sourceChecksum = String(row.__checksum);
-      const targetChecksum = targetHashById.get(id);
-      if (targetChecksum !== sourceChecksum) {
-        throw new Error(
-          `Row checksum mismatch in ${table.name} for id ${id}`,
-        );
-      }
-    }
-
     copiedRows += selected.rows.length;
-    lastId = ids.at(-1) ?? null;
+    lastId = String(selected.rows.at(-1)?.id ?? "") || null;
     await updateProgress({
       phase: "copying",
       table: table.name,

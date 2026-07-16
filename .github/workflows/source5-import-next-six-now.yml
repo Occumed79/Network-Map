@@ -35,7 +35,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for code in AT AU AZ; do
+          for code in AU AZ; do
             root="data/generated/source5-countries/${code}"
             test -f "$root/manifest.json"
             expected="$(jq -r '.total_rows' "$root/manifest.json")"

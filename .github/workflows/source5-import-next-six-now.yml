@@ -1,4 +1,4 @@
-name: Import next six Source 5 countries now
+name: Import remaining Source 5 countries now
 
 on:
   pull_request:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 jobs:
-  import-next-six:
+  import-remaining:
     if: github.event_name == 'workflow_dispatch' || github.head_ref == 'data/international-source-bootstrap'
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -31,11 +31,11 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y postgresql-client
 
-      - name: Import and verify six countries
+      - name: Import and verify remaining countries
         shell: bash
         run: |
           set -euo pipefail
-          for code in AG AM AR AT AU AZ; do
+          for code in AT AU AZ; do
             root="data/generated/source5-countries/${code}"
             test -f "$root/manifest.json"
             expected="$(jq -r '.total_rows' "$root/manifest.json")"

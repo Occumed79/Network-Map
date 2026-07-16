@@ -6,6 +6,11 @@ on:
       - data/international-source-bootstrap
     paths:
       - .github/workflows/source5-batch-next-six.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/source5-batch-next-six.yml
   workflow_dispatch:
 
 permissions:
@@ -16,7 +21,7 @@ env:
 
 jobs:
   generate:
-    if: github.actor != 'github-actions[bot]'
+    if: github.actor != 'github-actions[bot]' && (github.event_name != 'pull_request' || github.head_ref == 'data/international-source-bootstrap')
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -61,7 +66,7 @@ jobs:
           retention-days: 7
 
   publish:
-    if: always() && github.actor != 'github-actions[bot]'
+    if: always() && github.actor != 'github-actions[bot]' && (github.event_name != 'pull_request' || github.head_ref == 'data/international-source-bootstrap')
     needs: generate
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -111,6 +116,7 @@ jobs:
           cat data/generated/source5-countries/batch-manifest.json
 
       - name: Publish country-specific datasets
+        if: github.event_name != 'pull_request'
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"

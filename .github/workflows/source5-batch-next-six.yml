@@ -116,7 +116,6 @@ jobs:
           cat data/generated/source5-countries/batch-manifest.json
 
       - name: Publish country-specific datasets
-        if: github.event_name != 'pull_request'
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"

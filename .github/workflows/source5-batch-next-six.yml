@@ -6,29 +6,24 @@ on:
       - data/international-source-bootstrap
     paths:
       - .github/workflows/source5-batch-next-six.yml
-  pull_request:
-    branches:
-      - main
-    paths:
-      - .github/workflows/source5-batch-next-six.yml
   workflow_dispatch:
 
 permissions:
   contents: write
 
 env:
-  SOURCE5_CODES: AG,AR,AM,AU,AT,AZ
+  SOURCE5_CODES: BS,BH,BD,BB,BY,BE
 
 jobs:
   generate:
-    if: github.actor != 'github-actions[bot]' && (github.event_name != 'pull_request' || github.head_ref == 'data/international-source-bootstrap')
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
       fail-fast: false
       max-parallel: 6
       matrix:
-        country: [AG, AR, AM, AU, AT, AZ]
+        country: [BS, BH, BD, BB, BY, BE]
 
     steps:
       - name: Check out temporary international data branch
@@ -66,7 +61,7 @@ jobs:
           retention-days: 7
 
   publish:
-    if: always() && github.actor != 'github-actions[bot]' && (github.event_name != 'pull_request' || github.head_ref == 'data/international-source-bootstrap')
+    if: always() && github.actor != 'github-actions[bot]'
     needs: generate
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -92,23 +87,24 @@ jobs:
           const fs = require('fs');
           const path = require('path');
           const root = 'data/generated/source5-countries';
-          const countries = fs.existsSync(root)
-            ? fs.readdirSync(root).filter(code => fs.existsSync(path.join(root, code, 'manifest.json'))).sort()
-            : [];
-          const results = countries.map(code => {
-            const manifest = JSON.parse(fs.readFileSync(path.join(root, code, 'manifest.json'), 'utf8'));
-            const compact = JSON.parse(fs.readFileSync(path.join(root, code, 'compact', 'manifest.json'), 'utf8'));
-            return {
+          const requested = process.env.SOURCE5_CODES.split(',');
+          const results = requested.flatMap(code => {
+            const manifestPath = path.join(root, code, 'manifest.json');
+            const compactPath = path.join(root, code, 'compact', 'manifest.json');
+            if (!fs.existsSync(manifestPath) || !fs.existsSync(compactPath)) return [];
+            const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+            const compact = JSON.parse(fs.readFileSync(compactPath, 'utf8'));
+            return [{
               country_code: code,
               generated_at: manifest.generated_at,
               rows: manifest.total_rows,
               compact_files: compact.files.length,
               compact_rows: compact.total_rows,
-            };
+            }];
           });
           fs.writeFileSync(path.join(root, 'batch-manifest.json'), JSON.stringify({
-            requested: process.env.SOURCE5_CODES.split(','),
-            completed: countries,
+            requested,
+            completed: results.map(result => result.country_code),
             results,
             generated_at: new Date().toISOString(),
           }, null, 2) + '\n');
@@ -124,7 +120,7 @@ jobs:
           if git diff --cached --quiet; then
             exit 0
           fi
-          git commit -m "data: generate Source 5 AG AR AM AU AT AZ [skip ci]"
+          git commit -m "data: generate Source 5 BS BH BD BB BY BE [skip ci]"
           git push origin HEAD:data/international-source-bootstrap
 
       - name: Upload consolidated batch

@@ -1,0 +1,98 @@
+name: Diagnose and install county health department source v5
+
+on:
+  push:
+    paths:
+      - .github/workflows/install-naccho-source-v5-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: install-naccho-source-v5-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download source package
+        id: download
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p api-server/data
+          curl --retry 3 --retry-all-errors --retry-delay 3 --fail-with-body \
+            'https://filebin.net/occu-med-network-map-naccho-20260715-a3f19c/county-health-departments.jsonl' \
+            -o api-server/data/county-health-departments.jsonl
+          test -s api-server/data/county-health-departments.jsonl
+
+      - name: Validate source package
+        id: validate
+        if: steps.download.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          rows=[json.loads(x) for x in Path('api-server/data/county-health-departments.jsonl').read_text(encoding='utf-8').splitlines() if x.strip()]
+          def sr(r):
+              raw=r.get('raw_data') or {}
+              return int(r.get('source_row',raw.get('source_row')))
+          values=[sr(r) for r in rows]
+          assert len(rows)==3410, len(rows)
+          assert min(values)==2 and max(values)==3411 and len(set(values))==3410
+          assert len({r['lhd_id'] for r in rows})==3410
+          print('source_valid')
+          PY
+
+      - name: Validate backend build
+        id: build
+        if: steps.validate.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm --dir api-server run build
+
+      - name: Record result and commit source when valid
+        if: always()
+        shell: bash
+        env:
+          DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
+          VALIDATE_OUTCOME: ${{ steps.validate.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          result={
+            'download':os.environ.get('DOWNLOAD_OUTCOME','not_run'),
+            'validate':os.environ.get('VALIDATE_OUTCOME','not_run'),
+            'build':os.environ.get('BUILD_OUTCOME','not_run'),
+          }
+          result['complete']=all(result[k]=='success' for k in ('download','validate','build'))
+          Path('api-server/data').mkdir(parents=True,exist_ok=True)
+          Path('api-server/data/naccho-install-status.json').write_text(json.dumps(result,indent=2)+'\n')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add api-server/data/naccho-install-status.json
+          if [ "$DOWNLOAD_OUTCOME" = success ] && [ "$VALIDATE_OUTCOME" = success ]; then
+            git add api-server/data/county-health-departments.jsonl
+          fi
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Record county health department source installation result'
+          git pull --rebase origin main
+          git push origin HEAD:main

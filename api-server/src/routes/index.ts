@@ -22,11 +22,13 @@ import enhancedSearchRouter from "./enhancedSearch";
 import providerExplorerRouter from "./providerExplorer";
 import myClinicsUploadRouter from "./myClinicsUpload";
 import nacchoLhdRouter from "./nacchoLhd";
+import scoringDatabaseRouter from "./scoringDatabase";
 import { stabilizeProviderLayerRequests } from "../middleware/providerLayerContract";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use(scoringDatabaseRouter);
 
 // --- New unified architecture (takes precedence) ---
 router.use(universalDiscoveryRouter);

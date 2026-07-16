@@ -1,0 +1,38 @@
+name: Wake Source 5 batch 02 worker
+
+on:
+  push:
+    branches:
+      - data/international-source-bootstrap
+    paths:
+      - .github/workflows/wake-source5-batch02-worker.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Wait for production deployment and keep service awake
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="b866384c717ff65abcf54e1eaea756d2793af87b"
+          for attempt in $(seq 1 60); do
+            response="$(curl --fail --silent --show-error --max-time 90 https://network-map-tool-mqib.onrender.com/api/health || true)"
+            commit="$(printf '%s' "$response" | jq -r '.commit // empty' 2>/dev/null || true)"
+            echo "attempt=${attempt} commit=${commit:-unavailable}"
+            if [ "$commit" = "$expected" ]; then
+              for wake in $(seq 1 20); do
+                curl --fail --silent --show-error --max-time 90 https://network-map-tool-mqib.onrender.com/api/health >/dev/null
+                sleep 15
+              done
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Production did not reach the expected commit in time" >&2
+          exit 1

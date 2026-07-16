@@ -1,0 +1,36 @@
+name: Verify live Source 5 batch worker
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/source5-live-health.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-live-worker:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'data/international-source-bootstrap'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Read production health commit
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 20); do
+            if response="$(curl --fail --silent --show-error --max-time 30 https://network-map-tool-mqib.onrender.com/api/health)"; then
+              echo "$response"
+              commit="$(printf '%s' "$response" | jq -r '.commit // empty')"
+              echo "production_commit=$commit"
+              if [ "$commit" = "4a60f0571b53fd4e606fa72cbe6d5cb601fcfd9f" ]; then
+                echo "SOURCE5_BATCH_WORKER_DEPLOYED"
+                exit 0
+              fi
+            fi
+            sleep 15
+          done
+          echo "Production did not reach the batch-worker commit within the watch window."
+          exit 1

@@ -1,0 +1,168 @@
+Fetching BY from openstreetmap-overpass
+{
+  "generated_at": "2026-07-16T19:04:37.038Z",
+  "source_number": 5,
+  "source": "OpenStreetMap via Overpass API",
+  "source_key": "healthsites_osm",
+  "countries_requested": [
+    "BY"
+  ],
+  "country_results": {
+    "BY": {
+      "mode": "openstreetmap-overpass",
+      "accepted": 6455,
+      "fetched": 6455
+    }
+  },
+  "total_rows": 6455,
+  "destination_tables": [
+    "public.provider_raw_records",
+    "public.provider_stage_records",
+    "public.provider_master",
+    "public.provider_master_sources",
+    "public.provider_master_types",
+    "public.medical_providers"
+  ],
+  "sql_files": [
+    {
+      "file": "global_health_facilities_001.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_002.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_003.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_004.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_005.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_006.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_007.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_008.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_009.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_010.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_011.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_012.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_013.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_014.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_015.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_016.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_017.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_018.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_019.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_020.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_021.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_022.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_023.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_024.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_025.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_026.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_027.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_028.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_029.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_030.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_031.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_032.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_033.sql",
+      "rows": 55
+    }
+  ],
+  "safeguards": [
+    "Backend/Neon ingestion only; no frontend data bundle",
+    "Valid coordinates required",
+    "Blank and placeholder facility names excluded",
+    "Source lineage retained",
+    "Idempotent source-record and master-provider upserts",
+    "Healthsites API used when HEALTHSITES_API_KEY is configured; OpenStreetMap Overpass otherwise"
+  ]
+}

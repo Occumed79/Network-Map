@@ -1,0 +1,40 @@
+Fetching AG from openstreetmap-overpass
+{
+  "generated_at": "2026-07-16T18:09:49.158Z",
+  "source_number": 5,
+  "source": "OpenStreetMap via Overpass API",
+  "source_key": "healthsites_osm",
+  "countries_requested": [
+    "AG"
+  ],
+  "country_results": {
+    "AG": {
+      "mode": "openstreetmap-overpass",
+      "accepted": 38,
+      "fetched": 38
+    }
+  },
+  "total_rows": 38,
+  "destination_tables": [
+    "public.provider_raw_records",
+    "public.provider_stage_records",
+    "public.provider_master",
+    "public.provider_master_sources",
+    "public.provider_master_types",
+    "public.medical_providers"
+  ],
+  "sql_files": [
+    {
+      "file": "global_health_facilities_001.sql",
+      "rows": 38
+    }
+  ],
+  "safeguards": [
+    "Backend/Neon ingestion only; no frontend data bundle",
+    "Valid coordinates required",
+    "Blank and placeholder facility names excluded",
+    "Source lineage retained",
+    "Idempotent source-record and master-provider upserts",
+    "Healthsites API used when HEALTHSITES_API_KEY is configured; OpenStreetMap Overpass otherwise"
+  ]
+}

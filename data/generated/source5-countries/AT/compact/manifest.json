@@ -1,0 +1,278 @@
+{
+  "generated_at": "2026-07-16T18:10:38.788Z",
+  "total_rows": 13478,
+  "files": [
+    {
+      "file": "source5_compact_001.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_002.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_003.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_004.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_005.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_006.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_007.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_008.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_009.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_010.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_011.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_012.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_013.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_014.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_015.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_016.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_017.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_018.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_019.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_020.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_021.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_022.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_023.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_024.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_025.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_026.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_027.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_028.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_029.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_030.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_031.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_032.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_033.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_034.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_035.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_036.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_037.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_038.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_039.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_040.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_041.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_042.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_043.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_044.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_045.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_046.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_047.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_048.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_049.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_050.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_051.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_052.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_053.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_054.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_055.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_056.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_057.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_058.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_059.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_060.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_061.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_062.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_063.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_064.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_065.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_066.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_067.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_068.sql",
+      "rows": 78
+    }
+  ]
+}

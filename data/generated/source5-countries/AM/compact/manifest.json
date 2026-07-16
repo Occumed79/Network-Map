@@ -1,0 +1,26 @@
+{
+  "generated_at": "2026-07-16T18:10:14.058Z",
+  "total_rows": 919,
+  "files": [
+    {
+      "file": "source5_compact_001.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_002.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_003.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_004.sql",
+      "rows": 200
+    },
+    {
+      "file": "source5_compact_005.sql",
+      "rows": 119
+    }
+  ]
+}

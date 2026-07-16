@@ -1,0 +1,383 @@
+{
+  "generated_at": "2026-07-16T18:09:52.483Z",
+  "source_number": 5,
+  "source": "OpenStreetMap via Overpass API",
+  "source_key": "healthsites_osm",
+  "countries_requested": [
+    "AR"
+  ],
+  "country_results": {
+    "AR": {
+      "mode": "openstreetmap-overpass",
+      "accepted": 17390,
+      "fetched": 17390
+    }
+  },
+  "total_rows": 17390,
+  "destination_tables": [
+    "public.provider_raw_records",
+    "public.provider_stage_records",
+    "public.provider_master",
+    "public.provider_master_sources",
+    "public.provider_master_types",
+    "public.medical_providers"
+  ],
+  "sql_files": [
+    {
+      "file": "global_health_facilities_001.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_002.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_003.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_004.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_005.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_006.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_007.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_008.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_009.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_010.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_011.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_012.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_013.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_014.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_015.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_016.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_017.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_018.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_019.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_020.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_021.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_022.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_023.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_024.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_025.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_026.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_027.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_028.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_029.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_030.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_031.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_032.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_033.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_034.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_035.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_036.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_037.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_038.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_039.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_040.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_041.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_042.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_043.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_044.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_045.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_046.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_047.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_048.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_049.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_050.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_051.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_052.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_053.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_054.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_055.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_056.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_057.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_058.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_059.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_060.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_061.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_062.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_063.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_064.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_065.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_066.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_067.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_068.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_069.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_070.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_071.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_072.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_073.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_074.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_075.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_076.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_077.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_078.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_079.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_080.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_081.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_082.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_083.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_084.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_085.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_086.sql",
+      "rows": 200
+    },
+    {
+      "file": "global_health_facilities_087.sql",
+      "rows": 190
+    }
+  ],
+  "safeguards": [
+    "Backend/Neon ingestion only; no frontend data bundle",
+    "Valid coordinates required",
+    "Blank and placeholder facility names excluded",
+    "Source lineage retained",
+    "Idempotent source-record and master-provider upserts",
+    "Healthsites API used when HEALTHSITES_API_KEY is configured; OpenStreetMap Overpass otherwise"
+  ]
+}

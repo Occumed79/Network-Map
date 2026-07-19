@@ -147,7 +147,7 @@ async function copyTable(table: TableConfig): Promise<{ rows: number }> {
   );
 
   while (true) {
-    const selected = await source.query(
+    const selected: { rows: Array<Record<string, unknown>> } = await source.query(
       `SELECT ${quotedColumns}
        FROM ${relation}
        WHERE ($1::uuid IS NULL OR id > $1::uuid)
@@ -158,7 +158,7 @@ async function copyTable(table: TableConfig): Promise<{ rows: number }> {
     if (selected.rows.length === 0) break;
 
     const values: unknown[] = [];
-    const tuples = selected.rows.map((row, rowIndex) => {
+    const tuples = selected.rows.map((row: Record<string, unknown>, rowIndex: number) => {
       const base = rowIndex * table.columns.length;
       for (const column of table.columns) values.push(row[column]);
       return `(${table.columns

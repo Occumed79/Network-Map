@@ -1,3 +1,14 @@
+/**
+ * Provider layer request runtime.
+ *
+ * Provides fetchProviderLayer() — a named function for loading
+ * /api/provider-layers/:source with caching, auto-pagination, and concurrency
+ * control.
+ *
+ * This module does NOT monkey-patch window.fetch. All calls are explicit.
+ * App.tsx imports and calls fetchProviderLayer() directly.
+ */
+
 type ProviderCoordinate = { lat: number; lng: number };
 
 type Viewport = {
@@ -42,7 +53,6 @@ const cacheByRequest = new Map<string, CachedResponse>();
 const latestBySource = new Map<string, CachedResponse>();
 const inFlight = new Map<string, Promise<CaptureResult>>();
 const networkWaiters: Array<() => void> = [];
-const nativeFetch = window.fetch.bind(window);
 let activeNetworkLoads = 0;
 
 function asUrl(input: RequestInfo | URL): URL | null {
@@ -53,10 +63,6 @@ function asUrl(input: RequestInfo | URL): URL | null {
   } catch {
     return null;
   }
-}
-
-function requestMethod(input: RequestInfo | URL, init?: RequestInit): string {
-  return String(init?.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
 }
 
 function pageSize(value: string | null): number {
@@ -275,7 +281,7 @@ function pruneCaches(): void {
 }
 
 async function fetchAllProviderPages(url: URL, init?: RequestInit): Promise<Response> {
-  const firstResponse = await nativeFetch(url.toString(), init);
+  const firstResponse = await fetch(url.toString(), init);
   if (!firstResponse.ok) return firstResponse;
 
   const firstPayload = asPayload(await firstResponse.clone().json().catch(() => null));
@@ -292,7 +298,7 @@ async function fetchAllProviderPages(url: URL, init?: RequestInit): Promise<Resp
     page += 1;
     const pageUrl = new URL(url.toString());
     pageUrl.searchParams.set("page", String(page));
-    const pageResponse = await nativeFetch(pageUrl.toString(), init);
+    const pageResponse = await fetch(pageUrl.toString(), init);
     if (!pageResponse.ok) {
       throw new Error(`Provider layer page ${page} failed with HTTP ${pageResponse.status}`);
     }
@@ -380,14 +386,16 @@ async function captureResponse(
   };
 }
 
-window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+/**
+ * Fetch a provider layer URL with caching, auto-pagination, concurrency
+ * control, and telemetry dispatch.
+ *
+ * Call this instead of fetch() for all /api/provider-layers/ requests.
+ * This is the non-patching replacement for the former window.fetch override.
+ */
+export async function fetchProviderLayer(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const originalUrl = asUrl(input);
-  const method = requestMethod(input, init);
-  if (
-    !originalUrl || method !== "GET" ||
-    originalUrl.origin !== window.location.origin ||
-    !originalUrl.pathname.startsWith("/api/provider-layers/")
-  ) return nativeFetch(input, init);
+  if (!originalUrl) return fetch(input, init);
 
   const url = normalizeProviderLayerUrl(originalUrl);
   const source = sourceFromUrl(url);
@@ -464,6 +472,4 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   // Return a valid temporary payload so App.tsx preserves the user's enabled
   // toggle and retries later instead of switching the source off.
   return transientFailureResponse(source, warning);
-}) as typeof window.fetch;
-
-export {};
+}

@@ -191,7 +191,7 @@ async function googleExact(row: SourceRow, key: string): Promise<ExactHit | null
         expected_street_number: expectedStreetNumber,
         returned_street_number: gotStreetNumber,
         location_type: precision,
-        partial_match: result.partial_match === true,
+        partial_match: Boolean(result.partial_match),
         result_types: result.types ?? [],
       },
     };

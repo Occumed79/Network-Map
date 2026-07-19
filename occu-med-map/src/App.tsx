@@ -115,6 +115,98 @@ async function copyTextSafely(text:string):Promise<boolean> {
   }
 }
 
+type MyClinicSaveStatus = 'saving' | 'saved' | 'error';
+type MyClinicSaveOptions = { isNpi?: boolean; categoryLabel?: string };
+
+function nonEmptyString(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function finiteCoordinate(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function uniqueProviderTags(values: unknown[]): string[] {
+  const seen = new Set<string>();
+  const tags: string[] = [];
+  for (const value of values.flatMap(item => Array.isArray(item) ? item : [item])) {
+    const tag = nonEmptyString(value);
+    if (!tag) continue;
+    const normalized = tag.toLowerCase();
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    tags.push(tag);
+  }
+  return tags;
+}
+
+function providerSaveKey(result: any): string {
+  const id = nonEmptyString(result?.id != null ? String(result.id) : null);
+  if (id) return `id:${id}`;
+  const source = nonEmptyString(result?.source) || 'live';
+  const name = nonEmptyString(result?.name) || 'unnamed-provider';
+  const lat = finiteCoordinate(result?.lat ?? result?.latitude);
+  const lng = finiteCoordinate(result?.lng ?? result?.longitude);
+  if (lat != null && lng != null) return `geo:${source}|${name}|${lat.toFixed(6)}|${lng.toFixed(6)}`;
+  const address = nonEmptyString(result?.address ?? result?.addr) || 'address-unavailable';
+  return `address:${source}|${name}|${address}`;
+}
+
+function normalizeProviderForMyClinics(result: any, options: MyClinicSaveOptions = {}) {
+  const evidenceServices = Array.isArray(result?.evidence)
+    ? result.evidence.map((row: any) => row?.serviceDetected)
+    : [];
+  const tags = uniqueProviderTags([
+    result?.services,
+    result?.categories,
+    result?.cat,
+    result?.category,
+    result?.type,
+    result?.providerType,
+    result?.taxonomyDescription,
+    result?.taxonomy,
+    options.categoryLabel,
+    evidenceServices,
+  ]);
+  const source = nonEmptyString(result?.source)
+    || (options.isNpi ? 'NPI Registry' : 'Live discovery');
+  const clinicType = nonEmptyString(result?.clinic_type)
+    || nonEmptyString(result?.cat)
+    || nonEmptyString(result?.taxonomyDescription)
+    || nonEmptyString(result?.taxonomy)
+    || nonEmptyString(result?.providerType)
+    || nonEmptyString(options.categoryLabel)
+    || 'unknown';
+
+  return {
+    name: nonEmptyString(result?.name) || 'Unnamed provider',
+    clinic_type: clinicType,
+    services: tags,
+    categories: tags,
+    address: nonEmptyString(result?.address ?? result?.addr),
+    city: nonEmptyString(result?.city),
+    admin_area: nonEmptyString(result?.admin_area ?? result?.state),
+    country: nonEmptyString(result?.country) || (options.isNpi ? 'US' : null),
+    postal_code: nonEmptyString(result?.postal_code ?? result?.postalCode),
+    lat: finiteCoordinate(result?.lat ?? result?.latitude),
+    lng: finiteCoordinate(result?.lng ?? result?.longitude),
+    phone: nonEmptyString(result?.phone),
+    website: nonEmptyString(result?.website),
+    source_url: nonEmptyString(result?.source_url ?? result?.sourceUrl ?? result?.sourceDetail),
+    source,
+    source_kind: nonEmptyString(result?.source_kind) || 'live',
+    trust_tier: nonEmptyString(result?.trust_tier) || 'live-not-stored',
+    raw_source_data: result,
+  };
+}
+
 type ActiveTool = 'coverage' | 'liveFinder' | 'radius' | 'directories' | 'myClinics' | 'compare' | null;
 
 /**
@@ -1211,7 +1303,9 @@ export default function App() {
   const [indexedLayerData, setIndexedLayerData] = useState<any[]>([]);
   const [outreachNotes, setOutreachNotes] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_notes')||'{}'); } catch { return {}; } });
   const [outreachStatus, setOutreachStatus] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_status')||'{}'); } catch { return {}; } });
-  const [savedToMyClinics, setSavedToMyClinics] = useState<Record<string,'saving'|'saved'|'error'>>({});
+  const [savedToMyClinics, setSavedToMyClinics] = useState<Record<string,MyClinicSaveStatus>>({});
+  const [savedToMyClinicsErrors, setSavedToMyClinicsErrors] = useState<Record<string,string>>({});
+  const saveToMyClinicsInFlightRef = useRef<Set<string>>(new Set());
   const [dropUi, setDropUi] = useState({panelOpen:false, exportLoading:false, status:''});
   const lastRadiusRef = useRef<{lat:number;lng:number}|null>(null);
   const providerEta = useProviderEta();
@@ -1764,44 +1858,30 @@ export default function App() {
     }
   }
 
-  async function saveLiveResultToMyClinics(r: any) {
-    const id = String(r.id);
-    setSavedToMyClinics(prev=>({...prev,[id]:'saving'}));
+  async function saveLiveResultToMyClinics(result: any, options: MyClinicSaveOptions = {}) {
+    const key = providerSaveKey(result);
+    if (saveToMyClinicsInFlightRef.current.has(key) || savedToMyClinics[key] === 'saved') return;
+    saveToMyClinicsInFlightRef.current.add(key);
+    setSavedToMyClinics(prev=>({...prev,[key]:'saving'}));
+    setSavedToMyClinicsErrors(prev=>{ const next={...prev}; delete next[key]; return next; });
     try {
-      const body = {
-        provider: {
-          name: r.name || 'Unnamed provider',
-          clinic_type: r.cat || 'unknown',
-          services: [r.cat].filter(Boolean),
-          categories: [r.cat].filter(Boolean),
-          address: r.addr || null,
-          city: null,
-          admin_area: null,
-          country: null,
-          postal_code: null,
-          lat: typeof r.lat === 'number' ? r.lat : null,
-          lng: typeof r.lng === 'number' ? r.lng : null,
-          phone: r.phone || null,
-          website: r.website || null,
-          source_url: r.sourceDetail || r.source || null,
-          source: r.source || 'Live discovery',
-          source_kind: 'live',
-          trust_tier: 'live-not-stored',
-          raw_source_data: r,
-        },
-      };
+      const body = { provider: normalizeProviderForMyClinics(result, options) };
       const resp = await fetch('/api/provider-explorer/save-to-my-clinics', {
         method: 'POST',
         headers: {'content-type': 'application/json'},
         body: JSON.stringify(body),
       });
       const data = await resp.json().catch(()=>({}));
-      if (!resp.ok || data.error) throw new Error(data.error || `HTTP ${resp.status}`);
-      setSavedToMyClinics(prev=>({...prev,[id]:'saved'}));
-      // Reload My Clinics layer to show the new entry
+      if (!resp.ok || data.error) throw new Error(data.error || data.message || `HTTP ${resp.status}`);
+      setSavedToMyClinics(prev=>({...prev,[key]:'saved'}));
+      setSavedToMyClinicsErrors(prev=>{ const next={...prev}; delete next[key]; return next; });
       if (showMyClinicsLayer) void loadProviderDataset('myClinics');
     } catch(err) {
-      setSavedToMyClinics(prev=>({...prev,[id]:'error'}));
+      const message = err instanceof Error ? err.message : 'Save to My Clinics failed';
+      setSavedToMyClinics(prev=>({...prev,[key]:'error'}));
+      setSavedToMyClinicsErrors(prev=>({...prev,[key]:message}));
+    } finally {
+      saveToMyClinicsInFlightRef.current.delete(key);
     }
   }
 
@@ -4329,6 +4409,9 @@ export default function App() {
                 ? npiResults.map((p)=>{
                     const c=NPI_CATEGORY_MAP[npiCategory];
                     const explanation = buildExplanation(p);
+                    const saveKey = providerSaveKey(p);
+                    const saveState = savedToMyClinics[saveKey];
+                    const saveError = savedToMyClinicsErrors[saveKey];
                     return (
                       <div key={p.id} className="lp-item">
                         <div className="lp-row1">
@@ -4364,7 +4447,9 @@ export default function App() {
                           {p.sourceUrl&&<a href={p.sourceUrl} target="_blank" rel="noopener" className="lp-act pri" onClick={e=>e.stopPropagation()}>{p.source}</a>}
                           {p.phone&&<a href={`tel:${p.phone}`} className="lp-act" onClick={e=>e.stopPropagation()}>Call</a>}
                           {p.website&&<a href={p.website} target="_blank" rel="noopener" className="lp-act" onClick={e=>e.stopPropagation()}>Website</a>}
+                          <button type="button" className="lp-act" disabled={saveState==='saving'||saveState==='saved'} onClick={e=>{e.stopPropagation();void saveLiveResultToMyClinics(p,{isNpi:true,categoryLabel:c?.label});}}>{saveState==='saving'?'Saving…':saveState==='saved'?'Saved':saveState==='error'?'Retry save':'Save to My Clinics'}</button>
                         </div>
+                        {saveState==='error'&&saveError&&<div className="lp-save-error" role="alert">{saveError}</div>}
                       </div>
                     );
                   })
@@ -4372,6 +4457,9 @@ export default function App() {
                     const c=CATS[r.cat]||CATS.clinic;
                     const gm=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name+(r.addr?' '+r.addr:''))}`;
                     const resultEta=NATIVE_DRIVE_TIME_ENABLED?providerEta.findEta(r.name):null;
+                    const saveKey=providerSaveKey(r);
+                    const saveState=savedToMyClinics[saveKey];
+                    const saveError=savedToMyClinicsErrors[saveKey];
                     return (
                       <div key={r.id} className={`lp-item${liveHighlightId===r.id?' hl':''}`} onClick={()=>lpFly(r.lat,r.lng,r.id)}>
                         <div className="lp-row1">
@@ -4398,7 +4486,9 @@ export default function App() {
                           <a href={gm} target="_blank" rel="noopener" className="lp-act pri" onClick={e=>e.stopPropagation()}>Google Maps</a>
                           {r.website&&<a href={r.website} target="_blank" rel="noopener" className="lp-act" onClick={e=>e.stopPropagation()}>Website</a>}
                           {r.phone&&<a href={`tel:${r.phone}`} className="lp-act" onClick={e=>e.stopPropagation()}>Call</a>}
+                          <button type="button" className="lp-act" disabled={saveState==='saving'||saveState==='saved'} onClick={e=>{e.stopPropagation();void saveLiveResultToMyClinics(r);}}>{saveState==='saving'?'Saving…':saveState==='saved'?'Saved':saveState==='error'?'Retry save':'Save to My Clinics'}</button>
                         </div>
+                        {saveState==='error'&&saveError&&<div className="lp-save-error" role="alert">{saveError}</div>}
                         <div style={{marginTop:6,display:'grid',gap:5}} onClick={e=>e.stopPropagation()}>
                           <select
                             value={outreachStatus[String(r.id)]||'new'}

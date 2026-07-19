@@ -24,6 +24,7 @@ import "./performance-safety.css";
 import "./app-shell-layout.css";
 import "./workflow-ui.css";
 import "./network-command-center.css";
+import "./core-app-p2-fixes.css";
 
 const root = createRoot(document.getElementById("root")!);
 const phaseTwoPreview = new URLSearchParams(window.location.search).get("p2-preview") === "1";

@@ -1,0 +1,150 @@
+/* Focused viewport and save-action fixes loaded after command-center overrides. */
+.live-panel.open,
+.pf-panel.open {
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+.live-panel.open .lp-inner,
+.pf-panel.open .pf-inner {
+  box-sizing: border-box !important;
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
+.live-panel.open .lp-inner {
+  overflow: hidden !important;
+}
+
+.live-panel .lp-controls,
+.live-panel .lp-results,
+.pf-panel .pf-inner {
+  min-height: 0 !important;
+  overscroll-behavior: contain;
+}
+
+.live-panel .lp-results,
+.pf-panel .pf-inner {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+}
+
+.live-panel .lp-acts {
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)) !important;
+}
+
+.live-panel .lp-act:disabled {
+  cursor: default !important;
+  opacity: 0.68;
+}
+
+.lp-save-error {
+  margin-top: 5px;
+  padding: 5px 7px;
+  border: 1px solid rgba(185, 65, 65, 0.28);
+  border-radius: 8px;
+  background: rgba(255, 239, 239, 0.9);
+  color: #963f3f;
+  font-size: 9px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.dataset-backdrop {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dataset-modal {
+  max-height: calc(100dvh - 16px) !important;
+  min-height: 0 !important;
+}
+
+.dataset-header,
+.provider-explorer-summary,
+.provider-explorer-runtime-status,
+.provider-active-filters,
+.provider-map-status,
+.dataset-footer {
+  flex: 0 0 auto;
+}
+
+.provider-explorer-toolbar {
+  flex: 0 1 auto;
+  max-height: min(38dvh, 300px);
+  overflow-x: hidden !important;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.provider-facets {
+  flex: 0 1 auto;
+  max-height: min(22dvh, 180px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.dataset-content {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow: auto !important;
+  overscroll-behavior: contain;
+}
+
+.workflow-upload-modal {
+  box-sizing: border-box;
+  max-height: calc(100dvh - 16px) !important;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workflow-upload-modal .modal-header {
+  flex: 0 0 auto;
+}
+
+.workflow-upload-modal .modal-body {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 760px) {
+  .live-panel.open,
+  .pf-panel.open {
+    max-height: calc(100dvh - 16px) !important;
+  }
+
+  .dataset-backdrop {
+    padding: 8px !important;
+  }
+
+  .dataset-modal {
+    width: 100% !important;
+    height: calc(100dvh - 16px) !important;
+  }
+
+  .provider-explorer-toolbar {
+    max-height: 34dvh;
+  }
+
+  .provider-explorer-summary {
+    max-height: 18dvh;
+    overflow-y: auto;
+  }
+}
+
+@media (max-height: 700px) {
+  .live-panel .lp-controls {
+    min-height: 110px !important;
+    max-height: 40% !important;
+  }
+
+  .provider-explorer-toolbar {
+    max-height: 32dvh;
+  }
+
+  .provider-facets {
+    max-height: 16dvh;
+  }
+}

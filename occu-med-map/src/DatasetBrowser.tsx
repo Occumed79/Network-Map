@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 export type ProviderFeature = {
   id:string; source:string; source_kind:'stored'|'live'|'saved'|'candidate'; name:string; normalized_name?:string|null; clinic_type:string; services:string[]; categories:string[];
@@ -50,6 +50,20 @@ export default function DatasetBrowser({ open,onClose,getMapBounds,getCurrentRad
   const [facets,setFacets] = useState<Array<Record<string,unknown>>>([]);
   const [actionStatus,setActionStatus] = useState('');
   const [explorerStatus,setExplorerStatus] = useState<ProviderExplorerStatus|null>(null);
+
+  const externalGeographySignature = sharedFilters
+    ? `${sharedFilters.lat}|${sharedFilters.lng}|${sharedFilters.radiusMiles}|${sharedFilters.useMapBounds}`
+    : '';
+  const previousExternalGeographyRef = useRef(externalGeographySignature);
+  useLayoutEffect(()=>{
+    if(!sharedFilters) {
+      previousExternalGeographyRef.current = externalGeographySignature;
+      return;
+    }
+    if(previousExternalGeographyRef.current === externalGeographySignature) return;
+    previousExternalGeographyRef.current = externalGeographySignature;
+    setPage(1);
+  },[externalGeographySignature,sharedFilters]);
 
   const active = useMemo(()=>filterSummary(filters),[filters]);
   const updateFilters = (next:ProviderExplorerFilters) => { if(sharedFilters) onFiltersChange?.(next); else setLocalFilters(next); };

@@ -30,10 +30,8 @@ const phaseTwoPreview = new URLSearchParams(window.location.search).get("p2-prev
 
 async function boot() {
   if (!phaseTwoPreview) {
-    await Promise.all([
-      import("./providerLayerRequestRuntime"),
-      import("./providerLayerTelemetryRuntime"),
-    ]);
+    // providerLayerRequestRuntime is loaded as a named import from App.tsx
+    await import("./providerLayerTelemetryRuntime");
     root.render(<App />);
     return;
   }

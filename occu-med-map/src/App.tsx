@@ -49,6 +49,7 @@ import { useProviderEta } from './features/driveTime/useProviderEta';
 import './features/driveTime/driveTimeControls.css';
 import './features/driveTime/driveTimeBadge.css';
 import DatasetBrowser, { filterSummary, type DatasetKey, type DatasetLoadState, type ProviderFeature, type ProviderExplorerFilters } from './DatasetBrowser';
+import { fetchProviderLayer } from './providerLayerRequestRuntime';
 
 const NATIVE_DRIVE_TIME_ENABLED = import.meta.env.VITE_NATIVE_DRIVE_TIME === 'true';
 
@@ -1210,6 +1211,7 @@ export default function App() {
   const [indexedLayerData, setIndexedLayerData] = useState<any[]>([]);
   const [outreachNotes, setOutreachNotes] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_notes')||'{}'); } catch { return {}; } });
   const [outreachStatus, setOutreachStatus] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_status')||'{}'); } catch { return {}; } });
+  const [savedToMyClinics, setSavedToMyClinics] = useState<Record<string,'saving'|'saved'|'error'>>({});
   const [dropUi, setDropUi] = useState({panelOpen:false, exportLoading:false, status:''});
   const lastRadiusRef = useRef<{lat:number;lng:number}|null>(null);
   const providerEta = useProviderEta();
@@ -1762,6 +1764,47 @@ export default function App() {
     }
   }
 
+  async function saveLiveResultToMyClinics(r: any) {
+    const id = String(r.id);
+    setSavedToMyClinics(prev=>({...prev,[id]:'saving'}));
+    try {
+      const body = {
+        provider: {
+          name: r.name || 'Unnamed provider',
+          clinic_type: r.cat || 'unknown',
+          services: [r.cat].filter(Boolean),
+          categories: [r.cat].filter(Boolean),
+          address: r.addr || null,
+          city: null,
+          admin_area: null,
+          country: null,
+          postal_code: null,
+          lat: typeof r.lat === 'number' ? r.lat : null,
+          lng: typeof r.lng === 'number' ? r.lng : null,
+          phone: r.phone || null,
+          website: r.website || null,
+          source_url: r.sourceDetail || r.source || null,
+          source: r.source || 'Live discovery',
+          source_kind: 'live',
+          trust_tier: 'live-not-stored',
+          raw_source_data: r,
+        },
+      };
+      const resp = await fetch('/api/provider-explorer/save-to-my-clinics', {
+        method: 'POST',
+        headers: {'content-type': 'application/json'},
+        body: JSON.stringify(body),
+      });
+      const data = await resp.json().catch(()=>({}));
+      if (!resp.ok || data.error) throw new Error(data.error || `HTTP ${resp.status}`);
+      setSavedToMyClinics(prev=>({...prev,[id]:'saved'}));
+      // Reload My Clinics layer to show the new entry
+      if (showMyClinicsLayer) void loadProviderDataset('myClinics');
+    } catch(err) {
+      setSavedToMyClinics(prev=>({...prev,[id]:'error'}));
+    }
+  }
+
   async function markProviderExplorerOutreach(provider: ProviderFeature) {
     try {
       const resp = await fetch('/api/provider-explorer/outreach-target', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({provider}) });
@@ -1843,7 +1886,7 @@ export default function App() {
           params.set('east',String(bounds.getEast()));
           params.set('west',String(bounds.getWest()));
         }
-        const response = await fetch(`/api/provider-layers/${sourceByKey[key]}?${params.toString()}`);
+        const response = await fetchProviderLayer(`/api/provider-layers/${sourceByKey[key]}?${params.toString()}`);
         const data = await response.json().catch(()=>null);
         const responseError = data && typeof data.error === 'string' ? data.error : '';
         if(!response.ok || responseError) {
@@ -1876,23 +1919,50 @@ export default function App() {
   useEffect(()=>{
     const map = mapRef.current;
     if(!map || !mapReady) return;
-    let timer: ReturnType<typeof setTimeout>|null = null;
-    const refreshVisibleProviderSources = () => {
-      if(timer) clearTimeout(timer);
-      timer = setTimeout(()=>{
+    let moveTimer: ReturnType<typeof setTimeout>|null = null;
+    let startupTimers: ReturnType<typeof setTimeout>[] = [];
+
+    // On moveend, refresh all enabled layers (debounced, simultaneous is fine
+    // because providerLayerRequestRuntime limits concurrency to 2).
+    const refreshOnMove = () => {
+      if(moveTimer) clearTimeout(moveTimer);
+      moveTimer = setTimeout(()=>{
         if(showIndexedProviders) void loadProviderDataset('indexed');
         if(showBlueHive) void loadProviderDataset('bluehive');
         if(showDentists) void loadProviderDataset('dentists');
         if(showMyClinicsLayer) void loadProviderDataset('myClinics');
-      }, 140);
+      }, 300);
     };
-    refreshVisibleProviderSources();
-    map.on('moveend', refreshVisibleProviderSources);
+
+    // On initial mount stagger the four layers so the browser can render the
+    // map tile and respond to interactions before provider data arrives.
+    // Offsets: 0ms → indexed, 800ms → bluehive, 1600ms → dentists, 2400ms → my-clinics.
+    // This is not a visible-provider cap — all layers still load fully.
+    const STAGGER_MS = 800;
+    const enabledAtBoot: DatasetKey[] = [];
+    if(showIndexedProviders) enabledAtBoot.push('indexed');
+    if(showBlueHive) enabledAtBoot.push('bluehive');
+    if(showDentists) enabledAtBoot.push('dentists');
+    if(showMyClinicsLayer) enabledAtBoot.push('myClinics');
+    enabledAtBoot.forEach((key, index) => {
+      startupTimers.push(setTimeout(()=>{ void loadProviderDataset(key); }, index * STAGGER_MS));
+    });
+
+    map.on('moveend', refreshOnMove);
     return ()=>{
-      if(timer) clearTimeout(timer);
-      map.off('moveend', refreshVisibleProviderSources);
+      if(moveTimer) clearTimeout(moveTimer);
+      startupTimers.forEach(clearTimeout);
+      map.off('moveend', refreshOnMove);
     };
-  },[mapReady, showIndexedProviders, showBlueHive, showDentists, showMyClinicsLayer, loadProviderDataset]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[mapReady]);
+
+  // When a layer toggle changes after the map is ready, load that single layer.
+  // We depend on loadProviderDataset which is stable (useCallback).
+  useEffect(()=>{ if(mapReady && showIndexedProviders) void loadProviderDataset('indexed'); },[showIndexedProviders, loadProviderDataset]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(()=>{ if(mapReady && showBlueHive) void loadProviderDataset('bluehive'); },[showBlueHive, loadProviderDataset]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(()=>{ if(mapReady && showDentists) void loadProviderDataset('dentists'); },[showDentists, loadProviderDataset]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(()=>{ if(mapReady && showMyClinicsLayer) void loadProviderDataset('myClinics'); },[showMyClinicsLayer, loadProviderDataset]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Map Inventory: load indexed providers from Neon on map load + pan/zoom ──
   useEffect(()=>{
@@ -3043,8 +3113,7 @@ export default function App() {
     if(NATIVE_DRIVE_TIME_ENABLED) providerEta.clear();
     const validCoordinates = Number.isFinite(lat) && Number.isFinite(lng)
       && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
-    const cityState = validCoordinates ? await reverseGeocodeCityState(lat,lng) : null;
-    if(!validCoordinates || (!cityState && !selectedLocationLabel)) {
+    if(!validCoordinates) {
       lastRadiusRef.current=null;
       setLiveLoading(false);
       setLiveResults([]);
@@ -3066,7 +3135,9 @@ export default function App() {
     setNpiResults([]);
     setNpiError('');
     lastRadiusRef.current={lat,lng};
-    setLiveLocation(selectedLocationLabel || cityState?.display || 'Selected location');
+    // Reverse geocode for display label. Await it once here; failures fall back to coordinates.
+    const cityState = await reverseGeocodeCityState(lat,lng).catch(()=>null);
+    setLiveLocation(selectedLocationLabel || cityState?.display || `${lat.toFixed(4)}, ${lng.toFixed(4)}`);
 
     if(liveCircleRef.current) { try{map.removeLayer(liveCircleRef.current);}catch(e){} }
     if(livePinRef.current) { try{map.removeLayer(livePinRef.current);}catch(e){} }

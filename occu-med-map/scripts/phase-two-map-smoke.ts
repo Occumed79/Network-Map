@@ -113,7 +113,8 @@ assert.doesNotMatch(bridge, /setTimeout\(\(\) => registerMap\(map\),\s*0\)/);
 
 const main = readFileSync(resolve(here, '../src/main.tsx'), 'utf8');
 assert.match(main, /p2-preview/);
-assert.match(main, /import\("\.\/providerLayerRequestRuntime"\)/);
+// providerLayerRequestRuntime is now statically imported by App.tsx (not dynamic-imported by main.tsx)
+assert.doesNotMatch(main, /window\.fetch\s*=/); // must not monkey-patch fetch
 assert.match(main, /import\("\.\/providerLayerTelemetryRuntime"\)/);
 assert.doesNotMatch(main, /phaseTwoPreviewIsolation/);
 assert.match(main, /import\("\.\/phaseTwoMapBridge"\)/);
@@ -121,6 +122,10 @@ assert.match(main, /import\("\.\/phase-two-control-fix\.css"\)/);
 assert.match(main, /import\("\.\/PhaseTwoShell"\)/);
 assert.doesNotMatch(main, /phaseTwoLegacyLayerBridge/);
 assert.match(main, /root\.render\(<App \/>\)/);
+
+const app = readFileSync(resolve(here, '../src/App.tsx'), 'utf8');
+assert.match(app, /from ['"]\.\/providerLayerRequestRuntime['"]/);
+assert.match(app, /fetchProviderLayer/);
 
 const routeIndex = readFileSync(resolve(here, '../../api-server/src/routes/index.ts'), 'utf8');
 assert.doesNotMatch(routeIndex, /providerExplorerP2Read/);

@@ -1,0 +1,308 @@
+.map-dimension-switch-enabled {
+  position: relative;
+}
+
+.arcgis-globe-host {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 45%, rgba(28, 78, 121, 0.22), transparent 42%),
+    #030915;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 280ms ease, visibility 280ms ease;
+}
+
+.arcgis-globe-active .arcgis-globe-host {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.arcgis-globe-active #map {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.arcgis-globe-host.ready .arcgis-globe-loading {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.arcgis-globe-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  color: #d9efff;
+  text-align: center;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(39, 140, 196, 0.2), transparent 34%),
+    linear-gradient(180deg, rgba(3, 9, 21, 0.94), rgba(3, 9, 21, 0.82));
+  transition: opacity 220ms ease, visibility 220ms ease;
+}
+
+.arcgis-globe-loading strong {
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.arcgis-globe-loading small {
+  color: #6f95b4;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.arcgis-globe-spinner {
+  width: 28px;
+  height: 28px;
+  border: 2px solid rgba(125, 211, 252, 0.2);
+  border-top-color: #7dd3fc;
+  border-radius: 999px;
+  box-shadow: 0 0 18px rgba(56, 189, 248, 0.32);
+  animation: arcgis-globe-spin 0.8s linear infinite;
+}
+
+@keyframes arcgis-globe-spin {
+  to { transform: rotate(360deg); }
+}
+
+.map-dimension-toggle {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 1100;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 202px;
+  padding: 4px;
+  border: 1px solid rgba(146, 207, 244, 0.22);
+  border-radius: 13px;
+  background:
+    linear-gradient(180deg, rgba(11, 28, 52, 0.86), rgba(5, 16, 32, 0.82));
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.36),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 0 24px rgba(56, 189, 248, 0.08);
+  backdrop-filter: blur(18px) saturate(145%);
+  -webkit-backdrop-filter: blur(18px) saturate(145%);
+}
+
+.map-dimension-toggle::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(115deg, transparent 18%, rgba(255,255,255,0.08) 42%, transparent 64%);
+  background-size: 220% 100%;
+  animation: map-dimension-glisten 5.5s ease-in-out infinite;
+}
+
+@keyframes map-dimension-glisten {
+  0%, 65%, 100% { background-position: 130% 0; }
+  84% { background-position: -120% 0; }
+}
+
+.map-dimension-toggle button {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: #6f89a5;
+  background: transparent;
+  cursor: pointer;
+  transition: color 160ms ease, border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.map-dimension-toggle button:hover {
+  color: #d7efff;
+  background: rgba(125, 211, 252, 0.06);
+}
+
+.map-dimension-toggle button.active {
+  color: #e7f7ff;
+  border-color: rgba(125, 211, 252, 0.28);
+  background:
+    radial-gradient(circle at 50% 0, rgba(125, 211, 252, 0.18), transparent 70%),
+    rgba(22, 73, 108, 0.34);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    0 0 16px rgba(56, 189, 248, 0.12);
+}
+
+.map-dimension-toggle svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.65;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.map-dimension-toggle button span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  text-align: left;
+}
+
+.map-dimension-toggle button strong {
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.05em;
+}
+
+.map-dimension-toggle button small {
+  overflow: hidden;
+  color: currentColor;
+  opacity: 0.62;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 7px;
+  line-height: 1.1;
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.map-dimension-status {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 2px;
+  max-width: 202px;
+  padding: 4px 7px;
+  border: 1px solid rgba(125, 211, 252, 0.15);
+  border-radius: 999px;
+  color: #6e91ad;
+  background: rgba(3, 12, 25, 0.72);
+  box-shadow: 0 8px 18px rgba(0,0,0,0.24);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 7px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.map-dimension-status[data-state="loading"] {
+  color: #7dd3fc;
+}
+
+.map-dimension-status[data-state="error"] {
+  color: #fca5a5;
+  border-color: rgba(252, 165, 165, 0.25);
+}
+
+.arcgis-globe-host .esri-view,
+.arcgis-globe-host .esri-view-root,
+.arcgis-globe-host .esri-view-surface,
+.arcgis-globe-host canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.arcgis-globe-host .esri-ui-top-right {
+  top: 74px;
+  right: 12px;
+}
+
+.arcgis-globe-host .esri-widget,
+.arcgis-globe-host .esri-menu {
+  color: #d9efff;
+  background: rgba(6, 20, 38, 0.82);
+  border-color: rgba(125, 211, 252, 0.18);
+  backdrop-filter: blur(14px);
+}
+
+.arcgis-globe-host .esri-popup__main-container {
+  color: #dbeafe;
+  background: rgba(5, 17, 33, 0.94);
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  box-shadow: 0 16px 44px rgba(0,0,0,0.46);
+}
+
+.arcgis-globe-host .esri-popup__header-container,
+.arcgis-globe-host .esri-popup__content {
+  color: inherit;
+  background: transparent;
+}
+
+@media (max-width: 900px) {
+  .map-dimension-toggle {
+    top: 10px;
+    right: 10px;
+    width: 176px;
+  }
+
+  .map-dimension-toggle button {
+    min-height: 38px;
+    padding: 5px 6px;
+  }
+
+  .map-dimension-toggle button small {
+    display: none;
+  }
+
+  .map-dimension-status {
+    max-width: 176px;
+  }
+}
+
+@media (max-width: 520px) {
+  .map-dimension-toggle {
+    top: 8px;
+    right: 8px;
+    width: 132px;
+  }
+
+  .map-dimension-toggle button {
+    min-height: 36px;
+    gap: 4px;
+    padding: 4px;
+  }
+
+  .map-dimension-toggle svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .map-dimension-toggle button strong {
+    font-size: 9px;
+  }
+
+  .map-dimension-status {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arcgis-globe-spinner,
+  .map-dimension-toggle::before {
+    animation: none;
+  }
+
+  .arcgis-globe-host,
+  .arcgis-globe-loading,
+  .map-dimension-toggle button {
+    transition: none;
+  }
+}

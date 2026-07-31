@@ -1,6 +1,8 @@
 import { createRoot } from "react-dom/client";
 import "./adminApiRuntime";
 import "./mapboxLeafletRuntime";
+import "./arcgisGlobeRuntime";
+import "./arcgis-globe-runtime.css";
 import "./mapToolsCommandPanel";
 import "./rightPanelCompactor";
 import "./liveFinderDriveTools";

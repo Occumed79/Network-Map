@@ -69,19 +69,34 @@ function installLoaderHook(): void {
     return;
   }
 
-  if (existingDescriptor && existingDescriptor.configurable === false) return;
+  if (!existingDescriptor || existingDescriptor.configurable !== false) {
+    let current: ArcgisLoader | undefined;
+    Object.defineProperty(window, "$arcgis", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        return current;
+      },
+      set(value: ArcgisLoader | undefined) {
+        current = wrapLoader(value);
+      },
+    });
+  }
 
-  let current: ArcgisLoader | undefined;
-  Object.defineProperty(window, "$arcgis", {
-    configurable: true,
-    enumerable: true,
-    get() {
-      return current;
-    },
-    set(value: ArcgisLoader | undefined) {
-      current = wrapLoader(value);
-    },
-  });
+  // Secondary protection for SDK builds that redefine the global property
+  // rather than assigning through the setter. The dual-engine loader checks
+  // every 60 ms, so this short 5 ms poll wraps it first.
+  const started = Date.now();
+  const timer = window.setInterval(() => {
+    const loader = (window as any).$arcgis as ArcgisLoader | undefined;
+    if (loader && !(loader as any)[WRAPPED]) {
+      try { (window as any).$arcgis = wrapLoader(loader); } catch { /* retry */ }
+    }
+    const active = (window as any).$arcgis as ArcgisLoader | undefined;
+    if ((active as any)?.[WRAPPED] || Date.now() - started > 35_000) {
+      window.clearInterval(timer);
+    }
+  }, 5);
 }
 
 installLoaderHook();

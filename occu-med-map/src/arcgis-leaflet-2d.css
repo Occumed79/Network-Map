@@ -1,0 +1,38 @@
+.dual-engine-map-shell.arcgis-leaflet-2d .arcgis-map-host {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+.dual-engine-map-shell.arcgis-leaflet-2d:not(.mapbox-globe-active) .canonical-leaflet-controller {
+  z-index: 5 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+}
+
+.dual-engine-map-shell.arcgis-leaflet-2d.mapbox-globe-active .canonical-leaflet-controller {
+  z-index: 0 !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+.dual-engine-map-shell.arcgis-leaflet-2d:not(.mapbox-globe-active) .mapbox-globe-host {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+.dual-engine-map-shell.arcgis-leaflet-2d.mapbox-globe-active .mapbox-globe-host {
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+}
+
+.dual-engine-map-shell.arcgis-leaflet-2d .canonical-leaflet-controller,
+.dual-engine-map-shell.arcgis-leaflet-2d .canonical-leaflet-controller .leaflet-map-pane,
+.dual-engine-map-shell.arcgis-leaflet-2d .canonical-leaflet-controller .leaflet-tile-pane {
+  background: #d9effb;
+}

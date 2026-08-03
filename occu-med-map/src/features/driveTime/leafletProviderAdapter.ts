@@ -1,4 +1,5 @@
 import L from "leaflet";
+import "../../leafletInteractionDefaults";
 import { milesBetween } from "./providerEtaEngine";
 import type { EtaOrigin, EtaProviderCandidate } from "./providerEtaTypes";
 

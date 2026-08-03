@@ -1,5 +1,6 @@
 import { createRoot } from "react-dom/client";
-import "./atlasWebMapPatchRuntime";
+import "mapbox-gl/dist/mapbox-gl.css";
+import "./adminApiRuntime";
 import "./dualMapEngineRuntime";
 import App from "./App";
 import "./dual-map-engines.css";

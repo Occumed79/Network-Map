@@ -1,6 +1,8 @@
 import L from "leaflet";
+import mapboxgl from "mapbox-gl";
 
 type MapMode = "2d" | "3d";
+type MapProvider = "arcgis" | "mapbox";
 
 type ArcgisImportApi = {
   import: (modules: string[]) => Promise<any[]>;
@@ -23,14 +25,18 @@ const ARCGIS_SCRIPT_ID = "network-map-arcgis-sdk";
 const ARCGIS_STYLE_ID = "network-map-arcgis-theme";
 const ARCGIS_LOAD_TIMEOUT_MS = 20_000;
 const MAX_MIRRORED_GRAPHICS = 12000;
-const apiKey = import.meta.env.VITE_ARCGIS_API_KEY || "";
+const arcgisApiKey = import.meta.env.VITE_ARCGIS_API_KEY || "";
+const mapboxToken = import.meta.env.VITE_MAPBOX_TOKEN || "";
 
 let capturedMap: L.Map | null = null;
 let mode: MapMode = "2d";
+let provider: MapProvider = "arcgis";
 let host: HTMLDivElement | null = null;
 let control: HTMLDivElement | null = null;
 let statusNode: HTMLSpanElement | null = null;
+let mapView: any = null;
 let sceneView: any = null;
+let mapboxMap: any = null;
 let graphicsLayer: any = null;
 let GraphicCtor: any = null;
 let sceneReadyPromise: Promise<void> | null = null;
@@ -70,12 +76,12 @@ function installUi(map: L.Map): void {
   mapWrap.classList.add("map-dimension-switch-enabled");
 
   host = document.createElement("div");
-  host.className = "arcgis-globe-host";
+  host.className = "arcgis-map-host";
   host.setAttribute("aria-hidden", "true");
   host.innerHTML = `
-    <div class="arcgis-globe-loading" role="status">
-      <span class="arcgis-globe-spinner" aria-hidden="true"></span>
-      <strong>Starting ArcGIS 3D globe</strong>
+    <div class="arcgis-map-loading" role="status">
+      <span class="arcgis-map-spinner" aria-hidden="true"></span>
+      <strong>Starting ArcGIS 2D map</strong>
       <small>Synchronizing the active network layers…</small>
     </div>
   `;
@@ -85,15 +91,15 @@ function installUi(map: L.Map): void {
   control.setAttribute("role", "group");
   control.setAttribute("aria-label", "Map dimension");
   control.innerHTML = `
-    <button type="button" class="active" data-map-mode="2d" aria-pressed="true" title="Use the current Mapbox flat map">
+    <button type="button" class="active" data-map-mode="2d" aria-pressed="true" title="Use the ArcGIS 2D map">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Zm6-3v15m6-12v15"/></svg>
-      <span><strong>2D</strong><small>Mapbox</small></span>
+      <span><strong>2D</strong><small>ArcGIS</small></span>
     </button>
-    <button type="button" data-map-mode="3d" aria-pressed="false" title="Use the ArcGIS 3D globe">
+    <button type="button" data-map-mode="3d" aria-pressed="false" title="Use the Mapbox 3D map">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 4.5 6 4.5 9S15 18 12 21c-3-3-4.5-6-4.5-9S9 6 12 3Z"/></svg>
-      <span><strong>3D</strong><small>ArcGIS</small></span>
+      <span><strong>3D</strong><small>Mapbox</small></span>
     </button>
-    <span class="map-dimension-status" aria-live="polite">Mapbox 2D active</span>
+    <span class="map-dimension-status" aria-live="polite">ArcGIS 2D active</span>
   `;
 
   statusNode = control.querySelector(".map-dimension-status");
@@ -124,107 +130,122 @@ function updateToggleState(): void {
 
 async function setMode(nextMode: MapMode): Promise<void> {
   if (!capturedMap || !host) return;
-  if (nextMode === mode && (nextMode === "2d" || sceneView)) return;
+  if (nextMode === mode && (nextMode === "2d" || mapboxMap)) return;
 
   mode = nextMode;
   updateToggleState();
   const mapWrap = capturedMap.getContainer().parentElement;
 
   if (mode === "3d") {
-    mapWrap?.classList.add("arcgis-globe-active");
+    provider = "mapbox";
+    stopPeriodicSync();
+    syncLeafletToMapView();
+    mapWrap?.classList.remove("arcgis-map-active");
+    mapWrap?.classList.add("mapbox-3d-active");
     host.setAttribute("aria-hidden", "false");
-    setStatus("Loading ArcGIS 3D…", "loading");
+    setStatus("Loading Mapbox 3D…", "loading");
     try {
-      await ensureScene();
+      await ensureMapboxMap();
       syncGraphicsNow();
-      await syncSceneToLeafletView(true);
+      await syncMapboxToLeafletView();
       startPeriodicSync();
-      setStatus(`ArcGIS 3D · ${latestGraphicCount.toLocaleString()} active items`);
+      setStatus(`Mapbox 3D · ${latestGraphicCount.toLocaleString()} active items`);
     } catch (error) {
-      console.error("ArcGIS globe failed to initialize", error);
+      console.error("Mapbox 3D map failed to initialize", error);
       mode = "2d";
+      provider = "arcgis";
       updateToggleState();
-      mapWrap?.classList.remove("arcgis-globe-active");
+      mapWrap?.classList.remove("mapbox-3d-active");
+      mapWrap?.classList.add("arcgis-map-active");
       host.setAttribute("aria-hidden", "true");
-      setStatus("ArcGIS 3D unavailable", "error");
+      setStatus("Mapbox 3D unavailable, switching to ArcGIS 2D", "error");
       capturedMap.invalidateSize();
     }
     return;
   }
 
+  provider = "arcgis";
   stopPeriodicSync();
-  syncLeafletToSceneView();
-  mapWrap?.classList.remove("arcgis-globe-active");
-  host.setAttribute("aria-hidden", "true");
-  capturedMap.invalidateSize();
-  setStatus("Mapbox 2D active");
+  syncLeafletToMapboxView();
+  mapWrap?.classList.remove("mapbox-3d-active");
+  mapWrap?.classList.add("arcgis-map-active");
+  host.setAttribute("aria-hidden", "false");
+  setStatus("Loading ArcGIS 2D…", "loading");
+  try {
+    await ensureMapView();
+    syncGraphicsNow();
+    await syncMapViewToLeafletView();
+    startPeriodicSync();
+    setStatus(`ArcGIS 2D · ${latestGraphicCount.toLocaleString()} active items`);
+  } catch (error) {
+    console.error("ArcGIS 2D map failed to initialize", error);
+    mode = "3d";
+    provider = "mapbox";
+    updateToggleState();
+    mapWrap?.classList.remove("arcgis-map-active");
+    mapWrap?.classList.add("mapbox-3d-active");
+    host.setAttribute("aria-hidden", "false");
+    setStatus("ArcGIS 2D unavailable, switching to Mapbox 3D", "error");
+    capturedMap.invalidateSize();
+  }
 }
 
-async function ensureScene(): Promise<void> {
+async function ensureMapView(): Promise<void> {
+  if (mapView) return;
   if (sceneReadyPromise) return sceneReadyPromise;
-  if (sceneView) return;
 
   sceneReadyPromise = (async () => {
-    if (!apiKey) throw new Error("VITE_ARCGIS_API_KEY is not configured");
+    if (!arcgisApiKey) {
+      console.warn("VITE_ARCGIS_API_KEY is not configured - 2D map disabled");
+      throw new Error("VITE_ARCGIS_API_KEY is not configured");
+    }
     await loadArcgisSdk();
     if (!window.$arcgis || !host || !capturedMap) throw new Error("ArcGIS SDK did not load");
 
-    const [esriConfig, ArcGISMap, SceneView, GraphicsLayer, Graphic, reactiveUtils] = await window.$arcgis.import([
+    const [esriConfig, ArcGISMap, MapView, GraphicsLayer, Graphic, reactiveUtils] = await window.$arcgis.import([
       "@arcgis/core/config.js",
       "@arcgis/core/Map.js",
-      "@arcgis/core/views/SceneView.js",
+      "@arcgis/core/views/MapView.js",
       "@arcgis/core/layers/GraphicsLayer.js",
       "@arcgis/core/Graphic.js",
       "@arcgis/core/core/reactiveUtils.js",
     ]);
 
-    esriConfig.apiKey = apiKey;
+    esriConfig.apiKey = arcgisApiKey;
     GraphicCtor = Graphic;
     graphicsLayer = new GraphicsLayer({
       title: "Occu-Med Network Map overlays",
-      elevationInfo: { mode: "relative-to-ground", offset: 28 },
       listMode: "hide",
     });
 
-    const sceneMap = new ArcGISMap({
+    const arcgisMap = new ArcGISMap({
       basemap: "arcgis/navigation-night",
-      ground: "world-elevation",
       layers: [graphicsLayer],
     });
 
     const center = capturedMap.getCenter();
-    sceneView = new SceneView({
+    mapView = new MapView({
       container: host,
-      map: sceneMap,
+      map: arcgisMap,
       center: [center.lng, center.lat],
       zoom: capturedMap.getZoom(),
-      viewingMode: "global",
-      qualityProfile: window.matchMedia("(max-width: 768px)").matches ? "medium" : "high",
       popup: { dockEnabled: false },
-      environment: {
-        atmosphereEnabled: true,
-        starsEnabled: true,
-        lighting: {
-          directShadowsEnabled: true,
-          ambientOcclusionEnabled: true,
-        },
-      },
     });
 
-    await sceneView.when();
-    sceneView.ui.components = ["zoom", "compass", "attribution"];
+    await mapView.when();
+    mapView.ui.components = ["zoom", "attribution"];
     host.classList.add("ready");
 
     sceneWatchHandle = reactiveUtils.watch(
-      () => sceneView.stationary,
+      () => mapView.stationary,
       (stationary: boolean) => {
-        if (stationary && mode === "3d") syncLeafletToSceneView();
+        if (stationary && mode === "2d") syncLeafletToMapView();
       },
     );
 
-    sceneClickHandle = sceneView.on("click", async (event: any) => {
-      if (mode !== "3d" || !capturedMap) return;
-      const hit = await sceneView.hitTest(event).catch(() => null);
+    sceneClickHandle = mapView.on("click", async (event: any) => {
+      if (mode !== "2d" || !capturedMap) return;
+      const hit = await mapView.hitTest(event).catch(() => null);
       const hitNetworkGraphic = Boolean(hit?.results?.some((result: any) => result?.graphic?.layer === graphicsLayer));
       if (hitNetworkGraphic || !event.mapPoint) return;
       capturedMap.fire("click", {
@@ -233,8 +254,8 @@ async function ensureScene(): Promise<void> {
       });
     });
 
-    sceneDoubleClickHandle = sceneView.on("double-click", (event: any) => {
-      if (mode !== "3d" || !capturedMap || !event.mapPoint) return;
+    sceneDoubleClickHandle = mapView.on("double-click", (event: any) => {
+      if (mode !== "2d" || !capturedMap || !event.mapPoint) return;
       event.stopPropagation?.();
       capturedMap.fire("dblclick", {
         latlng: L.latLng(event.mapPoint.latitude, event.mapPoint.longitude),
@@ -246,20 +267,63 @@ async function ensureScene(): Promise<void> {
   try {
     await sceneReadyPromise;
   } catch (error) {
-    sceneWatchHandle?.remove?.();
-    sceneClickHandle?.remove?.();
-    sceneDoubleClickHandle?.remove?.();
-    sceneWatchHandle = null;
-    sceneClickHandle = null;
-    sceneDoubleClickHandle = null;
-    sceneView?.destroy?.();
-    sceneView = null;
+    mapView = null;
     graphicsLayer = null;
     GraphicCtor = null;
     host?.classList.remove("ready");
     sceneReadyPromise = null;
     throw error;
   }
+}
+
+async function ensureMapboxMap(): Promise<void> {
+  if (mapboxMap) return;
+  if (!mapboxToken) throw new Error("VITE_MAPBOX_TOKEN is not configured");
+  if (!host || !capturedMap) throw new Error("Map container not available");
+
+  mapboxgl.accessToken = mapboxToken;
+  
+  const center = capturedMap.getCenter();
+  mapboxMap = new mapboxgl.Map({
+    container: host,
+    style: "mapbox://styles/mapbox/streets-v12",
+    center: [center.lng, center.lat],
+    zoom: capturedMap.getZoom(),
+    pitch: 45,
+    bearing: 0,
+    antialias: true,
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    mapboxMap.on("load", () => resolve());
+    mapboxMap.on("error", (e: any) => reject(e.error));
+    setTimeout(() => reject(new Error("Mapbox map load timeout")), 15000);
+  });
+
+  mapboxMap.addControl(new mapboxgl.NavigationControl(), "top-right");
+  mapboxMap.addControl(new mapboxgl.AttributionControl(), "bottom-right");
+  host.classList.add("ready");
+
+  mapboxMap.on("moveend", () => {
+    if (mode === "3d") syncLeafletToMapboxView();
+  });
+
+  mapboxMap.on("click", (event: any) => {
+    if (mode !== "3d" || !capturedMap) return;
+    capturedMap.fire("click", {
+      latlng: L.latLng(event.lngLat.lat, event.lngLat.lng),
+      originalEvent: event.originalEvent,
+    });
+  });
+
+  mapboxMap.on("dblclick", (event: any) => {
+    if (mode !== "3d" || !capturedMap) return;
+    event.originalEvent.stopPropagation?.();
+    capturedMap.fire("dblclick", {
+      latlng: L.latLng(event.lngLat.lat, event.lngLat.lng),
+      originalEvent: event.originalEvent,
+    });
+  });
 }
 
 function loadArcgisSdk(): Promise<void> {
@@ -599,21 +663,20 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-async function syncSceneToLeafletView(tiltOnArrival = false): Promise<void> {
-  if (!sceneView || !capturedMap || mode !== "3d") return;
+async function syncMapViewToLeafletView(): Promise<void> {
+  if (!mapView || !capturedMap || mode !== "2d") return;
   const center = capturedMap.getCenter();
-  await sceneView.goTo({
+  await mapView.goTo({
     center: [center.lng, center.lat],
     zoom: capturedMap.getZoom(),
-    tilt: tiltOnArrival ? 34 : sceneView.camera?.tilt,
   }, { animate: true, duration: 650 }).catch(() => undefined);
 }
 
-function syncLeafletToSceneView(): void {
-  if (!sceneView || !capturedMap || mode !== "3d" || !sceneView.center) return;
-  const latitude = Number(sceneView.center.latitude);
-  const longitude = Number(sceneView.center.longitude);
-  const zoom = Math.max(2, Math.min(19, Math.round(numberOr(sceneView.zoom, capturedMap.getZoom()))));
+function syncLeafletToMapView(): void {
+  if (!mapView || !capturedMap || mode !== "2d" || !mapView.center) return;
+  const latitude = Number(mapView.center.latitude);
+  const longitude = Number(mapView.center.longitude);
+  const zoom = Math.max(2, Math.min(19, Math.round(numberOr(mapView.zoom, capturedMap.getZoom()))));
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
 
   const current = capturedMap.getCenter();
@@ -623,11 +686,38 @@ function syncLeafletToSceneView(): void {
   capturedMap.setView([latitude, longitude], zoom, { animate: false });
 }
 
+async function syncMapboxToLeafletView(): Promise<void> {
+  if (!mapboxMap || !capturedMap || mode !== "3d") return;
+  const center = capturedMap.getCenter();
+  mapboxMap.flyTo({
+    center: [center.lng, center.lat],
+    zoom: capturedMap.getZoom(),
+    pitch: 45,
+    bearing: 0,
+    duration: 650,
+  });
+}
+
+function syncLeafletToMapboxView(): void {
+  if (!mapboxMap || !capturedMap || mode !== "3d") return;
+  const center = mapboxMap.getCenter();
+  const zoom = mapboxMap.getZoom();
+  if (!center || !Number.isFinite(zoom)) return;
+
+  const current = capturedMap.getCenter();
+  if (Math.abs(current.lat - center.lat) < 0.0001 && Math.abs(current.lng - center.lng) < 0.0001 && capturedMap.getZoom() === zoom) return;
+
+  lastSceneDrivenLeafletMove = Date.now();
+  capturedMap.setView([center.lat, center.lng], zoom, { animate: false });
+}
+
 function onLeafletViewChanged(): void {
   queueGraphicSync();
-  if (mode !== "3d" || !sceneView) return;
+  if (mode === "2d" && !mapView) return;
+  if (mode === "3d" && !mapboxMap) return;
   if (Date.now() - lastSceneDrivenLeafletMove < 500) return;
-  void syncSceneToLeafletView(false);
+  if (mode === "2d") void syncMapViewToLeafletView();
+  if (mode === "3d") void syncMapboxToLeafletView();
 }
 
 window.__NETWORK_MAP_GLOBE__ = {
@@ -641,7 +731,9 @@ window.addEventListener("beforeunload", () => {
   sceneWatchHandle?.remove?.();
   sceneClickHandle?.remove?.();
   sceneDoubleClickHandle?.remove?.();
+  mapView?.destroy?.();
   sceneView?.destroy?.();
+  mapboxMap?.remove?.();
 });
 
 installMapCapture();

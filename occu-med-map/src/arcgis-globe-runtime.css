@@ -2,7 +2,7 @@
   position: relative;
 }
 
-.arcgis-globe-host {
+.arcgis-map-host {
   position: absolute;
   inset: 0;
   z-index: 2;
@@ -16,25 +16,25 @@
   transition: opacity 280ms ease, visibility 280ms ease;
 }
 
-.arcgis-globe-active .arcgis-globe-host {
+.arcgis-map-active .arcgis-map-host {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
 }
 
-.arcgis-globe-active #map {
+.arcgis-map-active #map {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
 }
 
-.arcgis-globe-host.ready .arcgis-globe-loading {
+.arcgis-map-host.ready .arcgis-map-loading {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
 }
 
-.arcgis-globe-loading {
+.arcgis-map-loading {
   position: absolute;
   inset: 0;
   z-index: 5;
@@ -50,12 +50,12 @@
   transition: opacity 220ms ease, visibility 220ms ease;
 }
 
-.arcgis-globe-loading strong {
+.arcgis-map-loading strong {
   font-size: 12px;
   letter-spacing: 0.02em;
 }
 
-.arcgis-globe-loading small {
+.arcgis-map-loading small {
   color: #6f95b4;
   font-family: "IBM Plex Mono", monospace;
   font-size: 8px;
@@ -63,17 +63,17 @@
   text-transform: uppercase;
 }
 
-.arcgis-globe-spinner {
+.arcgis-map-spinner {
   width: 28px;
   height: 28px;
   border: 2px solid rgba(125, 211, 252, 0.2);
   border-top-color: #7dd3fc;
   border-radius: 999px;
   box-shadow: 0 0 18px rgba(56, 189, 248, 0.32);
-  animation: arcgis-globe-spin 0.8s linear infinite;
+  animation: arcgis-map-spin 0.8s linear infinite;
 }
 
-@keyframes arcgis-globe-spin {
+@keyframes arcgis-map-spin {
   to { transform: rotate(360deg); }
 }
 
@@ -212,36 +212,36 @@
   border-color: rgba(252, 165, 165, 0.25);
 }
 
-.arcgis-globe-host .esri-view,
-.arcgis-globe-host .esri-view-root,
-.arcgis-globe-host .esri-view-surface,
-.arcgis-globe-host canvas {
+.arcgis-map-host .esri-view,
+.arcgis-map-host .esri-view-root,
+.arcgis-map-host .esri-view-surface,
+.arcgis-map-host canvas {
   width: 100% !important;
   height: 100% !important;
 }
 
-.arcgis-globe-host .esri-ui-top-right {
+.arcgis-map-host .esri-ui-top-right {
   top: 74px;
   right: 12px;
 }
 
-.arcgis-globe-host .esri-widget,
-.arcgis-globe-host .esri-menu {
+.arcgis-map-host .esri-widget,
+.arcgis-map-host .esri-menu {
   color: #d9efff;
   background: rgba(6, 20, 38, 0.82);
   border-color: rgba(125, 211, 252, 0.18);
   backdrop-filter: blur(14px);
 }
 
-.arcgis-globe-host .esri-popup__main-container {
+.arcgis-map-host .esri-popup__main-container {
   color: #dbeafe;
   background: rgba(5, 17, 33, 0.94);
   border: 1px solid rgba(125, 211, 252, 0.2);
   box-shadow: 0 16px 44px rgba(0,0,0,0.46);
 }
 
-.arcgis-globe-host .esri-popup__header-container,
-.arcgis-globe-host .esri-popup__content {
+.arcgis-map-host .esri-popup__header-container,
+.arcgis-map-host .esri-popup__content {
   color: inherit;
   background: transparent;
 }
@@ -295,13 +295,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .arcgis-globe-spinner,
+  .arcgis-map-spinner,
   .map-dimension-toggle::before {
     animation: none;
   }
 
-  .arcgis-globe-host,
-  .arcgis-globe-loading,
+  .arcgis-map-host,
+  .arcgis-map-loading,
   .map-dimension-toggle button {
     transition: none;
   }

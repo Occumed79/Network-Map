@@ -1,12 +1,14 @@
 import { createRoot } from "react-dom/client";
 import "./adminApiRuntime";
 import "./dualMapEngineRuntime";
+import "./mapboxGlobeLoadHardeningRuntime";
 import "./dualMapTransitionRuntime";
 import "./mapEngineLoadingCleanupRuntime";
 import "./manualProviderLayerGateRuntime";
 import "./unifiedProviderToolsRuntime";
 import "./manualProviderDefaultsRuntime";
 import "./dual-map-engines.css";
+import "./dual-map-transition-opaque.css";
 import "./mapToolsCommandPanel";
 import "./rightPanelCompactor";
 import "./liveFinderDriveTools";

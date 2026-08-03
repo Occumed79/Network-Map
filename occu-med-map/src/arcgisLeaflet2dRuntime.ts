@@ -17,6 +17,7 @@ const ARCGIS_WORLD_TOPO = "https://server.arcgisonline.com/ArcGIS/rest/services/
 const BRIDGE_PATCH_FLAG = "networkMapArcgisLeaflet2dPatched";
 const previousTileLayer = L.tileLayer.bind(L);
 let visibleMode: MapMode = "2d";
+let resizeQueued = false;
 
 function isLegacyBaseTemplate(template: unknown): template is string {
   if (typeof template !== "string") return false;
@@ -47,11 +48,24 @@ function setText(node: HTMLElement | null, value: string): void {
   if (node && node.textContent !== value) node.textContent = value;
 }
 
+function setAttribute(node: Element | null, name: string, value: string): void {
+  if (node && node.getAttribute(name) !== value) node.setAttribute(name, value);
+}
+
+function queueResize(): void {
+  if (resizeQueued) return;
+  resizeQueued = true;
+  window.requestAnimationFrame(() => {
+    resizeQueued = false;
+    window.dispatchEvent(new Event("resize"));
+  });
+}
+
 function updateButtons(shell: HTMLElement, mode: MapMode): void {
   shell.querySelectorAll<HTMLButtonElement>(".map-dimension-toggle button[data-map-mode]").forEach((button) => {
     const active = button.dataset.mapMode === mode;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-pressed", String(active));
+    if (button.classList.contains("active") !== active) button.classList.toggle("active", active);
+    setAttribute(button, "aria-pressed", String(active));
   });
 }
 
@@ -65,20 +79,19 @@ function showLeafletArcgis2d(shell: HTMLElement): void {
 
   arcgisHost?.classList.add("ready", "engine-render-ready");
   arcgisHost?.querySelectorAll<HTMLElement>(".dual-engine-loading").forEach((node) => node.remove());
-  arcgisHost?.setAttribute("aria-hidden", "true");
-  mapboxHost?.setAttribute("aria-hidden", "true");
+  setAttribute(arcgisHost, "aria-hidden", "true");
+  setAttribute(mapboxHost, "aria-hidden", "true");
 
   setText(status, "ArcGIS 2D active");
-  if (status) status.dataset.state = "normal";
+  if (status && status.dataset.state !== "normal") status.dataset.state = "normal";
   updateButtons(shell, "2d");
-
-  window.requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+  queueResize();
 }
 
 function showMapbox3d(shell: HTMLElement): void {
   shell.classList.add("mapbox-globe-active");
   const mapboxHost = shell.querySelector<HTMLElement>(".mapbox-globe-host");
-  mapboxHost?.setAttribute("aria-hidden", "false");
+  setAttribute(mapboxHost, "aria-hidden", "false");
   updateButtons(shell, "3d");
 }
 

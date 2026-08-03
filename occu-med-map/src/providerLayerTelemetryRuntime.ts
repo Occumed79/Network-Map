@@ -1,11 +1,9 @@
 /**
  * Provider layer telemetry runtime.
  *
- * Listens for `network-map:provider-layer-status` CustomEvents dispatched by
- * providerLayerRequestRuntime and updates telemetry-driven UI elements.
- *
- * This module does NOT monkey-patch window.fetch. It uses a narrow
- * MutationObserver scoped only to the provider source health header.
+ * Keeps database inventory totals separate from records loaded/rendered for the
+ * current viewport. The old UI presented a viewport-limited BlueHive count as
+ * though it were the full source inventory.
  */
 
 type ProviderLayerStatusDetail = {
@@ -26,7 +24,7 @@ type ProviderLayerStatusDetail = {
 type SourceMetric = {
   source: string;
   loaded: number;
-  total: number;
+  viewportTotal: number;
   rendered: number;
   successfullyLoaded: boolean;
   transientFailure: boolean;
@@ -37,24 +35,37 @@ type SourceMetric = {
   updatedAt: number;
 };
 
+type SourceKey = "indexed" | "bluehive" | "dentists" | "my-clinics";
+
 declare global {
   interface Window {
     __networkMapProviderMetrics?: {
       sources: Record<string, SourceMetric>;
+      sourceTotals: Record<string, number>;
       overlays: Record<string, never>;
       enabledSources: string[];
+      selectedSourceRecords: number;
       loadedRecords: number;
       renderedRecords: number;
     };
   }
 }
 
-const SOURCE_KEYS = ["indexed", "bluehive", "dentists", "my-clinics"] as const;
+const SOURCE_KEYS: SourceKey[] = ["indexed", "bluehive", "dentists", "my-clinics"];
+const SOURCE_QUERY: Record<SourceKey, string> = {
+  indexed: "indexed",
+  bluehive: "bluehive",
+  dentists: "dentists",
+  "my-clinics": "my-clinics",
+};
+
 const sourceMetrics = new Map<string, SourceMetric>();
+const sourceTotals = new Map<SourceKey, number>();
 let updateTimer: number | null = null;
 let headerObserver: MutationObserver | null = null;
+let inventoryRequest: Promise<void> | null = null;
 
-function normalizeSourceKey(value: string): string | null {
+function normalizeSourceKey(value: string): SourceKey | null {
   const normalized = value.trim().toLowerCase().replace(/[_\s]+/g, "-");
   if (normalized.includes("bluehive")) return "bluehive";
   if (normalized.includes("dentist")) return "dentists";
@@ -63,21 +74,21 @@ function normalizeSourceKey(value: string): string | null {
   return null;
 }
 
-function sourceKeyFromInput(input: HTMLInputElement): string | null {
+function sourceKeyFromInput(input: HTMLInputElement): SourceKey | null {
   return normalizeSourceKey(input.getAttribute("aria-label") || input.name || input.id || "");
 }
 
-function sourceInputs(): Array<{ key: string; input: HTMLInputElement; row: HTMLElement | null }> {
-  const result: Array<{ key: string; input: HTMLInputElement; row: HTMLElement | null }> = [];
+function sourceInputs(): Array<{ key: SourceKey; input: HTMLInputElement; row: HTMLElement | null }> {
+  const result: Array<{ key: SourceKey; input: HTMLInputElement; row: HTMLElement | null }> = [];
   document.querySelectorAll<HTMLInputElement>(".workflow-layer input[type='checkbox']").forEach((input) => {
     const key = sourceKeyFromInput(input);
-    if (!key || !SOURCE_KEYS.includes(key as typeof SOURCE_KEYS[number])) return;
+    if (!key || !SOURCE_KEYS.includes(key)) return;
     result.push({ key, input, row: input.closest<HTMLElement>(".workflow-layer") });
   });
   return result;
 }
 
-function enabledSourceKeys(): Set<string> {
+function enabledSourceKeys(): Set<SourceKey> {
   return new Set(sourceInputs().filter(({ input }) => input.checked).map(({ key }) => key));
 }
 
@@ -104,116 +115,102 @@ function scheduleUpdate(): void {
 
 function clearOverlay(label: string): void {
   scheduleUpdate();
-  void label; // kept for call-site compatibility; overlay metrics removed
+  void label;
 }
 
-function ensureStyles(): void {
-  if (document.getElementById("provider-layer-telemetry-styles")) return;
-  const style = document.createElement("style");
-  style.id = "provider-layer-telemetry-styles";
-  style.textContent = `
-    .provider-counter-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 6px;
-      margin-top: 9px;
-    }
-    .provider-counter-metric {
-      min-width: 0;
-      padding: 6px 7px;
-      border: 1px solid rgba(105, 139, 183, 0.2);
-      border-radius: 8px;
-      background: rgba(10, 24, 45, 0.36);
-    }
-    .provider-counter-metric strong,
-    .provider-counter-metric span {
-      display: block;
-    }
-    .provider-counter-metric strong {
-      color: #eef7ff;
-      font: 700 11px/1.15 'IBM Plex Mono', monospace;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .provider-counter-metric span {
-      margin-top: 2px;
-      color: #7890aa;
-      font: 600 7px/1.2 'IBM Plex Mono', monospace;
-      letter-spacing: .06em;
-      text-transform: uppercase;
-    }
-    .provider-counter-metric[data-provider-metric='overlays'] {
-      grid-column: 1 / -1;
-    }
-    .provider-source-health strong {
-      white-space: nowrap;
-    }
-  `;
-  document.head.appendChild(style);
+function inventoryTotal(key: SourceKey): number | null {
+  const value = sourceTotals.get(key);
+  return value === undefined ? null : value;
 }
 
-function ensureCounterGrid(heroSummary: Element): HTMLElement {
-  const existing = heroSummary.parentElement?.querySelector<HTMLElement>(".provider-counter-grid");
-  if (existing) return existing;
-  const grid = document.createElement("div");
-  grid.className = "provider-counter-grid";
-  const metrics = [
-    ["enabled", "Enabled sources"],
-    ["loaded", "Loaded sources"],
-    ["records", "Loaded records"],
-    ["rendered", "Rendered in viewport"],
-  ];
-  for (const [key, label] of metrics) {
-    const metric = document.createElement("div");
-    metric.className = "provider-counter-metric";
-    metric.dataset.providerMetric = key;
-    const value = document.createElement("strong");
-    value.textContent = "0";
-    const caption = document.createElement("span");
-    caption.textContent = label;
-    metric.append(value, caption);
-    grid.appendChild(metric);
+async function fetchSourceInventoryTotal(key: SourceKey): Promise<void> {
+  const params = new URLSearchParams({
+    mode: "records",
+    source: SOURCE_QUERY[key],
+    page: "1",
+    limit: "1",
+    includeLive: "false",
+    includeCandidates: "false",
+    includeSaved: key === "my-clinics" ? "true" : "false",
+  });
+  const response = await fetch(`/api/provider-explorer?${params.toString()}`, {
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const payload = await response.json().catch(() => null) as { total?: unknown; error?: unknown } | null;
+  if (!payload || payload.error) throw new Error(String(payload?.error || "Invalid provider inventory response"));
+  sourceTotals.set(key, safeNumber(payload.total));
+}
+
+function refreshInventoryTotals(): Promise<void> {
+  if (inventoryRequest) return inventoryRequest;
+  inventoryRequest = Promise.allSettled(SOURCE_KEYS.map((key) => fetchSourceInventoryTotal(key)))
+    .then(() => {
+      scheduleUpdate();
+      window.dispatchEvent(new CustomEvent("network-map:provider-inventory-totals", {
+        detail: Object.fromEntries(sourceTotals.entries()),
+      }));
+    })
+    .finally(() => {
+      inventoryRequest = null;
+    });
+  return inventoryRequest;
+}
+
+function sourceStatusText(key: SourceKey, input: HTMLInputElement, metric: SourceMetric | undefined): string {
+  const inventory = inventoryTotal(key);
+  const prefix = inventory === null ? "" : `${formatNumber(inventory)} total`;
+
+  if (!input.checked) return prefix ? `${prefix} · off` : "Off";
+  if (!metric) return prefix ? `${prefix} · loading…` : "Loading…";
+  if (!metric.successfullyLoaded || metric.transientFailure) {
+    return prefix ? `${prefix} · load failed` : "Temporary load failure";
   }
-  heroSummary.insertAdjacentElement("afterend", grid);
-  return grid;
+
+  const suffix = metric.stale ? " · cached fallback" : metric.fromCache ? " · cached" : "";
+  const visible = `${formatNumber(metric.rendered)} in view${suffix}`;
+  return prefix ? `${prefix} · ${visible}` : visible;
 }
 
-function updateMetric(grid: HTMLElement, key: string, value: string, title = ""): void {
-  const metric = grid.querySelector<HTMLElement>(`[data-provider-metric='${key}']`);
-  if (!metric) return;
-  setText(metric.querySelector("strong"), value);
-  if (metric.title !== title) metric.title = title;
+function updateSourceButtons(enabled: Set<SourceKey>): void {
+  const inputs = sourceInputs();
+  SOURCE_KEYS.forEach((key) => {
+    const button = document.querySelector<HTMLButtonElement>(`.unified-source-tool[data-source-key='${key}']`);
+    if (!button) return;
+    const input = inputs.find((entry) => entry.key === key)?.input;
+    const count = button.querySelector<HTMLElement>(".unified-source-count");
+    if (!input) {
+      setText(count, "Source unavailable");
+      return;
+    }
+    const metric = sourceMetrics.get(key);
+    const status = sourceStatusText(key, input, metric);
+    setText(count, status);
+    button.title = status;
+    button.classList.toggle("active", enabled.has(key));
+    button.setAttribute("aria-pressed", String(enabled.has(key)));
+  });
 }
 
-function updateSourceRows(enabled: Set<string>): void {
+function updateLegacySourceRows(enabled: Set<SourceKey>): void {
   for (const { key, input, row } of sourceInputs()) {
     const status = row?.querySelector<HTMLElement>(".workflow-layer-status");
-    const metric = sourceMetrics.get(key);
     if (!status) continue;
-    if (!input.checked) {
-      if (metric?.successfullyLoaded) {
-        setText(status, `${formatNumber(metric.loaded)} cached · toggle off`);
-      }
-      continue;
-    }
-    if (!enabled.has(key) || !metric) {
-      setText(status, "Enabled · waiting to load");
-      continue;
-    }
-    if (!metric.successfullyLoaded || metric.transientFailure) {
-      setText(status, "Enabled · temporary load failure");
-      status.title = metric.warning || "The source remains enabled and will retry.";
-      continue;
-    }
-    const suffix = metric.stale ? " · cached fallback" : metric.fromCache ? " · cached" : "";
-    setText(status, `${formatNumber(metric.loaded)} loaded · ${formatNumber(metric.rendered)} rendered${suffix}`);
-    status.title = `${formatNumber(metric.total)} matching records · ${metric.pagesLoaded} database page${metric.pagesLoaded === 1 ? "" : "s"}`;
+    const metric = sourceMetrics.get(key);
+    setText(status, sourceStatusText(key, input, metric));
+    if (!enabled.has(key)) continue;
+    const inventory = inventoryTotal(key);
+    status.title = inventory === null
+      ? "Full source inventory is being checked."
+      : `${formatNumber(inventory)} records in the source database. Viewport loading is shown separately.`;
   }
+}
+
+function removeLegacyCounterGrid(): void {
+  document.querySelectorAll<HTMLElement>(".provider-counter-grid").forEach((grid) => grid.remove());
 }
 
 function updateUi(): void {
-  ensureStyles();
   const enabled = enabledSourceKeys();
   const enabledMetrics = [...enabled]
     .map((key) => sourceMetrics.get(key))
@@ -221,35 +218,41 @@ function updateUi(): void {
   const successfullyLoaded = enabledMetrics.filter((metric) => metric.successfullyLoaded && !metric.transientFailure);
   const loadedRecords = successfullyLoaded.reduce((sum, metric) => sum + metric.loaded, 0);
   const renderedRecords = successfullyLoaded.reduce((sum, metric) => sum + metric.rendered, 0);
+  const selectedSourceRecords = [...enabled].reduce((sum, key) => sum + (inventoryTotal(key) || 0), 0);
+
   const header = document.querySelector<HTMLElement>(".provider-source-health");
   if (header) {
-    setText(header.querySelector("strong"), `${enabled.size} enabled`);
+    setText(header.querySelector("strong"), `${enabled.size} selected`);
     const spans = header.querySelectorAll("span");
     setText(spans.length ? spans[spans.length - 1] : null, `${successfullyLoaded.length} loaded`);
     header.title = [
-      `${enabled.size} provider sources enabled`,
+      `${enabled.size} provider sources selected`,
       `${successfullyLoaded.length} successfully loaded`,
-      `${formatNumber(loadedRecords)} records loaded`,
-      `${formatNumber(renderedRecords)} records rendered in the viewport`,
+      `${formatNumber(selectedSourceRecords)} records across selected source inventories`,
+      `${formatNumber(renderedRecords)} rendered in the current viewport`,
     ].join(" · ");
   }
 
   const heroSummary = document.querySelector<HTMLElement>(".hero-source-summary");
   if (heroSummary) {
-    setText(heroSummary.querySelector("span"), `${formatNumber(loadedRecords)} loaded records`);
+    const sourceRecordLabel = sourceTotals.size
+      ? `${formatNumber(selectedSourceRecords)} selected-source records`
+      : `${formatNumber(loadedRecords)} records loaded for this view`;
+    setText(heroSummary.querySelector("span"), sourceRecordLabel);
     setText(heroSummary.querySelector("strong"), `${formatNumber(renderedRecords)} rendered in viewport`);
-    const grid = ensureCounterGrid(heroSummary);
-    updateMetric(grid, "enabled", String(enabled.size), [...enabled].join(", ") || "No provider sources enabled");
-    updateMetric(grid, "loaded", String(successfullyLoaded.length), successfullyLoaded.map((metric) => metric.source).join(", ") || "No sources loaded yet");
-    updateMetric(grid, "records", formatNumber(loadedRecords), "Provider records fetched for enabled source layers");
-    updateMetric(grid, "rendered", formatNumber(renderedRecords), "Valid provider records inside the current viewport");
+    heroSummary.title = "Database source totals and current viewport rendering are intentionally shown as separate numbers.";
   }
 
-  updateSourceRows(enabled);
+  removeLegacyCounterGrid();
+  updateSourceButtons(enabled);
+  updateLegacySourceRows(enabled);
+
   window.__networkMapProviderMetrics = {
     sources: Object.fromEntries(sourceMetrics.entries()),
+    sourceTotals: Object.fromEntries(sourceTotals.entries()),
     overlays: {},
     enabledSources: [...enabled],
+    selectedSourceRecords,
     loadedRecords,
     renderedRecords,
   };
@@ -262,7 +265,7 @@ window.addEventListener("network-map:provider-layer-status", (event) => {
   sourceMetrics.set(source, {
     source,
     loaded: safeNumber(detail.loaded),
-    total: safeNumber(detail.total),
+    viewportTotal: safeNumber(detail.total),
     rendered: safeNumber(detail.rendered),
     successfullyLoaded: detail.successfullyLoaded === true,
     transientFailure: detail.transientFailure === true,
@@ -291,21 +294,14 @@ document.addEventListener("click", (event) => {
   const button = target.closest("button");
   const text = (button?.textContent || "").trim().toLowerCase();
   if (!text) return;
-  if (text.includes("clear") && (text.includes("provider") || text.includes("map"))) {
-    clearOverlay("Provider Explorer");
-  }
-  if (text.includes("clear") && (text.includes("live") || text.includes("result"))) {
-    clearOverlay("Live Finder");
-  }
+  if (text.includes("clear") && (text.includes("provider") || text.includes("map"))) clearOverlay("Provider Explorer");
+  if (text.includes("clear") && (text.includes("live") || text.includes("result"))) clearOverlay("Live Places");
 });
 
 function start(): void {
-  ensureStyles();
   scheduleUpdate();
+  void refreshInventoryTotals();
 
-  // Observe only the provider source health header for class changes so the
-  // enabled/loaded counts stay fresh when React re-renders the sidebar.
-  // This is deliberately scoped to avoid scanning the entire body.
   const connectHeader = () => {
     const header = document.querySelector(".provider-source-health");
     if (!header) return;
@@ -315,17 +311,20 @@ function start(): void {
   };
 
   if (!document.body) {
-    window.addEventListener("DOMContentLoaded", () => { connectHeader(); scheduleUpdate(); }, { once: true });
-    return;
-  }
-  connectHeader();
-  // Single lightweight body observer only to detect when the header mounts.
-  const mountObserver = new MutationObserver(() => {
-    if (document.querySelector(".provider-source-health")) {
-      mountObserver.disconnect();
+    window.addEventListener("DOMContentLoaded", () => {
       connectHeader();
       scheduleUpdate();
-    }
+      void refreshInventoryTotals();
+    }, { once: true });
+    return;
+  }
+
+  connectHeader();
+  const mountObserver = new MutationObserver(() => {
+    if (!document.querySelector(".provider-source-health")) return;
+    mountObserver.disconnect();
+    connectHeader();
+    scheduleUpdate();
   });
   mountObserver.observe(document.body, { childList: true, subtree: false });
 }

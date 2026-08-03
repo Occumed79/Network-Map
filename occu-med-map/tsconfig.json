@@ -1,7 +1,17 @@
 {
   "extends": "../tsconfig.base.json",
   "include": ["src/**/*", "scripts/**/*"],
-  "exclude": ["node_modules", "build", "dist", "**/*.test.ts"],
+  "exclude": [
+    "node_modules",
+    "build",
+    "dist",
+    "**/*.test.ts",
+    "src/dualMapEngineRuntime.ts",
+    "src/reliableMapRuntime.ts",
+    "src/mapboxGlobeLoadHardeningRuntime.ts",
+    "src/atlasWebMapPatchRuntime.ts",
+    "src/arcgisLeaflet2dRuntime.ts"
+  ],
   "compilerOptions": {
     "noEmit": true,
     "jsx": "preserve",

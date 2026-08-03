@@ -1,16 +1,16 @@
 const SOURCE_SELECTION_KEY = "network-map:provider-source-selection-v3";
-const SOURCE_INPUT_LABELS = [
+const OFF_BY_DEFAULT_LABELS = [
   "Indexed Providers",
   "BlueHive Providers",
   "Dental Examiner Presence",
   "My Clinics",
+  "Luminous Density",
 ] as const;
-const DENSITY_INPUT_LABEL = "Luminous Density";
 
-let initialized = false;
-let scanQueued = false;
+let attempts = 0;
+let timer: number | null = null;
 
-function setStoredSourcesOff(): void {
+function persistOffDefaults(): void {
   try {
     localStorage.setItem(SOURCE_SELECTION_KEY, JSON.stringify({
       bluehive: false,
@@ -19,95 +19,61 @@ function setStoredSourcesOff(): void {
       "my-clinics": false,
     }));
   } catch {
-    // Storage is optional. The DOM controls are still reset below.
+    // Local storage is optional.
   }
 }
 
-function inputByLabel(label: string): HTMLInputElement | null {
-  const target = label.trim().toLowerCase();
+function findInput(label: string): HTMLInputElement | null {
+  const wanted = label.toLowerCase();
   return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
-    .find((input) => (input.getAttribute("aria-label") || "").trim().toLowerCase() === target) || null;
+    .find(input => (input.getAttribute("aria-label") || "").trim().toLowerCase() === wanted) || null;
 }
 
-function turnOff(input: HTMLInputElement | null): void {
-  if (!input || input.disabled || !input.checked) return;
+function turnOff(input: HTMLInputElement): void {
+  if (!input.checked) return;
+  const wasDisabled = input.disabled;
+  if (wasDisabled) input.disabled = false;
   input.click();
+  if (wasDisabled && input.isConnected) input.disabled = true;
 }
 
-function applyManualDefaults(): void {
-  SOURCE_INPUT_LABELS.forEach((label) => turnOff(inputByLabel(label)));
-  turnOff(inputByLabel(DENSITY_INPUT_LABEL));
+function updateCopy(): void {
+  document.querySelectorAll<HTMLElement>(".command-section-title small").forEach(node => {
+    if ((node.textContent || "").trim().toLowerCase() === "all on by default") {
+      node.textContent = "Off by default";
+    }
+  });
+}
 
-  const allPresent = SOURCE_INPUT_LABELS.every((label) => Boolean(inputByLabel(label)))
-    && Boolean(inputByLabel(DENSITY_INPUT_LABEL));
-  if (allPresent) {
-    initialized = true;
+function applyDefaults(): boolean {
+  updateCopy();
+  const inputs = OFF_BY_DEFAULT_LABELS.map(findInput);
+  inputs.forEach(input => { if (input) turnOff(input); });
+  const complete = inputs.every(Boolean) && inputs.every(input => input?.checked === false);
+  if (complete) {
     document.body.dataset.providerDefaultsReady = "true";
+    delete document.body.dataset.providerDensityUserEnabled;
   }
+  return complete;
 }
 
-function scheduleScan(): void {
-  if (scanQueued || initialized) return;
-  scanQueued = true;
-  window.setTimeout(() => {
-    scanQueued = false;
-    applyManualDefaults();
-  }, 0);
-}
-
-function installDensityGate(): void {
-  if (document.getElementById("manual-provider-density-gate")) return;
-  const style = document.createElement("style");
-  style.id = "manual-provider-density-gate";
-  style.textContent = `
-    body:not([data-provider-density-user-enabled="true"]) .provider-density-field,
-    body:not([data-provider-density-user-enabled="true"]) .provider-hex-field {
-      display: none !important;
-    }
-  `;
-  document.head.appendChild(style);
-}
-
-function visualizationButton(target: Element): HTMLButtonElement | null {
-  const button = target.closest<HTMLButtonElement>(".provider-visualization-grid button");
-  return button || null;
-}
-
-function installUserActivationListeners(): void {
-  document.addEventListener("click", (event) => {
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-
-    const visualization = visualizationButton(target);
-    if (visualization) {
-      document.body.dataset.providerDensityUserEnabled = "true";
-      return;
-    }
-
-    const button = target.closest<HTMLButtonElement>("button");
-    const text = (button?.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
-    if (text.includes("clear filters") || text.includes("clear map")) {
-      delete document.body.dataset.providerDensityUserEnabled;
-    }
-  }, true);
+function scan(): void {
+  attempts += 1;
+  if (applyDefaults() || attempts >= 160) {
+    if (timer !== null) window.clearTimeout(timer);
+    timer = null;
+    return;
+  }
+  timer = window.setTimeout(scan, 50);
 }
 
 function initialize(): void {
-  setStoredSourcesOff();
-  installDensityGate();
-  installUserActivationListeners();
-  applyManualDefaults();
-
-  const observer = new MutationObserver(scheduleScan);
-  observer.observe(document.body, { childList: true, subtree: true });
+  persistOffDefaults();
+  if (timer === null) scan();
 }
 
-setStoredSourcesOff();
-
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", initialize, { once: true });
-} else {
-  initialize();
-}
+persistOffDefaults();
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initialize, { once: true });
+else initialize();
 
 export {};

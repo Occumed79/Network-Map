@@ -12,6 +12,8 @@ import "./features/driveTime/nativeDriveTimeRuntime";
 import "./features/driveTime/nativeDriveTimeRuntime.css";
 import App from "./App";
 import "./index.css";
+import "./professional-overrides.css";
+import "./professional-hardening.css";
 import "./liquid-glass-theme.css";
 import "./live-finder-ux.css";
 import "./mapbox-intelligence.css";
@@ -25,8 +27,7 @@ import "./app-shell-layout.css";
 import "./workflow-ui.css";
 import "./network-command-center.css";
 import "./core-app-p2-fixes.css";
-import "./professional-overrides.css";
-import "./professional-hardening.css";
+import "./ui-cascade-stabilization.css";
 
 const root = createRoot(document.getElementById("root")!);
 const phaseTwoPreview = new URLSearchParams(window.location.search).get("p2-preview") === "1";

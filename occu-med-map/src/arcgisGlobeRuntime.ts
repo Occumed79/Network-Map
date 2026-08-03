@@ -9,6 +9,7 @@ type ArcgisImportApi = {
 declare global {
   interface Window {
     $arcgis?: ArcgisImportApi;
+    __NETWORK_MAP_ARCGIS_SDK_READY__?: Promise<void>;
     __NETWORK_MAP_GLOBE__?: {
       getMode: () => MapMode;
       setMode: (mode: MapMode) => Promise<void>;
@@ -20,6 +21,7 @@ declare global {
 const ARCGIS_VERSION = "5.1";
 const ARCGIS_SCRIPT_ID = "network-map-arcgis-sdk";
 const ARCGIS_STYLE_ID = "network-map-arcgis-theme";
+const ARCGIS_LOAD_TIMEOUT_MS = 20_000;
 const MAX_MIRRORED_GRAPHICS = 12000;
 const apiKey = import.meta.env.VITE_ARCGIS_API_KEY || "";
 
@@ -32,6 +34,7 @@ let sceneView: any = null;
 let graphicsLayer: any = null;
 let GraphicCtor: any = null;
 let sceneReadyPromise: Promise<void> | null = null;
+let arcgisLoaderPromise: Promise<void> | null = null;
 let syncTimer: number | null = null;
 let periodicSyncTimer: number | null = null;
 let sceneWatchHandle: { remove?: () => void } | null = null;
@@ -158,8 +161,8 @@ async function setMode(nextMode: MapMode): Promise<void> {
 }
 
 async function ensureScene(): Promise<void> {
-  if (sceneView) return;
   if (sceneReadyPromise) return sceneReadyPromise;
+  if (sceneView) return;
 
   sceneReadyPromise = (async () => {
     if (!apiKey) throw new Error("VITE_ARCGIS_API_KEY is not configured");
@@ -243,6 +246,17 @@ async function ensureScene(): Promise<void> {
   try {
     await sceneReadyPromise;
   } catch (error) {
+    sceneWatchHandle?.remove?.();
+    sceneClickHandle?.remove?.();
+    sceneDoubleClickHandle?.remove?.();
+    sceneWatchHandle = null;
+    sceneClickHandle = null;
+    sceneDoubleClickHandle = null;
+    sceneView?.destroy?.();
+    sceneView = null;
+    graphicsLayer = null;
+    GraphicCtor = null;
+    host?.classList.remove("ready");
     sceneReadyPromise = null;
     throw error;
   }
@@ -259,24 +273,84 @@ function loadArcgisSdk(): Promise<void> {
   }
 
   if (window.$arcgis) return Promise.resolve();
+  if (window.__NETWORK_MAP_ARCGIS_SDK_READY__) return window.__NETWORK_MAP_ARCGIS_SDK_READY__;
+  if (arcgisLoaderPromise) return arcgisLoaderPromise;
 
-  return new Promise((resolve, reject) => {
-    const existingScript = document.getElementById(ARCGIS_SCRIPT_ID) as HTMLScriptElement | null;
-    const script = existingScript || document.createElement("script");
+  arcgisLoaderPromise = new Promise<void>((resolve, reject) => {
+    let script = document.getElementById(ARCGIS_SCRIPT_ID) as HTMLScriptElement | null;
 
-    const onLoad = () => window.$arcgis ? resolve() : reject(new Error("ArcGIS global loader is missing"));
-    const onError = () => reject(new Error("ArcGIS SDK request failed"));
-
-    script.addEventListener("load", onLoad, { once: true });
-    script.addEventListener("error", onError, { once: true });
-
-    if (!existingScript) {
-      script.id = ARCGIS_SCRIPT_ID;
-      script.src = `https://js.arcgis.com/${ARCGIS_VERSION}/`;
-      script.async = true;
-      document.head.appendChild(script);
+    if (script && (script.type !== "module" || script.dataset.arcgisLoadState === "failed")) {
+      script.remove();
+      script = null;
     }
+
+    const targetScript = script || document.createElement("script");
+    let settled = false;
+
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      targetScript.removeEventListener("load", onLoad);
+      targetScript.removeEventListener("error", onError);
+    };
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (window.$arcgis) {
+        targetScript.dataset.arcgisLoadState = "ready";
+        resolve();
+      } else {
+        targetScript.dataset.arcgisLoadState = "failed";
+        targetScript.remove();
+        reject(new Error("ArcGIS module loader finished without exposing $arcgis"));
+      }
+    };
+
+    const onLoad = () => window.setTimeout(finish, 0);
+    const onError = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      targetScript.dataset.arcgisLoadState = "failed";
+      targetScript.remove();
+      reject(new Error("ArcGIS SDK request failed"));
+    };
+
+    const timeout = window.setTimeout(() => {
+      if (window.$arcgis) {
+        finish();
+        return;
+      }
+      if (settled) return;
+      settled = true;
+      cleanup();
+      targetScript.dataset.arcgisLoadState = "failed";
+      targetScript.remove();
+      reject(new Error("ArcGIS SDK request timed out"));
+    }, ARCGIS_LOAD_TIMEOUT_MS);
+
+    targetScript.addEventListener("load", onLoad, { once: true });
+    targetScript.addEventListener("error", onError, { once: true });
+
+    if (!script) {
+      targetScript.id = ARCGIS_SCRIPT_ID;
+      targetScript.type = "module";
+      targetScript.src = `https://js.arcgis.com/${ARCGIS_VERSION}/`;
+      targetScript.crossOrigin = "anonymous";
+      targetScript.dataset.arcgisLoadState = "loading";
+      document.head.appendChild(targetScript);
+    } else if (window.$arcgis || targetScript.dataset.arcgisLoadState === "ready") {
+      window.setTimeout(finish, 0);
+    }
+  }).catch((error) => {
+    arcgisLoaderPromise = null;
+    window.__NETWORK_MAP_ARCGIS_SDK_READY__ = undefined;
+    throw error;
   });
+
+  window.__NETWORK_MAP_ARCGIS_SDK_READY__ = arcgisLoaderPromise;
+  return arcgisLoaderPromise;
 }
 
 function queueGraphicSync(): void {

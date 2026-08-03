@@ -1,13 +1,11 @@
 import { createRoot } from "react-dom/client";
 import "./adminApiRuntime";
-import "./mapboxLeafletRuntime";
-import "./arcgisGlobeRuntime";
-import "./immersiveGlobeTransition";
-import "./reliableMapRuntime";
+import "./dualMapEngineRuntime";
+import "./dualMapTransitionRuntime";
 import "./manualProviderLayerGateRuntime";
 import "./unifiedProviderToolsRuntime";
 import "./manualProviderDefaultsRuntime";
-import "./arcgis-globe-runtime.css";
+import "./dual-map-engines.css";
 import "./mapToolsCommandPanel";
 import "./rightPanelCompactor";
 import "./liveFinderDriveTools";
@@ -33,7 +31,6 @@ import "./workflow-ui.css";
 import "./network-command-center.css";
 import "./core-app-p2-fixes.css";
 import "./ui-cascade-stabilization.css";
-import "./immersive-globe-transition.css";
 
 const root = createRoot(document.getElementById("root")!);
 const phaseTwoPreview = new URLSearchParams(window.location.search).get("p2-preview") === "1";

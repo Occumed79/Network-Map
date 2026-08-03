@@ -158,7 +158,7 @@ async function setMode(nextMode: MapMode): Promise<void> {
       mapWrap?.classList.remove("mapbox-3d-active");
       mapWrap?.classList.add("arcgis-map-active");
       host.setAttribute("aria-hidden", "true");
-      setStatus("Mapbox 3D unavailable, switching to ArcGIS 2D", "error");
+      setStatus("Mapbox 3D unavailable, using 2D map", "error");
       capturedMap.invalidateSize();
     }
     return;
@@ -179,13 +179,14 @@ async function setMode(nextMode: MapMode): Promise<void> {
     setStatus(`ArcGIS 2D · ${latestGraphicCount.toLocaleString()} active items`);
   } catch (error) {
     console.error("ArcGIS 2D map failed to initialize", error);
-    mode = "3d";
-    provider = "mapbox";
+    // Fall back to default Leaflet map without trying Mapbox
+    mode = "2d";
+    provider = "arcgis";
     updateToggleState();
     mapWrap?.classList.remove("arcgis-map-active");
-    mapWrap?.classList.add("mapbox-3d-active");
-    host.setAttribute("aria-hidden", "false");
-    setStatus("ArcGIS 2D unavailable, switching to Mapbox 3D", "error");
+    host.setAttribute("aria-hidden", "true");
+    setStatus("ArcGIS 2D unavailable, using default map", "error");
+    host.classList.add("ready");
     capturedMap.invalidateSize();
   }
 }

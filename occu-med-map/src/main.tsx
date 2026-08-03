@@ -3,6 +3,7 @@ import "./adminApiRuntime";
 import "./mapboxLeafletRuntime";
 import "./arcgisGlobeRuntime";
 import "./immersiveGlobeTransition";
+import "./unifiedProviderToolsRuntime";
 import "./arcgis-globe-runtime.css";
 import "./mapToolsCommandPanel";
 import "./rightPanelCompactor";

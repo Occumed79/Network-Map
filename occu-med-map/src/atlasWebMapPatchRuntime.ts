@@ -37,12 +37,13 @@ function wrapLoader(loader: ArcgisLoader | undefined): ArcgisLoader | undefined 
             });
 
             const layers = Array.isArray(options.layers) ? options.layers : [];
+            const atlasMap = this as any;
             if (layers.length) {
               try {
-                this.addMany(layers);
+                atlasMap.addMany(layers);
               } catch {
                 for (const layer of layers) {
-                  try { this.add(layer); } catch { /* optional overlay */ }
+                  try { atlasMap.add(layer); } catch { /* optional overlay */ }
                 }
               }
             }

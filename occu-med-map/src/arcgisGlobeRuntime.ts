@@ -186,7 +186,6 @@ async function setMode(nextMode: MapMode): Promise<void> {
     mapWrap?.classList.remove("arcgis-map-active");
     host.setAttribute("aria-hidden", "true");
     setStatus("ArcGIS 2D unavailable, using default map", "error");
-    host.classList.add("ready");
     capturedMap.invalidateSize();
   }
 }

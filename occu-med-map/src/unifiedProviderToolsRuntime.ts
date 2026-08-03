@@ -26,6 +26,24 @@ function makeIcon(path: string): string {
   return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${path}"/></svg>`;
 }
 
+function removeDirectoriesTool(): void {
+  const grid = document.querySelector<HTMLElement>(".command-tool-grid");
+  const directoriesButton = grid ? findButton(grid, "Directories") : null;
+  if (directoriesButton) {
+    directoriesButton.hidden = true;
+    directoriesButton.disabled = true;
+    directoriesButton.setAttribute("aria-hidden", "true");
+    directoriesButton.tabIndex = -1;
+  }
+
+  document.querySelectorAll<HTMLElement>(".workflow-directory-modal").forEach((modal) => {
+    const backdrop = modal.closest<HTMLElement>(".modal-backdrop");
+    const target = backdrop || modal;
+    target.hidden = true;
+    target.setAttribute("aria-hidden", "true");
+  });
+}
+
 function ensureUnifiedButtons(): void {
   const grid = document.querySelector<HTMLElement>(".command-tool-grid");
   if (!grid) return;
@@ -179,6 +197,7 @@ function syncActiveButtons(): void {
 
 function scan(): void {
   ensureUnifiedButtons();
+  removeDirectoriesTool();
   hideDuplicateLaunchers();
   updatePanelMode();
   syncActiveButtons();

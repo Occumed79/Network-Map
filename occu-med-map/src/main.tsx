@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import "./adminApiRuntime";
 import "./mapboxLeafletRuntime";
 import "./arcgisGlobeRuntime";
+import "./immersiveGlobeTransition";
 import "./arcgis-globe-runtime.css";
 import "./mapToolsCommandPanel";
 import "./rightPanelCompactor";
@@ -28,6 +29,7 @@ import "./workflow-ui.css";
 import "./network-command-center.css";
 import "./core-app-p2-fixes.css";
 import "./ui-cascade-stabilization.css";
+import "./immersive-globe-transition.css";
 
 const root = createRoot(document.getElementById("root")!);
 const phaseTwoPreview = new URLSearchParams(window.location.search).get("p2-preview") === "1";

@@ -1,0 +1,301 @@
+/*
+ * Final UI contract for the production Network Map.
+ *
+ * Earlier stylesheets still contain legacy experiments. This file owns the
+ * non-negotiable shell dimensions, light luminous theme, and panel layering so
+ * later additions cannot create a mixed dark/light interface or overflow the
+ * map grid.
+ */
+
+:root {
+  --command-header-height: 70px;
+  --command-sidebar-width: clamp(300px, 22vw, 340px);
+  --sidebar-w: var(--command-sidebar-width);
+  --finder-panel-width: clamp(350px, 27vw, 400px);
+
+  --ui-page: #e8eef3;
+  --ui-panel: rgba(242, 251, 252, 0.78);
+  --ui-panel-strong: rgba(248, 253, 254, 0.93);
+  --ui-border: rgba(255, 255, 255, 0.82);
+  --ui-divider: rgba(62, 86, 104, 0.14);
+  --ui-ink: #102733;
+  --ui-muted: #5e7481;
+  --ui-accent: #087f9a;
+
+  --z-map-controls: 800;
+  --z-sidebar: 1000;
+  --z-command-header: 1300;
+  --z-panel: 1400;
+  --z-drawer: 1800;
+  --z-modal: 2200;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100dvh;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--ui-page) !important;
+  color: var(--ui-ink);
+}
+
+.app-wrap {
+  display: grid !important;
+  grid-template-rows: var(--command-header-height) minmax(0, 1fr) !important;
+  width: 100%;
+  height: 100dvh !important;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(180, 205, 230, 0.22), transparent 36%),
+    linear-gradient(180deg, #eef2f6 0%, #e3e9f0 100%) !important;
+}
+
+.command-header {
+  position: relative !important;
+  z-index: var(--z-command-header) !important;
+  min-width: 0;
+  color: var(--ui-ink) !important;
+  background:
+    linear-gradient(125deg, rgba(255,255,255,.94), rgba(232,248,250,.86) 46%, rgba(255,255,255,.92)),
+    rgba(245,252,253,.9) !important;
+  border-bottom: 1px solid rgba(66, 100, 123, .16) !important;
+  box-shadow: 0 8px 28px rgba(42, 72, 93, .11), inset 0 1px rgba(255,255,255,.96) !important;
+  backdrop-filter: blur(28px) saturate(150%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(150%) !important;
+}
+
+.command-search,
+.command-search-results,
+.provider-source-health,
+.command-action {
+  color: var(--ui-ink) !important;
+  background: rgba(255, 255, 255, 0.82) !important;
+  border-color: rgba(54, 88, 111, 0.16) !important;
+}
+
+.command-search input,
+.command-brand strong,
+.command-search-results strong {
+  color: var(--ui-ink) !important;
+}
+
+.app-body {
+  display: grid !important;
+  grid-row: 2;
+  grid-template-columns: var(--command-sidebar-width) minmax(0, 1fr) 0 !important;
+  width: 100%;
+  height: 100% !important;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  position: relative !important;
+}
+
+.app-body:has(.live-panel.open) {
+  grid-template-columns: var(--command-sidebar-width) minmax(0, 1fr) var(--finder-panel-width) !important;
+}
+
+.sidebar {
+  position: relative !important;
+  inset: auto !important;
+  grid-column: 1;
+  display: flex !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  flex: none !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  color: var(--ui-ink) !important;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.70), rgba(229, 251, 252, 0.46), rgba(255, 255, 255, 0.30)),
+    var(--ui-panel) !important;
+  border: 0 !important;
+  border-right: 1px solid var(--ui-border) !important;
+  border-radius: 0 !important;
+  box-shadow: 8px 0 28px rgba(43, 73, 96, 0.10) !important;
+  backdrop-filter: blur(30px) saturate(175%) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(175%) !important;
+  z-index: var(--z-sidebar) !important;
+}
+
+.sidebar .hero-card,
+.sidebar > .sb-section {
+  color: var(--ui-ink) !important;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.78), rgba(232,249,251,.42)),
+    rgba(255,255,255,.40) !important;
+  border: 1px solid var(--ui-border) !important;
+  outline: 1px solid rgba(255,255,255,.52) !important;
+  outline-offset: -5px !important;
+  box-shadow: 0 10px 26px rgba(55, 82, 100, 0.10), inset 0 1px rgba(255,255,255,.92) !important;
+}
+
+.sidebar .hero-title,
+.sidebar .sb-lbl,
+.command-section-title,
+.command-section-toggle,
+.diagnostics-heading strong {
+  color: var(--ui-ink) !important;
+}
+
+.sidebar .hero-sub,
+.sidebar .tog-lbl,
+.command-section-help,
+.command-section-title small,
+.diagnostics-heading span {
+  color: var(--ui-muted) !important;
+}
+
+.map-wrap {
+  position: relative !important;
+  inset: auto !important;
+  grid-column: 2;
+  width: auto !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  isolation: isolate;
+  background: #e8edf2 !important;
+}
+
+#map,
+.leaflet-container,
+.arcgis-globe-host {
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  background: #e8edf2 !important;
+}
+
+.leaflet-control-container,
+.occumed-map-tools-panel,
+.occumed-basemap-control {
+  z-index: var(--z-map-controls) !important;
+}
+
+.live-panel,
+.live-panel.open {
+  position: relative !important;
+  inset: auto !important;
+  grid-column: 3;
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  color: var(--ui-ink) !important;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.76), rgba(230,249,251,.44)),
+    var(--ui-panel-strong) !important;
+  border: 0 !important;
+  border-left: 1px solid var(--ui-border) !important;
+  border-radius: 0 !important;
+  box-shadow: -8px 0 28px rgba(43, 73, 96, 0.10) !important;
+  opacity: 1 !important;
+  z-index: var(--z-panel) !important;
+}
+
+.live-panel.open {
+  width: 100% !important;
+}
+
+.live-panel.open .lp-inner {
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  color: var(--ui-ink) !important;
+  background: transparent !important;
+}
+
+.live-panel .lp-title,
+.live-panel .lp-name {
+  color: var(--ui-ink) !important;
+}
+
+.live-panel .lp-addr,
+.live-panel .lp-dist {
+  color: var(--ui-muted) !important;
+}
+
+.provider-drawer-backdrop {
+  z-index: calc(var(--z-drawer) - 1) !important;
+}
+
+.provider-explorer-drawer {
+  z-index: var(--z-drawer) !important;
+  color: var(--ui-ink) !important;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.97), rgba(235,249,250,.94)),
+    #f6fbfc !important;
+}
+
+.modal-backdrop,
+.pdf-modal-wrap {
+  z-index: var(--z-modal) !important;
+}
+
+@media (max-width: 1100px) {
+  :root {
+    --command-sidebar-width: clamp(280px, 29vw, 310px);
+    --finder-panel-width: clamp(320px, 34vw, 360px);
+  }
+
+  .command-header {
+    gap: 10px !important;
+    padding-inline: 10px !important;
+  }
+}
+
+@media (max-width: 820px) {
+  :root {
+    --command-sidebar-width: min(88vw, 330px);
+    --finder-panel-width: min(92vw, 370px);
+  }
+
+  .app-body,
+  .app-body:has(.live-panel.open) {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .sidebar {
+    position: absolute !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    width: var(--command-sidebar-width) !important;
+    transform: translateX(-102%);
+    transition: transform 180ms ease;
+  }
+
+  .sidebar.mobile-open,
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .map-wrap {
+    grid-column: 1;
+  }
+
+  .live-panel,
+  .live-panel.open {
+    position: absolute !important;
+    top: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: var(--finder-panel-width) !important;
+    max-width: calc(100vw - 12px) !important;
+  }
+}

@@ -112,6 +112,13 @@ router.get("/enhanced-search", async (req: Request, res: Response) => {
     const mode = String(req.query.mode || "balanced") as "fast" | "balanced" | "deep";
     const googlePlacesTrigger = req.query.googlePlacesTrigger;
 
+    // Live Finder calls this endpoint without an explicit discovery opt-in.
+    // Keep that path limited to actual place-directory results. NPI/web/AI
+    // discovery belongs to the dedicated provider-source tools and must be
+    // explicitly requested with sourceScope=all or includeDiscovery=true.
+    const sourceScope = String(req.query.sourceScope || "places").trim().toLowerCase();
+    const includeDiscovery = sourceScope === "all" || String(req.query.includeDiscovery || "").toLowerCase() === "true";
+
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
       res.status(400).json({ error: "Missing or invalid lat/lng" });
       return;
@@ -131,7 +138,7 @@ router.get("/enhanced-search", async (req: Request, res: Response) => {
         trigger: googlePlacesTrigger,
       }),
       (async () => {
-        if (!isUS || !city || !state) return null;
+        if (!includeDiscovery || !isUS || !city || !state) return null;
         return runUnifiedSearch({ city, state, serviceType, radiusMiles, centerLat: lat, centerLng: lng, mode });
       })(),
     ]);
@@ -142,7 +149,7 @@ router.get("/enhanced-search", async (req: Request, res: Response) => {
       .map(place => normalizeGooglePlace(place, lat, lng, googleServiceType))
       .filter((candidate): candidate is ProviderCandidate => Boolean(candidate));
     const discoveryResponse = discoveryResult.status === "fulfilled" ? discoveryResult.value : null;
-    const discoveryCandidates = discoveryResponse?.results || [];
+    const discoveryCandidates = includeDiscovery ? (discoveryResponse?.results || []) : [];
 
     const seen = new Set<string>();
     const sorted = [...placesCandidates, ...discoveryCandidates]
@@ -192,12 +199,14 @@ router.get("/enhanced-search", async (req: Request, res: Response) => {
       })),
       facets: {} as Record<string, number>,
       sourceSummary: {
+        sourceScope: includeDiscovery ? "all" : "places",
+        discoveryEnabled: includeDiscovery,
         googlePlaces: placesCandidates.length,
         universalDiscovery: discoveryCandidates.length,
         merged: sorted.length,
         sources,
         savedToNeon: savedCount,
-        discoveryAudit: discoveryResponse?.audit || null,
+        discoveryAudit: includeDiscovery ? (discoveryResponse?.audit || null) : null,
         ...placesMetadata,
       },
     });

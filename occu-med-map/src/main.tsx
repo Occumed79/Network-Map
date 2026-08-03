@@ -1,7 +1,8 @@
 import { createRoot } from "react-dom/client";
+import "./atlasWebMapPatchRuntime";
+import "./dualMapEngineRuntime";
 import App from "./App";
 import "./dual-map-engines.css";
-import "./arcgis-leaflet-2d.css";
 import "./dual-map-transition-opaque.css";
 import "./map-engine-final-fixes.css";
 import "./modal-command-polish.css";
@@ -190,8 +191,6 @@ async function safeLoad(name: string, loader: () => Promise<unknown>): Promise<v
 
 async function loadOptionalRuntimes(): Promise<void> {
   await safeLoad("admin API", () => import("./adminApiRuntime"));
-  await safeLoad("dual map engine", () => import("./dualMapEngineRuntime"));
-  await safeLoad("stable 2D bridge", () => import("./arcgisLeaflet2dRuntime"));
   await safeLoad("Mapbox load hardening", () => import("./mapboxGlobeLoadHardeningRuntime"));
   await safeLoad("transition sound and cleanup", () => import("./mapEngineFinalFixRuntime"));
   await safeLoad("map transition", () => import("./dualMapTransitionRuntime"));

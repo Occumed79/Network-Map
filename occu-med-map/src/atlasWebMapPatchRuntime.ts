@@ -32,9 +32,7 @@ function wrapLoader(loader: ArcgisLoader | undefined): ArcgisLoader | undefined 
 
         class OccuMedAtlasWebMap extends WebMap {
           constructor(options: Record<string, any> = {}) {
-            super({
-              portalItem: { id: ATLAS_WEBMAP_ID },
-            });
+            super({ portalItem: { id: ATLAS_WEBMAP_ID } });
 
             const layers = Array.isArray(options.layers) ? options.layers : [];
             const atlasMap = this as any;
@@ -65,27 +63,24 @@ function installLoaderHook(): void {
   const existingValue = (window as any).$arcgis as ArcgisLoader | undefined;
 
   if (existingValue) {
-    (window as any).$arcgis = wrapLoader(existingValue);
+    try { (window as any).$arcgis = wrapLoader(existingValue); } catch { /* optional patch */ }
     return;
   }
 
   if (!existingDescriptor || existingDescriptor.configurable !== false) {
     let current: ArcgisLoader | undefined;
-    Object.defineProperty(window, "$arcgis", {
-      configurable: true,
-      enumerable: true,
-      get() {
-        return current;
-      },
-      set(value: ArcgisLoader | undefined) {
-        current = wrapLoader(value);
-      },
-    });
+    try {
+      Object.defineProperty(window, "$arcgis", {
+        configurable: true,
+        enumerable: true,
+        get() { return current; },
+        set(value: ArcgisLoader | undefined) { current = wrapLoader(value); },
+      });
+    } catch {
+      // The SDK can still be patched by the short poll below.
+    }
   }
 
-  // Secondary protection for SDK builds that redefine the global property
-  // rather than assigning through the setter. The dual-engine loader checks
-  // every 60 ms, so this short 5 ms poll wraps it first.
   const started = Date.now();
   const timer = window.setInterval(() => {
     const loader = (window as any).$arcgis as ArcgisLoader | undefined;

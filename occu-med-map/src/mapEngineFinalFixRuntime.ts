@@ -1,11 +1,5 @@
 import { TRANSITION_SOUND_DATA_URI } from "./transitionSoundData";
 
-declare global {
-  interface Window {
-    mapboxgl?: any;
-  }
-}
-
 const MAPBOX_PATCH_FLAG = "__networkMapDensityFilterPatched";
 const SOURCE_PATCH_FLAG = "__networkMapDensitySourcePatched";
 
@@ -70,7 +64,7 @@ function patchNetworkOverlaySource(map: any, sourceId: string): void {
 }
 
 function patchMapboxDensityMirroring(): void {
-  const MapCtor = window.mapboxgl?.Map;
+  const MapCtor = (window as any).mapboxgl?.Map;
   const prototype = MapCtor?.prototype;
   if (!prototype || prototype[MAPBOX_PATCH_FLAG]) return;
 

@@ -35,6 +35,13 @@ async function safeLoad(name: string, loader: () => Promise<unknown>): Promise<v
 
 async function loadOptionalRuntimes(): Promise<void> {
   await safeLoad("admin API", () => import("./adminApiRuntime"));
+
+  // Retain the repository's telemetry hook without restoring its expensive
+  // startup queries. It remains disabled unless explicitly enabled in Render.
+  if (import.meta.env.VITE_ENABLE_PROVIDER_LAYER_TELEMETRY === "true") {
+    await safeLoad("provider layer telemetry", () => import("./providerLayerTelemetryRuntime"));
+  }
+
   await safeLoad("transition sound and cleanup", () => import("./mapEngineFinalFixRuntime"));
   await safeLoad("map transition", () => import("./dualMapTransitionRuntime"));
   await safeLoad("engine loading cleanup", () => import("./mapEngineLoadingCleanupRuntime"));

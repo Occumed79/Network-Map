@@ -4,6 +4,7 @@ import "./mapboxLeafletRuntime";
 import "./arcgisGlobeRuntime";
 import "./immersiveGlobeTransition";
 import "./unifiedProviderToolsRuntime";
+import "./manualProviderDefaultsRuntime";
 import "./arcgis-globe-runtime.css";
 import "./mapToolsCommandPanel";
 import "./rightPanelCompactor";

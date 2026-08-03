@@ -219,7 +219,7 @@ async function ensureMapView(): Promise<void> {
     });
 
     const arcgisMap = new ArcGISMap({
-      basemap: "arcgis/navigation-night",
+      basemap: "streets",
       layers: [graphicsLayer],
     });
 

@@ -2,6 +2,7 @@ import { TRANSITION_SOUND_DATA_URI } from "./transitionSoundData";
 
 const MAPBOX_PATCH_FLAG = "__networkMapDensityFilterPatched";
 const SOURCE_PATCH_FLAG = "__networkMapDensitySourcePatched";
+const MAPBOX_SCRIPT_PATCH_FLAG = "networkMapDensityPatchBound";
 
 const transitionAudio = new Audio(TRANSITION_SOUND_DATA_URI);
 transitionAudio.preload = "auto";
@@ -80,6 +81,13 @@ function patchMapboxDensityMirroring(): void {
   prototype[MAPBOX_PATCH_FLAG] = true;
 }
 
+function bindMapboxScriptPatch(): void {
+  const script = document.getElementById("network-map-mapbox-gl-sdk") as HTMLScriptElement | null;
+  if (!script || script.dataset[MAPBOX_SCRIPT_PATCH_FLAG] === "true") return;
+  script.dataset[MAPBOX_SCRIPT_PATCH_FLAG] = "true";
+  script.addEventListener("load", patchMapboxDensityMirroring, { once: true });
+}
+
 function removeFinishedLoadingPanels(): void {
   document.querySelectorAll<HTMLElement>(".dual-engine-map-shell").forEach((shell) => {
     const status = shell.querySelector<HTMLElement>(".map-dimension-status")?.textContent?.toLowerCase() || "";
@@ -112,6 +120,7 @@ document.addEventListener("click", (event) => {
   const button = target?.closest<HTMLButtonElement>(".map-dimension-toggle button[data-map-mode]");
   if (!button || button.disabled) return;
 
+  patchMapboxDensityMirroring();
   const requestedMode = button.dataset.mapMode === "3d" ? "3d" : "2d";
   const isAlreadyActive = button.classList.contains("active") || button.getAttribute("aria-pressed") === "true";
   if (!isAlreadyActive) {
@@ -121,11 +130,13 @@ document.addEventListener("click", (event) => {
 }, true);
 
 const observer = new MutationObserver(() => {
+  bindMapboxScriptPatch();
   patchMapboxDensityMirroring();
   removeFinishedLoadingPanels();
 });
 
 function initialize(): void {
+  bindMapboxScriptPatch();
   patchMapboxDensityMirroring();
   removeFinishedLoadingPanels();
   observer.observe(document.documentElement, {
@@ -137,6 +148,7 @@ function initialize(): void {
   });
 
   window.setInterval(() => {
+    bindMapboxScriptPatch();
     patchMapboxDensityMirroring();
     removeFinishedLoadingPanels();
 
@@ -148,6 +160,8 @@ function initialize(): void {
     }
   }, 120);
 }
+
+bindMapboxScriptPatch();
 
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", initialize, { once: true });

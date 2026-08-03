@@ -1,162 +1,87 @@
 import L from "leaflet";
 
 type MapMode = "2d" | "3d";
-type GlobeBridge = {
-  getMode: () => MapMode;
-  setMode: (mode: MapMode) => Promise<void>;
-  sync: () => void;
-};
+type GlobeBridge = { getMode: () => MapMode; setMode: (mode: MapMode) => Promise<void>; sync: () => void };
+declare global { interface Window { __NETWORK_MAP_GLOBE__?: GlobeBridge } }
 
-declare global {
-  interface Window {
-    __NETWORK_MAP_GLOBE__?: GlobeBridge;
-  }
+const TOPO = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}";
+const PATCHED = "networkMapArcgisLeaflet2dPatched";
+const originalTileLayer = L.tileLayer.bind(L);
+let mode: MapMode = "2d";
+let attempts = 0;
+let resizePending = false;
+
+function baseTemplate(url: unknown): url is string {
+  return typeof url === "string" && (url.includes("tile.openstreetmap.org") || url.includes("api.mapbox.com/styles") || url.includes("basemaps.cartocdn.com"));
 }
 
-const ARCGIS_WORLD_TOPO = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}";
-const BRIDGE_PATCH_FLAG = "networkMapArcgisLeaflet2dPatched";
-const previousTileLayer = L.tileLayer.bind(L);
-let visibleMode: MapMode = "2d";
-let resizeQueued = false;
+(L as any).tileLayer = (url: string, options: L.TileLayerOptions = {}) => baseTemplate(url)
+  ? new L.TileLayer(TOPO, { ...options, maxZoom: Math.min(Number(options.maxZoom ?? 19), 19), maxNativeZoom: 19, updateWhenZooming: false, updateWhenIdle: true, keepBuffer: 1, crossOrigin: true, attribution: "Tiles © Esri — Source: Esri, HERE, Garmin, FAO, NOAA, USGS, OpenStreetMap contributors" })
+  : originalTileLayer(url, options);
 
-function isLegacyBaseTemplate(template: unknown): template is string {
-  if (typeof template !== "string") return false;
-  return template.includes("tile.openstreetmap.org")
-    || template.includes("api.mapbox.com/styles")
-    || template.includes("basemaps.cartocdn.com");
-}
-
-// The canonical Leaflet map already owns all real map data and interactions.
-// Render it with the public ArcGIS World Topographic tile service instead of
-// creating a second ArcGIS MapView that can stall on SDK/basemap credentials.
-(L as any).tileLayer = (template: string, options: L.TileLayerOptions = {}) => {
-  if (!isLegacyBaseTemplate(template)) return previousTileLayer(template, options);
-
-  return new L.TileLayer(ARCGIS_WORLD_TOPO, {
-    ...options,
-    maxZoom: Math.min(Number(options.maxZoom ?? 19), 19),
-    maxNativeZoom: 19,
-    updateWhenZooming: false,
-    updateWhenIdle: true,
-    keepBuffer: 1,
-    crossOrigin: true,
-    attribution: "Tiles © Esri — Source: Esri, HERE, Garmin, FAO, NOAA, USGS, OpenStreetMap contributors",
-  });
-};
-
-function setText(node: HTMLElement | null, value: string): void {
-  if (node && node.textContent !== value) node.textContent = value;
-}
-
-function setAttribute(node: Element | null, name: string, value: string): void {
+function attr(node: Element | null, name: string, value: string): void {
   if (node && node.getAttribute(name) !== value) node.setAttribute(name, value);
 }
 
-function queueResize(): void {
-  if (resizeQueued) return;
-  resizeQueued = true;
-  window.requestAnimationFrame(() => {
-    resizeQueued = false;
-    window.dispatchEvent(new Event("resize"));
-  });
+function resizeOnce(): void {
+  if (resizePending) return;
+  resizePending = true;
+  requestAnimationFrame(() => { resizePending = false; window.dispatchEvent(new Event("resize")); });
 }
 
-function updateButtons(shell: HTMLElement, mode: MapMode): void {
-  shell.querySelectorAll<HTMLButtonElement>(".map-dimension-toggle button[data-map-mode]").forEach((button) => {
-    const active = button.dataset.mapMode === mode;
-    if (button.classList.contains("active") !== active) button.classList.toggle("active", active);
-    setAttribute(button, "aria-pressed", String(active));
-  });
-}
-
-function showLeafletArcgis2d(shell: HTMLElement): void {
+function render(shell: HTMLElement, next: MapMode): void {
+  const was2d = shell.classList.contains("arcgis-leaflet-2d") && !shell.classList.contains("mapbox-globe-active");
   shell.classList.add("arcgis-leaflet-2d", "visible-engine-ready");
-  shell.classList.remove("mapbox-globe-active", "arcgis-globe-active", "mapbox-globe-preparing");
+  shell.classList.toggle("mapbox-globe-active", next === "3d");
+  shell.classList.remove("arcgis-globe-active", "mapbox-globe-preparing");
 
-  const arcgisHost = shell.querySelector<HTMLElement>(".arcgis-map-host");
-  const mapboxHost = shell.querySelector<HTMLElement>(".mapbox-globe-host");
+  const arcgis = shell.querySelector<HTMLElement>(".arcgis-map-host");
+  const mapbox = shell.querySelector<HTMLElement>(".mapbox-globe-host");
   const status = shell.querySelector<HTMLElement>(".map-dimension-status");
+  arcgis?.querySelectorAll<HTMLElement>(".dual-engine-loading").forEach(node => node.remove());
+  attr(arcgis, "aria-hidden", "true");
+  attr(mapbox, "aria-hidden", next === "3d" ? "false" : "true");
 
-  arcgisHost?.classList.add("ready", "engine-render-ready");
-  arcgisHost?.querySelectorAll<HTMLElement>(".dual-engine-loading").forEach((node) => node.remove());
-  setAttribute(arcgisHost, "aria-hidden", "true");
-  setAttribute(mapboxHost, "aria-hidden", "true");
-
-  setText(status, "ArcGIS 2D active");
-  if (status && status.dataset.state !== "normal") status.dataset.state = "normal";
-  updateButtons(shell, "2d");
-  queueResize();
+  if (next === "2d" && status?.textContent !== "ArcGIS 2D active") status.textContent = "ArcGIS 2D active";
+  shell.querySelectorAll<HTMLButtonElement>(".map-dimension-toggle button[data-map-mode]").forEach(button => {
+    const active = button.dataset.mapMode === next;
+    if (button.classList.contains("active") !== active) button.classList.toggle("active", active);
+    attr(button, "aria-pressed", String(active));
+  });
+  if (next === "2d" && !was2d) resizeOnce();
 }
 
-function showMapbox3d(shell: HTMLElement): void {
-  shell.classList.add("mapbox-globe-active");
-  const mapboxHost = shell.querySelector<HTMLElement>(".mapbox-globe-host");
-  setAttribute(mapboxHost, "aria-hidden", "false");
-  updateButtons(shell, "3d");
+function apply(): boolean {
+  const shells = Array.from(document.querySelectorAll<HTMLElement>(".dual-engine-map-shell"));
+  shells.forEach(shell => render(shell, mode));
+  return shells.length > 0;
 }
 
-function shells(): HTMLElement[] {
-  return Array.from(document.querySelectorAll<HTMLElement>(".dual-engine-map-shell"));
-}
-
-function applyVisibleMode(): void {
-  for (const shell of shells()) {
-    if (visibleMode === "2d") showLeafletArcgis2d(shell);
-    else showMapbox3d(shell);
-  }
-}
-
-function patchBridge(): void {
+function patch(): boolean {
   const bridge = window.__NETWORK_MAP_GLOBE__ as (GlobeBridge & Record<string, unknown>) | undefined;
-  if (!bridge || bridge[BRIDGE_PATCH_FLAG]) return;
-
-  const originalSetMode = bridge.setMode.bind(bridge);
-  const originalSync = bridge.sync.bind(bridge);
-
-  bridge.getMode = () => visibleMode;
-  bridge.setMode = async (nextMode: MapMode) => {
-    if (nextMode === "2d") {
-      visibleMode = "2d";
-      applyVisibleMode();
-      originalSync();
-      return;
-    }
-
-    visibleMode = "3d";
-    try {
-      await originalSetMode("3d");
-      applyVisibleMode();
-    } catch (error) {
-      visibleMode = "2d";
-      applyVisibleMode();
-      throw error;
-    }
+  if (!bridge) return false;
+  if (bridge[PATCHED]) return true;
+  const setMode = bridge.setMode.bind(bridge);
+  const sync = bridge.sync.bind(bridge);
+  bridge.getMode = () => mode;
+  bridge.setMode = async next => {
+    if (next === "2d") { mode = "2d"; apply(); sync(); return; }
+    mode = "3d";
+    try { await setMode("3d"); apply(); }
+    catch (error) { mode = "2d"; apply(); throw error; }
   };
-  bridge.sync = originalSync;
-  bridge[BRIDGE_PATCH_FLAG] = true;
+  bridge[PATCHED] = true;
+  return true;
 }
 
-function initialize(): void {
-  patchBridge();
-  applyVisibleMode();
-
-  const observer = new MutationObserver(() => {
-    patchBridge();
-    applyVisibleMode();
-  });
-  observer.observe(document.documentElement, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ["class", "data-state", "aria-hidden"],
-    characterData: true,
-  });
+function boot(): void {
+  attempts += 1;
+  if (patch() && apply()) return;
+  if (attempts < 120) window.setTimeout(boot, 50);
+  else console.error("Network Map map shell did not mount within 6 seconds");
 }
 
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", initialize, { once: true });
-} else {
-  initialize();
-}
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot, { once: true });
+else boot();
 
 export {};

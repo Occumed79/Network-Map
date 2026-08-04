@@ -242,6 +242,15 @@ body,
     #f6fbfc !important;
 }
 
+/* Leaflet 1.9 uses plus-lighter blending for Chrome tiles. Against this
+   light shell it bleaches the ArcGIS basemap, so keep raster colors literal. */
+.leaflet-container .network-map-tiles img.leaflet-tile,
+.leaflet-container img.leaflet-tile {
+  mix-blend-mode: normal !important;
+  filter: none !important;
+  opacity: 1 !important;
+}
+
 .modal-backdrop,
 .pdf-modal-wrap {
   z-index: var(--z-modal) !important;

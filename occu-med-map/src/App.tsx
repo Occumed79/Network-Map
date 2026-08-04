@@ -1261,8 +1261,8 @@ export default function App() {
   const [pendingMarkerColor, setPendingMarkerColor] = useState('#ef4444');
   const [multiDropMode, setMultiDropMode] = useState(false);
   const multiDropLayerRef = useRef<L.LayerGroup|null>(null);
-  const [showGlowPoints, setShowGlowPoints] = useState(true);
-  const [showBlueHive, setShowBlueHive] = useState(true);
+  const [showGlowPoints, setShowGlowPoints] = useState(false);
+  const [showBlueHive, setShowBlueHive] = useState(false);
   const [blueHiveData, setBlueHiveData] = useState<any[]>([]);
   const [inventoryData, setInventoryData] = useState<MapInventoryProvider[]>([]);
   const [inventoryLoading, setInventoryLoading] = useState(false);
@@ -1270,11 +1270,11 @@ export default function App() {
   const [serviceInventoryEnabled, setServiceInventoryEnabled] = useState(false);
   const inventoryLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
   const inventoryFetchRef = useRef<AbortController|null>(null);
-  const [showIndexedProviders, setShowIndexedProviders] = useState(true);
-  const [showDentists, setShowDentists] = useState(true);
+  const [showIndexedProviders, setShowIndexedProviders] = useState(false);
+  const [showDentists, setShowDentists] = useState(false);
   const [dentistData, setDentistData] = useState<any[]>([]);
   const dentistLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
-  const [showMyClinicsLayer, setShowMyClinicsLayer] = useState(true);
+  const [showMyClinicsLayer, setShowMyClinicsLayer] = useState(false);
   const [myClinicsData, setMyClinicsData] = useState<any[]>([]);
   // NACCHO Local Health Department layer — Issue #37
   const [showNacchoLayer, setShowNacchoLayer] = useState(false);
@@ -3779,7 +3779,7 @@ export default function App() {
           </section>
 
           <section className="sb-section command-section">
-            <div className="command-section-title"><Layers3 size={15}/><span>Provider Layers</span><small>All on by default</small></div>
+            <div className="command-section-title"><Layers3 size={15}/><span>Provider Layers</span><small>Off by default</small></div>
             <div className="workflow-layer-list">
               <LayerToggle label="Indexed Providers" checked={showIndexedProviders} onChange={checked=>toggleProviderLayer('indexed',checked)} disabled={datasetStatus.indexed.loading} status={providerLayerStatus('indexed',indexedLayerData.length,'No indexed providers in view',showIndexedProviders)}/>
               <LayerToggle label="BlueHive Providers" checked={showBlueHive} onChange={checked=>toggleProviderLayer('bluehive',checked)} disabled={datasetStatus.bluehive.loading} status={providerLayerStatus('bluehive',blueHiveData.length,'No BlueHive providers in view',showBlueHive)}/>

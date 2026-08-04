@@ -5,8 +5,6 @@ export type TileProviderKey =
   | 'carto_light'
   | 'carto_dark'
   | 'carto_voyager'
-  | 'esri_streets'
-  | 'esri_satellite'
   | 'opentopo'
   | 'stadia_smooth'
   | 'stadia_dark'
@@ -56,22 +54,6 @@ export const TILE_PROVIDERS: Record<TileProviderKey, TileProvider> = {
     attribution: '© OpenStreetMap contributors © CARTO',
     maxZoom: 20,
   },
-  esri_streets: {
-    key: 'esri_streets',
-    name: 'Esri Streets',
-    group: 'free',
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Tiles © Esri',
-    maxZoom: 19,
-  },
-  esri_satellite: {
-    key: 'esri_satellite',
-    name: 'Esri Satellite',
-    group: 'free',
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Tiles © Esri',
-    maxZoom: 19,
-  },
   opentopo: {
     key: 'opentopo',
     name: 'OpenTopoMap',
@@ -107,7 +89,7 @@ export const TILE_PROVIDERS: Record<TileProviderKey, TileProvider> = {
 };
 
 export const TILE_GROUPS: Record<string, TileProviderKey[]> = {
-  Free: ['osm', 'carto_light', 'carto_dark', 'carto_voyager', 'esri_streets', 'esri_satellite', 'opentopo', 'stadia_smooth', 'stadia_dark', 'stadia_outdoors'],
+  Free: ['osm', 'carto_light', 'carto_dark', 'carto_voyager', 'opentopo', 'stadia_smooth', 'stadia_dark', 'stadia_outdoors'],
 };
 
 export function createTileLayer(key: TileProviderKey): L.TileLayer {

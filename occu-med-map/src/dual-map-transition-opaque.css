@@ -14,13 +14,6 @@
   height: 100% !important;
 }
 
-.dual-engine-vortex,
-.dual-engine-vortex.active {
-  background: #020611 !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-}
-
 .dual-engine-vortex:not(.active) {
   display: none !important;
   visibility: hidden !important;
@@ -29,40 +22,6 @@
 }
 
 .dual-engine-vortex.active {
-  opacity: 1 !important;
+  display: block !important;
   visibility: visible !important;
-  pointer-events: all !important;
-}
-
-.dual-engine-vortex::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  background:
-    radial-gradient(ellipse at 50% 50%, rgba(111,76,255,.25) 0 8%, transparent 34%),
-    conic-gradient(from 22deg at 50% 50%, transparent 0 10%, rgba(63,220,255,.1) 15%, transparent 23% 43%, rgba(197,107,255,.11) 50%, transparent 59% 78%, rgba(87,180,255,.1) 85%, transparent 94%),
-    radial-gradient(circle at 50% 50%, #101b3b 0%, #071229 34%, #030918 64%, #01040d 100%);
-  animation: galactic-nebula-turn 7s linear infinite;
-}
-
-@keyframes galactic-nebula-turn { to { transform: rotate(360deg) scale(1.08); } }
-
-.dual-engine-vortex-canvas,
-.dual-engine-vortex-rings,
-.dual-engine-vortex-core,
-.dual-engine-vortex-bloom {
-  z-index: 2;
-}
-
-.dual-engine-vortex-copy {
-  z-index: 4;
-}
-
-.dual-engine-vortex.bursting::before {
-  background: #f7fdff;
-}
-
-.dual-engine-vortex.revealing {
-  opacity: 0 !important;
 }

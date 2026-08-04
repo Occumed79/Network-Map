@@ -1611,9 +1611,12 @@ export default function App() {
     map.doubleClickZoom.disable();
     mapRef.current = map;
 
-    // Tile layer with dark filter
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-      maxZoom:19,className:'dark-tiles'
+    // ArcGIS raster tiles keep the requested 2D basemap without requiring
+    // WebGL2, so the map works in Safari and on older/limited GPUs.
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',{
+      maxZoom:19,
+      className:'network-map-tiles',
+      attribution:'Tiles © Esri'
     }).addTo(map);
 
     // City layer

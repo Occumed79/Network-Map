@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @workspace/occu-med-map build && pnpm --filter @workspace/api-server build
-    startCommand: pnpm --filter @workspace/api-server start
+    startCommand: node --enable-source-maps ./api-server/dist/index.mjs
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION

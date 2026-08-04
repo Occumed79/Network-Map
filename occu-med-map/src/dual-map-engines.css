@@ -12,6 +12,16 @@
   pointer-events: none;
 }
 
+.dual-engine-map-shell.leaflet-fallback-active .canonical-leaflet-controller {
+  z-index: 2;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dual-engine-map-shell.leaflet-fallback-active .arcgis-map-host {
+  pointer-events: none;
+}
+
 .canonical-map-blank-tile {
   width: 100%;
   height: 100%;
@@ -54,6 +64,16 @@
   color: #7a271a;
   background: rgba(255,250,250,.94);
   box-shadow: 0 8px 28px rgba(60,20,16,.16);
+}
+
+.arcgis-map-host.fallback-active {
+  background: transparent;
+}
+
+.arcgis-map-host.fallback-active .arcgis-load-error {
+  top: auto;
+  bottom: 18px;
+  pointer-events: auto;
 }
 
 .arcgis-load-error button { justify-self: start; cursor: pointer; }

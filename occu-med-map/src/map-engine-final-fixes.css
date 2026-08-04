@@ -1,6 +1,6 @@
-.dual-engine-map-shell.visible-engine-ready .arcgis-map-host > .dual-engine-loading,
-.arcgis-map-host.ready > .dual-engine-loading,
-.arcgis-map-host.engine-render-ready > .dual-engine-loading,
+.dual-engine-map-shell.visible-engine-ready .mapbox-2d-host > .dual-engine-loading,
+.mapbox-2d-host.ready > .dual-engine-loading,
+.mapbox-2d-host.engine-render-ready > .dual-engine-loading,
 .mapbox-globe-host.ready > .dual-engine-loading,
 .mapbox-globe-host.engine-render-ready > .dual-engine-loading {
   display: none !important;
@@ -9,15 +9,14 @@
   pointer-events: none !important;
 }
 
-.arcgis-map-host.engine-render-ready,
-.arcgis-map-host.ready {
+.mapbox-2d-host.engine-render-ready,
+.mapbox-2d-host.ready {
   background: #d9effb;
 }
 
-.arcgis-map-host .esri-view,
-.arcgis-map-host .esri-view-root,
-.arcgis-map-host .esri-view-surface,
-.arcgis-map-host .esri-view-surface--inset-outline {
+.mapbox-2d-host .mapboxgl-map,
+.mapbox-2d-host .mapboxgl-canvas-container,
+.mapbox-2d-host .mapboxgl-canvas {
   width: 100% !important;
   height: 100% !important;
 }

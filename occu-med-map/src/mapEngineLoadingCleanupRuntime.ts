@@ -1,7 +1,7 @@
 import { runWithoutObserverFeedback } from "./settledMutationObserver";
 
 function removeCompletedLoadingPanels(): void {
-  document.querySelectorAll<HTMLElement>(".arcgis-map-host, .mapbox-globe-host").forEach((host) => {
+  document.querySelectorAll<HTMLElement>(".mapbox-2d-host, .mapbox-globe-host").forEach((host) => {
     const status = host
       .closest<HTMLElement>(".dual-engine-map-shell")
       ?.querySelector<HTMLElement>(".map-dimension-status")
@@ -9,7 +9,7 @@ function removeCompletedLoadingPanels(): void {
       ?.toLowerCase() || "";
 
     const engineReady = host.classList.contains("ready")
-      || (host.classList.contains("arcgis-map-host") && status.includes("arcgis 2d active"))
+      || (host.classList.contains("mapbox-2d-host") && status.includes("mapbox 2d active"))
       || (host.classList.contains("mapbox-globe-host") && status.includes("mapbox 3d globe active"));
 
     if (!engineReady) return;

@@ -18,7 +18,7 @@
   background: transparent;
 }
 
-.arcgis-map-host,
+.mapbox-2d-host,
 .mapbox-globe-host {
   position: absolute;
   inset: 0;
@@ -28,7 +28,7 @@
   transition: opacity 260ms ease, visibility 260ms ease;
 }
 
-.arcgis-map-host {
+.mapbox-2d-host {
   z-index: 2;
   opacity: 1;
   visibility: visible;
@@ -36,11 +36,10 @@
   background: transparent;
 }
 
-.arcgis-map-host .esri-view-root,
-.arcgis-map-host .esri-view-surface,
-.arcgis-map-host canvas { width: 100%; height: 100%; }
+.mapbox-2d-host .mapboxgl-map,
+.mapbox-2d-host canvas { width: 100%; height: 100%; }
 
-.arcgis-load-error {
+.mapbox-load-error {
   position: absolute;
   left: 50%;
   top: 18px;
@@ -57,7 +56,7 @@
   box-shadow: 0 8px 28px rgba(60,20,16,.16);
 }
 
-.arcgis-load-error button { justify-self: start; cursor: pointer; }
+.mapbox-load-error button { justify-self: start; cursor: pointer; }
 
 .mapbox-globe-host {
   z-index: 3;
@@ -67,7 +66,7 @@
   pointer-events: none;
 }
 
-.dual-engine-map-shell.mapbox-globe-active .arcgis-map-host {
+.dual-engine-map-shell.mapbox-globe-active .mapbox-2d-host {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
@@ -283,9 +282,11 @@
 .dual-engine-vortex-rings i {
   position: absolute;
   inset: 10%;
-  border: 1px solid rgba(125,211,252,.28);
-  border-radius: 50%;
-  box-shadow: 0 0 28px rgba(56,189,248,.26), inset 0 0 26px rgba(99,102,241,.16);
+  border: 2px solid rgba(125,211,252,.22);
+  border-top-color: rgba(222,251,255,.82);
+  border-right-color: rgba(190,112,255,.5);
+  border-radius: 48% 52% 46% 54%;
+  box-shadow: 0 0 36px rgba(56,189,248,.3), inset 0 0 32px rgba(99,102,241,.22);
   animation: vortex-ring-spin 2.4s linear infinite;
 }
 

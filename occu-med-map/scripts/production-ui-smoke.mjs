@@ -28,13 +28,13 @@ await page.addInitScript(() => {
 
 try {
   await page.goto(url, { waitUntil: "networkidle", timeout: 60_000 });
-  await page.locator(".arcgis-map-host .esri-view-root").waitFor({ state: "visible", timeout: 45_000 });
-  await page.locator(".arcgis-map-host canvas").first().waitFor({ state: "visible", timeout: 45_000 });
+  await page.locator(".mapbox-2d-host .mapboxgl-map").waitFor({ state: "visible", timeout: 45_000 });
+  await page.locator(".mapbox-2d-host canvas").first().waitFor({ state: "visible", timeout: 45_000 });
   await page.waitForTimeout(2_000);
   assert.equal(
-    await page.locator(".arcgis-map-host .dual-engine-loading").count(),
+    await page.locator(".mapbox-2d-host .dual-engine-loading").count(),
     0,
-    "ArcGIS loading panel must be removed after MapView is ready",
+    "Mapbox loading panel must be removed after the 2D map is ready",
   );
 
   const initial = await page.evaluate(() => ({ ...window.__smoke }));
@@ -42,10 +42,10 @@ try {
   assert.deepEqual(initial.tileProxyRequests || [], [], "2D must not request raster proxy tiles");
   assert.equal(await page.locator(".leaflet-tile:visible").count(), 0, "Leaflet raster tiles must not be visible");
 
-  const map = page.locator(".arcgis-map-host");
+  const map = page.locator(".mapbox-2d-host");
   const sidebarButton = page.locator(".sidebar button:visible").first();
   await sidebarButton.click({ timeout: 5_000 });
-  await page.locator(".arcgis-map-host .esri-zoom .esri-widget--button").first().click();
+  await page.locator(".mapbox-2d-host .mapboxgl-ctrl-zoom-in").first().click();
   await map.hover();
   await page.mouse.wheel(0, -300);
   const box = await map.boundingBox();

@@ -1,40 +1,8 @@
-import { TRANSITION_SOUND_DATA_URI } from "./transitionSoundData";
 import { runWithoutObserverFeedback } from "./settledMutationObserver";
 
 const MAPBOX_PATCH_FLAG = "__networkMapDensityFilterPatched";
 const SOURCE_PATCH_FLAG = "__networkMapDensitySourcePatched";
 const MAPBOX_SCRIPT_PATCH_FLAG = "networkMapDensityPatchBound";
-
-const transitionAudio = new Audio(TRANSITION_SOUND_DATA_URI);
-transitionAudio.preload = "auto";
-transitionAudio.volume = 0.72;
-let soundStartedAt = 0;
-let soundPlaying = false;
-
-function startTransitionSound(): void {
-  try {
-    transitionAudio.pause();
-    transitionAudio.currentTime = 0;
-    soundStartedAt = Date.now();
-    soundPlaying = true;
-    void transitionAudio.play().catch(() => {
-      soundPlaying = false;
-    });
-  } catch {
-    soundPlaying = false;
-  }
-}
-
-function stopTransitionSound(): void {
-  if (!soundPlaying) return;
-  soundPlaying = false;
-  try {
-    transitionAudio.pause();
-    transitionAudio.currentTime = 0;
-  } catch {
-    // Audio cleanup is best-effort.
-  }
-}
 
 function featureIsDensityBlob(feature: any): boolean {
   if (!feature || feature.geometry?.type !== "Point") return false;
@@ -92,17 +60,17 @@ function bindMapboxScriptPatch(): void {
 function removeFinishedLoadingPanels(): void {
   document.querySelectorAll<HTMLElement>(".dual-engine-map-shell").forEach((shell) => {
     const status = shell.querySelector<HTMLElement>(".map-dimension-status")?.textContent?.toLowerCase() || "";
-    const arcgisHost = shell.querySelector<HTMLElement>(".arcgis-map-host");
+    const mapbox2dHost = shell.querySelector<HTMLElement>(".mapbox-2d-host");
     const mapboxHost = shell.querySelector<HTMLElement>(".mapbox-globe-host");
 
-    const arcgisReady = shell.classList.contains("visible-engine-ready")
-      || arcgisHost?.classList.contains("ready")
-      || status.includes("arcgis 2d active")
-      || Boolean(arcgisHost?.querySelector(".esri-view-root, .esri-view"));
+    const mapbox2dReady = shell.classList.contains("visible-engine-ready")
+      || mapbox2dHost?.classList.contains("ready")
+      || status.includes("mapbox 2d active")
+      || Boolean(mapbox2dHost?.querySelector(".mapboxgl-map canvas"));
 
-    if (arcgisHost && arcgisReady) {
-      arcgisHost.classList.add("engine-render-ready");
-      arcgisHost.querySelectorAll<HTMLElement>(":scope > .dual-engine-loading").forEach((node) => node.remove());
+    if (mapbox2dHost && mapbox2dReady) {
+      mapbox2dHost.classList.add("engine-render-ready");
+      mapbox2dHost.querySelectorAll<HTMLElement>(":scope > .dual-engine-loading").forEach((node) => node.remove());
     }
 
     const mapboxReady = mapboxHost?.classList.contains("ready")
@@ -117,11 +85,7 @@ function removeFinishedLoadingPanels(): void {
 }
 
 function cleanupFinishedTransition(): void {
-  if (!soundPlaying || Date.now() - soundStartedAt < 350) return;
-  const overlay = document.querySelector<HTMLElement>(".dual-engine-vortex");
-  if (overlay?.classList.contains("active")) return;
-  stopTransitionSound();
-  delete document.documentElement.dataset.mapTransitionTarget;
+  if (!document.querySelector(".dual-engine-vortex.active")) delete document.documentElement.dataset.mapTransitionTarget;
 }
 
 document.addEventListener("click", (event) => {
@@ -133,7 +97,6 @@ document.addEventListener("click", (event) => {
   const requestedMode = button.dataset.mapMode === "3d" ? "3d" : "2d";
   const isAlreadyActive = button.classList.contains("active") || button.getAttribute("aria-pressed") === "true";
   if (!isAlreadyActive) {
-    startTransitionSound();
     document.documentElement.dataset.mapTransitionTarget = requestedMode;
   }
 }, true);
@@ -172,8 +135,5 @@ if (document.readyState === "loading") {
 } else {
   initialize();
 }
-
-window.addEventListener("pagehide", stopTransitionSound);
-window.addEventListener("beforeunload", stopTransitionSound);
 
 export {};

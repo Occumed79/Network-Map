@@ -1,10 +1,8 @@
 import L from "leaflet";
 
 type MapMode = "2d" | "3d";
-type ArcgisImportApi = { import: (modules: string[]) => Promise<any[]> };
 declare global {
   interface Window {
-    $arcgis?: ArcgisImportApi;
     mapboxgl?: any;
     __NETWORK_MAP_GLOBE__?: {
       getMode: () => MapMode;
@@ -14,33 +12,25 @@ declare global {
   }
 }
 
-const ARCGIS_VERSION = "5.1";
 const MAPBOX_VERSION = "3.25.0";
-const ARCGIS_KEY = import.meta.env.VITE_ARCGIS_API_KEY || "";
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || import.meta.env.VITE_MAPBOX_ACCESS_TOKEN || "";
+const MAPBOX_2D_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN_2 || "";
 const MAX_MIRRORED_FEATURES = 12_000;
 const ARCGIS_LOAD_TIMEOUT_MS = 25_000;
 
 let canonicalMap: L.Map | null = null;
 let currentMode: MapMode = "2d";
 let mapWrap: HTMLElement | null = null;
-let arcgisHost: HTMLDivElement | null = null;
+let mapbox2dHost: HTMLDivElement | null = null;
 let mapboxHost: HTMLDivElement | null = null;
 let toggleControl: HTMLDivElement | null = null;
 let statusNode: HTMLSpanElement | null = null;
 
-let arcgisLoaderPromise: Promise<void> | null = null;
 let mapboxLoaderPromise: Promise<void> | null = null;
-let arcgisViewPromise: Promise<void> | null = null;
+let mapbox2dViewPromise: Promise<void> | null = null;
 let mapboxViewPromise: Promise<void> | null = null;
 
-let arcgisView: any = null;
-let arcgisGraphicsLayer: any = null;
-let ArcgisGraphic: any = null;
-let arcgisStationaryHandle: { remove?: () => void } | null = null;
-let arcgisClickHandle: { remove?: () => void } | null = null;
-let arcgisDoubleClickHandle: { remove?: () => void } | null = null;
-
+let mapbox2dMap: any = null;
 let mapboxMap: any = null;
 let syncTimer: number | null = null;
 let periodicTimer: number | null = null;
@@ -71,71 +61,66 @@ async function initializeDualEngines(map: L.Map): Promise<void> {
     { maxZoom: 19, attribution: "Tiles &copy; Esri" },
   ).addTo(map);
 
-  arcgisHost = document.createElement("div");
-  arcgisHost.className = "arcgis-map-host";
-  arcgisHost.setAttribute("aria-label", "ArcGIS two-dimensional map");
-  arcgisHost.innerHTML = loadingMarkup("Starting ArcGIS 2D map", "Loading the ArcGIS topographic basemap…");
+  mapbox2dHost = document.createElement("div");
+  mapbox2dHost.className = "mapbox-2d-host";
+  mapbox2dHost.setAttribute("aria-label", "Mapbox two-dimensional map");
+  mapbox2dHost.innerHTML = loadingMarkup("Starting Mapbox 2D map", "Loading the Mapbox streets basemap…");
 
-  // Keep this historical class because the luminous transition readiness check
-  // looks for it. It now contains the Mapbox globe rather than ArcGIS SceneView.
   mapboxHost = document.createElement("div");
-  mapboxHost.className = "arcgis-globe-host mapbox-globe-host";
+  mapboxHost.className = "mapbox-globe-host";
   mapboxHost.setAttribute("aria-hidden", "true");
   mapboxHost.innerHTML = loadingMarkup("Starting Mapbox 3D globe", "Building atmosphere and network layers…");
 
   toggleControl = document.createElement("div");
   toggleControl.className = "map-dimension-toggle";
   toggleControl.setAttribute("role", "group");
-  toggleControl.setAttribute("aria-label", "Map engine");
+  toggleControl.setAttribute("aria-label", "Map dimension");
   toggleControl.innerHTML = `
-    <button type="button" class="active" data-map-mode="2d" aria-pressed="true" title="Use the ArcGIS 2D map">
+    <button type="button" class="active" data-map-mode="2d" aria-pressed="true" title="Use the Mapbox 2D map">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Zm6-3v15m6-12v15"/></svg>
-      <span><strong>2D Map</strong><small>ArcGIS</small></span>
+      <span><strong>2D Map</strong><small>Mapbox</small></span>
     </button>
     <button type="button" data-map-mode="3d" aria-pressed="false" title="Open the Mapbox 3D globe">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 4.5 6 4.5 9S15 18 12 21c-3-3-4.5-6-4.5-9S9 6 12 3Z"/></svg>
       <span><strong>3D Globe</strong><small>Mapbox</small></span>
     </button>
-    <span class="map-dimension-status" aria-live="polite">Loading ArcGIS 2D…</span>
+    <span class="map-dimension-status" aria-live="polite">Loading Mapbox 2D…</span>
   `;
   statusNode = toggleControl.querySelector(".map-dimension-status");
 
-  mapWrap.append(arcgisHost, mapboxHost, toggleControl);
+  mapWrap.append(mapbox2dHost, mapboxHost, toggleControl);
   map.on("layeradd layerremove overlayadd overlayremove", queueOverlaySync);
   map.on("moveend zoomend", onCanonicalViewChanged);
   map.once("unload", cleanupDualEngines);
   observeMapSize();
 
   try {
-    await ensureArcgis2d();
-    markArcgisReady();
+    await ensureMapbox2d();
     mapWrap.classList.add("visible-engine-ready");
     syncAllOverlays();
-    setStatus("ArcGIS 2D active");
+    setStatus("Mapbox 2D active");
   } catch (error) {
-    console.error("ArcGIS 2D map failed", error);
-    showArcgisError(error);
-    setStatus(`ArcGIS 2D unavailable · ${errorMessage(error)}`, "error");
+    console.error("Mapbox 2D map failed", error);
+    showMapbox2dError(error);
+    setStatus(`Mapbox 2D unavailable · ${errorMessage(error)}`, "error");
   }
 }
 
-function showArcgisError(error: unknown): void {
-  if (!arcgisHost) return;
-  arcgisHost.classList.remove("ready", "engine-render-ready");
-  arcgisHost.innerHTML = `<div class="arcgis-load-error" role="status"><strong>ArcGIS 2D map unavailable</strong><small>${escapeHtml(errorMessage(error))}</small><button type="button">Retry ArcGIS</button></div>`;
-  arcgisHost.querySelector("button")?.addEventListener("click", () => {
-    if (!arcgisHost) return;
-    arcgisHost.innerHTML = loadingMarkup("Starting ArcGIS 2D map", "Loading the ArcGIS topographic basemap…");
-    setStatus("Retrying ArcGIS 2D…", "loading");
-    void ensureArcgis2d().then(() => {
-      markArcgisReady();
-      mapWrap?.classList.add("visible-engine-ready");
+function showMapbox2dError(error: unknown): void {
+  if (!mapbox2dHost) return;
+  mapbox2dHost.classList.remove("ready", "engine-render-ready");
+  mapbox2dHost.innerHTML = `<div class="mapbox-load-error" role="status"><strong>Mapbox 2D map unavailable</strong><small>${escapeHtml(errorMessage(error))}</small><button type="button">Retry Mapbox</button></div>`;
+  mapbox2dHost.querySelector("button")?.addEventListener("click", () => {
+    if (!mapbox2dHost) return;
+    mapbox2dHost.innerHTML = loadingMarkup("Starting Mapbox 2D map", "Loading the Mapbox streets basemap…");
+    setStatus("Retrying Mapbox 2D…", "loading");
+    void ensureMapbox2d().then(() => {
+      mapbox2dHost?.classList.add("ready", "engine-render-ready");
       syncAllOverlays();
-      setStatus("ArcGIS 2D active");
+      setStatus("Mapbox 2D active");
     }).catch((nextError) => {
-      console.error("ArcGIS 2D retry failed", nextError);
-      showArcgisError(nextError);
-      setStatus(`ArcGIS 2D unavailable · ${errorMessage(nextError)}`, "error");
+      showMapbox2dError(nextError);
+      setStatus(`Mapbox 2D unavailable · ${errorMessage(nextError)}`, "error");
     });
   }, { once: true });
 }
@@ -162,7 +147,7 @@ function observeMapSize(): void {
     if (!size || size.width <= 0 || size.height <= 0) return;
     window.cancelAnimationFrame(mapResizeFrame);
     mapResizeFrame = window.requestAnimationFrame(() => {
-      if (currentMode === "2d") arcgisView?.resize?.();
+      if (currentMode === "2d") mapbox2dMap?.resize?.();
       else mapboxMap?.resize?.();
     });
   });
@@ -194,14 +179,14 @@ function updateToggle(): void {
 }
 
 async function setMode(nextMode: MapMode): Promise<void> {
-  if (!canonicalMap || !mapWrap || !arcgisHost || !mapboxHost) return;
+  if (!canonicalMap || !mapWrap || !mapbox2dHost || !mapboxHost) return;
 
   if (nextMode === "3d") {
     setStatus("Loading Mapbox 3D…", "loading");
     await ensureMapboxGlobe();
     currentMode = "3d";
-    mapWrap.classList.add("arcgis-globe-active", "mapbox-globe-active");
-    arcgisHost.setAttribute("aria-hidden", "true");
+    mapWrap.classList.add("mapbox-globe-active");
+    mapbox2dHost.setAttribute("aria-hidden", "true");
     mapboxHost.setAttribute("aria-hidden", "false");
     updateToggle();
     mapboxMap?.resize?.();
@@ -212,183 +197,95 @@ async function setMode(nextMode: MapMode): Promise<void> {
     return;
   }
 
-  setStatus("Loading ArcGIS 2D…", "loading");
+  setStatus("Loading Mapbox 2D…", "loading");
   stopPeriodicSync();
-  await ensureArcgis2d();
-  markArcgisReady();
+  await ensureMapbox2d();
   currentMode = "2d";
-  mapWrap.classList.remove("arcgis-globe-active", "mapbox-globe-active");
-  arcgisHost.setAttribute("aria-hidden", "false");
+  mapWrap.classList.remove("mapbox-globe-active");
+  mapbox2dHost.setAttribute("aria-hidden", "false");
   mapboxHost.setAttribute("aria-hidden", "true");
   updateToggle();
-  arcgisView?.resize?.();
-  void syncArcgisCameraFromLeaflet(false);
+  mapbox2dMap?.resize?.();
+  syncMapbox2dCameraFromLeaflet(false);
   syncAllOverlays();
-  setStatus("ArcGIS 2D active");
+  setStatus("Mapbox 2D active");
 }
 
-async function ensureArcgis2d(): Promise<void> {
-  if (arcgisView) return;
-  if (arcgisViewPromise) return arcgisViewPromise;
-
-  arcgisViewPromise = (async () => {
-    if (!ARCGIS_KEY) throw new Error("VITE_ARCGIS_API_KEY is not configured");
-    await withTimeout(loadArcgisSdk(), ARCGIS_LOAD_TIMEOUT_MS, "ArcGIS SDK");
-    if (!window.$arcgis || !arcgisHost || !canonicalMap) throw new Error("ArcGIS SDK did not initialize");
-
-    const [esriConfig, ArcGISMap, MapView, GraphicsLayer, Graphic, reactiveUtils] = await withTimeout(window.$arcgis.import([
-      "@arcgis/core/config.js",
-      "@arcgis/core/Map.js",
-      "@arcgis/core/views/MapView.js",
-      "@arcgis/core/layers/GraphicsLayer.js",
-      "@arcgis/core/Graphic.js",
-      "@arcgis/core/core/reactiveUtils.js",
-    ]), ARCGIS_LOAD_TIMEOUT_MS, "ArcGIS modules");
-
-    esriConfig.apiKey = ARCGIS_KEY;
-    ArcgisGraphic = Graphic;
-    arcgisGraphicsLayer = new GraphicsLayer({
-      title: "Occu-Med network overlays",
-      listMode: "hide",
-    });
-
-    const arcgisMap = new ArcGISMap({
-      basemap: "arcgis/topographic",
-      layers: [arcgisGraphicsLayer],
-    });
-    const center = canonicalMap.getCenter();
-    arcgisView = new MapView({
-      container: arcgisHost,
-      map: arcgisMap,
-      center: [center.lng, center.lat],
-      zoom: canonicalMap.getZoom(),
-      constraints: { rotationEnabled: false },
-      popup: { dockEnabled: false },
-    });
-
-    await withTimeout(Promise.resolve(arcgisView.when()), ARCGIS_LOAD_TIMEOUT_MS, "ArcGIS map view");
-    arcgisView.ui.components = ["zoom", "attribution"];
-    arcgisHost.classList.add("ready");
-
-    arcgisStationaryHandle = reactiveUtils.watch(
-      () => arcgisView.stationary,
-      (stationary: boolean) => {
-        if (stationary && currentMode === "2d") syncLeafletCameraFromArcgis();
-      },
-    );
-
-    arcgisClickHandle = arcgisView.on("click", async (event: any) => {
-      if (currentMode !== "2d" || !canonicalMap || !event.mapPoint) return;
-      const hit = await arcgisView.hitTest(event).catch(() => null);
-      const overlayHit = Boolean(hit?.results?.some((result: any) => result?.graphic?.layer === arcgisGraphicsLayer));
-      if (overlayHit) return;
-      canonicalMap.fire("click", {
-        latlng: L.latLng(event.mapPoint.latitude, event.mapPoint.longitude),
-        originalEvent: event.native,
-      });
-    });
-
-    arcgisDoubleClickHandle = arcgisView.on("double-click", (event: any) => {
-      if (currentMode !== "2d" || !canonicalMap || !event.mapPoint) return;
-      event.stopPropagation?.();
-      canonicalMap.fire("dblclick", {
-        latlng: L.latLng(event.mapPoint.latitude, event.mapPoint.longitude),
-        originalEvent: event.native,
-      });
-    });
-  })();
-
+async function ensureMapbox2d(): Promise<void> {
+  if (mapbox2dMap) return;
+  if (mapbox2dViewPromise) return mapbox2dViewPromise;
+  mapbox2dViewPromise = createMapboxMap("2d");
   try {
-    await arcgisViewPromise;
+    await mapbox2dViewPromise;
   } catch (error) {
-    destroyArcgisView();
-    arcgisViewPromise = null;
+    mapbox2dMap?.remove?.();
+    mapbox2dMap = null;
+    mapbox2dViewPromise = null;
     throw error;
   }
+}
+
+async function createMapboxMap(mode: MapMode): Promise<void> {
+  const is2d = mode === "2d";
+  const token = is2d ? MAPBOX_2D_TOKEN : MAPBOX_TOKEN;
+  const host = is2d ? mapbox2dHost : mapboxHost;
+  if (!token) throw new Error(is2d ? "VITE_MAPBOX_TOKEN_2 is not configured" : "VITE_MAPBOX_TOKEN is not configured");
+  await loadMapboxSdk();
+  if (!window.mapboxgl || !host || !canonicalMap) throw new Error("Mapbox GL JS did not initialize");
+  window.mapboxgl.accessToken = token;
+  const center = canonicalMap.getCenter();
+  const instance = new window.mapboxgl.Map({
+    container: host,
+    accessToken: token,
+    style: is2d ? "mapbox://styles/mapbox/streets-v12" : "mapbox://styles/mapbox/standard",
+    projection: is2d ? "mercator" : "globe",
+    center: [center.lng, center.lat],
+    zoom: is2d ? canonicalMap.getZoom() : Math.max(1.2, canonicalMap.getZoom()),
+    minZoom: 1,
+    maxZoom: 17,
+    antialias: true,
+    attributionControl: true,
+    renderWorldCopies: false,
+  });
+  if (is2d) mapbox2dMap = instance;
+  else mapboxMap = instance;
+  instance.addControl(new window.mapboxgl.NavigationControl({ visualizePitch: !is2d }), "top-left");
+  await new Promise<void>((resolve, reject) => {
+    const timeout = window.setTimeout(() => reject(new Error(`Mapbox ${is2d ? "2D map" : "globe"} timed out`)), 25_000);
+    instance.once("load", () => { window.clearTimeout(timeout); resolve(); });
+    instance.once("error", (event: any) => {
+      if (!instance.loaded?.()) { window.clearTimeout(timeout); reject(event?.error || new Error("Mapbox failed to load")); }
+    });
+  });
+  installMapboxOverlayLayers(instance);
+  host.classList.add("ready", "engine-render-ready");
+  if (!is2d) instance.setFog?.({ color: "rgb(185, 214, 235)", "high-color": "rgb(36, 92, 223)", "horizon-blend": 0.08, "space-color": "rgb(3, 7, 18)", "star-intensity": 0.32 });
+  instance.on("moveend", () => {
+    if (currentMode === mode) syncLeafletCameraFromMapbox(instance);
+  });
+  installMapboxInteractions(instance, mode);
+}
+
+function installMapboxInteractions(instance: any, mode: MapMode): void {
+  instance.on("click", (event: any) => {
+    if (currentMode !== mode || !canonicalMap) return;
+    const layers = ["network-points", "network-lines", "network-fills"].filter((id) => Boolean(instance.getLayer(id)));
+    const features = layers.length ? instance.queryRenderedFeatures(event.point, { layers }) : [];
+    const html = String(features[0]?.properties?.popupHtml || "");
+    if (html) new window.mapboxgl!.Popup({ closeButton: true }).setLngLat(event.lngLat).setHTML(html).addTo(instance);
+    else canonicalMap.fire("click", { latlng: L.latLng(event.lngLat.lat, event.lngLat.lng), originalEvent: event.originalEvent });
+  });
+  instance.on("dblclick", (event: any) => {
+    if (currentMode !== mode || !canonicalMap) return;
+    event.preventDefault?.();
+    canonicalMap.fire("dblclick", { latlng: L.latLng(event.lngLat.lat, event.lngLat.lng), originalEvent: event.originalEvent });
+  });
 }
 
 async function ensureMapboxGlobe(): Promise<void> {
   if (mapboxMap) return;
   if (mapboxViewPromise) return mapboxViewPromise;
-
-  mapboxViewPromise = (async () => {
-    if (!MAPBOX_TOKEN) throw new Error("VITE_MAPBOX_TOKEN is not configured");
-    await loadMapboxSdk();
-    if (!window.mapboxgl || !mapboxHost || !canonicalMap) throw new Error("Mapbox GL JS did not initialize");
-
-    window.mapboxgl.accessToken = MAPBOX_TOKEN;
-    const center = canonicalMap.getCenter();
-    mapboxMap = new window.mapboxgl.Map({
-      container: mapboxHost,
-      style: "mapbox://styles/mapbox/standard",
-      projection: "globe",
-      center: [center.lng, center.lat],
-      zoom: Math.max(1.2, canonicalMap.getZoom()),
-      minZoom: 1,
-      maxZoom: 17,
-      antialias: true,
-      attributionControl: true,
-      renderWorldCopies: false,
-      refreshExpiredTiles: false,
-    });
-
-    mapboxMap.addControl(new window.mapboxgl.NavigationControl({ visualizePitch: true }), "top-left");
-    mapboxMap.scrollZoom?.setWheelZoomRate?.(1 / 600);
-    mapboxMap.scrollZoom?.setZoomRate?.(1 / 180);
-
-    await new Promise<void>((resolve, reject) => {
-      const timeout = window.setTimeout(() => reject(new Error("Mapbox globe timed out")), 25_000);
-      mapboxMap.once("load", () => {
-        window.clearTimeout(timeout);
-        resolve();
-      });
-      mapboxMap.once("error", (event: any) => {
-        const message = event?.error?.message;
-        if (!mapboxMap?.loaded?.()) {
-          window.clearTimeout(timeout);
-          reject(new Error(message || "Mapbox globe failed to load"));
-        }
-      });
-    });
-
-    mapboxMap.setFog?.({
-      color: "rgb(185, 214, 235)",
-      "high-color": "rgb(36, 92, 223)",
-      "horizon-blend": 0.08,
-      "space-color": "rgb(3, 7, 18)",
-      "star-intensity": 0.32,
-    });
-    installMapboxOverlayLayers();
-    mapboxHost.classList.add("ready");
-
-    mapboxMap.on("moveend", () => {
-      if (currentMode === "3d") syncLeafletCameraFromMapbox();
-    });
-    mapboxMap.on("click", (event: any) => {
-      if (currentMode !== "3d" || !canonicalMap) return;
-      const features = mapboxMap.queryRenderedFeatures(event.point, {
-        layers: ["network-points", "network-lines", "network-fills"].filter((id) => Boolean(mapboxMap.getLayer(id))),
-      });
-      if (features.length) {
-        const html = String(features[0]?.properties?.popupHtml || "");
-        if (html) new window.mapboxgl!.Popup({ closeButton: true }).setLngLat(event.lngLat).setHTML(html).addTo(mapboxMap);
-        return;
-      }
-      canonicalMap.fire("click", {
-        latlng: L.latLng(event.lngLat.lat, event.lngLat.lng),
-        originalEvent: event.originalEvent,
-      });
-    });
-    mapboxMap.on("dblclick", (event: any) => {
-      if (currentMode !== "3d" || !canonicalMap) return;
-      event.preventDefault?.();
-      canonicalMap.fire("dblclick", {
-        latlng: L.latLng(event.lngLat.lat, event.lngLat.lng),
-        originalEvent: event.originalEvent,
-      });
-    });
-  })();
-
+  mapboxViewPromise = createMapboxMap("3d");
   try {
     await mapboxViewPromise;
   } catch (error) {
@@ -396,32 +293,6 @@ async function ensureMapboxGlobe(): Promise<void> {
     mapboxViewPromise = null;
     throw error;
   }
-}
-
-function loadArcgisSdk(): Promise<void> {
-  if (window.$arcgis) return Promise.resolve();
-  if (arcgisLoaderPromise) return arcgisLoaderPromise;
-
-  const cssId = "network-map-arcgis-light-theme";
-  if (!document.getElementById(cssId)) {
-    const link = document.createElement("link");
-    link.id = cssId;
-    link.rel = "stylesheet";
-    link.href = `https://js.arcgis.com/${ARCGIS_VERSION}/esri/themes/light/main.css`;
-    document.head.appendChild(link);
-  }
-
-  arcgisLoaderPromise = loadScriptModule(
-    "network-map-arcgis-sdk",
-    `https://js.arcgis.com/${ARCGIS_VERSION}/`,
-    () => Boolean(window.$arcgis),
-    "ArcGIS SDK",
-  ).catch((error) => {
-    document.getElementById("network-map-arcgis-sdk")?.remove();
-    arcgisLoaderPromise = null;
-    throw error;
-  });
-  return arcgisLoaderPromise;
 }
 
 function loadMapboxSdk(): Promise<void> {
@@ -515,13 +386,13 @@ function waitForGlobal(
   finish();
 }
 
-function installMapboxOverlayLayers(): void {
-  if (!mapboxMap || mapboxMap.getSource("network-overlays")) return;
-  mapboxMap.addSource("network-overlays", {
+function installMapboxOverlayLayers(targetMap: any): void {
+  if (!targetMap || targetMap.getSource("network-overlays")) return;
+  targetMap.addSource("network-overlays", {
     type: "geojson",
     data: emptyFeatureCollection(),
   });
-  mapboxMap.addLayer({
+  targetMap.addLayer({
     id: "network-fills",
     type: "fill",
     source: "network-overlays",
@@ -532,7 +403,7 @@ function installMapboxOverlayLayers(): void {
       "fill-outline-color": ["coalesce", ["get", "lineColor"], "#ffffff"],
     },
   });
-  mapboxMap.addLayer({
+  targetMap.addLayer({
     id: "network-lines",
     type: "line",
     source: "network-overlays",
@@ -543,7 +414,7 @@ function installMapboxOverlayLayers(): void {
       "line-width": ["coalesce", ["get", "lineWidth"], 2],
     },
   });
-  mapboxMap.addLayer({
+  targetMap.addLayer({
     id: "network-points",
     type: "circle",
     source: "network-overlays",
@@ -580,27 +451,14 @@ function stopPeriodicSync(): void {
 
 function syncAllOverlays(): void {
   if (!canonicalMap) return;
-  const layers = collectRenderableLayers(canonicalMap);
-
-  if (arcgisGraphicsLayer && ArcgisGraphic) {
-    const graphics: any[] = [];
-    for (const layer of layers) {
-      const graphic = leafletToArcgisGraphic(layer);
-      if (graphic) graphics.push(graphic);
-      if (graphics.length >= MAX_MIRRORED_FEATURES) break;
-    }
-    arcgisGraphicsLayer.removeAll();
-    if (graphics.length) arcgisGraphicsLayer.addMany(graphics);
+  const features: any[] = [];
+  for (const layer of collectRenderableLayers(canonicalMap)) {
+    const feature = leafletToGeoJsonFeature(layer);
+    if (feature) features.push(feature);
+    if (features.length >= MAX_MIRRORED_FEATURES) break;
   }
-
-  if (mapboxMap?.getSource?.("network-overlays")) {
-    const features: any[] = [];
-    for (const layer of layers) {
-      const feature = leafletToGeoJsonFeature(layer);
-      if (feature) features.push(feature);
-      if (features.length >= MAX_MIRRORED_FEATURES) break;
-    }
-    mapboxMap.getSource("network-overlays").setData({ type: "FeatureCollection", features });
+  for (const instance of [mapbox2dMap, mapboxMap]) {
+    instance?.getSource?.("network-overlays")?.setData({ type: "FeatureCollection", features });
   }
 }
 
@@ -627,68 +485,6 @@ function collectRenderableLayers(map: L.Map): any[] {
   };
   map.eachLayer((layer: L.Layer) => visit(layer));
   return result;
-}
-
-function leafletToArcgisGraphic(layer: any): any | null {
-  if (!ArcgisGraphic) return null;
-  const popupTemplate = popupTemplateFor(layer);
-  const attributes = { leafletLayerId: String(layer._leaflet_id || "") };
-
-  if (layer instanceof L.Circle) {
-    const center = layer.getLatLng();
-    return new ArcgisGraphic({
-      geometry: { type: "polygon", rings: [geodesicRing(center.lat, center.lng, layer.getRadius())], spatialReference: { wkid: 4326 } },
-      symbol: arcgisPolygonSymbol(layer.options),
-      popupTemplate,
-      attributes,
-    });
-  }
-  if (layer instanceof L.CircleMarker || layer instanceof L.Marker) {
-    const center = layer.getLatLng();
-    const options: any = layer.options || {};
-    return new ArcgisGraphic({
-      geometry: { type: "point", longitude: center.lng, latitude: center.lat },
-      symbol: {
-        type: "simple-marker",
-        style: "circle",
-        size: layer instanceof L.CircleMarker ? Math.max(7, Number(options.radius || 4) * 2.1) : 11,
-        color: rgbaArray(options.fillColor || options.color || "#0e7490", Number(options.fillOpacity ?? 0.9)),
-        outline: {
-          color: rgbaArray(options.color || "#ffffff", Number(options.opacity ?? 0.95)),
-          width: Math.max(0.5, Number(options.weight || 1)),
-        },
-      },
-      popupTemplate,
-      attributes,
-    });
-  }
-  if (layer instanceof L.Polygon) {
-    const rings: number[][][] = [];
-    collectCoordinatePaths(layer.getLatLngs(), rings);
-    if (!rings.length) return null;
-    return new ArcgisGraphic({
-      geometry: { type: "polygon", rings, spatialReference: { wkid: 4326 } },
-      symbol: arcgisPolygonSymbol(layer.options),
-      popupTemplate,
-      attributes,
-    });
-  }
-  if (layer instanceof L.Polyline) {
-    const paths: number[][][] = [];
-    collectCoordinatePaths(layer.getLatLngs(), paths);
-    if (!paths.length) return null;
-    return new ArcgisGraphic({
-      geometry: { type: "polyline", paths, spatialReference: { wkid: 4326 } },
-      symbol: {
-        type: "simple-line",
-        color: rgbaArray(layer.options?.color || "#67e8f9", Number(layer.options?.opacity ?? 0.9)),
-        width: Math.max(1, Number(layer.options?.weight || 2)),
-      },
-      popupTemplate,
-      attributes,
-    });
-  }
-  return null;
 }
 
 function leafletToGeoJsonFeature(layer: any): any | null {
@@ -734,26 +530,6 @@ function geoJsonFeature(geometry: Record<string, unknown>, properties: Record<st
 
 function emptyFeatureCollection(): Record<string, unknown> {
   return { type: "FeatureCollection", features: [] };
-}
-
-function arcgisPolygonSymbol(options: any): Record<string, unknown> {
-  return {
-    type: "simple-fill",
-    color: rgbaArray(options?.fillColor || options?.color || "#0e7490", Number(options?.fillOpacity ?? 0.18)),
-    outline: {
-      color: rgbaArray(options?.color || "#67e8f9", Number(options?.opacity ?? 0.85)),
-      width: Math.max(0.75, Number(options?.weight || 1.5)),
-    },
-  };
-}
-
-function popupTemplateFor(layer: any): Record<string, unknown> | undefined {
-  const content = popupHtmlFor(layer);
-  if (!content) return undefined;
-  const div = document.createElement("div");
-  div.innerHTML = content;
-  const title = (div.textContent || "Occu-Med network detail").replace(/\s+/g, " ").trim().slice(0, 90);
-  return { title: title || "Occu-Med network detail", content };
 }
 
 function popupHtmlFor(layer: any): string {
@@ -826,57 +602,38 @@ function clampNumber(value: unknown, fallback: number): number {
 function onCanonicalViewChanged(): void {
   queueOverlaySync();
   if (Date.now() - lastEngineDrivenLeafletMove < 450) return;
-  if (currentMode === "2d") void syncArcgisCameraFromLeaflet(false);
+  if (currentMode === "2d") syncMapbox2dCameraFromLeaflet(false);
   else syncMapboxCameraFromLeaflet(false);
 }
 
-async function syncArcgisCameraFromLeaflet(animate: boolean): Promise<void> {
-  if (!arcgisView || !canonicalMap || currentMode !== "2d") return;
-  const center = canonicalMap.getCenter();
-  await arcgisView.goTo({ center: [center.lng, center.lat], zoom: canonicalMap.getZoom() }, {
-    animate,
-    duration: animate ? 500 : 0,
-  }).catch(() => undefined);
+function syncMapbox2dCameraFromLeaflet(animate: boolean): void {
+  syncMapboxCamera(mapbox2dMap, animate, "2d");
 }
 
 function syncMapboxCameraFromLeaflet(animate: boolean): void {
-  if (!mapboxMap || !canonicalMap || currentMode !== "3d") return;
+  syncMapboxCamera(mapboxMap, animate, "3d");
+}
+
+function syncMapboxCamera(instance: any, animate: boolean, mode: MapMode): void {
+  if (!instance || !canonicalMap || currentMode !== mode) return;
   const center = canonicalMap.getCenter();
   const camera = { center: [center.lng, center.lat], zoom: Math.max(1, canonicalMap.getZoom()) };
-  if (animate) mapboxMap.easeTo({ ...camera, duration: 600 });
-  else mapboxMap.jumpTo(camera);
+  if (animate) instance.easeTo({ ...camera, duration: 600 });
+  else instance.jumpTo(camera);
 }
 
-function syncLeafletCameraFromArcgis(): void {
-  if (!arcgisView || !canonicalMap || !arcgisView.center) return;
-  const latitude = Number(arcgisView.center.latitude);
-  const longitude = Number(arcgisView.center.longitude);
-  const zoom = Math.max(2, Math.min(17, Math.round(Number(arcgisView.zoom ?? canonicalMap.getZoom()))));
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
-  lastEngineDrivenLeafletMove = Date.now();
-  canonicalMap.setView([latitude, longitude], zoom, { animate: false });
-}
-
-function syncLeafletCameraFromMapbox(): void {
-  if (!mapboxMap || !canonicalMap) return;
-  const center = mapboxMap.getCenter();
-  const zoom = Math.max(2, Math.min(17, Math.round(Number(mapboxMap.getZoom()))));
+function syncLeafletCameraFromMapbox(instance: any): void {
+  if (!instance || !canonicalMap) return;
+  const center = instance.getCenter();
+  const zoom = Math.max(2, Math.min(17, Math.round(Number(instance.getZoom()))));
   lastEngineDrivenLeafletMove = Date.now();
   canonicalMap.setView([center.lat, center.lng], zoom, { animate: false });
 }
 
-function destroyArcgisView(): void {
-  arcgisStationaryHandle?.remove?.();
-  arcgisClickHandle?.remove?.();
-  arcgisDoubleClickHandle?.remove?.();
-  arcgisStationaryHandle = null;
-  arcgisClickHandle = null;
-  arcgisDoubleClickHandle = null;
-  arcgisView?.destroy?.();
-  arcgisView = null;
-  arcgisGraphicsLayer = null;
-  ArcgisGraphic = null;
-  arcgisHost?.classList.remove("ready");
+function destroyMapbox2dView(): void {
+  mapbox2dMap?.remove?.();
+  mapbox2dMap = null;
+  mapbox2dHost?.classList.remove("ready");
 }
 
 function destroyMapboxView(): void {
@@ -911,12 +668,12 @@ function cleanupDualEngines(): void {
   window.cancelAnimationFrame(mapResizeFrame);
   mapResizeObserver?.disconnect();
   mapResizeObserver = null;
-  destroyArcgisView();
+  destroyMapbox2dView();
   destroyMapboxView();
   if (arcgisTileUnderlay && canonicalMap) canonicalMap.removeLayer(arcgisTileUnderlay);
   arcgisTileUnderlay = null;
   mapWrap = null;
-  arcgisHost = null;
+  mapbox2dHost = null;
   mapboxHost = null;
   toggleControl = null;
   statusNode = null;

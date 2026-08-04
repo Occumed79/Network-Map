@@ -104,7 +104,7 @@ async function initializeDualEngines(map: L.Map): Promise<void> {
 
   try {
     await ensureArcgis2d();
-    disableLeafletFallback();
+    markArcgisReady();
     mapWrap.classList.add("visible-engine-ready");
     syncAllOverlays();
     setStatus("ArcGIS 2D active");
@@ -126,7 +126,7 @@ function showArcgisError(error: unknown): void {
     arcgisHost.classList.remove("fallback-active");
     setStatus("Retrying ArcGIS 2D…", "loading");
     void ensureArcgis2d().then(() => {
-      disableLeafletFallback();
+      markArcgisReady();
       mapWrap?.classList.add("visible-engine-ready");
       syncAllOverlays();
       setStatus("ArcGIS 2D active");
@@ -138,24 +138,12 @@ function showArcgisError(error: unknown): void {
   }, { once: true });
 }
 
-function enableLeafletFallback(): void {
-  if (!canonicalMap || !mapWrap || !arcgisHost) return;
-  if (!leafletFallbackLayer) {
-    leafletFallbackLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "&copy; OpenStreetMap contributors",
-      maxZoom: 19,
-    }).addTo(canonicalMap);
-  }
-  mapWrap.classList.add("leaflet-fallback-active", "visible-engine-ready");
-  arcgisHost.classList.add("fallback-active");
-  canonicalMap.invalidateSize();
-}
-
-function disableLeafletFallback(): void {
-  mapWrap?.classList.remove("leaflet-fallback-active");
-  arcgisHost?.classList.remove("fallback-active");
-  if (leafletFallbackLayer && canonicalMap) canonicalMap.removeLayer(leafletFallbackLayer);
-  leafletFallbackLayer = null;
+function markArcgisReady(): void {
+  if (!arcgisHost) return;
+  arcgisHost.classList.add("ready", "engine-render-ready");
+  // Do not rely on a later optional runtime or the CSS cascade to hide this.
+  // Once MapView.when() resolves, the loading panel has completed its job.
+  arcgisHost.querySelectorAll<HTMLElement>(".dual-engine-loading").forEach((node) => node.remove());
 }
 
 function escapeHtml(value: string): string {
@@ -225,7 +213,7 @@ async function setMode(nextMode: MapMode): Promise<void> {
   setStatus("Loading ArcGIS 2D…", "loading");
   stopPeriodicSync();
   await ensureArcgis2d();
-  disableLeafletFallback();
+  markArcgisReady();
   currentMode = "2d";
   mapWrap.classList.remove("arcgis-globe-active", "mapbox-globe-active");
   arcgisHost.setAttribute("aria-hidden", "false");

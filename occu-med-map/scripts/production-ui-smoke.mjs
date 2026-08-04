@@ -31,6 +31,11 @@ try {
   await page.locator(".arcgis-map-host .esri-view-root").waitFor({ state: "visible", timeout: 45_000 });
   await page.locator(".arcgis-map-host canvas").first().waitFor({ state: "visible", timeout: 45_000 });
   await page.waitForTimeout(2_000);
+  assert.equal(
+    await page.locator(".arcgis-map-host .dual-engine-loading").count(),
+    0,
+    "ArcGIS loading panel must be removed after MapView is ready",
+  );
 
   const initial = await page.evaluate(() => ({ ...window.__smoke }));
   assert.deepEqual(initial.providerRequests, [], "provider APIs must be lazy at startup");

@@ -205,7 +205,7 @@ async function markInvalid(row: SourceRow, reason: string): Promise<void> {
     `UPDATE public.naccho_lhd
      SET raw_data=COALESCE(raw_data,'{}'::jsonb)||jsonb_build_object(
        'geocode_status','invalid_source_address',
-       'geocode_rejection_reason',$2,
+       'geocode_rejection_reason',$2::text,
        'geocode_attempted_at',now()
      ),updated_at=now()
      WHERE lhd_id=$1 AND lat IS NULL`,
@@ -274,7 +274,7 @@ async function processRow(row: SourceRow, key: string): Promise<void> {
            WHEN COALESCE((raw_data->>'geocode_attempt_count')::int,0)+1 >= $3 THEN 'geocode_error'
            ELSE 'retry_pending' END,
          'geocode_attempt_count',COALESCE((raw_data->>'geocode_attempt_count')::int,0)+1,
-         'geocode_error_message',$2,
+         'geocode_error_message',$2::text,
          'geocode_attempted_at',now()
        ),updated_at=now()
        WHERE lhd_id=$1 AND lat IS NULL`,
@@ -302,10 +302,10 @@ async function updateJob(status: string, complete = false): Promise<void> {
   await getPool().query(
     `INSERT INTO public.naccho_geocode_job
        (job_key,status,total_rows,verified_rows,rejected_rows,invalid_rows,error_rows,pending_rows,details,started_at,completed_at,updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'{}'::jsonb,now(),CASE WHEN $9 THEN now() ELSE NULL END,now())
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'{}'::jsonb,now(),CASE WHEN $9::boolean THEN now() ELSE NULL END,now())
      ON CONFLICT(job_key) DO UPDATE SET
        status=$2,total_rows=$3,verified_rows=$4,rejected_rows=$5,invalid_rows=$6,error_rows=$7,pending_rows=$8,
-       completed_at=CASE WHEN $9 THEN now() ELSE public.naccho_geocode_job.completed_at END,updated_at=now()`,
+       completed_at=CASE WHEN $9::boolean THEN now() ELSE public.naccho_geocode_job.completed_at END,updated_at=now()`,
     [
       JOB_KEY,
       status,
@@ -394,6 +394,6 @@ export function startNacchoLhdGeocoder(): void {
   if (started || process.env.NACCHO_STRICT_GEOCODER === "false") return;
   started = true;
   setTimeout(() => {
-    void run().catch((error) => logger.error({ error }, "County health department strict geocoding failed"));
+    void run().catch((error) => logger.error({ err: error }, "County health department strict geocoding failed"));
   }, 4_000).unref();
 }

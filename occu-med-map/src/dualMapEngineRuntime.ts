@@ -47,7 +47,7 @@ let periodicTimer: number | null = null;
 let lastEngineDrivenLeafletMove = 0;
 let mapResizeObserver: ResizeObserver | null = null;
 let mapResizeFrame = 0;
-let leafletFallbackLayer: L.TileLayer | null = null;
+let arcgisTileUnderlay: L.TileLayer | null = null;
 
 const originalMapFactory = L.map.bind(L);
 (L as any).map = (element: string | HTMLElement, options?: L.MapOptions) => {
@@ -66,6 +66,10 @@ async function initializeDualEngines(map: L.Map): Promise<void> {
 
   mapWrap.classList.add("dual-engine-map-shell");
   mapContainer.classList.add("canonical-leaflet-controller");
+  arcgisTileUnderlay = L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+    { maxZoom: 19, attribution: "Tiles &copy; Esri" },
+  ).addTo(map);
 
   arcgisHost = document.createElement("div");
   arcgisHost.className = "arcgis-map-host";
@@ -110,7 +114,6 @@ async function initializeDualEngines(map: L.Map): Promise<void> {
     setStatus("ArcGIS 2D active");
   } catch (error) {
     console.error("ArcGIS 2D map failed", error);
-    enableLeafletFallback();
     showArcgisError(error);
     setStatus(`ArcGIS 2D unavailable · ${errorMessage(error)}`, "error");
   }
@@ -123,7 +126,6 @@ function showArcgisError(error: unknown): void {
   arcgisHost.querySelector("button")?.addEventListener("click", () => {
     if (!arcgisHost) return;
     arcgisHost.innerHTML = loadingMarkup("Starting ArcGIS 2D map", "Loading the ArcGIS topographic basemap…");
-    arcgisHost.classList.remove("fallback-active");
     setStatus("Retrying ArcGIS 2D…", "loading");
     void ensureArcgis2d().then(() => {
       markArcgisReady();
@@ -254,7 +256,6 @@ async function ensureArcgis2d(): Promise<void> {
       basemap: "arcgis/topographic",
       layers: [arcgisGraphicsLayer],
     });
-    await withTimeout(Promise.resolve(arcgisMap.loadAll()), ARCGIS_LOAD_TIMEOUT_MS, "ArcGIS basemap");
     const center = canonicalMap.getCenter();
     arcgisView = new MapView({
       container: arcgisHost,
@@ -266,7 +267,6 @@ async function ensureArcgis2d(): Promise<void> {
     });
 
     await withTimeout(Promise.resolve(arcgisView.when()), ARCGIS_LOAD_TIMEOUT_MS, "ArcGIS map view");
-    await waitForArcgisBasemap(arcgisMap, reactiveUtils);
     arcgisView.ui.components = ["zoom", "attribution"];
     arcgisHost.classList.add("ready");
 
@@ -305,35 +305,6 @@ async function ensureArcgis2d(): Promise<void> {
     arcgisViewPromise = null;
     throw error;
   }
-}
-
-async function waitForArcgisBasemap(arcgisMap: any, reactiveUtils: any): Promise<void> {
-  if (!arcgisView) throw new Error("ArcGIS map view is unavailable");
-  const layers = [
-    ...arcgisMap.basemap.baseLayers.toArray(),
-    ...arcgisMap.basemap.referenceLayers.toArray(),
-  ];
-  if (!layers.length) throw new Error("ArcGIS topographic basemap has no layers");
-
-  const layerViews = await withTimeout(
-    Promise.all(layers.map((layer: any) => arcgisView.whenLayerView(layer))),
-    ARCGIS_LOAD_TIMEOUT_MS,
-    "ArcGIS basemap layer views",
-  );
-  await withTimeout(
-    reactiveUtils.whenOnce(() => arcgisView?.ready === true
-      && arcgisView?.updating === false
-      && layerViews.every((layerView: any) => layerView.updating === false)),
-    ARCGIS_LOAD_TIMEOUT_MS,
-    "ArcGIS basemap rendering",
-  );
-  await nextPaint();
-}
-
-function nextPaint(): Promise<void> {
-  return new Promise((resolve) => {
-    window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
-  });
 }
 
 async function ensureMapboxGlobe(): Promise<void> {
@@ -942,7 +913,8 @@ function cleanupDualEngines(): void {
   mapResizeObserver = null;
   destroyArcgisView();
   destroyMapboxView();
-  disableLeafletFallback();
+  if (arcgisTileUnderlay && canonicalMap) canonicalMap.removeLayer(arcgisTileUnderlay);
+  arcgisTileUnderlay = null;
   mapWrap = null;
   arcgisHost = null;
   mapboxHost = null;

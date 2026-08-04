@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import "leaflet/dist/leaflet.css";
 import "mapbox-gl/dist/mapbox-gl.css";
 import "./adminApiRuntime";
 import "./dualMapEngineRuntime";

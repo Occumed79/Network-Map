@@ -421,7 +421,7 @@ function leafletGraphics(layer: any): any[] {
 
   if (layer instanceof L.CircleMarker || layer instanceof L.Marker) {
     const point = layer.getLatLng();
-    const options = layer.options || {};
+    const options: any = layer.options || {};
     return [new GraphicCtor({
       geometry: { type: "point", longitude: point.lng, latitude: point.lat },
       symbol: {

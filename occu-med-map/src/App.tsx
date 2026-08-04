@@ -1611,9 +1611,9 @@ export default function App() {
     map.doubleClickZoom.disable();
     mapRef.current = map;
 
-    // ArcGIS raster tiles keep the requested 2D basemap without requiring
-    // WebGL2, so the map works in Safari and on older/limited GPUs.
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',{
+    // The same-origin endpoint proxies ArcGIS raster tiles so Safari content
+    // blockers and cross-origin policies cannot leave the basemap blank.
+    L.tileLayer('/api/map-tiles/{z}/{y}/{x}',{
       maxZoom:19,
       className:'network-map-tiles',
       attribution:'Tiles © Esri'

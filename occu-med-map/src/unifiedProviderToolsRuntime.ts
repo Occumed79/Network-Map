@@ -10,7 +10,9 @@ type SourceConfig = {
   iconPath: string;
 };
 
-const SOURCE_SELECTION_KEY = "network-map:provider-source-selection-v3";
+// v4 intentionally invalidates selections saved before provider layers became
+// opt-in. A stale `true` from v3 must not silently enable a source on startup.
+const SOURCE_SELECTION_KEY = "network-map:provider-source-selection-v4";
 const DEFAULT_SOURCE_SELECTION: Record<SourceKey, boolean> = {
   bluehive: false,
   indexed: false,

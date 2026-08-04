@@ -31,6 +31,7 @@ import "./network-command-center.css";
 import "./core-app-p2-fixes.css";
 import "./ui-cascade-stabilization.css";
 import "./map-tools-visible.css";
+import "./luxury-futuristic-shell.css";
 
 async function safeLoad(name: string, loader: () => Promise<unknown>): Promise<void> {
   try {

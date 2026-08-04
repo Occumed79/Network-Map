@@ -1,18 +1,11 @@
 import L from "leaflet";
+import "@arcgis/core/assets/esri/themes/light/main.css";
 
 type MapMode = "2d" | "3d";
-type ArcgisImportApi = { import: (modules: string[]) => Promise<any[]> };
-type MapboxGlApi = {
-  accessToken: string;
-  Map: new (options: Record<string, unknown>) => any;
-  NavigationControl: new (options?: Record<string, unknown>) => any;
-  Popup: new (options?: Record<string, unknown>) => any;
-};
 
 declare global {
   interface Window {
-    $arcgis?: ArcgisImportApi;
-    mapboxgl?: MapboxGlApi;
+    mapboxgl?: any;
     __NETWORK_MAP_GLOBE__?: {
       getMode: () => MapMode;
       setMode: (mode: MapMode) => Promise<void>;
@@ -21,11 +14,11 @@ declare global {
   }
 }
 
-const ARCGIS_VERSION = "5.1";
 const MAPBOX_VERSION = "3.25.0";
 const ARCGIS_KEY = import.meta.env.VITE_ARCGIS_API_KEY || "";
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || import.meta.env.VITE_MAPBOX_ACCESS_TOKEN || "";
 const MAX_MIRRORED_FEATURES = 12_000;
+const ARCGIS_STARTUP_TIMEOUT_MS = 30_000;
 
 let canonicalMap: L.Map | null = null;
 let currentMode: MapMode = "2d";
@@ -35,10 +28,10 @@ let mapboxHost: HTMLDivElement | null = null;
 let toggleControl: HTMLDivElement | null = null;
 let statusNode: HTMLSpanElement | null = null;
 
-let arcgisLoaderPromise: Promise<void> | null = null;
 let mapboxLoaderPromise: Promise<void> | null = null;
 let arcgisViewPromise: Promise<void> | null = null;
 let mapboxViewPromise: Promise<void> | null = null;
+let arcgisAttempt = 0;
 
 let arcgisView: any = null;
 let arcgisGraphicsLayer: any = null;
@@ -53,27 +46,6 @@ let periodicTimer: number | null = null;
 let lastEngineDrivenLeafletMove = 0;
 
 const originalMapFactory = L.map.bind(L);
-const originalTileLayerFactory = L.tileLayer.bind(L);
-
-// The Leaflet map remains the canonical data/controller layer, but its old
-// raster base map should not consume tiles behind the two visible engines.
-(L as any).tileLayer = (template: string, options: L.TileLayerOptions = {}) => {
-  const hiddenBaseMap = typeof template === "string" && (
-    template.includes("tile.openstreetmap.org") ||
-    template.includes("api.mapbox.com/styles")
-  );
-  if (!hiddenBaseMap) return originalTileLayerFactory(template, options);
-
-  const blankLayer = L.gridLayer(options);
-  (blankLayer as any).createTile = (_coords: unknown, done?: (error: Error | null, tile: HTMLElement) => void) => {
-    const tile = document.createElement("div");
-    tile.className = "canonical-map-blank-tile";
-    done?.(null, tile);
-    return tile;
-  };
-  return blankLayer as unknown as L.TileLayer;
-};
-
 (L as any).map = (element: string | HTMLElement, options?: L.MapOptions) => {
   const map = originalMapFactory(element, options);
   canonicalMap = map;
@@ -94,7 +66,7 @@ async function initializeDualEngines(map: L.Map): Promise<void> {
   arcgisHost = document.createElement("div");
   arcgisHost.className = "arcgis-map-host";
   arcgisHost.setAttribute("aria-label", "ArcGIS two-dimensional map");
-  arcgisHost.innerHTML = loadingMarkup("Starting ArcGIS 2D map", "Loading the Atlas topographic basemap…");
+  arcgisHost.innerHTML = loadingMarkup("Starting ArcGIS 2D map", "Loading the ArcGIS topographic basemap…");
 
   // Keep this historical class because the luminous transition readiness check
   // looks for it. It now contains the Mapbox globe rather than ArcGIS SceneView.
@@ -127,15 +99,14 @@ async function initializeDualEngines(map: L.Map): Promise<void> {
 
   try {
     await ensureArcgis2d();
+    mapWrap.classList.remove("leaflet-fallback-visible");
+    arcgisHost.setAttribute("aria-hidden", "false");
     mapWrap.classList.add("visible-engine-ready");
     syncAllOverlays();
     setStatus("ArcGIS 2D active");
   } catch (error) {
     console.error("ArcGIS 2D map failed", error);
-    // Force hide loading spinner
-    arcgisHost?.querySelectorAll<HTMLElement>(".dual-engine-loading").forEach((node) => node.remove());
-    arcgisHost?.classList.add("ready");
-    mapWrap.classList.add("leaflet-fallback-visible");
+    showLeafletFallback();
     setStatus(`ArcGIS 2D unavailable · ${errorMessage(error)}`, "error");
   }
 }
@@ -185,7 +156,7 @@ async function setMode(nextMode: MapMode): Promise<void> {
   setStatus("Loading ArcGIS 2D…", "loading");
   await ensureArcgis2d();
   currentMode = "2d";
-  mapWrap.classList.remove("arcgis-globe-active", "mapbox-globe-active");
+  mapWrap.classList.remove("arcgis-globe-active", "mapbox-globe-active", "leaflet-fallback-visible");
   arcgisHost.setAttribute("aria-hidden", "false");
   mapboxHost.setAttribute("aria-hidden", "true");
   updateToggle();
@@ -199,29 +170,30 @@ async function ensureArcgis2d(): Promise<void> {
   if (arcgisView) return;
   if (arcgisViewPromise) return arcgisViewPromise;
 
-  arcgisViewPromise = (async () => {
+  const attempt = ++arcgisAttempt;
+  arcgisViewPromise = withTimeout((async () => {
     if (!ARCGIS_KEY) throw new Error("VITE_ARCGIS_API_KEY is not configured");
-    
-    // Add timeout to prevent infinite loading
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error("ArcGIS 2D initialization timed out after 15 seconds")), 15000);
-    });
-    
-    await Promise.race([
-      loadArcgisSdk(),
-      timeoutPromise
-    ]);
-    
-    if (!window.$arcgis || !arcgisHost || !canonicalMap) throw new Error("ArcGIS SDK did not initialize");
+    if (!arcgisHost || !canonicalMap) throw new Error("ArcGIS map container is unavailable");
 
-    const [esriConfig, ArcGISMap, MapView, GraphicsLayer, Graphic, reactiveUtils] = await window.$arcgis.import([
-      "@arcgis/core/config.js",
-      "@arcgis/core/Map.js",
-      "@arcgis/core/views/MapView.js",
-      "@arcgis/core/layers/GraphicsLayer.js",
-      "@arcgis/core/Graphic.js",
-      "@arcgis/core/core/reactiveUtils.js",
+    setStatus("Loading ArcGIS modules…", "loading");
+    const [
+      { default: esriConfig },
+      { default: ArcGISMap },
+      { default: MapView },
+      { default: GraphicsLayer },
+      { default: Graphic },
+      reactiveUtils,
+    ] = await Promise.all([
+      import("@arcgis/core/config.js"),
+      import("@arcgis/core/Map.js"),
+      import("@arcgis/core/views/MapView.js"),
+      import("@arcgis/core/layers/GraphicsLayer.js"),
+      import("@arcgis/core/Graphic.js"),
+      import("@arcgis/core/core/reactiveUtils.js"),
     ]);
+    if (attempt !== arcgisAttempt || !arcgisHost || !canonicalMap) {
+      throw new Error("ArcGIS startup was superseded");
+    }
 
     esriConfig.apiKey = ARCGIS_KEY;
     ArcgisGraphic = Graphic;
@@ -230,12 +202,13 @@ async function ensureArcgis2d(): Promise<void> {
       listMode: "hide",
     });
 
+    setStatus("Starting ArcGIS topographic map…", "loading");
     const arcgisMap = new ArcGISMap({
-      basemap: "streets",
+      basemap: "arcgis/topographic",
       layers: [arcgisGraphicsLayer],
     });
     const center = canonicalMap.getCenter();
-    arcgisView = new MapView({
+    const view = new MapView({
       container: arcgisHost,
       map: arcgisMap,
       center: [center.lng, center.lat],
@@ -243,9 +216,13 @@ async function ensureArcgis2d(): Promise<void> {
       constraints: { rotationEnabled: false },
       popup: { dockEnabled: false },
     });
+    arcgisView = view;
 
-    await arcgisView.when();
-    arcgisView.ui.components = ["zoom", "attribution"];
+    await view.when();
+    if (attempt !== arcgisAttempt || arcgisView !== view) {
+      view.destroy();
+      throw new Error("ArcGIS startup was superseded");
+    }
     arcgisHost.classList.add("ready");
 
     arcgisStationaryHandle = reactiveUtils.watch(
@@ -274,7 +251,7 @@ async function ensureArcgis2d(): Promise<void> {
         originalEvent: event.native,
       });
     });
-  })();
+  })(), ARCGIS_STARTUP_TIMEOUT_MS, "ArcGIS 2D map startup timed out");
 
   try {
     await arcgisViewPromise;
@@ -283,6 +260,31 @@ async function ensureArcgis2d(): Promise<void> {
     arcgisViewPromise = null;
     throw error;
   }
+}
+
+function showLeafletFallback(): void {
+  if (!mapWrap || !canonicalMap) return;
+  arcgisHost?.querySelectorAll<HTMLElement>(".dual-engine-loading").forEach((node) => node.remove());
+  arcgisHost?.setAttribute("aria-hidden", "true");
+  mapWrap.classList.remove("visible-engine-ready", "arcgis-globe-active", "mapbox-globe-active");
+  mapWrap.classList.add("leaflet-fallback-visible");
+  window.requestAnimationFrame(() => canonicalMap?.invalidateSize());
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timeout);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
 }
 
 async function ensureMapboxGlobe(): Promise<void> {
@@ -376,31 +378,6 @@ async function ensureMapboxGlobe(): Promise<void> {
   }
 }
 
-function loadArcgisSdk(): Promise<void> {
-  if (window.$arcgis) return Promise.resolve();
-  if (arcgisLoaderPromise) return arcgisLoaderPromise;
-
-  const cssId = "network-map-arcgis-light-theme";
-  if (!document.getElementById(cssId)) {
-    const link = document.createElement("link");
-    link.id = cssId;
-    link.rel = "stylesheet";
-    link.href = `https://js.arcgis.com/${ARCGIS_VERSION}/esri/themes/light/main.css`;
-    document.head.appendChild(link);
-  }
-
-  arcgisLoaderPromise = loadScriptModule(
-    "network-map-arcgis-sdk",
-    `https://js.arcgis.com/${ARCGIS_VERSION}/`,
-    () => Boolean(window.$arcgis),
-    "ArcGIS SDK",
-  ).catch((error) => {
-    arcgisLoaderPromise = null;
-    throw error;
-  });
-  return arcgisLoaderPromise;
-}
-
 function loadMapboxSdk(): Promise<void> {
   if (window.mapboxgl) return Promise.resolve();
   if (mapboxLoaderPromise) return mapboxLoaderPromise;
@@ -424,26 +401,6 @@ function loadMapboxSdk(): Promise<void> {
     throw error;
   });
   return mapboxLoaderPromise;
-}
-
-function loadScriptModule(id: string, src: string, ready: () => boolean, label: string): Promise<void> {
-  if (ready()) return Promise.resolve();
-  return new Promise<void>((resolve, reject) => {
-    let script = document.getElementById(id) as HTMLScriptElement | null;
-    if (script && script.type !== "module") {
-      script.remove();
-      script = null;
-    }
-    const target = script || document.createElement("script");
-    if (!script) {
-      target.id = id;
-      target.type = "module";
-      target.src = src;
-      target.crossOrigin = "anonymous";
-      document.head.appendChild(target);
-    }
-    waitForGlobal(target, ready, label, resolve, reject);
-  });
 }
 
 function loadClassicScript(id: string, src: string, ready: () => boolean, label: string): Promise<void> {
@@ -622,7 +579,7 @@ function leafletToArcgisGraphic(layer: any): any | null {
   }
   if (layer instanceof L.CircleMarker || layer instanceof L.Marker) {
     const center = layer.getLatLng();
-    const options = layer.options || {};
+    const options: any = layer.options || {};
     return new ArcgisGraphic({
       geometry: { type: "point", longitude: center.lng, latitude: center.lat },
       symbol: {
@@ -843,6 +800,7 @@ function syncLeafletCameraFromMapbox(): void {
 }
 
 function destroyArcgisView(): void {
+  arcgisAttempt += 1;
   arcgisStationaryHandle?.remove?.();
   arcgisClickHandle?.remove?.();
   arcgisDoubleClickHandle?.remove?.();

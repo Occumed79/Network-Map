@@ -47,6 +47,7 @@ let periodicTimer: number | null = null;
 let lastEngineDrivenLeafletMove = 0;
 let mapResizeObserver: ResizeObserver | null = null;
 let mapResizeFrame = 0;
+let leafletFallbackLayer: L.TileLayer | null = null;
 
 const originalMapFactory = L.map.bind(L);
 (L as any).map = (element: string | HTMLElement, options?: L.MapOptions) => {
@@ -109,6 +110,7 @@ async function initializeDualEngines(map: L.Map): Promise<void> {
     setStatus("ArcGIS 2D active");
   } catch (error) {
     console.error("ArcGIS 2D map failed", error);
+    enableLeafletFallback();
     showArcgisError(error);
     setStatus(`ArcGIS 2D unavailable · ${errorMessage(error)}`, "error");
   }
@@ -121,6 +123,7 @@ function showArcgisError(error: unknown): void {
   arcgisHost.querySelector("button")?.addEventListener("click", () => {
     if (!arcgisHost) return;
     arcgisHost.innerHTML = loadingMarkup("Starting ArcGIS 2D map", "Loading the ArcGIS topographic basemap…");
+    arcgisHost.classList.remove("fallback-active");
     setStatus("Retrying ArcGIS 2D…", "loading");
     void ensureArcgis2d().then(() => {
       markArcgisReady();
@@ -939,6 +942,7 @@ function cleanupDualEngines(): void {
   mapResizeObserver = null;
   destroyArcgisView();
   destroyMapboxView();
+  disableLeafletFallback();
   mapWrap = null;
   arcgisHost = null;
   mapboxHost = null;

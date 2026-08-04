@@ -132,6 +132,9 @@ async function initializeDualEngines(map: L.Map): Promise<void> {
     setStatus("ArcGIS 2D active");
   } catch (error) {
     console.error("ArcGIS 2D map failed", error);
+    // Force hide loading spinner
+    arcgisHost?.querySelectorAll<HTMLElement>(".dual-engine-loading").forEach((node) => node.remove());
+    arcgisHost?.classList.add("ready");
     mapWrap.classList.add("leaflet-fallback-visible");
     setStatus(`ArcGIS 2D unavailable · ${errorMessage(error)}`, "error");
   }
@@ -198,7 +201,17 @@ async function ensureArcgis2d(): Promise<void> {
 
   arcgisViewPromise = (async () => {
     if (!ARCGIS_KEY) throw new Error("VITE_ARCGIS_API_KEY is not configured");
-    await loadArcgisSdk();
+    
+    // Add timeout to prevent infinite loading
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error("ArcGIS 2D initialization timed out after 15 seconds")), 15000);
+    });
+    
+    await Promise.race([
+      loadArcgisSdk(),
+      timeoutPromise
+    ]);
+    
     if (!window.$arcgis || !arcgisHost || !canonicalMap) throw new Error("ArcGIS SDK did not initialize");
 
     const [esriConfig, ArcGISMap, MapView, GraphicsLayer, Graphic, reactiveUtils] = await window.$arcgis.import([

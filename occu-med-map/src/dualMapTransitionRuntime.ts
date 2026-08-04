@@ -327,17 +327,19 @@ function drawAccretionDisk(
   elapsedSeconds: number,
 ): void {
   const plunge = easeInCubic(progress);
-  const lateAlignment = smoothstep((progress - 0.82) / 0.18);
   const baseRadius = Math.min(width * 0.42, height * 0.58);
   const radius = baseRadius * lerp(0.98, 1.08, smoothstep(progress));
-  const earlyTilt = lerp(0.34, 0.43, smoothstep(progress / 0.72));
-  const tilt = lerp(earlyTilt, 0.78, lateAlignment);
-  const diskRotation = lerp(-0.13, -0.055, smoothstep(progress));
-  const driftX = Math.sin(progress * Math.PI * 2.2) * width * 0.006 * (1 - lateAlignment);
-  const driftY = lerp(height * 0.055, 0, smoothstep(progress));
+
+  // Keep the same angled camera perspective throughout the entire plunge.
+  // Forward motion comes from the rings and stars streaming past the viewer,
+  // never from rotating or flattening the black hole toward the screen.
+  const tilt = 0.38;
+  const diskRotation = -0.12;
+  const driftX = Math.sin(progress * Math.PI * 2.2) * width * 0.004;
+  const driftY = lerp(height * 0.05, height * 0.015, smoothstep(progress));
   const diskCenterX = centerX + driftX;
   const diskCenterY = centerY + driftY;
-  const diskOpacity = lerp(1, 0.86, lateAlignment);
+  const diskOpacity = lerp(1, 0.92, smoothstep(progress));
 
   context.save();
   context.translate(diskCenterX, diskCenterY);
@@ -367,7 +369,7 @@ function drawAccretionDisk(
 
   const horizonProgress = easeInOutCubic(progress);
   const horizonRadius = Math.min(width, height) * lerp(0.07, 0.36, horizonProgress);
-  const horizonAspect = lerp(0.5, 0.82, lateAlignment);
+  const horizonAspect = tilt;
 
   context.save();
   context.translate(diskCenterX, diskCenterY);

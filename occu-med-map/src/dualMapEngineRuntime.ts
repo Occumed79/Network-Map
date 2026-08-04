@@ -46,10 +46,11 @@ const originalMapFactory = L.map.bind(L);
 async function initializeDualEngines(map: L.Map): Promise<void> {
   const mapContainer = map.getContainer();
   mapWrap = mapContainer.parentElement;
-  if (!mapWrap || mapWrap.querySelector(".dual-engine-map-shell")) return;
+  if (!mapWrap || mapWrap.classList.contains("dual-engine-map-shell")) return;
 
-  mapWrap.classList.add("dual-engine-map-shell");
+  mapWrap.classList.add("dual-engine-map-shell", "arcgis-leaflet-2d");
   mapContainer.classList.add("canonical-leaflet-controller");
+  restoreLeafletInteraction(map);
 
   arcgisHost = document.createElement("div");
   arcgisHost.className = "arcgis-map-host";
@@ -91,10 +92,32 @@ async function initializeDualEngines(map: L.Map): Promise<void> {
   arcgisHost.innerHTML = "";
   arcgisHost.classList.add("ready", "engine-render-ready");
   arcgisHost.setAttribute("aria-hidden", "true");
+  arcgisHost.hidden = true;
   mapWrap.classList.add("visible-engine-ready", "leaflet-fallback-visible");
-  window.requestAnimationFrame(() => map.invalidateSize());
+  invalidateLeafletLayout(map);
   syncAllOverlays();
   setStatus("ArcGIS 2D active");
+}
+
+function restoreLeafletInteraction(map: L.Map): void {
+  const container = map.getContainer();
+  container.removeAttribute("inert");
+  container.style.pointerEvents = "auto";
+  map.dragging.enable();
+  map.scrollWheelZoom.enable();
+  map.touchZoom.enable();
+  map.boxZoom.enable();
+  map.keyboard.enable();
+}
+
+function invalidateLeafletLayout(map: L.Map): void {
+  const refresh = () => {
+    restoreLeafletInteraction(map);
+    map.invalidateSize({ animate: false, pan: false });
+  };
+  window.requestAnimationFrame(refresh);
+  window.setTimeout(refresh, 120);
+  window.setTimeout(refresh, 500);
 }
 
 function loadingMarkup(title: string, detail: string): string {
@@ -145,9 +168,10 @@ async function setMode(nextMode: MapMode): Promise<void> {
   mapWrap.classList.remove("arcgis-globe-active", "mapbox-globe-active");
   mapWrap.classList.add("visible-engine-ready", "leaflet-fallback-visible");
   arcgisHost.setAttribute("aria-hidden", "true");
+  arcgisHost.hidden = true;
   mapboxHost.setAttribute("aria-hidden", "true");
   updateToggle();
-  window.requestAnimationFrame(() => canonicalMap?.invalidateSize());
+  invalidateLeafletLayout(canonicalMap);
   syncAllOverlays();
   setStatus("ArcGIS 2D active");
 }

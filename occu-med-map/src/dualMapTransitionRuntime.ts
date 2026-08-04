@@ -1,29 +1,11 @@
 import { TRANSITION_SOUND_DATA_URI } from "./transitionSoundData";
+import "./black-hole-transition.css";
 
 type MapMode = "2d" | "3d";
+type GlobeBridge = { getMode: () => MapMode; setMode: (mode: MapMode) => Promise<void>; sync: () => void };
+type Star = { angle: number; radius: number; speed: number; size: number; alpha: number };
 
-type GlobeBridge = {
-  getMode: () => MapMode;
-  setMode: (mode: MapMode) => Promise<void>;
-  sync: () => void;
-};
-
-type Particle = {
-  angle: number;
-  radius: number;
-  speed: number;
-  spin: number;
-  width: number;
-  hue: number;
-  alpha: number;
-  trail: number;
-};
-
-declare global {
-  interface Window {
-    __NETWORK_MAP_GLOBE__?: GlobeBridge;
-  }
-}
+declare global { interface Window { __NETWORK_MAP_GLOBE__?: GlobeBridge } }
 
 let transitionRunning = false;
 const transitionAudio = new Audio(TRANSITION_SOUND_DATA_URI);
@@ -36,20 +18,15 @@ function playTransitionSound(): void {
   void transitionAudio.play().catch(() => undefined);
 }
 
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
-}
+function delay(ms: number): Promise<void> { return new Promise((resolve) => window.setTimeout(resolve, ms)); }
 
 function engineReady(mode: MapMode, control: HTMLElement): boolean {
   const api = window.__NETWORK_MAP_GLOBE__;
   const wrap = control.closest<HTMLElement>(".dual-engine-map-shell");
   if (!api || !wrap || api.getMode() !== mode) return false;
-  if (mode === "3d") {
-    const host = wrap.querySelector<HTMLElement>(".mapbox-globe-host");
-    return wrap.classList.contains("mapbox-globe-active") && Boolean(host?.classList.contains("ready"));
-  }
-  const host = wrap.querySelector<HTMLElement>(".mapbox-2d-host");
-  return !wrap.classList.contains("mapbox-globe-active") && Boolean(host?.classList.contains("ready"));
+  const selector = mode === "3d" ? ".mapbox-globe-host" : ".mapbox-2d-host";
+  const host = wrap.querySelector<HTMLElement>(selector);
+  return Boolean(host?.classList.contains("ready")) && (mode === "3d" ? wrap.classList.contains("mapbox-globe-active") : !wrap.classList.contains("mapbox-globe-active"));
 }
 
 function updateControl(control: HTMLElement): void {
@@ -76,207 +53,209 @@ function ensureOverlay(): HTMLElement {
   overlay.setAttribute("aria-hidden", "true");
   overlay.innerHTML = `
     <canvas class="dual-engine-vortex-canvas" aria-hidden="true"></canvas>
-    <div class="dual-engine-vortex-rings" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
-    <div class="dual-engine-vortex-core" aria-hidden="true"><span></span></div>
-    <div class="dual-engine-vortex-bloom" aria-hidden="true"></div>
     <div class="dual-engine-vortex-copy" role="status" aria-live="polite">
-      <strong>Opening Mapbox globe</strong>
-      <small>Folding the map into three dimensions…</small>
+      <strong>Entering the black hole</strong>
+      <small>Falling through the luminous accretion disk…</small>
     </div>
   `;
   document.body.appendChild(overlay);
   return overlay;
 }
 
-function createParticle(direction: "in" | "out", index: number): Particle {
-  const hues = [184, 192, 205, 222, 252, 278];
-  const lane = index % 6;
-  return {
-    angle: index * 2.39996 + lane * 0.12,
-    radius: direction === "in" ? 0.18 + (index % 29) / 24 : 0.012 + (index % 7) * 0.006,
-    speed: 0.00009 + lane * 0.000012,
-    spin: 0.00042 + lane * 0.000045,
-    width: 0.7 + lane * 0.17,
-    hue: hues[lane],
-    alpha: 0.48 + (index % 5) * 0.09,
-    trail: 0.09 + lane * 0.014,
-  };
-}
-
-function beginVortex(targetMode: MapMode): { complete: () => Promise<void>; fail: (message: string) => Promise<void>; stop: () => void } {
+function beginBlackHole(targetMode: MapMode): { complete: () => Promise<void>; fail: (message: string) => Promise<void>; stop: () => void } {
   const overlay = ensureOverlay();
-  const canvas = overlay.querySelector<HTMLCanvasElement>(".dual-engine-vortex-canvas");
-  const context = canvas?.getContext("2d", { alpha: true });
-  const direction: "in" | "out" = targetMode === "3d" ? "in" : "out";
-  const title = overlay.querySelector<HTMLElement>(".dual-engine-vortex-copy strong");
-  const detail = overlay.querySelector<HTMLElement>(".dual-engine-vortex-copy small");
+  const canvas = overlay.querySelector<HTMLCanvasElement>("canvas");
+  const ctx = canvas?.getContext("2d", { alpha: false });
+  const title = overlay.querySelector<HTMLElement>("strong");
+  const detail = overlay.querySelector<HTMLElement>("small");
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const particles = Array.from({ length: reducedMotion ? 0 : 92 }, (_, index) => createParticle(direction, index));
+  if (title) title.textContent = targetMode === "3d" ? "Entering the black hole" : "Escaping the black hole";
+  if (detail) detail.textContent = targetMode === "3d" ? "Falling through the luminous accretion disk…" : "Rising back into the flat map…";
 
-  if (title) title.textContent = targetMode === "3d" ? "Opening Mapbox globe" : "Returning to Mapbox 2D";
-  if (detail) detail.textContent = targetMode === "3d"
-    ? "Folding the map into three dimensions…"
-    : "Flattening the globe into the street map…";
-
-  overlay.className = `dual-engine-vortex active ${targetMode === "3d" ? "entering" : "exiting"}`;
+  overlay.className = `dual-engine-vortex active black-hole-${targetMode === "3d" ? "in" : "out"}`;
   overlay.setAttribute("aria-hidden", "false");
 
-  let stopped = false;
+  let width = innerWidth;
+  let height = innerHeight;
+  let ratio = Math.min(devicePixelRatio || 1, 2);
   let frame = 0;
-  let previous = performance.now();
-  let width = window.innerWidth;
-  let height = window.innerHeight;
-  let ratio = Math.min(window.devicePixelRatio || 1, 2);
-  let centerX = width / 2;
-  let centerY = height / 2;
-  let maxRadius = Math.hypot(width, height) * 0.62;
+  let stopped = false;
+  const started = performance.now();
+  const duration = reducedMotion ? 650 : 2200;
+  const stars: Star[] = Array.from({ length: reducedMotion ? 20 : 120 }, (_, i) => ({
+    angle: i * 2.39996,
+    radius: 0.28 + (i % 37) / 32,
+    speed: 0.00007 + (i % 9) * 0.000011,
+    size: 0.7 + (i % 4) * 0.45,
+    alpha: 0.28 + (i % 5) * 0.13,
+  }));
 
   const resize = () => {
-    if (!canvas || !context) return;
-    width = window.innerWidth;
-    height = window.innerHeight;
-    ratio = Math.min(window.devicePixelRatio || 1, 2);
-    centerX = width / 2;
-    centerY = height / 2;
-    maxRadius = Math.hypot(width, height) * 0.62;
+    if (!canvas || !ctx) return;
+    width = innerWidth;
+    height = innerHeight;
+    ratio = Math.min(devicePixelRatio || 1, 2);
     canvas.width = Math.round(width * ratio);
     canvas.height = Math.round(height * ratio);
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
-    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  };
+
+  const ring = (cx: number, cy: number, rx: number, ry: number, lineWidth: number, color: string, rotation: number, start = 0, end = Math.PI * 2) => {
+    if (!ctx) return;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(rotation);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, rx, ry, 0, start, end);
+    ctx.lineWidth = lineWidth;
+    ctx.strokeStyle = color;
+    ctx.stroke();
+    ctx.restore();
   };
 
   const render = (now: number) => {
-    if (stopped || !canvas || !context) return;
-    const delta = Math.min(34, Math.max(8, now - previous));
-    previous = now;
-    context.clearRect(0, 0, width, height);
-    context.save();
-    context.globalCompositeOperation = "lighter";
+    if (stopped || !ctx) return;
+    const raw = Math.min(1, (now - started) / duration);
+    const p = targetMode === "3d" ? raw : 1 - raw;
+    const eased = 1 - Math.pow(1 - p, 3);
+    const cx = width / 2;
+    const cy = height / 2;
+    const base = Math.min(width, height);
+    const zoom = 0.72 + eased * 3.8;
+    const tilt = 0.48 + eased * 0.46;
+    const outer = base * 0.42 * zoom;
+    const hole = Math.max(18, base * (0.055 + eased * 0.42));
+    const spin = now * 0.00055;
 
-    particles.forEach((particle, index) => {
-      const priorRadius = particle.radius;
-      const closeness = Math.max(0, 1 - Math.min(1, particle.radius));
-      if (direction === "in") {
-        particle.radius -= particle.speed * delta * (1 + closeness * closeness * 10);
-        particle.angle += particle.spin * delta * (1 + closeness * 7);
-      } else {
-        particle.radius += particle.speed * delta * (3 + particle.radius * 5);
-        particle.angle += particle.spin * delta * (2 + particle.radius * 3);
-      }
+    const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(width, height) * 0.8);
+    bg.addColorStop(0, "#2b0758");
+    bg.addColorStop(0.42, "#120329");
+    bg.addColorStop(1, "#000000");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, width, height);
 
-      const radius = particle.radius * maxRadius;
-      const prior = priorRadius * maxRadius + particle.trail * maxRadius;
-      const x = centerX + Math.cos(particle.angle) * radius;
-      const y = centerY + Math.sin(particle.angle) * radius;
-      const tailAngle = particle.angle - particle.spin * delta * (12 + closeness * 24);
-      const tailX = centerX + Math.cos(tailAngle) * prior;
-      const tailY = centerY + Math.sin(tailAngle) * prior;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    for (const star of stars) {
+      star.angle += star.speed * 16 * (1 + eased * 8);
+      const r = star.radius * outer;
+      const x = cx + Math.cos(star.angle + spin) * r;
+      const y = cy + Math.sin(star.angle + spin) * r * tilt;
+      ctx.fillStyle = `rgba(190,135,255,${star.alpha * (1 - eased * 0.45)})`;
+      ctx.beginPath();
+      ctx.arc(x, y, star.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
-      context.strokeStyle = `hsla(${particle.hue},100%,${74 + closeness * 22}%,${particle.alpha * (0.35 + closeness)})`;
-      context.lineWidth = particle.width * (0.65 + closeness * 1.45);
-      context.shadowBlur = 14 + closeness * 30;
-      context.shadowColor = `hsla(${particle.hue},100%,72%,0.75)`;
-      context.beginPath();
-      context.moveTo(tailX, tailY);
-      context.quadraticCurveTo(
-        centerX + Math.cos((particle.angle + tailAngle) / 2 + 0.18) * ((radius + prior) / 2),
-        centerY + Math.sin((particle.angle + tailAngle) / 2 + 0.18) * ((radius + prior) / 2),
-        x,
-        y,
-      );
-      context.stroke();
+    const glow = ctx.createRadialGradient(cx, cy, hole * 0.65, cx, cy, outer * 0.72);
+    glow.addColorStop(0, "rgba(255,255,255,.98)");
+    glow.addColorStop(0.08, "rgba(255,246,160,.96)");
+    glow.addColorStop(0.18, "rgba(255,186,20,.88)");
+    glow.addColorStop(0.38, "rgba(255,73,12,.44)");
+    glow.addColorStop(0.62, "rgba(170,0,255,.18)");
+    glow.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, outer * 0.92, outer * tilt * 0.92, 0, 0, Math.PI * 2);
+    ctx.fill();
 
-      if ((direction === "in" && particle.radius < 0.005) || (direction === "out" && particle.radius > 1.2)) {
-        Object.assign(particle, createParticle(direction, index));
-      }
-    });
+    for (let i = 0; i < 18; i += 1) {
+      const t = i / 18;
+      const radius = hole * 1.15 + (outer - hole) * Math.pow(t, 1.18);
+      const ry = radius * tilt;
+      const alpha = (1 - t) * 0.98 + 0.08;
+      const hue = 36 - t * 20;
+      ring(cx, cy, radius, ry, Math.max(2, base * 0.008 * (1 - t * 0.55)), `hsla(${hue},100%,${62 + (1 - t) * 28}%,${alpha})`, spin * (i % 2 ? 1 : -0.7), spin + i * 0.22, spin + Math.PI * (1.2 + (i % 5) * 0.11));
+    }
 
-    const core = context.createRadialGradient(centerX, centerY, 0, centerX, centerY, 160);
-    core.addColorStop(0, "rgba(255,255,255,1)");
-    core.addColorStop(0.08, "rgba(205,248,255,.94)");
-    core.addColorStop(0.28, "rgba(70,210,255,.46)");
-    core.addColorStop(0.62, "rgba(89,70,255,.2)");
-    core.addColorStop(1, "rgba(2,8,24,0)");
-    context.fillStyle = core;
-    context.beginPath();
-    context.arc(centerX, centerY, 160, 0, Math.PI * 2);
-    context.fill();
-    context.restore();
-    frame = window.requestAnimationFrame(render);
+    ctx.shadowColor = "rgba(255,110,0,.95)";
+    ctx.shadowBlur = Math.max(22, hole * 0.34);
+    ctx.fillStyle = "#000";
+    ctx.beginPath();
+    ctx.arc(cx, cy, hole, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    const rim = ctx.createRadialGradient(cx - hole * 0.22, cy - hole * 0.22, hole * 0.2, cx, cy, hole * 1.22);
+    rim.addColorStop(0, "rgba(0,0,0,0)");
+    rim.addColorStop(0.67, "rgba(0,0,0,0)");
+    rim.addColorStop(0.82, "rgba(255,242,170,.98)");
+    rim.addColorStop(0.94, "rgba(255,95,0,.8)");
+    rim.addColorStop(1, "rgba(122,0,255,0)");
+    ctx.fillStyle = rim;
+    ctx.beginPath();
+    ctx.arc(cx, cy, hole * 1.26, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    if (raw > 0.78) overlay.classList.add("black-hole-final");
+    frame = requestAnimationFrame(render);
   };
 
   const stop = () => {
     if (stopped) return;
     stopped = true;
-    window.cancelAnimationFrame(frame);
-    window.removeEventListener("resize", resize);
+    cancelAnimationFrame(frame);
+    removeEventListener("resize", resize);
     overlay.className = "dual-engine-vortex";
     overlay.setAttribute("aria-hidden", "true");
   };
 
   const complete = async () => {
-    overlay.classList.add("collapsing");
-    await delay(reducedMotion ? 100 : 420);
-    overlay.classList.add("bursting");
-    await delay(reducedMotion ? 120 : 500);
+    await delay(reducedMotion ? 300 : 1750);
+    overlay.classList.add("black-hole-final");
+    await delay(reducedMotion ? 180 : 520);
     overlay.classList.add("revealing");
-    await delay(reducedMotion ? 80 : 300);
+    await delay(240);
     stop();
   };
 
   const fail = async (message: string) => {
-    overlay.classList.add("failed");
     if (title) title.textContent = "Map transition failed";
     if (detail) detail.textContent = message;
-    await delay(650);
+    await delay(700);
     overlay.classList.add("revealing");
     await delay(240);
     stop();
   };
 
   resize();
-  window.addEventListener("resize", resize);
-  if (context && particles.length) frame = window.requestAnimationFrame(render);
+  addEventListener("resize", resize);
+  frame = requestAnimationFrame(render);
   return { complete, fail, stop };
 }
 
 async function switchMode(targetMode: MapMode, control: HTMLElement): Promise<void> {
   const api = window.__NETWORK_MAP_GLOBE__;
   if (!api || transitionRunning) return;
-  if (engineReady(targetMode, control)) {
-    updateControl(control);
-    return;
-  }
+  if (engineReady(targetMode, control)) { updateControl(control); return; }
 
   transitionRunning = true;
   control.dataset.transitioning = "true";
-  control.querySelectorAll<HTMLButtonElement>("button[data-map-mode]").forEach((button) => {
-    button.disabled = true;
-  });
-  const vortex = beginVortex(targetMode);
+  control.querySelectorAll<HTMLButtonElement>("button[data-map-mode]").forEach((button) => { button.disabled = true; });
+  const blackHole = beginBlackHole(targetMode);
   playTransitionSound();
-  setControlStatus(control, targetMode === "3d" ? "Opening Mapbox globe…" : "Returning to Mapbox 2D…", "loading");
+  setControlStatus(control, targetMode === "3d" ? "Entering black hole…" : "Escaping black hole…", "loading");
 
   try {
-    await delay(320);
+    await delay(420);
     await api.setMode(targetMode);
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline && !engineReady(targetMode, control)) await delay(80);
     if (!engineReady(targetMode, control)) throw new Error(`${targetMode === "3d" ? "Mapbox globe" : "Mapbox 2D map"} did not become ready`);
-    await vortex.complete();
+    await blackHole.complete();
     setControlStatus(control, targetMode === "3d" ? "Mapbox 3D globe active" : "Mapbox 2D active");
     updateControl(control);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown map engine error";
     console.error("Map engine transition failed", error);
-    await vortex.fail(message);
+    await blackHole.fail(message);
     setControlStatus(control, message, "error");
     updateControl(control);
   } finally {
-    control.querySelectorAll<HTMLButtonElement>("button[data-map-mode]").forEach((button) => {
-      button.disabled = false;
-    });
+    control.querySelectorAll<HTMLButtonElement>("button[data-map-mode]").forEach((button) => { button.disabled = false; });
     control.dataset.transitioning = "false";
     transitionRunning = false;
   }
@@ -290,8 +269,7 @@ document.addEventListener("click", (event) => {
   if (!control) return;
   event.preventDefault();
   event.stopImmediatePropagation();
-  const mode: MapMode = button.dataset.mapMode === "3d" ? "3d" : "2d";
-  void switchMode(mode, control);
+  void switchMode(button.dataset.mapMode === "3d" ? "3d" : "2d", control);
 }, true);
 
 export {};

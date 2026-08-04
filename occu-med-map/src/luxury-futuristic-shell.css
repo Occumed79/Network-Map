@@ -1,0 +1,485 @@
+:root {
+  --lux-bg: #05070b;
+  --lux-panel: rgba(11, 15, 22, 0.92);
+  --lux-panel-raised: rgba(17, 22, 31, 0.9);
+  --lux-card: rgba(255, 255, 255, 0.045);
+  --lux-card-hover: rgba(255, 255, 255, 0.072);
+  --lux-border: rgba(203, 218, 232, 0.14);
+  --lux-border-strong: rgba(216, 229, 241, 0.23);
+  --lux-text: #edf3f8;
+  --lux-muted: #8f9eac;
+  --lux-dim: #667482;
+  --lux-accent: #9ad7e5;
+  --lux-accent-soft: rgba(154, 215, 229, 0.13);
+  --lux-shadow: 0 24px 70px rgba(0, 0, 0, 0.5), 0 5px 20px rgba(0, 0, 0, 0.32);
+}
+
+/* Floating application shell */
+.app-body {
+  box-sizing: border-box !important;
+  padding: 12px !important;
+  gap: 12px !important;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(83, 113, 136, 0.1), transparent 30%),
+    radial-gradient(circle at 82% 100%, rgba(43, 68, 88, 0.11), transparent 32%),
+    var(--lux-bg) !important;
+}
+
+.sidebar,
+.live-panel,
+.live-panel.open {
+  border: 1px solid var(--lux-border) !important;
+  border-radius: 22px !important;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.035), transparent 28%),
+    var(--lux-panel) !important;
+  color: var(--lux-text) !important;
+  box-shadow:
+    var(--lux-shadow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.075),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.018) !important;
+  backdrop-filter: blur(28px) saturate(115%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(115%) !important;
+}
+
+.sidebar {
+  padding: 11px !important;
+}
+
+.live-panel,
+.live-panel.open {
+  border-left: 1px solid var(--lux-border) !important;
+}
+
+.sidebar::before,
+.live-panel.open::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 1 !important;
+  background:
+    linear-gradient(115deg, rgba(255,255,255,0.055), transparent 18%, transparent 78%, rgba(132,177,199,0.035)),
+    radial-gradient(circle at 50% -15%, rgba(183, 221, 236, 0.07), transparent 34%);
+}
+
+.map-wrap {
+  border: 1px solid rgba(206, 220, 233, 0.12) !important;
+  border-radius: 22px !important;
+  background: #06080d !important;
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.44),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+}
+
+.mapbox-2d-host,
+.mapbox-globe-host,
+#map,
+.leaflet-container {
+  border-radius: 21px !important;
+}
+
+/* Neutral premium scrollbar */
+.sidebar::-webkit-scrollbar,
+.lp-controls::-webkit-scrollbar,
+.lp-results::-webkit-scrollbar {
+  width: 7px !important;
+}
+
+.sidebar::-webkit-scrollbar-track,
+.lp-controls::-webkit-scrollbar-track,
+.lp-results::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+.sidebar::-webkit-scrollbar-thumb,
+.lp-controls::-webkit-scrollbar-thumb,
+.lp-results::-webkit-scrollbar-thumb {
+  background: rgba(204, 219, 231, 0.22) !important;
+  border: 2px solid transparent !important;
+  border-radius: 999px !important;
+  background-clip: padding-box !important;
+}
+
+/* Sidebar surfaces */
+.sidebar .hero-card,
+.sidebar > .sb-section,
+.sidebar .workflow-section,
+.sidebar .workflow-card,
+.sidebar .tool-card,
+.sidebar .layer-card,
+.live-panel .lp-item,
+.live-panel .lp-empty.show,
+.live-panel .lp-controls > div,
+.live-panel .result-card {
+  color: var(--lux-text) !important;
+  border: 1px solid var(--lux-border) !important;
+  border-radius: 16px !important;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,0.035), transparent 48%),
+    var(--lux-card) !important;
+  box-shadow:
+    0 9px 24px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.045) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+}
+
+.sidebar .hero-card:hover,
+.sidebar > .sb-section:hover,
+.live-panel .lp-item:hover {
+  border-color: var(--lux-border-strong) !important;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,0.055), transparent 50%),
+    var(--lux-card-hover) !important;
+}
+
+.sidebar .hero-title,
+.sidebar .sb-lbl,
+.sidebar .workflow-title,
+.sidebar strong,
+.live-panel .lp-title,
+.live-panel .lp-name,
+.live-panel strong {
+  color: var(--lux-text) !important;
+  text-shadow: none !important;
+}
+
+.sidebar .hero-sub,
+.sidebar .tog-lbl,
+.sidebar [style*="var(--muted)"],
+.sidebar small,
+.sidebar p,
+.live-panel .lp-addr,
+.live-panel .lp-dist,
+.live-panel .lp-results > div[style],
+.live-panel .lp-empty,
+.live-panel small {
+  color: var(--lux-muted) !important;
+}
+
+.sidebar .sb-lbl,
+.live-panel .lp-title,
+.occumed-map-tools-section-title {
+  letter-spacing: 0.12em !important;
+  text-transform: uppercase !important;
+  font-weight: 750 !important;
+}
+
+/* Inputs, selectors and buttons: monochrome with one cool accent */
+.sidebar input,
+.sidebar select,
+.sidebar textarea,
+.live-panel input,
+.live-panel select,
+.live-panel textarea,
+.live-panel .rp-input,
+.live-panel .rp-select,
+.occumed-map-tools-panel input,
+.occumed-map-tools-panel select {
+  color: var(--lux-text) !important;
+  caret-color: var(--lux-accent) !important;
+  border: 1px solid var(--lux-border) !important;
+  border-radius: 11px !important;
+  background: rgba(2, 5, 9, 0.58) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.03),
+    0 4px 14px rgba(0,0,0,0.16) !important;
+}
+
+.sidebar input::placeholder,
+.sidebar textarea::placeholder,
+.live-panel input::placeholder,
+.live-panel textarea::placeholder,
+.occumed-map-tools-panel input::placeholder {
+  color: #63717e !important;
+  opacity: 1 !important;
+}
+
+.sidebar input:focus,
+.sidebar select:focus,
+.sidebar textarea:focus,
+.live-panel input:focus,
+.live-panel select:focus,
+.live-panel textarea:focus,
+.occumed-map-tools-panel input:focus {
+  outline: none !important;
+  border-color: rgba(154, 215, 229, 0.48) !important;
+  box-shadow: 0 0 0 3px rgba(154, 215, 229, 0.09) !important;
+}
+
+.sidebar button,
+.sidebar .mbtn,
+.sidebar .hero-btn,
+.sidebar .vbtn,
+.sidebar .fbtn,
+.live-panel button,
+.live-panel .lp-act,
+.live-panel .lp-chip,
+.occumed-map-tools-panel button {
+  color: #d6e0e8 !important;
+  border: 1px solid var(--lux-border) !important;
+  border-radius: 10px !important;
+  background: rgba(255, 255, 255, 0.045) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.035) !important;
+  text-shadow: none !important;
+}
+
+.sidebar button:hover,
+.sidebar .mbtn:hover,
+.sidebar .hero-btn:hover,
+.sidebar .vbtn:hover,
+.sidebar .fbtn:hover,
+.live-panel button:hover,
+.live-panel .lp-act:hover,
+.occumed-map-tools-panel button:hover {
+  color: #ffffff !important;
+  border-color: var(--lux-border-strong) !important;
+  background: rgba(255, 255, 255, 0.075) !important;
+  transform: translateY(-1px);
+}
+
+.sidebar button.active,
+.sidebar .mbtn.active,
+.sidebar .hero-btn.active,
+.sidebar .vbtn.active,
+.sidebar .fbtn.active,
+.live-panel button.active,
+.live-panel .lp-act.pri,
+.live-panel .lp-chip.on,
+.occumed-map-tools-panel button.active {
+  color: #eafcff !important;
+  border-color: rgba(154, 215, 229, 0.42) !important;
+  background:
+    linear-gradient(180deg, rgba(154, 215, 229, 0.14), rgba(154, 215, 229, 0.075)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.09),
+    0 0 0 1px rgba(154, 215, 229, 0.035),
+    0 0 20px rgba(91, 163, 184, 0.08) !important;
+}
+
+.sidebar .tog-slider {
+  background: rgba(255,255,255,0.1) !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+}
+
+.sidebar input:checked + .tog-slider {
+  background: rgba(154, 215, 229, 0.24) !important;
+  border-color: rgba(154, 215, 229, 0.38) !important;
+  box-shadow: 0 0 14px rgba(109, 187, 208, 0.12) !important;
+}
+
+.sidebar input:checked + .tog-slider::before {
+  background: #e8f7fb !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.38) !important;
+}
+
+.live-panel.open .lp-inner {
+  color: var(--lux-text) !important;
+  padding: 11px !important;
+}
+
+.lp-panel-header,
+.lp-controls {
+  border-color: rgba(207, 220, 232, 0.1) !important;
+}
+
+.live-panel .lp-tag,
+.live-panel .lp-chip,
+.sidebar .tag,
+.sidebar .badge,
+.sidebar [class*="badge"] {
+  color: #aebbc7 !important;
+  border: 1px solid rgba(207, 220, 232, 0.12) !important;
+  background: rgba(255,255,255,0.035) !important;
+  box-shadow: none !important;
+}
+
+/* Floating map-tools card uses the same visual language */
+.dual-engine-map-shell > .occumed-map-tools-panel[data-map-tools-visible="true"],
+.occumed-map-tools-panel {
+  color: var(--lux-text) !important;
+  border: 1px solid var(--lux-border) !important;
+  border-radius: 18px !important;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,0.045), transparent 35%),
+    rgba(9, 13, 20, 0.9) !important;
+  box-shadow:
+    0 20px 52px rgba(0,0,0,0.44),
+    inset 0 1px 0 rgba(255,255,255,0.065) !important;
+  backdrop-filter: blur(24px) saturate(110%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(110%) !important;
+}
+
+.occumed-basemap-title,
+.occumed-map-tools-panel .occumed-mapbox-status {
+  color: var(--lux-text) !important;
+}
+
+.occumed-map-tools-panel .occumed-mapbox-status {
+  border-top-color: rgba(207, 220, 232, 0.1) !important;
+  color: var(--lux-muted) !important;
+}
+
+/* Provider popups: dark premium information cards */
+.leaflet-popup-content-wrapper,
+.mapboxgl-popup-content {
+  color: var(--lux-text) !important;
+  border: 1px solid rgba(211, 224, 236, 0.2) !important;
+  border-radius: 18px !important;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,0.05), transparent 36%),
+    rgba(9, 13, 20, 0.96) !important;
+  box-shadow:
+    0 26px 64px rgba(0,0,0,0.56),
+    inset 0 1px 0 rgba(255,255,255,0.075),
+    0 0 0 1px rgba(0,0,0,0.34) !important;
+  backdrop-filter: blur(24px) saturate(110%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(110%) !important;
+}
+
+.leaflet-popup-tip,
+.mapboxgl-popup-anchor-bottom .mapboxgl-popup-tip {
+  background: rgba(9, 13, 20, 0.96) !important;
+  border-top-color: rgba(9, 13, 20, 0.96) !important;
+}
+
+.mapboxgl-popup-anchor-top .mapboxgl-popup-tip {
+  border-bottom-color: rgba(9, 13, 20, 0.96) !important;
+}
+
+.mapboxgl-popup-anchor-left .mapboxgl-popup-tip {
+  border-right-color: rgba(9, 13, 20, 0.96) !important;
+}
+
+.mapboxgl-popup-anchor-right .mapboxgl-popup-tip {
+  border-left-color: rgba(9, 13, 20, 0.96) !important;
+}
+
+.leaflet-popup-content,
+.mapboxgl-popup-content {
+  color: var(--lux-text) !important;
+  font-size: 12px !important;
+  line-height: 1.55 !important;
+}
+
+.leaflet-popup-content strong,
+.mapboxgl-popup-content strong,
+.leaflet-popup-content .pt,
+.mapboxgl-popup-content .pt {
+  color: #f4f8fb !important;
+  font-weight: 760 !important;
+  letter-spacing: -0.01em !important;
+}
+
+.leaflet-popup-content .pi,
+.mapboxgl-popup-content .pi {
+  color: var(--lux-text) !important;
+  min-width: 230px !important;
+}
+
+.leaflet-popup-content .ps,
+.leaflet-popup-content .pcl,
+.leaflet-popup-content .pcn,
+.mapboxgl-popup-content .ps,
+.mapboxgl-popup-content .pcl,
+.mapboxgl-popup-content .pcn {
+  color: var(--lux-muted) !important;
+}
+
+.leaflet-popup-content .pb,
+.leaflet-popup-content .pc,
+.mapboxgl-popup-content .pb,
+.mapboxgl-popup-content .pc {
+  color: #dce6ed !important;
+  border: 1px solid rgba(207, 220, 232, 0.13) !important;
+  border-radius: 10px !important;
+  background: rgba(255,255,255,0.045) !important;
+  box-shadow: none !important;
+}
+
+.leaflet-popup-content .pdiv,
+.mapboxgl-popup-content .pdiv {
+  border-color: rgba(207, 220, 232, 0.1) !important;
+  background: rgba(207, 220, 232, 0.1) !important;
+}
+
+.leaflet-popup-content .pct,
+.mapboxgl-popup-content .pct {
+  background: rgba(255,255,255,0.075) !important;
+}
+
+.leaflet-popup-content .pcf,
+.mapboxgl-popup-content .pcf {
+  background: linear-gradient(90deg, #71808c, #b5c4cf) !important;
+  box-shadow: none !important;
+}
+
+.leaflet-popup-content .pcs,
+.mapboxgl-popup-content .pcs {
+  color: #bdcad4 !important;
+}
+
+.leaflet-popup-content a,
+.mapboxgl-popup-content a {
+  color: var(--lux-accent) !important;
+  font-weight: 700 !important;
+  text-decoration: none !important;
+}
+
+.leaflet-popup-content a:hover,
+.mapboxgl-popup-content a:hover {
+  color: #d9f6fc !important;
+  text-decoration: underline !important;
+}
+
+.leaflet-popup-content button,
+.mapboxgl-popup-content button,
+.provider-popup-save {
+  color: #e6eef4 !important;
+  border: 1px solid var(--lux-border-strong) !important;
+  border-radius: 9px !important;
+  background: rgba(255,255,255,0.06) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.045) !important;
+}
+
+.leaflet-popup-close-button,
+.mapboxgl-popup-close-button {
+  color: #9caab6 !important;
+  background: transparent !important;
+  text-shadow: none !important;
+  font-size: 19px !important;
+}
+
+.leaflet-popup-close-button:hover,
+.mapboxgl-popup-close-button:hover {
+  color: #ffffff !important;
+}
+
+/* Keep category identity in the pins, not in loud card backgrounds. */
+.leaflet-popup-content [style*="background:"],
+.mapboxgl-popup-content [style*="background:"] {
+  background-color: transparent;
+}
+
+@media (max-width: 900px) {
+  .app-body {
+    padding: 8px !important;
+    gap: 8px !important;
+  }
+
+  .sidebar,
+  .live-panel,
+  .live-panel.open,
+  .map-wrap {
+    border-radius: 17px !important;
+  }
+
+  .mapbox-2d-host,
+  .mapbox-globe-host,
+  #map,
+  .leaflet-container {
+    border-radius: 16px !important;
+  }
+}

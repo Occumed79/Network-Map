@@ -1,8 +1,7 @@
 import L from "leaflet";
-import { mapboxDirections, mapboxGeocode, mapboxReverseGeocode } from "./mapboxServices";
+import { mapboxDirections, mapboxGeocode } from "./mapboxServices";
 
 type Point = { lat: number; lng: number; label?: string };
-type PickTarget = "from" | "to" | null;
 
 const ROUTE_PANEL_FLAG = "routePlannerReady";
 let canonicalMap: L.Map | null = null;
@@ -11,7 +10,6 @@ let toPoint: Point | null = null;
 let fromMarker: L.Marker | null = null;
 let toMarker: L.Marker | null = null;
 let routeLayer: L.LayerGroup | null = null;
-let pickTarget: PickTarget = null;
 let observer: MutationObserver | null = null;
 let scanTimer: number | null = null;
 
@@ -21,22 +19,8 @@ function status(text: string): void {
   });
 }
 
-function inputFor(target: Exclude<PickTarget, null>): HTMLInputElement | null {
+function inputFor(target: "from" | "to"): HTMLInputElement | null {
   return document.querySelector<HTMLInputElement>(`.occumed-route-${target}`);
-}
-
-function pickButton(target: Exclude<PickTarget, null>): HTMLButtonElement | null {
-  return document.querySelector<HTMLButtonElement>(`.occumed-pick-${target}`);
-}
-
-function setPickTarget(next: PickTarget): void {
-  pickTarget = next;
-  for (const target of ["from", "to"] as const) {
-    const active = target === next;
-    pickButton(target)?.classList.toggle("active", active);
-    pickButton(target)?.setAttribute("aria-pressed", String(active));
-  }
-  if (next) status(`Click the map to choose the ${next === "from" ? "starting point" : "destination"}.`);
 }
 
 function markerIcon(kind: "from" | "to"): L.DivIcon {
@@ -121,22 +105,6 @@ async function routeFromInputs(map: L.Map): Promise<void> {
   }
 }
 
-async function useMapPoint(map: L.Map, point: Point): Promise<void> {
-  const target = pickTarget || (fromPoint ? "to" : "from");
-  try {
-    const place = await mapboxReverseGeocode(point);
-    const resolved = { ...point, label: place?.placeName || "Selected location" };
-    setPoint(map, target, resolved);
-    setPickTarget(null);
-    if (target === "to" && fromPoint) await drawRoute(map, fromPoint, resolved);
-    else status(`${target === "from" ? "From" : "To"} set: ${resolved.label}`);
-  } catch {
-    setPoint(map, target, point);
-    setPickTarget(null);
-    if (target === "to" && fromPoint) await drawRoute(map, fromPoint, point);
-  }
-}
-
 function clearPlanner(map: L.Map): void {
   clearRouteOnly(map);
   if (fromMarker) map.removeLayer(fromMarker);
@@ -149,8 +117,7 @@ function clearPlanner(map: L.Map): void {
   const toInput = inputFor("to");
   if (fromInput) fromInput.value = "";
   if (toInput) toInput.value = "";
-  setPickTarget(null);
-  status("Enter From and To, or pick both points on the map.");
+  status("Enter a starting location and destination.");
 }
 
 function swapPlanner(map: L.Map): void {
@@ -214,19 +181,8 @@ function installPanel(panel: HTMLElement): void {
   title.textContent = "From / To Route";
   planner.appendChild(title);
 
-  const fromRow = document.createElement("div");
-  fromRow.className = "occumed-route-row";
   const fromInput = createInput("occumed-route-from", "From address or place", "Route starting location");
-  const pickFrom = actionButton("Pick From", "occumed-pick-from", () => setPickTarget(pickTarget === "from" ? null : "from"));
-  pickFrom.setAttribute("aria-pressed", "false");
-  fromRow.append(fromInput, pickFrom);
-
-  const toRow = document.createElement("div");
-  toRow.className = "occumed-route-row";
   const toInput = createInput("occumed-route-to", "To address, place, or provider", "Route destination");
-  const pickTo = actionButton("Pick To", "occumed-pick-to", () => setPickTarget(pickTarget === "to" ? null : "to"));
-  pickTo.setAttribute("aria-pressed", "false");
-  toRow.append(toInput, pickTo);
 
   const actions = document.createElement("div");
   actions.className = "occumed-mapbox-actions occumed-route-actions";
@@ -249,11 +205,11 @@ function installPanel(panel: HTMLElement): void {
     void routeFromInputs(map);
   });
 
-  planner.append(fromRow, toRow, actions);
+  planner.append(fromInput, toInput, actions);
   if (firstSection) panel.insertBefore(planner, firstSection);
   else panel.appendChild(planner);
   panel.dataset[ROUTE_PANEL_FLAG] = "true";
-  status("Enter From and To, or pick both points on the map.");
+  status("Enter a starting location and destination.");
 }
 
 function scanForPanel(): void {
@@ -270,10 +226,6 @@ function scheduleScan(delay = 0): void {
 
 function bindMap(map: L.Map): void {
   canonicalMap = map;
-  map.on("click", (event: L.LeafletMouseEvent) => {
-    if (!pickTarget) return;
-    void useMapPoint(map, { lat: event.latlng.lat, lng: event.latlng.lng });
-  });
   map.once("unload", () => {
     if (canonicalMap === map) canonicalMap = null;
   });
@@ -302,10 +254,7 @@ window.addEventListener("occumed:route-to-point", ((event: Event) => {
   const point = { lat: detail.lat, lng: detail.lng, label: detail.label || "Selected provider" };
   setPoint(canonicalMap, "to", point);
   if (fromPoint) void drawRoute(canonicalMap, fromPoint, point);
-  else {
-    setPickTarget("from");
-    status("Destination selected. Enter or pick the starting point.");
-  }
+  else status("Destination selected. Enter the starting location, then press Route.");
 }) as EventListener);
 
 patchLeafletFactory();

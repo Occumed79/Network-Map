@@ -8,8 +8,9 @@
   position: absolute !important;
   inset: 0;
   z-index: 0;
-  opacity: 1;
+  opacity: 0;
   pointer-events: none;
+  background: transparent !important;
 }
 
 .canonical-map-blank-tile {
@@ -24,6 +25,7 @@
   inset: 0;
   width: 100%;
   height: 100%;
+  overflow: hidden;
   background: #d9effb;
   transition: opacity 260ms ease, visibility 260ms ease;
 }
@@ -37,7 +39,14 @@
 }
 
 .mapbox-2d-host .mapboxgl-map,
-.mapbox-2d-host canvas { width: 100%; height: 100%; }
+.mapbox-2d-host .mapboxgl-canvas-container,
+.mapbox-2d-host canvas,
+.mapbox-globe-host .mapboxgl-map,
+.mapbox-globe-host .mapboxgl-canvas-container,
+.mapbox-globe-host canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
 
 .mapbox-load-error {
   position: absolute;

@@ -9,12 +9,6 @@
   filter: none !important;
 }
 
-.leaflet-tile,
-.leaflet-tile-pane,
-.network-map-tiles {
-  will-change: auto !important;
-}
-
 .occumed-map-tools-panel,
 .sidebar,
 .live-panel.open,

@@ -1611,13 +1611,8 @@ export default function App() {
     map.doubleClickZoom.disable();
     mapRef.current = map;
 
-    // The same-origin endpoint proxies ArcGIS raster tiles so Safari content
-    // blockers and cross-origin policies cannot leave the basemap blank.
-    L.tileLayer('/api/map-tiles/{z}/{y}/{x}',{
-      maxZoom:19,
-      className:'network-map-tiles',
-      attribution:'Tiles © Esri'
-    }).addTo(map);
+    // Leaflet remains a hidden controller for the existing tools. The visible
+    // basemap is rendered exclusively by the ArcGIS MapView runtime.
 
     // City layer
     const cityLayer = L.layerGroup().addTo(map);

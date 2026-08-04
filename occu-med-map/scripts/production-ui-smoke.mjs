@@ -15,6 +15,7 @@ await page.addInitScript(() => {
   window.fetch = function smokeFetch(input, init) {
     const url = input instanceof Request ? input.url : String(input);
     if (/\/api\/(provider-layers|provider-explorer)\//.test(url)) window.__smoke.providerRequests.push(url);
+    if (/\/api\/map-tiles\//.test(url)) window.__smoke.tileProxyRequests = (window.__smoke.tileProxyRequests || []).concat(url);
     return originalFetch.call(this, input, init);
   };
   new MutationObserver(records => { window.__smoke.mutations += records.length; })
@@ -27,16 +28,19 @@ await page.addInitScript(() => {
 
 try {
   await page.goto(url, { waitUntil: "networkidle", timeout: 60_000 });
-  await page.locator(".leaflet-container").waitFor({ state: "visible" });
+  await page.locator(".arcgis-map-host .esri-view-root").waitFor({ state: "visible", timeout: 45_000 });
+  await page.locator(".arcgis-map-host canvas").first().waitFor({ state: "visible", timeout: 45_000 });
   await page.waitForTimeout(2_000);
 
   const initial = await page.evaluate(() => ({ ...window.__smoke }));
   assert.deepEqual(initial.providerRequests, [], "provider APIs must be lazy at startup");
+  assert.deepEqual(initial.tileProxyRequests || [], [], "2D must not request raster proxy tiles");
+  assert.equal(await page.locator(".leaflet-tile:visible").count(), 0, "Leaflet raster tiles must not be visible");
 
-  const map = page.locator(".leaflet-container");
+  const map = page.locator(".arcgis-map-host");
   const sidebarButton = page.locator(".sidebar button:visible").first();
   await sidebarButton.click({ timeout: 5_000 });
-  await page.locator(".leaflet-control-zoom-in").click();
+  await page.locator(".arcgis-map-host .esri-zoom .esri-widget--button").first().click();
   await map.hover();
   await page.mouse.wheel(0, -300);
   const box = await map.boundingBox();

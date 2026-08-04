@@ -40,7 +40,6 @@ html, body, #root {
 }
 
 .dark-tiles,
-.network-map-tiles,
 .global-light-tiles,
 .leaflet-tile-pane {
   filter: none !important;

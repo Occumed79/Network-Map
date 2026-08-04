@@ -242,36 +242,6 @@ body,
     #f6fbfc !important;
 }
 
-/* Leaflet 1.9 uses plus-lighter blending for Chrome tiles. Against this
-   light shell it bleaches the ArcGIS basemap, so keep raster colors literal. */
-.leaflet-container .network-map-tiles img.leaflet-tile,
-.leaflet-container img.leaflet-tile {
-  mix-blend-mode: normal !important;
-  filter: none !important;
-  opacity: 1 !important;
-}
-
-/* The ArcGIS 2D basemap is rendered by Leaflet. Keep the historical ArcGIS
-   host out of hit testing and make the canonical controller the sole 2D input
-   surface so drag, wheel, touch, keyboard, and zoom controls stay interactive. */
-.dual-engine-map-shell.arcgis-leaflet-2d:not(.mapbox-globe-active) > .arcgis-map-host {
-  display: none !important;
-  visibility: hidden !important;
-  pointer-events: none !important;
-}
-
-.dual-engine-map-shell.arcgis-leaflet-2d:not(.mapbox-globe-active) > .canonical-leaflet-controller {
-  z-index: 5 !important;
-  opacity: 1 !important;
-  visibility: visible !important;
-  pointer-events: auto !important;
-}
-
-.dual-engine-map-shell.arcgis-leaflet-2d:not(.mapbox-globe-active) > .canonical-leaflet-controller .leaflet-control-container,
-.dual-engine-map-shell.arcgis-leaflet-2d:not(.mapbox-globe-active) > .canonical-leaflet-controller .leaflet-control {
-  pointer-events: auto !important;
-}
-
 .modal-backdrop,
 .pdf-modal-wrap {
   z-index: var(--z-modal) !important;

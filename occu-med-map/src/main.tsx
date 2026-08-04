@@ -3,6 +3,7 @@ import "leaflet/dist/leaflet.css";
 import "mapbox-gl/dist/mapbox-gl.css";
 import "./adminApiRuntime";
 import "./mapControlsBridgeRuntime";
+import "./completeProviderPinMirrorRuntime";
 import "./mapToolsCommandPanel";
 import "./dualMapEngineRuntime";
 import App from "./App";

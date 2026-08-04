@@ -1,3 +1,5 @@
+import { TRANSITION_SOUND_DATA_URI } from "./transitionSoundData";
+
 type MapMode = "2d" | "3d";
 
 type GlobeBridge = {
@@ -24,6 +26,15 @@ declare global {
 }
 
 let transitionRunning = false;
+const transitionAudio = new Audio(TRANSITION_SOUND_DATA_URI);
+transitionAudio.preload = "auto";
+transitionAudio.volume = 0.72;
+
+function playTransitionSound(): void {
+  transitionAudio.pause();
+  transitionAudio.currentTime = 0;
+  void transitionAudio.play().catch(() => undefined);
+}
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
@@ -37,7 +48,7 @@ function engineReady(mode: MapMode, control: HTMLElement): boolean {
     const host = wrap.querySelector<HTMLElement>(".mapbox-globe-host");
     return wrap.classList.contains("mapbox-globe-active") && Boolean(host?.classList.contains("ready"));
   }
-  const host = wrap.querySelector<HTMLElement>(".arcgis-map-host");
+  const host = wrap.querySelector<HTMLElement>(".mapbox-2d-host");
   return !wrap.classList.contains("mapbox-globe-active") && Boolean(host?.classList.contains("ready"));
 }
 
@@ -78,16 +89,17 @@ function ensureOverlay(): HTMLElement {
 }
 
 function createParticle(direction: "in" | "out", index: number): Particle {
-  const hues = [184, 194, 207, 224, 262];
+  const hues = [184, 192, 205, 222, 252, 278];
+  const lane = index % 6;
   return {
-    angle: Math.random() * Math.PI * 2,
-    radius: direction === "in" ? 0.3 + Math.random() * 0.95 : 0.008 + Math.random() * 0.06,
-    speed: 0.000075 + Math.random() * 0.00013,
-    spin: (index % 2 === 0 ? 1 : -1) * (0.0002 + Math.random() * 0.00045),
-    width: 0.7 + Math.random() * 1.8,
-    hue: hues[index % hues.length] + Math.random() * 9,
-    alpha: 0.35 + Math.random() * 0.65,
-    trail: 0.025 + Math.random() * 0.08,
+    angle: index * 2.39996 + lane * 0.12,
+    radius: direction === "in" ? 0.18 + (index % 29) / 24 : 0.012 + (index % 7) * 0.006,
+    speed: 0.00009 + lane * 0.000012,
+    spin: 0.00042 + lane * 0.000045,
+    width: 0.7 + lane * 0.17,
+    hue: hues[lane],
+    alpha: 0.48 + (index % 5) * 0.09,
+    trail: 0.09 + lane * 0.014,
   };
 }
 
@@ -99,12 +111,12 @@ function beginVortex(targetMode: MapMode): { complete: () => Promise<void>; fail
   const title = overlay.querySelector<HTMLElement>(".dual-engine-vortex-copy strong");
   const detail = overlay.querySelector<HTMLElement>(".dual-engine-vortex-copy small");
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const particles = Array.from({ length: reducedMotion ? 0 : 155 }, (_, index) => createParticle(direction, index));
+  const particles = Array.from({ length: reducedMotion ? 0 : 92 }, (_, index) => createParticle(direction, index));
 
-  if (title) title.textContent = targetMode === "3d" ? "Opening Mapbox globe" : "Returning to ArcGIS map";
+  if (title) title.textContent = targetMode === "3d" ? "Opening Mapbox globe" : "Returning to Mapbox 2D";
   if (detail) detail.textContent = targetMode === "3d"
     ? "Folding the map into three dimensions…"
-    : "Flattening the globe into the Atlas view…";
+    : "Flattening the globe into the street map…";
 
   overlay.className = `dual-engine-vortex active ${targetMode === "3d" ? "entering" : "exiting"}`;
   overlay.setAttribute("aria-hidden", "false");
@@ -162,8 +174,8 @@ function beginVortex(targetMode: MapMode): { complete: () => Promise<void>; fail
       const tailY = centerY + Math.sin(tailAngle) * prior;
 
       context.strokeStyle = `hsla(${particle.hue},100%,${74 + closeness * 22}%,${particle.alpha * (0.35 + closeness)})`;
-      context.lineWidth = particle.width * (0.8 + closeness * 1.8);
-      context.shadowBlur = 10 + closeness * 24;
+      context.lineWidth = particle.width * (0.65 + closeness * 1.45);
+      context.shadowBlur = 14 + closeness * 30;
       context.shadowColor = `hsla(${particle.hue},100%,72%,0.75)`;
       context.beginPath();
       context.moveTo(tailX, tailY);
@@ -243,16 +255,17 @@ async function switchMode(targetMode: MapMode, control: HTMLElement): Promise<vo
     button.disabled = true;
   });
   const vortex = beginVortex(targetMode);
-  setControlStatus(control, targetMode === "3d" ? "Opening Mapbox globe…" : "Returning to ArcGIS map…", "loading");
+  playTransitionSound();
+  setControlStatus(control, targetMode === "3d" ? "Opening Mapbox globe…" : "Returning to Mapbox 2D…", "loading");
 
   try {
     await delay(320);
     await api.setMode(targetMode);
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline && !engineReady(targetMode, control)) await delay(80);
-    if (!engineReady(targetMode, control)) throw new Error(`${targetMode === "3d" ? "Mapbox globe" : "ArcGIS map"} did not become ready`);
+    if (!engineReady(targetMode, control)) throw new Error(`${targetMode === "3d" ? "Mapbox globe" : "Mapbox 2D map"} did not become ready`);
     await vortex.complete();
-    setControlStatus(control, targetMode === "3d" ? "Mapbox 3D globe active" : "ArcGIS 2D active");
+    setControlStatus(control, targetMode === "3d" ? "Mapbox 3D globe active" : "Mapbox 2D active");
     updateControl(control);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown map engine error";

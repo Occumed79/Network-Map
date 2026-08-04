@@ -22,11 +22,76 @@
   box-shadow: inset 0 0 0 1px rgba(14, 116, 144, 0.16) !important;
 }
 
+.occumed-route-planner {
+  display: grid !important;
+  gap: 7px !important;
+}
+
+.occumed-route-row {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  gap: 6px !important;
+  align-items: center !important;
+}
+
+.occumed-route-row .occumed-mapbox-search {
+  min-width: 0 !important;
+  margin: 0 !important;
+}
+
+.occumed-route-row > button,
+.occumed-route-actions > button {
+  min-height: 30px !important;
+  padding-inline: 9px !important;
+  white-space: nowrap !important;
+}
+
+.occumed-route-row > button.active {
+  color: #075985 !important;
+  background: #ffffff !important;
+  border-color: rgba(14, 116, 144, 0.45) !important;
+  box-shadow: 0 0 0 2px rgba(14, 116, 144, 0.12) !important;
+}
+
+.occumed-route-actions {
+  margin: 0 !important;
+}
+
+.occumed-route-go {
+  color: #ffffff !important;
+  background: #0e7490 !important;
+  border-color: #0e7490 !important;
+}
+
+.occumed-route-marker {
+  display: grid !important;
+  place-items: center !important;
+  width: 26px !important;
+  height: 26px !important;
+  border: 3px solid #ffffff !important;
+  border-radius: 999px !important;
+  color: #ffffff !important;
+  font: 900 11px/1 Inter, system-ui, sans-serif !important;
+  box-shadow: 0 0 0 4px rgba(15, 23, 42, 0.16), 0 8px 18px rgba(15, 23, 42, 0.32) !important;
+}
+
+.occumed-route-marker.from {
+  background: #0e7490 !important;
+}
+
+.occumed-route-marker.to {
+  background: #7c3aed !important;
+}
+
 @media (max-width: 760px) {
   .dual-engine-map-shell > .occumed-map-tools-panel[data-map-tools-visible="true"] {
     left: 10px !important;
     bottom: 10px !important;
     width: min(280px, calc(100% - 20px)) !important;
     max-width: min(280px, calc(100% - 20px)) !important;
+  }
+
+  .occumed-route-row {
+    grid-template-columns: minmax(0, 1fr) 76px !important;
   }
 }

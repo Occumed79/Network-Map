@@ -1,4 +1,5 @@
 import { TRANSITION_SOUND_DATA_URI } from "./transitionSoundData";
+import { runWithoutObserverFeedback } from "./settledMutationObserver";
 
 const MAPBOX_PATCH_FLAG = "__networkMapDensityFilterPatched";
 const SOURCE_PATCH_FLAG = "__networkMapDensitySourcePatched";
@@ -115,6 +116,14 @@ function removeFinishedLoadingPanels(): void {
   });
 }
 
+function cleanupFinishedTransition(): void {
+  if (!soundPlaying || Date.now() - soundStartedAt < 350) return;
+  const overlay = document.querySelector<HTMLElement>(".dual-engine-vortex");
+  if (overlay?.classList.contains("active")) return;
+  stopTransitionSound();
+  delete document.documentElement.dataset.mapTransitionTarget;
+}
+
 document.addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target : null;
   const button = target?.closest<HTMLButtonElement>(".map-dimension-toggle button[data-map-mode]");
@@ -129,36 +138,31 @@ document.addEventListener("click", (event) => {
   }
 }, true);
 
-const observer = new MutationObserver(() => {
-  bindMapboxScriptPatch();
-  patchMapboxDensityMirroring();
-  removeFinishedLoadingPanels();
-});
+const observerOptions: MutationObserverInit = {
+  subtree: true,
+  childList: true,
+  attributes: true,
+  attributeFilter: ["class", "data-state", "aria-hidden"],
+};
+
+const observer = new MutationObserver(() => runWithoutObserverFeedback(
+  observer,
+  document.documentElement,
+  observerOptions,
+  () => {
+    bindMapboxScriptPatch();
+    patchMapboxDensityMirroring();
+    removeFinishedLoadingPanels();
+    cleanupFinishedTransition();
+  },
+));
 
 function initialize(): void {
   bindMapboxScriptPatch();
   patchMapboxDensityMirroring();
   removeFinishedLoadingPanels();
-  observer.observe(document.documentElement, {
-    subtree: true,
-    childList: true,
-    attributes: true,
-    characterData: true,
-    attributeFilter: ["class", "data-state", "aria-hidden"],
-  });
-
-  window.setInterval(() => {
-    bindMapboxScriptPatch();
-    patchMapboxDensityMirroring();
-    removeFinishedLoadingPanels();
-
-    if (!soundPlaying || Date.now() - soundStartedAt < 350) return;
-    const overlay = document.querySelector<HTMLElement>(".dual-engine-vortex");
-    if (!overlay?.classList.contains("active")) {
-      stopTransitionSound();
-      delete document.documentElement.dataset.mapTransitionTarget;
-    }
-  }, 120);
+  cleanupFinishedTransition();
+  observer.observe(document.documentElement, observerOptions);
 }
 
 bindMapboxScriptPatch();

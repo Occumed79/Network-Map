@@ -11,6 +11,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test:p2-map": "tsx scripts/phase-two-map-smoke.ts",
+    "test:ui-production": "node scripts/production-ui-smoke.mjs",
     "scrape:bluehive": "tsx scripts/scrape-bluehive.ts",
     "scrape:bluehive:recover": "tsx scripts/scrape-bluehive.ts --recover",
     "scrape:bluehive:sitemap": "tsx scripts/reconcile-bluehive-sitemap.ts",

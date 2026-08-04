@@ -21,6 +21,13 @@
   -webkit-backdrop-filter: none !important;
 }
 
+.dual-engine-vortex:not(.active) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 .dual-engine-vortex.active {
   opacity: 1 !important;
   visibility: visible !important;

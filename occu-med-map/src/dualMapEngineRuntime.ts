@@ -218,7 +218,7 @@ async function ensureArcgis2d(): Promise<void> {
     });
 
     const arcgisMap = new ArcGISMap({
-      basemap: "arcgis/topographic",
+      basemap: "streets",
       layers: [arcgisGraphicsLayer],
     });
     const center = canonicalMap.getCenter();

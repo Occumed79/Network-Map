@@ -2,6 +2,8 @@ import { createRoot } from "react-dom/client";
 import "leaflet/dist/leaflet.css";
 import "mapbox-gl/dist/mapbox-gl.css";
 import "./adminApiRuntime";
+import "./mapControlsBridgeRuntime";
+import "./mapToolsCommandPanel";
 import "./dualMapEngineRuntime";
 import App from "./App";
 import "./dual-map-engines.css";
@@ -26,6 +28,7 @@ import "./workflow-ui.css";
 import "./network-command-center.css";
 import "./core-app-p2-fixes.css";
 import "./ui-cascade-stabilization.css";
+import "./map-tools-visible.css";
 
 async function safeLoad(name: string, loader: () => Promise<unknown>): Promise<void> {
   try {
@@ -43,7 +46,6 @@ async function loadOptionalRuntimes(): Promise<void> {
   await Promise.allSettled([
     safeLoad("provider tools", () => import("./unifiedProviderToolsRuntime")),
     safeLoad("provider layer telemetry", () => import("./providerLayerTelemetryRuntime")),
-    safeLoad("map tools", () => import("./mapToolsCommandPanel")),
     safeLoad("right panel", () => import("./rightPanelCompactor")),
     safeLoad("live finder tools", () => import("./liveFinderDriveTools")),
     safeLoad("U.S. diagnostics", () => import("./usDiagnosticsGate")),

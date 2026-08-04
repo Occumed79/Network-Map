@@ -3,6 +3,7 @@ import "leaflet/dist/leaflet.css";
 import "mapbox-gl/dist/mapbox-gl.css";
 import "./adminApiRuntime";
 import "./mapControlsBridgeRuntime";
+import "./diagnosticsReliabilityRuntime";
 import "./completeProviderPinMirrorRuntime";
 import "./mapToolsCommandPanel";
 import "./routePlannerControlsRuntime";
@@ -32,6 +33,7 @@ import "./core-app-p2-fixes.css";
 import "./ui-cascade-stabilization.css";
 import "./map-tools-visible.css";
 import "./luxury-futuristic-shell.css";
+import "./map-tools-reliability.css";
 
 async function safeLoad(name: string, loader: () => Promise<unknown>): Promise<void> {
   try {

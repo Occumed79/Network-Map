@@ -1,0 +1,74 @@
+.dual-engine-map-shell > .occumed-map-tools-panel[data-map-tools-visible="true"],
+.occumed-map-tools-panel {
+  box-sizing: border-box !important;
+  width: min(332px, calc(100% - 28px)) !important;
+  max-width: min(332px, calc(100% - 28px)) !important;
+  height: auto !important;
+  max-height: min(720px, calc(100% - 28px)) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain !important;
+  scrollbar-gutter: stable !important;
+  margin-left: 0 !important;
+  margin-bottom: 0 !important;
+  padding: 12px !important;
+}
+
+.dual-engine-map-shell > .occumed-map-tools-panel[data-map-tools-visible="true"]:hover,
+.dual-engine-map-shell > .occumed-map-tools-panel[data-map-tools-visible="true"]:focus-within,
+.occumed-map-tools-panel:hover,
+.occumed-map-tools-panel:focus-within {
+  max-height: min(720px, calc(100% - 28px)) !important;
+  overflow-y: auto !important;
+}
+
+.occumed-basemap-title::after {
+  content: "" !important;
+}
+
+.occumed-map-tools-panel .occumed-basemap-title {
+  position: sticky !important;
+  top: -12px !important;
+  z-index: 4 !important;
+  margin: -12px -12px 8px !important;
+  padding: 12px !important;
+  background: linear-gradient(180deg, rgba(9, 13, 20, 0.99), rgba(9, 13, 20, 0.93)) !important;
+  border-bottom: 1px solid rgba(203, 218, 232, 0.1) !important;
+}
+
+.occumed-map-tools-panel::-webkit-scrollbar {
+  width: 7px !important;
+}
+
+.occumed-map-tools-panel::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+.occumed-map-tools-panel::-webkit-scrollbar-thumb {
+  background: rgba(204, 219, 231, 0.24) !important;
+  border: 2px solid transparent !important;
+  border-radius: 999px !important;
+  background-clip: padding-box !important;
+}
+
+@media (max-height: 820px) {
+  .dual-engine-map-shell > .occumed-map-tools-panel[data-map-tools-visible="true"],
+  .occumed-map-tools-panel,
+  .dual-engine-map-shell > .occumed-map-tools-panel[data-map-tools-visible="true"]:hover,
+  .dual-engine-map-shell > .occumed-map-tools-panel[data-map-tools-visible="true"]:focus-within,
+  .occumed-map-tools-panel:hover,
+  .occumed-map-tools-panel:focus-within {
+    max-height: calc(100% - 20px) !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .dual-engine-map-shell > .occumed-map-tools-panel[data-map-tools-visible="true"],
+  .occumed-map-tools-panel {
+    left: 10px !important;
+    bottom: 10px !important;
+    width: min(310px, calc(100% - 20px)) !important;
+    max-width: min(310px, calc(100% - 20px)) !important;
+    max-height: calc(100% - 20px) !important;
+  }
+}

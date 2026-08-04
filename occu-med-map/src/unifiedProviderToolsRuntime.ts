@@ -12,10 +12,17 @@ type SourceConfig = {
 
 const SOURCE_SELECTION_KEY = "network-map:provider-source-selection-v3";
 const DEFAULT_SOURCE_SELECTION: Record<SourceKey, boolean> = {
-  bluehive: true,
+  bluehive: false,
   indexed: false,
   dentists: false,
   "my-clinics": false,
+};
+
+const OBSERVER_OPTIONS: MutationObserverInit = {
+  childList: true,
+  subtree: true,
+  attributes: true,
+  attributeFilter: ["class", "hidden"],
 };
 
 const SOURCE_CONFIGS: SourceConfig[] = [
@@ -49,6 +56,8 @@ let installed = false;
 let scanQueued = false;
 let sourceSelectionInitialized = false;
 let applyingStoredSelection = false;
+let observer: MutationObserver | null = null;
+let observerConnected = false;
 
 function normalizedText(node: Element | null): string {
   return (node?.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -437,12 +446,32 @@ function scan(): void {
   syncActiveButtons();
 }
 
+function connectObserver(): void {
+  if (!observer || observerConnected || !document.body) return;
+  observer.observe(document.body, OBSERVER_OPTIONS);
+  observerConnected = true;
+}
+
+function scanWithoutObservingOwnChanges(): void {
+  const reconnect = observerConnected;
+  if (reconnect) {
+    observer?.disconnect();
+    observerConnected = false;
+  }
+
+  try {
+    scan();
+  } finally {
+    if (reconnect) connectObserver();
+  }
+}
+
 function scheduleScan(): void {
   if (scanQueued) return;
   scanQueued = true;
   window.setTimeout(() => {
     scanQueued = false;
-    scan();
+    scanWithoutObservingOwnChanges();
   }, 40);
 }
 
@@ -458,8 +487,8 @@ export function installUnifiedProviderTools(): void {
     scheduleScan();
   });
 
-  const observer = new MutationObserver(scheduleScan);
-  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "hidden"] });
+  observer = new MutationObserver(scheduleScan);
+  connectObserver();
   window.addEventListener("load", scheduleScan, { once: true });
   scheduleScan();
 }

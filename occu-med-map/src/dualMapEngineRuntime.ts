@@ -19,7 +19,7 @@ const MAPBOX_VERSION = "3.25.0";
 const ARCGIS_KEY = import.meta.env.VITE_ARCGIS_API_KEY || "";
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || import.meta.env.VITE_MAPBOX_ACCESS_TOKEN || "";
 const MAX_MIRRORED_FEATURES = 12_000;
-const ARCGIS_LOAD_TIMEOUT_MS = 12_000;
+const ARCGIS_LOAD_TIMEOUT_MS = 25_000;
 
 let canonicalMap: L.Map | null = null;
 let currentMode: MapMode = "2d";
@@ -254,6 +254,7 @@ async function ensureArcgis2d(): Promise<void> {
       basemap: "arcgis/topographic",
       layers: [arcgisGraphicsLayer],
     });
+    await withTimeout(Promise.resolve(arcgisMap.loadAll()), ARCGIS_LOAD_TIMEOUT_MS, "ArcGIS basemap");
     const center = canonicalMap.getCenter();
     arcgisView = new MapView({
       container: arcgisHost,
@@ -265,6 +266,7 @@ async function ensureArcgis2d(): Promise<void> {
     });
 
     await withTimeout(Promise.resolve(arcgisView.when()), ARCGIS_LOAD_TIMEOUT_MS, "ArcGIS map view");
+    await waitForArcgisBasemap(arcgisMap, reactiveUtils);
     arcgisView.ui.components = ["zoom", "attribution"];
     arcgisHost.classList.add("ready");
 
@@ -303,6 +305,35 @@ async function ensureArcgis2d(): Promise<void> {
     arcgisViewPromise = null;
     throw error;
   }
+}
+
+async function waitForArcgisBasemap(arcgisMap: any, reactiveUtils: any): Promise<void> {
+  if (!arcgisView) throw new Error("ArcGIS map view is unavailable");
+  const layers = [
+    ...arcgisMap.basemap.baseLayers.toArray(),
+    ...arcgisMap.basemap.referenceLayers.toArray(),
+  ];
+  if (!layers.length) throw new Error("ArcGIS topographic basemap has no layers");
+
+  const layerViews = await withTimeout(
+    Promise.all(layers.map((layer: any) => arcgisView.whenLayerView(layer))),
+    ARCGIS_LOAD_TIMEOUT_MS,
+    "ArcGIS basemap layer views",
+  );
+  await withTimeout(
+    reactiveUtils.whenOnce(() => arcgisView?.ready === true
+      && arcgisView?.updating === false
+      && layerViews.every((layerView: any) => layerView.updating === false)),
+    ARCGIS_LOAD_TIMEOUT_MS,
+    "ArcGIS basemap rendering",
+  );
+  await nextPaint();
+}
+
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
+  });
 }
 
 async function ensureMapboxGlobe(): Promise<void> {

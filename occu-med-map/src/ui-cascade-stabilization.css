@@ -170,12 +170,20 @@ body,
 
 #map,
 .leaflet-container,
-.mapbox-globe-host {
+.mapbox-2d-host {
   width: 100% !important;
   height: 100% !important;
   min-width: 0 !important;
   min-height: 0 !important;
   background: #e8edf2 !important;
+}
+
+.mapbox-globe-host {
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  background: #030712 !important;
 }
 
 .leaflet-control-container,

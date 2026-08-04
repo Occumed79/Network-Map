@@ -115,6 +115,7 @@ function prepareGlobeContainer(button: HTMLButtonElement): void {
   host.setAttribute("aria-hidden", "false");
   host.style.visibility = "visible";
   host.style.display = "block";
+  let cleanupTimer: number | null = null;
 
   const cleanup = () => {
     const status = wrap.querySelector<HTMLElement>(".map-dimension-status")?.textContent?.toLowerCase() || "";
@@ -127,6 +128,8 @@ function prepareGlobeContainer(button: HTMLButtonElement): void {
     wrap.classList.remove("mapbox-globe-preparing");
     host.style.removeProperty("visibility");
     host.style.removeProperty("display");
+    if (cleanupTimer !== null) window.clearTimeout(cleanupTimer);
+    cleanupTimer = null;
     return true;
   };
 
@@ -135,11 +138,12 @@ function prepareGlobeContainer(button: HTMLButtonElement): void {
   });
   observer.observe(wrap, { subtree: true, childList: true, attributes: true, characterData: true });
 
-  window.setTimeout(() => {
+  cleanupTimer = window.setTimeout(() => {
     observer.disconnect();
     wrap.classList.remove("mapbox-globe-preparing");
     host.style.removeProperty("visibility");
     host.style.removeProperty("display");
+    cleanupTimer = null;
   }, 45_000);
 }
 
@@ -159,10 +163,5 @@ document.addEventListener("click", (event) => {
   const wrap = button.closest<HTMLElement>(".dual-engine-map-shell");
   wrap?.classList.remove("mapbox-globe-preparing");
 }, true);
-
-// Begin downloading and patching Mapbox before the first globe request.
-void ensureMapboxAssets().catch((error) => {
-  console.warn("Mapbox background preload did not complete", error);
-});
 
 export {};

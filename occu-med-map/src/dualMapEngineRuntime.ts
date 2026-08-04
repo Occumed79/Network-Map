@@ -86,7 +86,7 @@ async function initializeDualEngines(map: L.Map): Promise<void> {
   mapWrap.append(arcgisHost, mapboxHost, toggleControl);
   map.on("layeradd layerremove overlayadd overlayremove", queueOverlaySync);
   map.on("moveend zoomend", onCanonicalViewChanged);
-  startPeriodicSync();
+  map.once("unload", cleanupDualEngines);
 
   // ArcGIS's raster topographic service is rendered by the existing Leaflet
   // controller. This avoids the ArcGIS SDK's WebGL2 requirement while keeping
@@ -166,7 +166,20 @@ async function setMode(nextMode: MapMode): Promise<void> {
 
   if (nextMode === "3d") {
     setStatus("Loading Mapbox 3D…", "loading");
-    await ensureMapboxGlobe();
+    try {
+      await ensureMapboxGlobe();
+    } catch (error) {
+      currentMode = "2d";
+      stopPeriodicSync();
+      mapWrap.classList.remove("arcgis-globe-active", "mapbox-globe-active", "mapbox-globe-preparing");
+      mapWrap.classList.add("visible-engine-ready", "leaflet-fallback-visible");
+      mapboxHost.setAttribute("aria-hidden", "true");
+      restoreLeafletInteraction(canonicalMap);
+      invalidateLeafletLayout(canonicalMap);
+      setStatus("Mapbox 3D unavailable", "error");
+      updateToggle();
+      throw error;
+    }
     currentMode = "3d";
     mapWrap.classList.remove("leaflet-fallback-visible");
     mapWrap.classList.add("arcgis-globe-active", "mapbox-globe-active");
@@ -176,12 +189,14 @@ async function setMode(nextMode: MapMode): Promise<void> {
     mapboxMap?.resize?.();
     syncMapboxCameraFromLeaflet(false);
     syncAllOverlays();
+    startPeriodicSync();
     setStatus("Mapbox 3D globe active");
     return;
   }
 
   setStatus("Returning to ArcGIS 2D…", "loading");
   currentMode = "2d";
+  stopPeriodicSync();
   mapWrap.classList.remove("arcgis-globe-active", "mapbox-globe-active");
   mapWrap.classList.add("visible-engine-ready", "leaflet-fallback-visible");
   arcgisHost.setAttribute("aria-hidden", "true");
@@ -573,6 +588,24 @@ function destroyMapboxView(): void {
   mapboxMap?.remove?.();
   mapboxMap = null;
   mapboxHost?.classList.remove("ready");
+}
+
+function cleanupDualEngines(): void {
+  stopPeriodicSync();
+  if (syncTimer !== null) window.clearTimeout(syncTimer);
+  syncTimer = null;
+  window.cancelAnimationFrame(leafletLayoutFrame);
+  leafletLayoutObserver?.disconnect();
+  leafletLayoutObserver = null;
+  destroyMapboxView();
+  toggleControl?.remove();
+  arcgisHost?.remove();
+  mapboxHost?.remove();
+  canonicalMap = null;
+  toggleControl = null;
+  arcgisHost = null;
+  mapboxHost = null;
+  mapWrap = null;
 }
 
 window.__NETWORK_MAP_GLOBE__ = {

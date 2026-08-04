@@ -20,18 +20,58 @@ type Star = {
 declare global {
   interface Window {
     __NETWORK_MAP_GLOBE__?: GlobeBridge;
+    webkitAudioContext?: typeof AudioContext;
   }
 }
 
 let transitionRunning = false;
 const transitionAudio = new Audio(TRANSITION_SOUND_DATA_URI);
 transitionAudio.preload = "auto";
-transitionAudio.volume = 0.72;
+transitionAudio.volume = 1;
+transitionAudio.load();
+
+let audioContext: AudioContext | null = null;
+let audioGain: GainNode | null = null;
+let audioGraphConnected = false;
+
+function ensureAudioGraph(): void {
+  if (audioGraphConnected) return;
+  const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextConstructor) return;
+
+  try {
+    audioContext = audioContext || new AudioContextConstructor();
+    const source = audioContext.createMediaElementSource(transitionAudio);
+    audioGain = audioContext.createGain();
+    audioGain.gain.value = 1.35;
+    source.connect(audioGain);
+    audioGain.connect(audioContext.destination);
+    audioGraphConnected = true;
+  } catch (error) {
+    console.warn("Transition audio amplification was unavailable", error);
+    audioContext = null;
+    audioGain = null;
+  }
+}
 
 function playTransitionSound(): void {
   transitionAudio.pause();
   transitionAudio.currentTime = 0;
-  void transitionAudio.play().catch(() => undefined);
+  transitionAudio.muted = false;
+  transitionAudio.volume = 1;
+  ensureAudioGraph();
+
+  const startPlayback = () => {
+    void transitionAudio.play().catch((error) => {
+      console.warn("Transition sound could not start", error);
+    });
+  };
+
+  if (audioContext?.state === "suspended") {
+    void audioContext.resume().then(startPlayback, startPlayback);
+  } else {
+    startPlayback();
+  }
 }
 
 function delay(milliseconds: number): Promise<void> {
@@ -117,10 +157,10 @@ function createStars(count: number): Star[] {
   return Array.from({ length: count }, () => ({
     x: Math.random(),
     y: Math.random(),
-    size: 0.35 + Math.random() * 1.4,
-    alpha: 0.18 + Math.random() * 0.65,
+    size: 0.35 + Math.random() * 1.25,
+    alpha: 0.2 + Math.random() * 0.55,
     phase: Math.random() * Math.PI * 2,
-    depth: 0.35 + Math.random() * 1.35,
+    depth: 0.35 + Math.random() * 1.3,
   }));
 }
 
@@ -140,51 +180,100 @@ function drawSpace(
     0,
     centerX,
     centerY,
-    Math.max(width, height) * 0.82,
+    Math.max(width, height) * 0.86,
   );
-  background.addColorStop(0, "#250044");
-  background.addColorStop(0.34, "#120022");
-  background.addColorStop(0.72, "#05000d");
-  background.addColorStop(1, "#010005");
+  background.addColorStop(0, "#1f0739");
+  background.addColorStop(0.42, "#10031f");
+  background.addColorStop(0.78, "#05000d");
+  background.addColorStop(1, "#010004");
   context.fillStyle = background;
   context.fillRect(0, 0, width, height);
 
   context.save();
-  context.globalCompositeOperation = "screen";
-
   for (const star of stars) {
     const sourceX = star.x * width;
     const sourceY = star.y * height;
     const deltaX = sourceX - centerX;
     const deltaY = sourceY - centerY;
-    const pull = 1 + easeInCubic(progress) * star.depth * 0.88;
-    const x = centerX + deltaX * pull;
-    const y = centerY + deltaY * pull;
-    const trail = progress * progress * star.depth * 16;
     const distance = Math.max(1, Math.hypot(deltaX, deltaY));
     const unitX = deltaX / distance;
     const unitY = deltaY / distance;
-    const twinkle = 0.72 + Math.sin(elapsedSeconds * 3.2 + star.phase) * 0.28;
-    const alpha = star.alpha * twinkle * (1 - progress * 0.62);
+    const pull = 1 + easeInCubic(progress) * star.depth * 0.72;
+    const x = centerX + deltaX * pull;
+    const y = centerY + deltaY * pull;
+    const trail = progress * progress * star.depth * 13;
+    const twinkle = 0.72 + Math.sin(elapsedSeconds * 2.9 + star.phase) * 0.28;
+    const alpha = star.alpha * twinkle * (1 - progress * 0.58);
 
-    context.strokeStyle = `rgba(255,225,255,${alpha})`;
+    context.strokeStyle = `rgba(255,232,255,${alpha})`;
     context.lineWidth = star.size;
     context.beginPath();
     context.moveTo(x - unitX * trail, y - unitY * trail);
     context.lineTo(x, y);
     context.stroke();
   }
-
   context.restore();
 }
 
-function ringColor(position: number, alpha: number): string {
-  if (position < 0.18) return `rgba(176,42,255,${alpha})`;
-  if (position < 0.36) return `rgba(247,54,178,${alpha})`;
-  if (position < 0.58) return `rgba(255,91,41,${alpha})`;
-  if (position < 0.78) return `rgba(255,171,30,${alpha})`;
-  if (position < 0.92) return `rgba(255,232,82,${alpha})`;
-  return `rgba(255,255,232,${alpha})`;
+function diskColor(position: number, alpha: number): string {
+  if (position < 0.2) return `rgba(100,35,190,${alpha})`;
+  if (position < 0.38) return `rgba(206,39,196,${alpha})`;
+  if (position < 0.58) return `rgba(255,74,122,${alpha})`;
+  if (position < 0.77) return `rgba(255,132,48,${alpha})`;
+  if (position < 0.92) return `rgba(255,202,66,${alpha})`;
+  return `rgba(255,244,188,${alpha})`;
+}
+
+function drawDiskBand(
+  context: CanvasRenderingContext2D,
+  radius: number,
+  position: number,
+  opacity: number,
+): void {
+  const scale = lerp(1.22, 0.43, position);
+  const heat = Math.pow(position, 0.82);
+  const lineWidth = radius * lerp(0.018, 0.034, heat);
+  const color = diskColor(position, opacity * lerp(0.48, 0.88, heat));
+
+  context.strokeStyle = color;
+  context.lineWidth = lineWidth;
+  context.shadowBlur = radius * lerp(0.01, 0.027, heat);
+  context.shadowColor = diskColor(position, opacity * 0.62);
+  context.setLineDash([]);
+  context.beginPath();
+  context.arc(0, 0, radius * scale, 0, Math.PI * 2);
+  context.stroke();
+}
+
+function drawMovingHighlights(
+  context: CanvasRenderingContext2D,
+  radius: number,
+  elapsedSeconds: number,
+  opacity: number,
+): void {
+  const highlightRadii = [1.12, 0.98, 0.83, 0.68, 0.56, 0.48];
+
+  highlightRadii.forEach((scale, index) => {
+    const warm = index < 3;
+    context.strokeStyle = warm
+      ? `rgba(255,195,78,${opacity * 0.82})`
+      : `rgba(255,250,218,${opacity * 0.9})`;
+    context.lineWidth = radius * (warm ? 0.012 : 0.009);
+    context.shadowBlur = radius * 0.018;
+    context.shadowColor = warm
+      ? "rgba(255,112,38,0.72)"
+      : "rgba(255,247,196,0.78)";
+    context.setLineDash([
+      radius * lerp(0.24, 0.12, index / 5),
+      radius * lerp(0.11, 0.055, index / 5),
+    ]);
+    context.lineDashOffset = -elapsedSeconds * radius * (0.18 + index * 0.025);
+    context.beginPath();
+    context.arc(0, 0, radius * scale, 0, Math.PI * 2);
+    context.stroke();
+  });
+
+  context.setLineDash([]);
 }
 
 function drawAccretionDisk(
@@ -197,134 +286,88 @@ function drawAccretionDisk(
   elapsedSeconds: number,
 ): void {
   const travel = easeInOutCubic(progress);
-  const finalMorph = smoothstep((progress - 0.66) / 0.34);
-  const baseRadius = Math.min(width * 0.42, height * 0.58);
-  const zoom = lerp(0.98, 1.74, easeInCubic(progress));
-  const radius = baseRadius * zoom;
-  const tilt = lerp(0.34, 0.97, travel);
+  const finalMorph = smoothstep((progress - 0.62) / 0.38);
+  const approach = easeInCubic(progress);
+  const baseRadius = Math.min(width * 0.39, height * 0.56);
+  const radius = baseRadius * lerp(0.96, 2.05, approach);
+  const tilt = lerp(0.39, 0.98, finalMorph);
+  const diskOpacity = lerp(1, 0.82, finalMorph);
   const diskCenterY = lerp(centerY + height * 0.035, centerY, finalMorph);
-  const rotation = elapsedSeconds * 0.24;
+  const diskRotation = lerp(-0.14, -0.02, finalMorph);
 
   context.save();
   context.translate(centerX, diskCenterY);
-  context.rotate(-0.12 + rotation * 0.08);
-  context.globalCompositeOperation = "lighter";
+  context.rotate(diskRotation);
+  context.scale(1, tilt);
 
-  const aura = context.createRadialGradient(0, 0, radius * 0.18, 0, 0, radius * 1.46);
-  aura.addColorStop(0, "rgba(255,246,182,0.18)");
-  aura.addColorStop(0.3, "rgba(255,128,26,0.13)");
-  aura.addColorStop(0.55, "rgba(237,41,154,0.11)");
-  aura.addColorStop(0.76, "rgba(114,30,213,0.09)");
+  const aura = context.createRadialGradient(0, 0, radius * 0.12, 0, 0, radius * 1.5);
+  aura.addColorStop(0, "rgba(255,236,153,0.14)");
+  aura.addColorStop(0.34, "rgba(255,119,38,0.12)");
+  aura.addColorStop(0.58, "rgba(232,37,173,0.09)");
+  aura.addColorStop(0.82, "rgba(92,32,172,0.07)");
   aura.addColorStop(1, "rgba(0,0,0,0)");
   context.fillStyle = aura;
   context.beginPath();
-  context.ellipse(0, 0, radius * 1.42, radius * tilt * 1.42, 0, 0, Math.PI * 2);
+  context.arc(0, 0, radius * 1.48, 0, Math.PI * 2);
   context.fill();
 
-  const bandCount = 26;
+  const bandCount = 28;
   for (let index = 0; index < bandCount; index += 1) {
-    const normalized = index / (bandCount - 1);
-    const scale = lerp(1.22, 0.39, normalized);
-    const heat = Math.pow(normalized, 0.78);
-    const alpha = lerp(0.38, 0.94, heat) * lerp(0.92, 0.74, finalMorph);
-    const lineWidth = radius * lerp(0.018, 0.036, heat);
-    const localRotation = rotation * (0.34 + normalized * 1.35) + index * 0.035;
-
-    context.save();
-    context.rotate(localRotation);
-    context.strokeStyle = ringColor(normalized, alpha);
-    context.lineWidth = lineWidth;
-    context.shadowBlur = radius * lerp(0.018, 0.045, heat);
-    context.shadowColor = ringColor(normalized, 0.88);
-    context.beginPath();
-    context.ellipse(0, 0, radius * scale, radius * scale * tilt, 0, 0, Math.PI * 2);
-    context.stroke();
-    context.restore();
+    drawDiskBand(context, radius, index / (bandCount - 1), diskOpacity);
   }
 
-  const highlightScales = [1.1, 0.93, 0.76, 0.59, 0.48];
-  highlightScales.forEach((scale, index) => {
-    context.save();
-    context.rotate(-rotation * (0.7 + index * 0.18) - index * 0.44);
-    context.strokeStyle = index < 2
-      ? "rgba(255,194,61,0.88)"
-      : "rgba(255,255,238,0.94)";
-    context.lineWidth = radius * (index < 2 ? 0.014 : 0.011);
-    context.shadowBlur = radius * 0.035;
-    context.shadowColor = index < 2
-      ? "rgba(255,107,29,0.95)"
-      : "rgba(255,249,191,0.95)";
-    context.setLineDash([
-      radius * lerp(0.34, 0.16, index / 4),
-      radius * lerp(0.11, 0.055, index / 4),
-    ]);
-    context.lineDashOffset = -elapsedSeconds * radius * (0.13 + index * 0.035);
-    context.beginPath();
-    context.ellipse(0, 0, radius * scale, radius * scale * tilt, 0, 0, Math.PI * 2);
-    context.stroke();
-    context.restore();
-  });
+  drawMovingHighlights(context, radius, elapsedSeconds, diskOpacity);
+
+  context.strokeStyle = `rgba(255,252,225,${lerp(0.66, 0.86, travel)})`;
+  context.lineWidth = radius * 0.022;
+  context.shadowBlur = radius * 0.03;
+  context.shadowColor = "rgba(255,212,98,0.72)";
+  context.beginPath();
+  context.arc(0, 0, radius * 0.51, Math.PI * 1.08, Math.PI * 1.92);
+  context.stroke();
 
   context.restore();
 
-  const horizonRadius = radius * lerp(0.095, 0.38, smoothstep((progress - 0.12) / 0.88));
-  const horizonYRadius = horizonRadius * lerp(tilt, 1, finalMorph);
+  const horizonRadius = radius * lerp(0.105, 0.36, smoothstep((progress - 0.08) / 0.92));
+  const horizonAspect = lerp(tilt, 1, finalMorph);
 
   context.save();
   context.translate(centerX, diskCenterY);
+  context.rotate(diskRotation);
+  context.scale(1, horizonAspect);
 
-  const lensGlow = context.createRadialGradient(
+  const halo = context.createRadialGradient(
     0,
     0,
-    horizonRadius * 0.72,
+    horizonRadius * 0.86,
     0,
     0,
-    horizonRadius * 1.75,
+    horizonRadius * 1.62,
   );
-  lensGlow.addColorStop(0, "rgba(0,0,0,0)");
-  lensGlow.addColorStop(0.46, "rgba(0,0,0,0)");
-  lensGlow.addColorStop(0.62, `rgba(255,255,225,${0.5 + finalMorph * 0.4})`);
-  lensGlow.addColorStop(0.72, `rgba(255,218,58,${0.46 + finalMorph * 0.34})`);
-  lensGlow.addColorStop(0.84, `rgba(255,91,34,${0.25 + finalMorph * 0.35})`);
-  lensGlow.addColorStop(0.94, `rgba(223,35,180,${0.12 + finalMorph * 0.26})`);
-  lensGlow.addColorStop(1, "rgba(0,0,0,0)");
-  context.fillStyle = lensGlow;
+  halo.addColorStop(0, "rgba(0,0,0,0)");
+  halo.addColorStop(0.54, "rgba(0,0,0,0)");
+  halo.addColorStop(0.68, `rgba(255,246,198,${0.52 + finalMorph * 0.22})`);
+  halo.addColorStop(0.78, `rgba(255,190,67,${0.42 + finalMorph * 0.2})`);
+  halo.addColorStop(0.9, `rgba(237,52,174,${0.18 + finalMorph * 0.18})`);
+  halo.addColorStop(1, "rgba(0,0,0,0)");
+  context.fillStyle = halo;
   context.beginPath();
-  context.ellipse(0, 0, horizonRadius * 1.86, horizonYRadius * 1.86, 0, 0, Math.PI * 2);
+  context.arc(0, 0, horizonRadius * 1.65, 0, Math.PI * 2);
   context.fill();
 
-  const finalRingAlpha = lerp(0.24, 1, finalMorph);
-  const finalRingWidths = [0.19, 0.125, 0.065];
-  const finalRingColors = [
-    `rgba(228,34,186,${0.34 * finalRingAlpha})`,
-    `rgba(255,112,24,${0.68 * finalRingAlpha})`,
-    `rgba(255,246,184,${0.96 * finalRingAlpha})`,
-  ];
+  context.strokeStyle = `rgba(255,232,121,${0.62 + finalMorph * 0.3})`;
+  context.lineWidth = horizonRadius * lerp(0.1, 0.14, finalMorph);
+  context.shadowBlur = horizonRadius * 0.18;
+  context.shadowColor = "rgba(255,154,48,0.66)";
+  context.beginPath();
+  context.arc(0, 0, horizonRadius * 1.18, 0, Math.PI * 2);
+  context.stroke();
 
-  finalRingWidths.forEach((widthFactor, index) => {
-    context.strokeStyle = finalRingColors[index];
-    context.lineWidth = horizonRadius * widthFactor;
-    context.shadowBlur = horizonRadius * (0.18 - index * 0.035);
-    context.shadowColor = finalRingColors[index];
-    context.beginPath();
-    context.ellipse(
-      0,
-      0,
-      horizonRadius * (1.22 + index * 0.045),
-      horizonYRadius * (1.22 + index * 0.045),
-      0,
-      0,
-      Math.PI * 2,
-    );
-    context.stroke();
-  });
-
-  context.globalCompositeOperation = "source-over";
   context.fillStyle = "#000000";
-  context.shadowBlur = horizonRadius * 0.1;
+  context.shadowBlur = horizonRadius * 0.08;
   context.shadowColor = "rgba(0,0,0,1)";
   context.beginPath();
-  context.ellipse(0, 0, horizonRadius, horizonYRadius, 0, 0, Math.PI * 2);
+  context.arc(0, 0, horizonRadius, 0, Math.PI * 2);
   context.fill();
 
   context.restore();
@@ -341,10 +384,10 @@ function beginBlackHole(targetMode: MapMode): {
   const title = overlay.querySelector<HTMLElement>(".dual-engine-vortex-copy strong");
   const detail = overlay.querySelector<HTMLElement>(".dual-engine-vortex-copy small");
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const duration = reducedMotion ? 480 : 2200;
-  const stars = createStars(reducedMotion ? 24 : 118);
+  const duration = reducedMotion ? 520 : 2380;
+  const stars = createStars(reducedMotion ? 24 : 105);
 
-  if (title) title.textContent = targetMode === "3d" ? "Entering the black hole" : "Crossing back through the black hole";
+  if (title) title.textContent = targetMode === "3d" ? "Entering the black hole" : "Crossing through the black hole";
   if (detail) detail.textContent = targetMode === "3d"
     ? "Falling through the luminous accretion disk…"
     : "Falling through to the flat Mapbox view…";
@@ -413,9 +456,9 @@ function beginBlackHole(targetMode: MapMode): {
 
   const complete = async () => {
     await finalFrame;
-    await delay(reducedMotion ? 40 : 150);
+    await delay(reducedMotion ? 40 : 130);
     overlay.classList.add("revealing");
-    await delay(reducedMotion ? 80 : 340);
+    await delay(reducedMotion ? 80 : 320);
     stop();
   };
 
@@ -456,8 +499,8 @@ async function switchMode(targetMode: MapMode, control: HTMLElement): Promise<vo
     button.disabled = true;
   });
 
-  const blackHole = beginBlackHole(targetMode);
   playTransitionSound();
+  const blackHole = beginBlackHole(targetMode);
   setControlStatus(
     control,
     targetMode === "3d" ? "Opening Mapbox globe…" : "Returning to Mapbox 2D…",
@@ -465,7 +508,7 @@ async function switchMode(targetMode: MapMode, control: HTMLElement): Promise<vo
   );
 
   try {
-    await delay(360);
+    await delay(320);
     await api.setMode(targetMode);
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline && !engineReady(targetMode, control)) await delay(80);

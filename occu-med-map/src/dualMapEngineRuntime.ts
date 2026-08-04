@@ -32,6 +32,8 @@ let mapboxMap: any = null;
 let syncTimer: number | null = null;
 let periodicTimer: number | null = null;
 let lastEngineDrivenLeafletMove = 0;
+let leafletLayoutObserver: ResizeObserver | null = null;
+let leafletLayoutFrame = 0;
 
 const originalMapFactory = L.map.bind(L);
 (L as any).map = (element: string | HTMLElement, options?: L.MapOptions) => {
@@ -118,6 +120,21 @@ function invalidateLeafletLayout(map: L.Map): void {
   window.requestAnimationFrame(refresh);
   window.setTimeout(refresh, 120);
   window.setTimeout(refresh, 500);
+
+  // The application shell changes from its intrinsic startup width to the
+  // final CSS grid width after Leaflet's first layout pass. Track the actual
+  // map shell instead of guessing that transition with timers; otherwise the
+  // initial tile grid can remain sized to a narrow pre-grid column.
+  leafletLayoutObserver?.disconnect();
+  if (mapWrap && typeof ResizeObserver !== "undefined") {
+    leafletLayoutObserver = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect;
+      if (!box || box.width <= 0 || box.height <= 0) return;
+      window.cancelAnimationFrame(leafletLayoutFrame);
+      leafletLayoutFrame = window.requestAnimationFrame(refresh);
+    });
+    leafletLayoutObserver.observe(mapWrap);
+  }
 }
 
 function loadingMarkup(title: string, detail: string): string {

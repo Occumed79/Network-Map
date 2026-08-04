@@ -1,3 +1,5 @@
+import { runWithoutObserverFeedback } from "./settledMutationObserver";
+
 function removeCompletedLoadingPanels(): void {
   document.querySelectorAll<HTMLElement>(".arcgis-map-host, .mapbox-globe-host").forEach((host) => {
     const status = host
@@ -18,16 +20,16 @@ function removeCompletedLoadingPanels(): void {
 function initialize(): void {
   removeCompletedLoadingPanels();
 
-  const observer = new MutationObserver(removeCompletedLoadingPanels);
-  observer.observe(document.documentElement, {
+  const options: MutationObserverInit = {
     childList: true,
     subtree: true,
     attributes: true,
     attributeFilter: ["class", "data-state"],
-    characterData: true,
+  };
+  const observer = new MutationObserver(() => {
+    runWithoutObserverFeedback(observer, document.documentElement, options, removeCompletedLoadingPanels);
   });
-
-  window.setInterval(removeCompletedLoadingPanels, 500);
+  observer.observe(document.documentElement, options);
 }
 
 if (document.readyState === "loading") {

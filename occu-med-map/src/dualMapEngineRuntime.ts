@@ -19,6 +19,7 @@ const MAPBOX_VERSION = "3.25.0";
 const ARCGIS_KEY = import.meta.env.VITE_ARCGIS_API_KEY || "";
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || import.meta.env.VITE_MAPBOX_ACCESS_TOKEN || "";
 const MAX_MIRRORED_FEATURES = 12_000;
+const ARCGIS_LOAD_TIMEOUT_MS = 12_000;
 
 let canonicalMap: L.Map | null = null;
 let currentMode: MapMode = "2d";
@@ -102,6 +103,7 @@ async function initializeDualEngines(map: L.Map): Promise<void> {
 
   try {
     await ensureArcgis2d();
+    markArcgisReady();
     mapWrap.classList.add("visible-engine-ready");
     syncAllOverlays();
     setStatus("ArcGIS 2D active");
@@ -121,6 +123,7 @@ function showArcgisError(error: unknown): void {
     arcgisHost.innerHTML = loadingMarkup("Starting ArcGIS 2D map", "Loading the ArcGIS topographic basemap…");
     setStatus("Retrying ArcGIS 2D…", "loading");
     void ensureArcgis2d().then(() => {
+      markArcgisReady();
       mapWrap?.classList.add("visible-engine-ready");
       syncAllOverlays();
       setStatus("ArcGIS 2D active");
@@ -130,6 +133,14 @@ function showArcgisError(error: unknown): void {
       setStatus(`ArcGIS 2D unavailable · ${errorMessage(nextError)}`, "error");
     });
   }, { once: true });
+}
+
+function markArcgisReady(): void {
+  if (!arcgisHost) return;
+  arcgisHost.classList.add("ready", "engine-render-ready");
+  // Do not rely on a later optional runtime or the CSS cascade to hide this.
+  // Once MapView.when() resolves, the loading panel has completed its job.
+  arcgisHost.querySelectorAll<HTMLElement>(".dual-engine-loading").forEach((node) => node.remove());
 }
 
 function escapeHtml(value: string): string {
@@ -199,6 +210,7 @@ async function setMode(nextMode: MapMode): Promise<void> {
   setStatus("Loading ArcGIS 2D…", "loading");
   stopPeriodicSync();
   await ensureArcgis2d();
+  markArcgisReady();
   currentMode = "2d";
   mapWrap.classList.remove("arcgis-globe-active", "mapbox-globe-active");
   arcgisHost.setAttribute("aria-hidden", "false");
@@ -216,17 +228,17 @@ async function ensureArcgis2d(): Promise<void> {
 
   arcgisViewPromise = (async () => {
     if (!ARCGIS_KEY) throw new Error("VITE_ARCGIS_API_KEY is not configured");
-    await loadArcgisSdk();
+    await withTimeout(loadArcgisSdk(), ARCGIS_LOAD_TIMEOUT_MS, "ArcGIS SDK");
     if (!window.$arcgis || !arcgisHost || !canonicalMap) throw new Error("ArcGIS SDK did not initialize");
 
-    const [esriConfig, ArcGISMap, MapView, GraphicsLayer, Graphic, reactiveUtils] = await window.$arcgis.import([
+    const [esriConfig, ArcGISMap, MapView, GraphicsLayer, Graphic, reactiveUtils] = await withTimeout(window.$arcgis.import([
       "@arcgis/core/config.js",
       "@arcgis/core/Map.js",
       "@arcgis/core/views/MapView.js",
       "@arcgis/core/layers/GraphicsLayer.js",
       "@arcgis/core/Graphic.js",
       "@arcgis/core/core/reactiveUtils.js",
-    ]);
+    ]), ARCGIS_LOAD_TIMEOUT_MS, "ArcGIS modules");
 
     esriConfig.apiKey = ARCGIS_KEY;
     ArcgisGraphic = Graphic;
@@ -249,7 +261,7 @@ async function ensureArcgis2d(): Promise<void> {
       popup: { dockEnabled: false },
     });
 
-    await arcgisView.when();
+    await withTimeout(Promise.resolve(arcgisView.when()), ARCGIS_LOAD_TIMEOUT_MS, "ArcGIS map view");
     arcgisView.ui.components = ["zoom", "attribution"];
     arcgisHost.classList.add("ready");
 
@@ -870,6 +882,22 @@ function destroyMapboxView(): void {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "unknown error";
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = window.setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timeout);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
 }
 
 function cleanupDualEngines(): void {

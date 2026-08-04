@@ -146,7 +146,7 @@ function ensureOverlay(): HTMLElement {
     <canvas class="dual-engine-vortex-canvas" aria-hidden="true"></canvas>
     <div class="dual-engine-vortex-copy" role="status" aria-live="polite">
       <strong>Entering the black hole</strong>
-      <small>Falling through the luminous accretion disk…</small>
+      <small>Falling toward the event horizon…</small>
     </div>
   `;
   document.body.appendChild(overlay);
@@ -180,16 +180,18 @@ function drawSpace(
     0,
     centerX,
     centerY,
-    Math.max(width, height) * 0.86,
+    Math.max(width, height) * 0.9,
   );
-  background.addColorStop(0, "#1f0739");
-  background.addColorStop(0.42, "#10031f");
-  background.addColorStop(0.78, "#05000d");
+  background.addColorStop(0, "#21083d");
+  background.addColorStop(0.4, "#10031f");
+  background.addColorStop(0.76, "#05000d");
   background.addColorStop(1, "#010004");
   context.fillStyle = background;
   context.fillRect(0, 0, width, height);
 
+  const plunge = easeInCubic(progress);
   context.save();
+  context.globalCompositeOperation = "screen";
   for (const star of stars) {
     const sourceX = star.x * width;
     const sourceY = star.y * height;
@@ -198,15 +200,15 @@ function drawSpace(
     const distance = Math.max(1, Math.hypot(deltaX, deltaY));
     const unitX = deltaX / distance;
     const unitY = deltaY / distance;
-    const pull = 1 + easeInCubic(progress) * star.depth * 0.72;
-    const x = centerX + deltaX * pull;
-    const y = centerY + deltaY * pull;
-    const trail = progress * progress * star.depth * 13;
-    const twinkle = 0.72 + Math.sin(elapsedSeconds * 2.9 + star.phase) * 0.28;
-    const alpha = star.alpha * twinkle * (1 - progress * 0.58);
+    const expansion = 1 + plunge * star.depth * 1.8;
+    const x = centerX + deltaX * expansion;
+    const y = centerY + deltaY * expansion;
+    const trail = plunge * plunge * star.depth * Math.max(width, height) * 0.075;
+    const twinkle = 0.7 + Math.sin(elapsedSeconds * 3.2 + star.phase) * 0.3;
+    const alpha = star.alpha * twinkle * (1 - progress * 0.72);
 
-    context.strokeStyle = `rgba(255,232,255,${alpha})`;
-    context.lineWidth = star.size;
+    context.strokeStyle = `rgba(255,231,255,${alpha})`;
+    context.lineWidth = star.size * lerp(1, 1.8, plunge);
     context.beginPath();
     context.moveTo(x - unitX * trail, y - unitY * trail);
     context.lineTo(x, y);
@@ -224,56 +226,94 @@ function diskColor(position: number, alpha: number): string {
   return `rgba(255,244,188,${alpha})`;
 }
 
-function drawDiskBand(
+function drawFlowingBand(
   context: CanvasRenderingContext2D,
   radius: number,
-  position: number,
+  phase: number,
   opacity: number,
 ): void {
-  const scale = lerp(1.22, 0.43, position);
-  const heat = Math.pow(position, 0.82);
-  const lineWidth = radius * lerp(0.018, 0.034, heat);
-  const color = diskColor(position, opacity * lerp(0.48, 0.88, heat));
+  const depth = Math.pow(phase, 1.72);
+  const scale = lerp(0.14, 3.15, depth);
+  const fade = Math.pow(Math.sin(Math.PI * phase), 0.58);
+  const heat = 1 - phase;
+  const alpha = opacity * fade * lerp(0.42, 0.95, heat);
 
-  context.strokeStyle = color;
-  context.lineWidth = lineWidth;
-  context.shadowBlur = radius * lerp(0.01, 0.027, heat);
-  context.shadowColor = diskColor(position, opacity * 0.62);
+  context.strokeStyle = diskColor(heat, alpha);
+  context.lineWidth = radius * lerp(0.008, 0.034, depth);
+  context.shadowBlur = radius * lerp(0.012, 0.04, heat);
+  context.shadowColor = diskColor(heat, alpha * 0.72);
   context.setLineDash([]);
   context.beginPath();
   context.arc(0, 0, radius * scale, 0, Math.PI * 2);
   context.stroke();
 }
 
-function drawMovingHighlights(
+function drawFlowingHighlights(
   context: CanvasRenderingContext2D,
   radius: number,
+  progress: number,
   elapsedSeconds: number,
   opacity: number,
 ): void {
-  const highlightRadii = [1.12, 0.98, 0.83, 0.68, 0.56, 0.48];
+  for (let index = 0; index < 9; index += 1) {
+    const phase = (index / 9 + progress * 1.9) % 1;
+    const depth = Math.pow(phase, 1.65);
+    const scale = lerp(0.18, 3.05, depth);
+    const fade = Math.pow(Math.sin(Math.PI * phase), 0.8);
+    const warm = index % 3 !== 2;
 
-  highlightRadii.forEach((scale, index) => {
-    const warm = index < 3;
     context.strokeStyle = warm
-      ? `rgba(255,195,78,${opacity * 0.82})`
-      : `rgba(255,250,218,${opacity * 0.9})`;
-    context.lineWidth = radius * (warm ? 0.012 : 0.009);
-    context.shadowBlur = radius * 0.018;
+      ? `rgba(255,198,78,${opacity * fade * 0.82})`
+      : `rgba(255,252,222,${opacity * fade * 0.92})`;
+    context.lineWidth = radius * lerp(0.008, 0.022, depth);
+    context.shadowBlur = radius * 0.025;
     context.shadowColor = warm
-      ? "rgba(255,112,38,0.72)"
-      : "rgba(255,247,196,0.78)";
+      ? "rgba(255,104,32,0.7)"
+      : "rgba(255,244,188,0.8)";
     context.setLineDash([
-      radius * lerp(0.24, 0.12, index / 5),
-      radius * lerp(0.11, 0.055, index / 5),
+      radius * lerp(0.1, 0.42, depth),
+      radius * lerp(0.055, 0.16, depth),
     ]);
-    context.lineDashOffset = -elapsedSeconds * radius * (0.18 + index * 0.025);
+    context.lineDashOffset = -elapsedSeconds * radius * (0.22 + index * 0.018);
     context.beginPath();
     context.arc(0, 0, radius * scale, 0, Math.PI * 2);
     context.stroke();
-  });
-
+  }
   context.setLineDash([]);
+}
+
+function drawNearLightStreaks(
+  context: CanvasRenderingContext2D,
+  radius: number,
+  horizonRadius: number,
+  progress: number,
+  elapsedSeconds: number,
+): void {
+  const intensity = smoothstep((progress - 0.38) / 0.62);
+  if (intensity <= 0) return;
+
+  context.save();
+  context.globalCompositeOperation = "screen";
+  for (let index = 0; index < 18; index += 1) {
+    const angle = index * 2.3999632297 + elapsedSeconds * (0.12 + (index % 4) * 0.014);
+    const start = horizonRadius * lerp(1.35, 1.05, intensity);
+    const length = radius * lerp(0.18, 1.15, intensity) * (0.65 + (index % 5) * 0.08);
+    const x1 = Math.cos(angle) * start;
+    const y1 = Math.sin(angle) * start;
+    const x2 = Math.cos(angle) * (start + length);
+    const y2 = Math.sin(angle) * (start + length);
+    const gradient = context.createLinearGradient(x1, y1, x2, y2);
+    gradient.addColorStop(0, `rgba(255,248,214,${0.7 * intensity})`);
+    gradient.addColorStop(0.35, `rgba(255,151,58,${0.48 * intensity})`);
+    gradient.addColorStop(1, "rgba(220,46,208,0)");
+    context.strokeStyle = gradient;
+    context.lineWidth = radius * (0.004 + (index % 3) * 0.0015);
+    context.beginPath();
+    context.moveTo(x1, y1);
+    context.lineTo(x2, y2);
+    context.stroke();
+  }
+  context.restore();
 }
 
 function drawAccretionDisk(
@@ -285,82 +325,81 @@ function drawAccretionDisk(
   progress: number,
   elapsedSeconds: number,
 ): void {
-  const travel = easeInOutCubic(progress);
-  const finalMorph = smoothstep((progress - 0.62) / 0.38);
-  const approach = easeInCubic(progress);
-  const baseRadius = Math.min(width * 0.39, height * 0.56);
-  const radius = baseRadius * lerp(0.96, 2.05, approach);
-  const tilt = lerp(0.39, 0.98, finalMorph);
-  const diskOpacity = lerp(1, 0.82, finalMorph);
-  const diskCenterY = lerp(centerY + height * 0.035, centerY, finalMorph);
-  const diskRotation = lerp(-0.14, -0.02, finalMorph);
+  const plunge = easeInCubic(progress);
+  const lateAlignment = smoothstep((progress - 0.82) / 0.18);
+  const baseRadius = Math.min(width * 0.42, height * 0.58);
+  const radius = baseRadius * lerp(0.98, 1.08, smoothstep(progress));
+  const earlyTilt = lerp(0.34, 0.43, smoothstep(progress / 0.72));
+  const tilt = lerp(earlyTilt, 0.78, lateAlignment);
+  const diskRotation = lerp(-0.13, -0.055, smoothstep(progress));
+  const driftX = Math.sin(progress * Math.PI * 2.2) * width * 0.006 * (1 - lateAlignment);
+  const driftY = lerp(height * 0.055, 0, smoothstep(progress));
+  const diskCenterX = centerX + driftX;
+  const diskCenterY = centerY + driftY;
+  const diskOpacity = lerp(1, 0.86, lateAlignment);
 
   context.save();
-  context.translate(centerX, diskCenterY);
+  context.translate(diskCenterX, diskCenterY);
   context.rotate(diskRotation);
   context.scale(1, tilt);
 
-  const aura = context.createRadialGradient(0, 0, radius * 0.12, 0, 0, radius * 1.5);
-  aura.addColorStop(0, "rgba(255,236,153,0.14)");
-  aura.addColorStop(0.34, "rgba(255,119,38,0.12)");
-  aura.addColorStop(0.58, "rgba(232,37,173,0.09)");
-  aura.addColorStop(0.82, "rgba(92,32,172,0.07)");
+  const aura = context.createRadialGradient(0, 0, radius * 0.06, 0, 0, radius * 1.75);
+  aura.addColorStop(0, "rgba(255,239,163,0.13)");
+  aura.addColorStop(0.28, "rgba(255,121,40,0.12)");
+  aura.addColorStop(0.56, "rgba(229,39,181,0.1)");
+  aura.addColorStop(0.82, "rgba(87,31,170,0.08)");
   aura.addColorStop(1, "rgba(0,0,0,0)");
   context.fillStyle = aura;
   context.beginPath();
-  context.arc(0, 0, radius * 1.48, 0, Math.PI * 2);
+  context.arc(0, 0, radius * 1.72, 0, Math.PI * 2);
   context.fill();
 
-  const bandCount = 28;
+  const bandCount = 36;
   for (let index = 0; index < bandCount; index += 1) {
-    drawDiskBand(context, radius, index / (bandCount - 1), diskOpacity);
+    const phase = (index / bandCount + plunge * 1.52) % 1;
+    drawFlowingBand(context, radius, phase, diskOpacity);
   }
 
-  drawMovingHighlights(context, radius, elapsedSeconds, diskOpacity);
-
-  context.strokeStyle = `rgba(255,252,225,${lerp(0.66, 0.86, travel)})`;
-  context.lineWidth = radius * 0.022;
-  context.shadowBlur = radius * 0.03;
-  context.shadowColor = "rgba(255,212,98,0.72)";
-  context.beginPath();
-  context.arc(0, 0, radius * 0.51, Math.PI * 1.08, Math.PI * 1.92);
-  context.stroke();
+  drawFlowingHighlights(context, radius, progress, elapsedSeconds, diskOpacity);
 
   context.restore();
 
-  const horizonRadius = radius * lerp(0.105, 0.36, smoothstep((progress - 0.08) / 0.92));
-  const horizonAspect = lerp(tilt, 1, finalMorph);
+  const horizonProgress = easeInOutCubic(progress);
+  const horizonRadius = Math.min(width, height) * lerp(0.07, 0.36, horizonProgress);
+  const horizonAspect = lerp(0.5, 0.82, lateAlignment);
 
   context.save();
-  context.translate(centerX, diskCenterY);
+  context.translate(diskCenterX, diskCenterY);
   context.rotate(diskRotation);
   context.scale(1, horizonAspect);
 
   const halo = context.createRadialGradient(
     0,
     0,
-    horizonRadius * 0.86,
+    horizonRadius * 0.84,
     0,
     0,
-    horizonRadius * 1.62,
+    horizonRadius * 1.74,
   );
   halo.addColorStop(0, "rgba(0,0,0,0)");
-  halo.addColorStop(0.54, "rgba(0,0,0,0)");
-  halo.addColorStop(0.68, `rgba(255,246,198,${0.52 + finalMorph * 0.22})`);
-  halo.addColorStop(0.78, `rgba(255,190,67,${0.42 + finalMorph * 0.2})`);
-  halo.addColorStop(0.9, `rgba(237,52,174,${0.18 + finalMorph * 0.18})`);
+  halo.addColorStop(0.5, "rgba(0,0,0,0)");
+  halo.addColorStop(0.63, `rgba(255,249,216,${0.48 + progress * 0.2})`);
+  halo.addColorStop(0.73, `rgba(255,183,61,${0.42 + progress * 0.18})`);
+  halo.addColorStop(0.88, `rgba(230,45,184,${0.2 + progress * 0.12})`);
   halo.addColorStop(1, "rgba(0,0,0,0)");
   context.fillStyle = halo;
   context.beginPath();
-  context.arc(0, 0, horizonRadius * 1.65, 0, Math.PI * 2);
+  context.arc(0, 0, horizonRadius * 1.76, 0, Math.PI * 2);
   context.fill();
 
-  context.strokeStyle = `rgba(255,232,121,${0.62 + finalMorph * 0.3})`;
-  context.lineWidth = horizonRadius * lerp(0.1, 0.14, finalMorph);
-  context.shadowBlur = horizonRadius * 0.18;
-  context.shadowColor = "rgba(255,154,48,0.66)";
+  drawNearLightStreaks(context, radius, horizonRadius, progress, elapsedSeconds);
+
+  context.strokeStyle = `rgba(255,236,137,${0.64 + progress * 0.24})`;
+  context.lineWidth = horizonRadius * lerp(0.075, 0.11, progress);
+  context.shadowBlur = horizonRadius * 0.16;
+  context.shadowColor = "rgba(255,141,42,0.68)";
   context.beginPath();
-  context.arc(0, 0, horizonRadius * 1.18, 0, Math.PI * 2);
+  context.arc(0, 0, horizonRadius * 1.15, 0, Math.PI * 2);
   context.stroke();
 
   context.fillStyle = "#000000";
@@ -384,13 +423,13 @@ function beginBlackHole(targetMode: MapMode): {
   const title = overlay.querySelector<HTMLElement>(".dual-engine-vortex-copy strong");
   const detail = overlay.querySelector<HTMLElement>(".dual-engine-vortex-copy small");
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const duration = reducedMotion ? 520 : 2380;
-  const stars = createStars(reducedMotion ? 24 : 105);
+  const duration = reducedMotion ? 560 : 2720;
+  const stars = createStars(reducedMotion ? 24 : 115);
 
-  if (title) title.textContent = targetMode === "3d" ? "Entering the black hole" : "Crossing through the black hole";
+  if (title) title.textContent = "Entering the black hole";
   if (detail) detail.textContent = targetMode === "3d"
-    ? "Falling through the luminous accretion disk…"
-    : "Falling through to the flat Mapbox view…";
+    ? "Falling toward the Mapbox globe…"
+    : "Falling through to the Mapbox 2D view…";
 
   overlay.className = `dual-engine-vortex active ${targetMode === "3d" ? "entering" : "exiting"}`;
   overlay.setAttribute("aria-hidden", "false");
@@ -456,9 +495,9 @@ function beginBlackHole(targetMode: MapMode): {
 
   const complete = async () => {
     await finalFrame;
-    await delay(reducedMotion ? 40 : 130);
+    await delay(reducedMotion ? 40 : 110);
     overlay.classList.add("revealing");
-    await delay(reducedMotion ? 80 : 320);
+    await delay(reducedMotion ? 80 : 280);
     stop();
   };
 

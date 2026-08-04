@@ -8,7 +8,7 @@
   position: absolute !important;
   inset: 0;
   z-index: 0;
-  opacity: 0;
+  opacity: 1;
   pointer-events: none;
 }
 
@@ -33,6 +33,7 @@
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
+  background: transparent;
 }
 
 .arcgis-map-host .esri-view-root,

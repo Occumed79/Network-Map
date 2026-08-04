@@ -236,12 +236,12 @@ function drawFlowingBand(
   const scale = lerp(0.14, 3.15, depth);
   const fade = Math.pow(Math.sin(Math.PI * phase), 0.58);
   const heat = 1 - phase;
-  const alpha = opacity * fade * lerp(0.42, 0.95, heat);
+  const alpha = opacity * fade * lerp(0.54, 1, heat);
 
   context.strokeStyle = diskColor(heat, alpha);
-  context.lineWidth = radius * lerp(0.008, 0.034, depth);
-  context.shadowBlur = radius * lerp(0.012, 0.04, heat);
-  context.shadowColor = diskColor(heat, alpha * 0.72);
+  context.lineWidth = radius * lerp(0.009, 0.036, depth);
+  context.shadowBlur = radius * lerp(0.018, 0.055, heat);
+  context.shadowColor = diskColor(heat, alpha * 0.92);
   context.setLineDash([]);
   context.beginPath();
   context.arc(0, 0, radius * scale, 0, Math.PI * 2);
@@ -263,13 +263,13 @@ function drawFlowingHighlights(
     const warm = index % 3 !== 2;
 
     context.strokeStyle = warm
-      ? `rgba(255,198,78,${opacity * fade * 0.82})`
-      : `rgba(255,252,222,${opacity * fade * 0.92})`;
-    context.lineWidth = radius * lerp(0.008, 0.022, depth);
-    context.shadowBlur = radius * 0.025;
+      ? `rgba(255,210,92,${opacity * fade * 0.95})`
+      : `rgba(255,254,232,${opacity * fade})`;
+    context.lineWidth = radius * lerp(0.01, 0.025, depth);
+    context.shadowBlur = radius * 0.038;
     context.shadowColor = warm
-      ? "rgba(255,104,32,0.7)"
-      : "rgba(255,244,188,0.8)";
+      ? "rgba(255,118,34,0.92)"
+      : "rgba(255,248,210,0.98)";
     context.setLineDash([
       radius * lerp(0.1, 0.42, depth),
       radius * lerp(0.055, 0.16, depth),
@@ -303,11 +303,12 @@ function drawNearLightStreaks(
     const x2 = Math.cos(angle) * (start + length);
     const y2 = Math.sin(angle) * (start + length);
     const gradient = context.createLinearGradient(x1, y1, x2, y2);
-    gradient.addColorStop(0, `rgba(255,248,214,${0.7 * intensity})`);
-    gradient.addColorStop(0.35, `rgba(255,151,58,${0.48 * intensity})`);
+    gradient.addColorStop(0, `rgba(255,250,224,${0.86 * intensity})`);
+    gradient.addColorStop(0.35, `rgba(255,164,68,${0.62 * intensity})`);
+    gradient.addColorStop(0.72, `rgba(255,82,214,${0.26 * intensity})`);
     gradient.addColorStop(1, "rgba(220,46,208,0)");
     context.strokeStyle = gradient;
-    context.lineWidth = radius * (0.004 + (index % 3) * 0.0015);
+    context.lineWidth = radius * (0.0055 + (index % 3) * 0.002);
     context.beginPath();
     context.moveTo(x1, y1);
     context.lineTo(x2, y2);
@@ -344,10 +345,10 @@ function drawAccretionDisk(
   context.scale(1, tilt);
 
   const aura = context.createRadialGradient(0, 0, radius * 0.06, 0, 0, radius * 1.75);
-  aura.addColorStop(0, "rgba(255,239,163,0.13)");
-  aura.addColorStop(0.28, "rgba(255,121,40,0.12)");
-  aura.addColorStop(0.56, "rgba(229,39,181,0.1)");
-  aura.addColorStop(0.82, "rgba(87,31,170,0.08)");
+  aura.addColorStop(0, "rgba(255,239,163,0.18)");
+  aura.addColorStop(0.28, "rgba(255,121,40,0.17)");
+  aura.addColorStop(0.56, "rgba(229,39,181,0.14)");
+  aura.addColorStop(0.82, "rgba(87,31,170,0.11)");
   aura.addColorStop(1, "rgba(0,0,0,0)");
   context.fillStyle = aura;
   context.beginPath();
@@ -383,9 +384,9 @@ function drawAccretionDisk(
   );
   halo.addColorStop(0, "rgba(0,0,0,0)");
   halo.addColorStop(0.5, "rgba(0,0,0,0)");
-  halo.addColorStop(0.63, `rgba(255,249,216,${0.48 + progress * 0.2})`);
-  halo.addColorStop(0.73, `rgba(255,183,61,${0.42 + progress * 0.18})`);
-  halo.addColorStop(0.88, `rgba(230,45,184,${0.2 + progress * 0.12})`);
+  halo.addColorStop(0.63, `rgba(255,250,224,${0.56 + progress * 0.22})`);
+  halo.addColorStop(0.73, `rgba(255,192,72,${0.5 + progress * 0.2})`);
+  halo.addColorStop(0.88, `rgba(236,56,190,${0.27 + progress * 0.14})`);
   halo.addColorStop(1, "rgba(0,0,0,0)");
   context.fillStyle = halo;
   context.beginPath();
@@ -394,10 +395,10 @@ function drawAccretionDisk(
 
   drawNearLightStreaks(context, radius, horizonRadius, progress, elapsedSeconds);
 
-  context.strokeStyle = `rgba(255,236,137,${0.64 + progress * 0.24})`;
-  context.lineWidth = horizonRadius * lerp(0.075, 0.11, progress);
-  context.shadowBlur = horizonRadius * 0.16;
-  context.shadowColor = "rgba(255,141,42,0.68)";
+  context.strokeStyle = `rgba(255,240,152,${0.74 + progress * 0.24})`;
+  context.lineWidth = horizonRadius * lerp(0.082, 0.118, progress);
+  context.shadowBlur = horizonRadius * 0.22;
+  context.shadowColor = "rgba(255,150,48,0.84)";
   context.beginPath();
   context.arc(0, 0, horizonRadius * 1.15, 0, Math.PI * 2);
   context.stroke();
@@ -423,7 +424,7 @@ function beginBlackHole(targetMode: MapMode): {
   const title = overlay.querySelector<HTMLElement>(".dual-engine-vortex-copy strong");
   const detail = overlay.querySelector<HTMLElement>(".dual-engine-vortex-copy small");
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const duration = reducedMotion ? 560 : 2720;
+  const duration = reducedMotion ? 650 : 3200;
   const stars = createStars(reducedMotion ? 24 : 115);
 
   if (title) title.textContent = "Entering the black hole";

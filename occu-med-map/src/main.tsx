@@ -132,57 +132,6 @@ function installManualRequestGates(): void {
   }) as typeof window.fetch;
 }
 
-function persistOffDefaults(): void {
-  try {
-    localStorage.setItem("network-map:provider-source-selection-v3", JSON.stringify({
-      bluehive: false,
-      indexed: false,
-      dentists: false,
-      "my-clinics": false,
-    }));
-  } catch {
-    // Storage is optional.
-  }
-}
-
-function turnDefaultLayersOffAfterMount(): void {
-  const labels = [
-    "Indexed Providers",
-    "BlueHive Providers",
-    "Dental Examiner Presence",
-    "My Clinics",
-    "Luminous Density",
-  ];
-  let attempts = 0;
-
-  const scan = () => {
-    attempts += 1;
-    const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'));
-    let complete = true;
-
-    for (const label of labels) {
-      const input = inputs.find((candidate) =>
-        (candidate.getAttribute("aria-label") || "").trim().toLowerCase() === label.toLowerCase());
-      if (!input) {
-        complete = false;
-        continue;
-      }
-      if (input.checked) {
-        complete = false;
-        if (!input.disabled) input.click();
-      }
-    }
-
-    document.querySelectorAll<HTMLElement>(".command-section-title small").forEach((node) => {
-      if ((node.textContent || "").trim().toLowerCase() === "all on by default") node.textContent = "Off by default";
-    });
-
-    if (!complete && attempts < 40) window.setTimeout(scan, 100);
-  };
-
-  window.setTimeout(scan, 0);
-}
-
 async function safeLoad(name: string, loader: () => Promise<unknown>): Promise<void> {
   try {
     await loader();
@@ -209,7 +158,6 @@ async function loadOptionalRuntimes(): Promise<void> {
 }
 
 installManualRequestGates();
-persistOffDefaults();
 
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("Network Map root element is missing");
@@ -219,7 +167,6 @@ const phaseTwoPreview = new URLSearchParams(window.location.search).get("p2-prev
 async function boot(): Promise<void> {
   if (!phaseTwoPreview) {
     root.render(<App />);
-    turnDefaultLayersOffAfterMount();
     window.setTimeout(() => { void loadOptionalRuntimes(); }, 0);
     return;
   }
@@ -236,7 +183,6 @@ async function boot(): Promise<void> {
     console.error("Phase Two preview failed; loading standard map", error);
     root.render(<App />);
   }
-  turnDefaultLayersOffAfterMount();
   window.setTimeout(() => { void loadOptionalRuntimes(); }, 0);
 }
 

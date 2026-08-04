@@ -94,6 +94,6 @@ function installLoaderHook(): void {
   }, 5);
 }
 
-installLoaderHook();
-
+// DISABLED - This patch forces ArcGIS to use a specific WebMap which causes stuck loading
+// To re-enable, remove this early return
 export {};

@@ -123,6 +123,42 @@ app.head("/api/health", (_req, res) => {
   res.status(200).end();
 });
 
+app.get("/api/map-tiles/:z/:y/:x", async (req, res) => {
+  const z = Number(req.params.z);
+  const y = Number(req.params.y);
+  const x = Number(req.params.x);
+  const tileLimit = Number.isInteger(z) && z >= 0 && z <= 19 ? 2 ** z : 0;
+
+  if (
+    !tileLimit ||
+    !Number.isInteger(x) || x < 0 || x >= tileLimit ||
+    !Number.isInteger(y) || y < 0 || y >= tileLimit
+  ) {
+    res.status(400).json({ error: "Invalid map tile coordinates" });
+    return;
+  }
+
+  try {
+    const tileUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/${z}/${y}/${x}`;
+    const tileResponse = await fetch(tileUrl, {
+      headers: { "User-Agent": "Occu-Med-Network-Map/1.0" },
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!tileResponse.ok) {
+      res.status(tileResponse.status).end();
+      return;
+    }
+
+    const contentType = tileResponse.headers.get("content-type") || "image/jpeg";
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800");
+    res.status(200).send(Buffer.from(await tileResponse.arrayBuffer()));
+  } catch (error) {
+    logger.warn({ error, z, y, x }, "ArcGIS map tile proxy failed");
+    res.status(502).end();
+  }
+});
+
 app.use("/api/price-hunt", rateLimit({ windowMs: 10 * 60 * 1000, max: 20 }));
 app.use("/api/occ-hunt", rateLimit({ windowMs: 10 * 60 * 1000, max: 30 }));
 app.use("/api/price-finder", rateLimit({ windowMs: 10 * 60 * 1000, max: 60 }));
@@ -170,8 +206,23 @@ app.use((req, res, next) => {
 app.use("/api", router);
 
 const frontendDist = path.resolve(__dirname, "../../occu-med-map/dist/public");
-app.use(express.static(frontendDist));
+app.use(express.static(frontendDist, {
+  setHeaders(res, filePath) {
+    if (path.basename(filePath) === "index.html") {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+      return;
+    }
+    if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    }
+  },
+}));
 app.get("/{*path}", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
   res.sendFile(path.join(frontendDist, "index.html"));
 });
 

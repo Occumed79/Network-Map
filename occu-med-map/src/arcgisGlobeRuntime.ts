@@ -219,7 +219,7 @@ async function ensureMapView(): Promise<void> {
     });
 
     const arcgisMap = new ArcGISMap({
-      basemap: "streets",
+      basemap: "osm-standard",
       layers: [graphicsLayer],
     });
 

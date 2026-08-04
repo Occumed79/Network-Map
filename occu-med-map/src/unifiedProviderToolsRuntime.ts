@@ -49,14 +49,6 @@ let installed = false;
 let scanQueued = false;
 let sourceSelectionInitialized = false;
 let applyingStoredSelection = false;
-let domObserver: MutationObserver | null = null;
-
-const OBSERVER_OPTIONS: MutationObserverInit = {
-  childList: true,
-  subtree: true,
-  attributes: true,
-  attributeFilter: ["class", "hidden"],
-};
 
 function normalizedText(node: Element | null): string {
   return (node?.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -436,24 +428,13 @@ function syncActiveButtons(): void {
 }
 
 function scan(): void {
-  // This runtime deliberately rearranges and annotates React-owned controls.
-  // Do not observe those writes: properties such as `hidden` and `textContent`
-  // enqueue mutation records even when their effective value is unchanged.
-  // Observing our own scan used to schedule another scan every 40 ms forever,
-  // eventually monopolizing the browser's main thread and freezing the whole
-  // application (not just the map).
-  domObserver?.disconnect();
-  try {
-    ensureUnifiedButtons();
-    removeDirectoriesTool();
-    hideDuplicateLaunchers();
-    simplifyLegacyLayerSection();
-    initializeSourceSelection();
-    updatePanelMode();
-    syncActiveButtons();
-  } finally {
-    if (domObserver) domObserver.observe(document.body, OBSERVER_OPTIONS);
-  }
+  ensureUnifiedButtons();
+  removeDirectoriesTool();
+  hideDuplicateLaunchers();
+  simplifyLegacyLayerSection();
+  initializeSourceSelection();
+  updatePanelMode();
+  syncActiveButtons();
 }
 
 function scheduleScan(): void {
@@ -477,8 +458,8 @@ export function installUnifiedProviderTools(): void {
     scheduleScan();
   });
 
-  domObserver = new MutationObserver(scheduleScan);
-  domObserver.observe(document.body, OBSERVER_OPTIONS);
+  const observer = new MutationObserver(scheduleScan);
+  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "hidden"] });
   window.addEventListener("load", scheduleScan, { once: true });
   scheduleScan();
 }

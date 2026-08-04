@@ -16,6 +16,7 @@ const MAPBOX_VERSION = "3.25.0";
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || import.meta.env.VITE_MAPBOX_ACCESS_TOKEN || "";
 const MAPBOX_2D_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN_2 || "";
 const MAX_MIRRORED_FEATURES = 12_000;
+const ARCGIS_LOAD_TIMEOUT_MS = 25_000;
 
 let canonicalMap: L.Map | null = null;
 let currentMode: MapMode = "2d";
@@ -36,6 +37,7 @@ let periodicTimer: number | null = null;
 let lastEngineDrivenLeafletMove = 0;
 let mapResizeObserver: ResizeObserver | null = null;
 let mapResizeFrame = 0;
+let arcgisTileUnderlay: L.TileLayer | null = null;
 
 const originalMapFactory = L.map.bind(L);
 (L as any).map = (element: string | HTMLElement, options?: L.MapOptions) => {
@@ -54,6 +56,10 @@ async function initializeDualEngines(map: L.Map): Promise<void> {
 
   mapWrap.classList.add("dual-engine-map-shell");
   mapContainer.classList.add("canonical-leaflet-controller");
+  arcgisTileUnderlay = L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+    { maxZoom: 19, attribution: "Tiles &copy; Esri" },
+  ).addTo(map);
 
   mapbox2dHost = document.createElement("div");
   mapbox2dHost.className = "mapbox-2d-host";
@@ -117,6 +123,14 @@ function showMapbox2dError(error: unknown): void {
       setStatus(`Mapbox 2D unavailable · ${errorMessage(nextError)}`, "error");
     });
   }, { once: true });
+}
+
+function markArcgisReady(): void {
+  if (!arcgisHost) return;
+  arcgisHost.classList.add("ready", "engine-render-ready");
+  // Do not rely on a later optional runtime or the CSS cascade to hide this.
+  // Once MapView.when() resolves, the loading panel has completed its job.
+  arcgisHost.querySelectorAll<HTMLElement>(".dual-engine-loading").forEach((node) => node.remove());
 }
 
 function escapeHtml(value: string): string {
@@ -632,6 +646,22 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "unknown error";
 }
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = window.setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timeout);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
+}
+
 function cleanupDualEngines(): void {
   stopPeriodicSync();
   if (syncTimer !== null) window.clearTimeout(syncTimer);
@@ -640,6 +670,8 @@ function cleanupDualEngines(): void {
   mapResizeObserver = null;
   destroyMapbox2dView();
   destroyMapboxView();
+  if (arcgisTileUnderlay && canonicalMap) canonicalMap.removeLayer(arcgisTileUnderlay);
+  arcgisTileUnderlay = null;
   mapWrap = null;
   mapbox2dHost = null;
   mapboxHost = null;

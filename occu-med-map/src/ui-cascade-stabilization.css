@@ -170,7 +170,7 @@ body,
 
 #map,
 .leaflet-container,
-.arcgis-globe-host {
+.mapbox-globe-host {
   width: 100% !important;
   height: 100% !important;
   min-width: 0 !important;

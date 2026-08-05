@@ -31,6 +31,7 @@ jobs:
       RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       RCLONE_CONFIG_R2_ACL: private
+      RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
       R2_BUCKET: healthsites-data
 
     steps:
@@ -61,6 +62,7 @@ jobs:
             "r2:${R2_BUCKET}/${OBJECT_KEY}" \
             --auto-filename=false \
             --no-clobber \
+            --s3-no-check-bucket \
             --s3-chunk-size 64Mi \
             --s3-upload-concurrency 4 \
             --retries 5 \
@@ -72,4 +74,4 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rclone lsl "r2:${R2_BUCKET}/${OBJECT_KEY}"
+          rclone lsl "r2:${R2_BUCKET}/${OBJECT_KEY}" --s3-no-check-bucket

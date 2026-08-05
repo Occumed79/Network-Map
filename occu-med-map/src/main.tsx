@@ -39,6 +39,7 @@ import "./luxury-futuristic-shell.css";
 import "./map-tools-reliability.css";
 import "./provider-location-finder.css";
 import "./sidebar-button-theme.css";
+import "./sidebarWorkspaceTabsRuntime";
 
 async function safeLoad(name: string, loader: () => Promise<unknown>): Promise<void> {
   try {

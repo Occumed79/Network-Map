@@ -91,7 +91,7 @@ function copyResponseHeader(upstream: globalThis.Response, res: Response, name: 
   if (value) res.setHeader(name, value);
 }
 
-async function streamBody(upstream: globalThis.Response, req: Request, res: Response): Promise<void> {
+async function streamBody(upstream: globalThis.Response, res: Response): Promise<void> {
   if (!upstream.body) {
     res.end();
     return;
@@ -99,7 +99,8 @@ async function streamBody(upstream: globalThis.Response, req: Request, res: Resp
 
   const reader = upstream.body.getReader();
   let disconnected = false;
-  req.once("close", () => {
+  res.once("close", () => {
+    if (res.writableEnded) return;
     disconnected = true;
     void reader.cancel().catch(() => undefined);
   });
@@ -167,7 +168,7 @@ async function proxyFlatGeobuf(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    await streamBody(upstream, req, res);
+    await streamBody(upstream, res);
   } catch (error) {
     req.log?.error({ err: error }, "Healthsites FlatGeobuf proxy failed");
     if (!res.headersSent) {

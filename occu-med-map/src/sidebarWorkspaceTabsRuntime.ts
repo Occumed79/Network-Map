@@ -9,7 +9,7 @@ type TabDefinition = {
 const STYLE_ID = "occumed-sidebar-workspace-tabs-style";
 const TABS_CLASS = "occumed-sidebar-workspace-tabs";
 const PROVIDER_CONTENT_CLASS = "occumed-sidebar-provider-content";
-const DATA_ATTRIBUTE = "occumedSidebarWorkspace";
+const DATA_ATTRIBUTE = "occumedworkspace";
 
 const TAB_DEFINITIONS: TabDefinition[] = [
   { id: "providers", label: "Providers", ariaLabel: "Show provider layers and workflows" },

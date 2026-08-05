@@ -26,6 +26,7 @@ import nacchoLhdRouter from "./nacchoLhd";
 import nacchoRecoveryStatusRouter from "./nacchoRecoveryStatus";
 import scoringDatabaseRouter from "./scoringDatabase";
 import { stabilizeProviderLayerRequests } from "../middleware/providerLayerContract";
+import { normalizeProviderTypeResponses } from "../middleware/normalizeProviderTypes";
 
 const router: IRouter = Router();
 
@@ -42,6 +43,7 @@ router.use(npiCustomSearchRouter);
 router.use(sourceStatusRouter);
 router.use(browserExtractionRouter);
 router.use(vectorIndexRouter);
+router.use(normalizeProviderTypeResponses);
 router.use(providerExplorerRouter);
 router.use(nacchoRecoveryStatusRouter);
 router.use(nacchoLhdRouter);

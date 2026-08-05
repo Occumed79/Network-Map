@@ -17,10 +17,6 @@ type StableLayerGroup = L.LayerGroup & {
   __occumedAggregateClearTimer?: number | null;
 };
 
-type PatchedLayerGroupPrototype = typeof L.LayerGroup.prototype & {
-  [PATCH_FLAG]?: boolean;
-};
-
 const aggregateGroups = new Set<StableLayerGroup>();
 let aggregateRequestsInFlight = 0;
 let forceImmediateClearUntil = 0;
@@ -62,11 +58,11 @@ function clearTimer(group: StableLayerGroup): void {
 }
 
 function installProviderExplorerLayerStability(): void {
-  const prototype = L.LayerGroup.prototype as PatchedLayerGroupPrototype;
+  const prototype = L.LayerGroup.prototype as any;
   if (prototype[PATCH_FLAG]) return;
 
-  const originalAddLayer = prototype.addLayer;
-  const originalClearLayers = prototype.clearLayers;
+  const originalAddLayer = prototype.addLayer as (this: L.LayerGroup, layer: L.Layer) => L.LayerGroup;
+  const originalClearLayers = prototype.clearLayers as (this: L.LayerGroup) => L.LayerGroup;
   const originalFetch = window.fetch.bind(window);
 
   function flushGroup(group: StableLayerGroup): void {
@@ -93,7 +89,7 @@ function installProviderExplorerLayerStability(): void {
     aggregateGroups.forEach((group) => flushGroup(group));
   }
 
-  prototype.addLayer = function patchedAddLayer(this: StableLayerGroup, layer: L.Layer): StableLayerGroup {
+  prototype.addLayer = function patchedAddLayer(this: StableLayerGroup, layer: L.Layer) {
     if (isAggregateLayer(layer)) {
       this.__occumedAggregateGroup = true;
       aggregateGroups.add(this);
@@ -102,15 +98,15 @@ function installProviderExplorerLayerStability(): void {
       // collection while a density/hex request is still loading.
       flushGroup(this);
     }
-    return originalAddLayer.call(this, layer) as StableLayerGroup;
+    return originalAddLayer.call(this, layer);
   };
 
-  prototype.clearLayers = function patchedClearLayers(this: StableLayerGroup): StableLayerGroup {
+  prototype.clearLayers = function patchedClearLayers(this: StableLayerGroup) {
     const forceImmediate = Date.now() < forceImmediateClearUntil;
     if (!this.__occumedAggregateGroup || !hasLayers(this) || forceImmediate) {
       clearTimer(this);
       this.__occumedPendingAggregateClear = false;
-      return originalClearLayers.call(this) as StableLayerGroup;
+      return originalClearLayers.call(this);
     }
 
     if (!this.__occumedPendingAggregateClear) {

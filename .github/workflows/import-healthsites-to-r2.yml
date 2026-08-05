@@ -1,0 +1,79 @@
+name: Import Healthsites archive to R2
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_url:
+        description: Direct HTTPS URL for the Healthsites World.zip download
+        required: true
+        type: string
+      object_key:
+        description: Destination object path inside the R2 bucket
+        required: true
+        default: source/World.zip
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: healthsites-r2-import
+  cancel-in-progress: false
+
+jobs:
+  transfer:
+    name: Copy Healthsites archive to Cloudflare R2
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      SOURCE_URL: ${{ inputs.source_url }}
+      OBJECT_KEY: ${{ inputs.object_key }}
+      RCLONE_CONFIG_R2_TYPE: s3
+      RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+      RCLONE_CONFIG_R2_REGION: auto
+      RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      RCLONE_CONFIG_R2_ACL: private
+      R2_BUCKET: healthsites-data
+
+    steps:
+      - name: Validate configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_URL" == https://* ]] || { echo "source_url must use HTTPS"; exit 1; }
+          [[ -n "$OBJECT_KEY" ]] || { echo "object_key is required"; exit 1; }
+          [[ -n "$RCLONE_CONFIG_R2_ENDPOINT" ]] || { echo "Missing R2_ENDPOINT secret"; exit 1; }
+          [[ -n "$RCLONE_CONFIG_R2_ACCESS_KEY_ID" ]] || { echo "Missing R2_ACCESS_KEY_ID secret"; exit 1; }
+          [[ -n "$RCLONE_CONFIG_R2_SECRET_ACCESS_KEY" ]] || { echo "Missing R2_SECRET_ACCESS_KEY secret"; exit 1; }
+
+      - name: Install rclone
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location https://rclone.org/install.sh -o /tmp/install-rclone.sh
+          sudo bash /tmp/install-rclone.sh
+          rclone version
+
+      - name: Transfer archive directly to R2
+        shell: bash
+        run: |
+          set -euo pipefail
+          rclone copyurl \
+            "$SOURCE_URL" \
+            "r2:${R2_BUCKET}/${OBJECT_KEY}" \
+            --auto-filename=false \
+            --no-clobber \
+            --s3-chunk-size 64Mi \
+            --s3-upload-concurrency 4 \
+            --retries 5 \
+            --low-level-retries 20 \
+            --stats 30s \
+            --stats-one-line
+
+      - name: Verify object exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          rclone lsl "r2:${R2_BUCKET}/${OBJECT_KEY}"

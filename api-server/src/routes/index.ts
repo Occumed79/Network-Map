@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
+import healthsitesFlatGeobufRouter from "./healthsitesFlatGeobuf";
 import providerSearchRouter from "./providerSearch";
 import dentalProviderDiscoveryRouter from "./dentalProviderDiscovery";
 import liveFinderRouter from "./liveFinder";
@@ -29,6 +30,7 @@ import { stabilizeProviderLayerRequests } from "../middleware/providerLayerContr
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use(healthsitesFlatGeobufRouter);
 router.use(scoringDatabaseRouter);
 
 // --- New unified architecture (takes precedence) ---

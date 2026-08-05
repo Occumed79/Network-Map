@@ -11,6 +11,7 @@ import "./healthsitesFlatDotsRuntime";
 import "./providerLocationFinderRuntime";
 import "./providerTypeNormalizationRuntime";
 import "./dualMapEngineRuntime";
+import "./providerExplorerLayerStabilityRuntime";
 import App from "./App";
 import "./dual-map-engines.css";
 import "./dual-map-transition-opaque.css";

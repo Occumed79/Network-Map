@@ -221,6 +221,7 @@ function wrapLongitude(value: number): number {
 
 function queryRectangles(map: mapboxgl.Map): Rect[] {
   const bounds = map.getBounds();
+  if (!bounds) return [];
   const rawWest = bounds.getWest();
   const rawEast = bounds.getEast();
   const south = Math.max(-85.051129, bounds.getSouth());

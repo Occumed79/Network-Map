@@ -1,0 +1,232 @@
+name: Build Healthsites FlatGeobuf
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_key:
+        description: Source archive path inside the R2 bucket
+        required: true
+        default: source/World.zip
+        type: string
+      destination_key:
+        description: Destination FlatGeobuf path inside the R2 bucket
+        required: true
+        default: flatgeobuf/healthsites.fgb
+        type: string
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/build-healthsites-flatgeobuf.yml
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: healthsites-flatgeobuf-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Convert Healthsites archive to FlatGeobuf
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      SOURCE_KEY: ${{ github.event.inputs.source_key || 'source/World.zip' }}
+      DESTINATION_KEY: ${{ github.event.inputs.destination_key || 'flatgeobuf/healthsites.fgb' }}
+      R2_BUCKET: healthsites-data
+      RCLONE_CONFIG_R2_TYPE: s3
+      RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+      RCLONE_CONFIG_R2_REGION: auto
+      RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      RCLONE_CONFIG_R2_ACL: private
+      RCLONE_CONFIG_R2_NO_CHECK_BUCKET: 'true'
+
+    steps:
+      - name: Publish running status
+        id: status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const created = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Healthsites FlatGeobuf build ${context.runId}`,
+              body: [
+                '**Status:** in_progress',
+                '',
+                `**Run:** https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+                '',
+                `**Head SHA:** \`${context.sha}\``,
+                '',
+                '**Output:** `flatgeobuf/healthsites.fgb`',
+                '',
+                '**Rendering:** individual dots only; no clustering and no PMTiles dependency.'
+              ].join('\n')
+            });
+            return created.data.number;
+
+      - name: Validate configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$SOURCE_KEY" ]] || { echo "source_key is required"; exit 1; }
+          [[ -n "$DESTINATION_KEY" ]] || { echo "destination_key is required"; exit 1; }
+          [[ -n "$RCLONE_CONFIG_R2_ENDPOINT" ]] || { echo "Missing R2_ENDPOINT secret"; exit 1; }
+          [[ -n "$RCLONE_CONFIG_R2_ACCESS_KEY_ID" ]] || { echo "Missing R2_ACCESS_KEY_ID secret"; exit 1; }
+          [[ -n "$RCLONE_CONFIG_R2_SECRET_ACCESS_KEY" ]] || { echo "Missing R2_SECRET_ACCESS_KEY secret"; exit 1; }
+
+      - name: Reclaim runner disk space
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup || true
+          df -h /
+
+      - name: Install GDAL and rclone
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gdal-bin jq unzip
+          curl --fail --show-error --silent --location https://rclone.org/install.sh -o /tmp/install-rclone.sh
+          sudo bash /tmp/install-rclone.sh
+          ogr2ogr --version
+          rclone version
+
+      - name: Download Healthsites archive from R2
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/healthsites
+          rclone copyto \
+            "r2:${R2_BUCKET}/${SOURCE_KEY}" \
+            /tmp/healthsites/World.zip \
+            --s3-no-check-bucket \
+            --multi-thread-streams 4 \
+            --retries 5 \
+            --low-level-retries 20 \
+            --stats 30s \
+            --stats-one-line
+          test -s /tmp/healthsites/World.zip
+          ls -lh /tmp/healthsites/World.zip
+
+      - name: Locate Healthsites shapefile
+        id: inspect
+        shell: bash
+        run: |
+          set -euo pipefail
+          zipinfo -1 /tmp/healthsites/World.zip > /tmp/healthsites/archive-manifest.txt
+          SHAPEFILE_PATH="$(python3 - <<'PY'
+          import zipfile
+          archive = '/tmp/healthsites/World.zip'
+          with zipfile.ZipFile(archive) as zf:
+              candidates = [entry for entry in zf.infolist() if entry.filename.lower().endswith('.shp')]
+              if not candidates:
+                  raise SystemExit('No .shp file was found in the Healthsites archive')
+              print(max(candidates, key=lambda entry: entry.file_size).filename)
+          PY
+          )"
+          echo "Selected shapefile: ${SHAPEFILE_PATH}"
+          echo "shapefile_path=${SHAPEFILE_PATH}" >> "$GITHUB_OUTPUT"
+          ogrinfo -ro -so "/vsizip//tmp/healthsites/World.zip/${SHAPEFILE_PATH}" > /tmp/healthsites/source-schema.txt
+          cat /tmp/healthsites/source-schema.txt
+
+      - name: Convert to spatially indexed FlatGeobuf
+        shell: bash
+        env:
+          SHAPEFILE_PATH: ${{ steps.inspect.outputs.shapefile_path }}
+        run: |
+          set -euo pipefail
+          ogr2ogr \
+            -f FlatGeobuf \
+            /tmp/healthsites/healthsites.fgb \
+            "/vsizip//tmp/healthsites/World.zip/${SHAPEFILE_PATH}" \
+            -t_srs EPSG:4326 \
+            -lco SPATIAL_INDEX=YES \
+            -skipfailures \
+            -progress
+          test -s /tmp/healthsites/healthsites.fgb
+          ogrinfo -ro -so /tmp/healthsites/healthsites.fgb > /tmp/healthsites/flatgeobuf-schema.txt
+          ls -lh /tmp/healthsites/healthsites.fgb
+          cat /tmp/healthsites/flatgeobuf-schema.txt
+
+      - name: Build metadata
+        shell: bash
+        env:
+          SHAPEFILE_PATH: ${{ steps.inspect.outputs.shapefile_path }}
+        run: |
+          set -euo pipefail
+          SOURCE_SIZE="$(stat -c '%s' /tmp/healthsites/World.zip)"
+          FGB_SIZE="$(stat -c '%s' /tmp/healthsites/healthsites.fgb)"
+          FGB_SHA256="$(sha256sum /tmp/healthsites/healthsites.fgb | awk '{print $1}')"
+          FEATURE_COUNT="$(awk -F': ' '/Feature Count/ {print $2; exit}' /tmp/healthsites/flatgeobuf-schema.txt || true)"
+          jq -n \
+            --arg generatedAt "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            --arg sourceKey "$SOURCE_KEY" \
+            --arg destinationKey "$DESTINATION_KEY" \
+            --arg shapefilePath "$SHAPEFILE_PATH" \
+            --arg featureCount "${FEATURE_COUNT:-unknown}" \
+            --arg sha256 "$FGB_SHA256" \
+            --argjson sourceBytes "$SOURCE_SIZE" \
+            --argjson flatGeobufBytes "$FGB_SIZE" \
+            '{generatedAt:$generatedAt,sourceKey:$sourceKey,destinationKey:$destinationKey,shapefilePath:$shapefilePath,featureCount:$featureCount,sourceBytes:$sourceBytes,flatGeobufBytes:$flatGeobufBytes,sha256:$sha256,format:"FlatGeobuf",spatialIndex:true,clustered:false}' \
+            > /tmp/healthsites/healthsites-flatgeobuf-metadata.json
+          cat /tmp/healthsites/healthsites-flatgeobuf-metadata.json
+
+      - name: Upload FlatGeobuf and metadata to R2
+        shell: bash
+        run: |
+          set -euo pipefail
+          rclone copyto \
+            /tmp/healthsites/healthsites.fgb \
+            "r2:${R2_BUCKET}/${DESTINATION_KEY}" \
+            --s3-no-check-bucket \
+            --s3-chunk-size 64Mi \
+            --s3-upload-concurrency 4 \
+            --retries 5 \
+            --low-level-retries 20 \
+            --stats 30s \
+            --stats-one-line
+          rclone copyto /tmp/healthsites/healthsites-flatgeobuf-metadata.json "r2:${R2_BUCKET}/metadata/healthsites-flatgeobuf-metadata.json" --s3-no-check-bucket
+          rclone copyto /tmp/healthsites/flatgeobuf-schema.txt "r2:${R2_BUCKET}/metadata/healthsites-flatgeobuf-schema.txt" --s3-no-check-bucket
+          rclone copyto /tmp/healthsites/archive-manifest.txt "r2:${R2_BUCKET}/metadata/healthsites-archive-manifest.txt" --s3-no-check-bucket
+
+      - name: Verify FlatGeobuf in R2
+        shell: bash
+        run: |
+          set -euo pipefail
+          rclone lsl "r2:${R2_BUCKET}/${DESTINATION_KEY}" --s3-no-check-bucket
+          rclone lsl "r2:${R2_BUCKET}/metadata/healthsites-flatgeobuf-metadata.json" --s3-no-check-bucket
+          rclone lsl "r2:${R2_BUCKET}/metadata/healthsites-flatgeobuf-schema.txt" --s3-no-check-bucket
+
+      - name: Publish final status
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ steps.status.outputs.result }}
+          RESULT: ${{ job.status }}
+        with:
+          script: |
+            const issue_number = Number(process.env.ISSUE_NUMBER);
+            const result = process.env.RESULT;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              body: result === 'success'
+                ? 'FlatGeobuf conversion completed and the R2 object was verified.'
+                : `FlatGeobuf conversion finished with status: **${result}**.`
+            });
+            if (result === 'success') {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                state: 'closed',
+                state_reason: 'completed'
+              });
+            }

@@ -295,7 +295,7 @@ function patchSourceRegistration(): void {
 
 function popupHtml(properties: Record<string, unknown>): string {
   const classification = classify(properties);
-  const rows: Array<[string, string]> = [
+  const rows = ([
     ["Provider Type", classification.label],
     ["Address", firstProperty(properties, ["address"])],
     ["City", firstProperty(properties, ["city"])],
@@ -304,7 +304,7 @@ function popupHtml(properties: Record<string, unknown>): string {
     ["Phone", firstProperty(properties, ["phone"])],
     ["Services", firstProperty(properties, ["services"])],
     ["Source", firstProperty(properties, ["source"])],
-  ].filter(([, value]) => Boolean(value));
+  ] as Array<[string, string]>).filter(([, value]) => Boolean(value));
   const website = firstProperty(properties, ["website"]);
   const sourceType = classification.sourceType && normalizeToken(classification.sourceType) !== normalizeToken(classification.label)
     ? `<div class="provider-location-popup-row"><span>Source Type</span><strong>${escapeHtml(classification.sourceType)}</strong></div>`

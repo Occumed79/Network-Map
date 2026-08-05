@@ -9,6 +9,7 @@ import "./mapToolsCommandPanel";
 import "./routePlannerControlsRuntime";
 import "./healthsitesFlatDotsRuntime";
 import "./providerLocationFinderRuntime";
+import "./providerTypeNormalizationRuntime";
 import "./dualMapEngineRuntime";
 import App from "./App";
 import "./dual-map-engines.css";

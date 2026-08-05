@@ -7,6 +7,7 @@ import "./diagnosticsReliabilityRuntime";
 import "./completeProviderPinMirrorRuntime";
 import "./mapToolsCommandPanel";
 import "./routePlannerControlsRuntime";
+import "./healthsitesFlatDotsRuntime";
 import "./dualMapEngineRuntime";
 import App from "./App";
 import "./dual-map-engines.css";

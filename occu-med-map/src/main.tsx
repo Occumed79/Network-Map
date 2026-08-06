@@ -46,6 +46,8 @@ import "./map-tools-reliability.css";
 import "./provider-location-finder.css";
 import "./sidebar-button-theme.css";
 import "./sidebarWorkspaceControllerRuntime";
+import "./sidebar-workspace-final-fixes.css";
+import "./sidebarWorkspacePanelGuardRuntime";
 
 async function safeLoad(name: string, loader: () => Promise<unknown>): Promise<void> {
   try {

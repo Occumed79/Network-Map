@@ -148,7 +148,9 @@ function audit(): GeneralUiAuditResult {
   const appBody = document.querySelector<HTMLElement>(".app-body");
   if (appBody && isVisible(appBody)) {
     const rect = appBody.getBoundingClientRect();
-    if (rect.width < 400 || rect.height < 240) failures.push("application workspace collapsed");
+    const minimumWidth = Math.min(400, Math.max(280, window.innerWidth - 4));
+    const minimumHeight = Math.min(240, Math.max(180, window.innerHeight - 180));
+    if (rect.width < minimumWidth || rect.height < minimumHeight) failures.push("application workspace collapsed");
   }
 
   document.querySelectorAll<HTMLElement>(OVERLAY_SELECTOR).forEach((element) => {

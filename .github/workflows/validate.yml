@@ -62,6 +62,9 @@ jobs:
       - name: Run general UI hardening smoke test
         run: pnpm --filter @workspace/occu-med-map test:general-ui-hardening
 
+      - name: Run startup resilience hardening smoke test
+        run: pnpm --filter @workspace/occu-med-map test:startup-hardening
+
       - name: Run network request pipeline hardening smoke test
         run: pnpm --filter @workspace/occu-med-map test:network-request-hardening
 

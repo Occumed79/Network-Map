@@ -1,60 +1,159 @@
-/* Final sidebar workspace corrections.
-   This file intentionally uses a stronger scope than the legacy theme layers so
-   the four workspace tabs share one stable width, palette, and map footprint. */
+/* Authoritative workspace UI layer.
+   Loaded last so the four sidebar workspaces share one geometry, palette,
+   scrolling model, and map footprint regardless of older theme rules. */
 
 :root {
   --command-sidebar-width: clamp(292px, 21vw, 320px);
+  --workspace-shell-gap: 10px;
+  --workspace-shell-padding: 10px;
+  --workspace-panel-bg: #061421;
+  --workspace-card-bg: #0a1c2c;
+  --workspace-control-bg: #071d30;
+  --workspace-control-hover: #0a2940;
+  --workspace-border: rgba(72, 139, 174, 0.34);
+  --workspace-border-strong: rgba(100, 180, 215, 0.62);
+  --workspace-text: #dcebf2;
+  --workspace-muted: #9fb7c5;
 }
 
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body,
 html[data-occumed-workspace-ready="true"] body .app-wrap .app-body:has(.live-panel.open) {
-  grid-template-columns: var(--command-sidebar-width) minmax(0, 1fr) 0 !important;
+  box-sizing: border-box !important;
+  display: grid !important;
+  grid-template-columns: var(--command-sidebar-width) minmax(0, 1fr) !important;
+  grid-template-rows: minmax(0, 1fr) !important;
+  gap: var(--workspace-shell-gap) !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  padding: var(--workspace-shell-padding) !important;
+  overflow: hidden !important;
+  background: #02070d !important;
 }
 
 html[data-occumed-workspace-ready="true"] body .app-wrap .app-body .sidebar.occumed-sidebar-workspace-scope {
   box-sizing: border-box !important;
-  width: var(--command-sidebar-width) !important;
-  min-width: var(--command-sidebar-width) !important;
-  max-width: var(--command-sidebar-width) !important;
+  position: relative !important;
+  inset: auto !important;
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  align-self: stretch !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 10px !important;
   overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain !important;
+  scrollbar-gutter: stable !important;
+  color: var(--workspace-text) !important;
+  background: linear-gradient(180deg, #07111d 0%, #050d16 100%) !important;
+  border: 1px solid rgba(72, 139, 174, 0.28) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 14px 34px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.035) !important;
+  z-index: 40 !important;
 }
 
 html[data-occumed-workspace-ready="true"] body .app-wrap .app-body .map-wrap {
+  box-sizing: border-box !important;
+  position: relative !important;
+  inset: auto !important;
   grid-column: 2 !important;
-  width: auto !important;
+  grid-row: 1 !important;
+  width: 100% !important;
   min-width: 0 !important;
   max-width: none !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+  border: 1px solid rgba(72, 139, 174, 0.24) !important;
+  border-radius: 16px !important;
+  background: #08131e !important;
+  box-shadow: 0 14px 34px rgba(0,0,0,.24) !important;
+}
+
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body .map-wrap :is(
+  #map,
+  .leaflet-container,
+  .dual-engine-map-shell,
+  .mapbox-2d-host,
+  .mapbox-3d-host,
+  .mapboxgl-map,
+  .mapboxgl-canvas-container,
+  .mapboxgl-canvas
+) {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+}
+
+/* The legacy right drawer must never participate in application grid sizing. */
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body > :is(
+  .live-panel,
+  .provider-explorer-drawer,
+  .provider-drawer-backdrop
+) {
+  grid-column: auto !important;
+  grid-row: auto !important;
 }
 
 html[data-occumed-workspace-ready="true"] body .app-wrap .app-body .sidebar.occumed-sidebar-workspace-scope
   > .occumed-sidebar-workspace-tabs {
   box-sizing: border-box !important;
-  flex: 0 0 auto !important;
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 5100 !important;
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 6px !important;
   width: 100% !important;
   min-width: 0 !important;
-  gap: 6px !important;
+  min-height: 52px !important;
+  margin: 0 0 10px !important;
   padding: 6px !important;
   background: #061421 !important;
-  border-color: rgba(72, 139, 174, 0.44) !important;
+  border: 1px solid rgba(72, 139, 174, 0.44) !important;
+  border-radius: 13px !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.045), 0 8px 22px rgba(0,0,0,.24) !important;
+  backdrop-filter: blur(18px) saturate(140%) !important;
 }
 
 html[data-occumed-workspace-ready="true"] body .app-wrap .app-body .sidebar.occumed-sidebar-workspace-scope
   > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab {
+  box-sizing: border-box !important;
+  display: grid !important;
+  place-items: center !important;
   min-width: 0 !important;
   min-height: 40px !important;
+  margin: 0 !important;
   padding: 7px 4px !important;
-  color: #dcebf2 !important;
-  background: #071d30 !important;
-  border-color: rgba(72, 139, 174, 0.48) !important;
+  color: var(--workspace-text) !important;
+  background: var(--workspace-control-bg) !important;
+  border: 1px solid rgba(72, 139, 174, 0.48) !important;
+  border-radius: 9px !important;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.035) !important;
   font-size: 11.5px !important;
   font-weight: 800 !important;
+  line-height: 1.15 !important;
+  letter-spacing: .01em !important;
+  text-align: center !important;
+  white-space: nowrap !important;
+  transform: none !important;
 }
 
 html[data-occumed-workspace-ready="true"] body .app-wrap .app-body .sidebar.occumed-sidebar-workspace-scope
   > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab:hover:not(:disabled) {
   color: #ffffff !important;
-  background: #0a2940 !important;
-  border-color: rgba(100, 180, 215, 0.68) !important;
+  background: var(--workspace-control-hover) !important;
+  border-color: var(--workspace-border-strong) !important;
   box-shadow: 0 0 13px rgba(44, 135, 174, 0.18) !important;
 }
 
@@ -68,38 +167,30 @@ html[data-occumed-workspace-ready="true"] body .app-wrap .app-body .sidebar.occu
   box-shadow: inset 0 1px 0 rgba(255,255,255,.09), 0 0 14px rgba(40, 125, 164, 0.20) !important;
 }
 
-/* Finder and Explorer belong to the left workspace. Never reserve a phantom
-   third application column or allow the panel to use its old right-drawer size. */
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body .app-wrap .app-body .live-panel.open,
-html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body .app-wrap .app-body .provider-explorer-drawer.open {
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-provider-content,
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-host {
   box-sizing: border-box !important;
-  width: var(--workspace-panel-width) !important;
-  min-width: var(--workspace-panel-width) !important;
-  max-width: var(--workspace-panel-width) !important;
-  background: #061421 !important;
-  border-color: rgba(72, 139, 174, 0.34) !important;
-  box-shadow: 10px 12px 30px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.035) !important;
-}
-
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body .app-wrap .app-body .live-panel.open .lp-inner,
-html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body .app-wrap .app-body .provider-explorer-drawer.open .provider-drawer-body {
-  box-sizing: border-box !important;
-  width: 100% !important;
   min-width: 0 !important;
   max-width: 100% !important;
-  overflow-x: hidden !important;
-  overflow-y: auto !important;
-  background: #061421 !important;
-  scrollbar-gutter: stable !important;
 }
 
-/* Map Tools was still inheriting the old pale floating-card theme. Force it to
-   use the same navy workspace system as Finder and Explorer. */
-html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body .app-wrap .app-body
-  .sidebar.occumed-sidebar-workspace-scope > .occumed-sidebar-workspace-host {
-  box-sizing: border-box !important;
+html[data-occumedworkspace="providers"][data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope > .occumed-sidebar-provider-content {
+  display: block !important;
+}
+
+html[data-occumedworkspace]:not([data-occumedworkspace="providers"])[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope > .occumed-sidebar-provider-content {
+  display: none !important;
+}
+
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-host {
+  display: none !important;
   width: 100% !important;
-  min-width: 0 !important;
+  margin: 0 !important;
   padding: 0 2px 10px !important;
   overflow: visible !important;
   background: transparent !important;
@@ -107,7 +198,76 @@ html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body
   box-shadow: none !important;
 }
 
-html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body .app-wrap .app-body
+html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope > .occumed-sidebar-workspace-host {
+  display: block !important;
+}
+
+/* Finder and Explorer are left-workspace overlays. They use the measured
+   sidebar rectangle and never reserve a right-side column. */
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body .live-panel.open,
+html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body .provider-explorer-drawer.open {
+  box-sizing: border-box !important;
+  position: fixed !important;
+  inset: var(--workspace-panel-top) auto var(--workspace-panel-bottom) var(--workspace-panel-left) !important;
+  display: flex !important;
+  width: var(--workspace-panel-width) !important;
+  min-width: var(--workspace-panel-width) !important;
+  max-width: var(--workspace-panel-width) !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+  transform: none !important;
+  color: var(--workspace-text) !important;
+  background: var(--workspace-panel-bg) !important;
+  border: 1px solid var(--workspace-border) !important;
+  border-top: 0 !important;
+  border-radius: 0 0 14px 14px !important;
+  box-shadow: 10px 12px 30px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.035) !important;
+  backdrop-filter: blur(20px) saturate(140%) !important;
+  z-index: 5000 !important;
+}
+
+html[data-occumedworkspace]:not([data-occumedworkspace="liveFinder"])[data-occumed-workspace-ready="true"] body .live-panel,
+html[data-occumedworkspace]:not([data-occumedworkspace="explorer"])[data-occumed-workspace-ready="true"] body .provider-explorer-drawer {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body .live-panel.open .lp-inner,
+html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body .provider-explorer-drawer.open .provider-drawer-body {
+  box-sizing: border-box !important;
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  padding: 10px !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain !important;
+  scrollbar-gutter: stable !important;
+  color: var(--workspace-text) !important;
+  background: var(--workspace-panel-bg) !important;
+}
+
+html[data-occumed-workspace-ready="true"] body .provider-drawer-backdrop {
+  display: none !important;
+  pointer-events: none !important;
+}
+
+/* Docked Map Tools must remain a normal sidebar document flow element. */
+html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body
   .sidebar.occumed-sidebar-workspace-scope > .occumed-sidebar-workspace-host > .occumed-map-tools-panel {
   box-sizing: border-box !important;
   position: static !important;
@@ -122,14 +282,23 @@ html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body
   padding: 0 !important;
   overflow: visible !important;
   opacity: 1 !important;
-  color: #dcebf2 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+  transform: none !important;
+  color: var(--workspace-text) !important;
   background: transparent !important;
   border: 0 !important;
+  border-radius: 0 !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
 }
 
-html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body .app-wrap .app-body
+html[data-occumed-workspace-ready="true"] body .leaflet-control-container
+  .occumed-map-tools-panel[data-sidebar-docked="true"] {
+  display: none !important;
+}
+
+html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body
   .sidebar.occumed-sidebar-workspace-scope .occumed-map-tools-panel .occumed-basemap-title {
   position: static !important;
   top: auto !important;
@@ -139,7 +308,7 @@ html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body
   padding: 10px 11px !important;
   color: #eef9fd !important;
   background: #0b2033 !important;
-  border: 1px solid rgba(72, 139, 174, 0.34) !important;
+  border: 1px solid var(--workspace-border) !important;
   border-radius: 11px !important;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.035) !important;
   font-size: 12px !important;
@@ -147,26 +316,27 @@ html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body
   letter-spacing: .04em !important;
 }
 
-html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body .app-wrap .app-body
+html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body
   .sidebar.occumed-sidebar-workspace-scope .occumed-map-tools-panel .occumed-map-tools-section {
   box-sizing: border-box !important;
   width: 100% !important;
   min-width: 0 !important;
   margin: 0 0 8px !important;
   padding: 10px !important;
-  color: #dcebf2 !important;
-  background: #0a1c2c !important;
+  overflow: hidden !important;
+  color: var(--workspace-text) !important;
+  background: var(--workspace-card-bg) !important;
   border: 1px solid rgba(72, 139, 174, 0.26) !important;
   border-radius: 11px !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
 }
 
-html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body .app-wrap .app-body
+html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body
   .sidebar.occumed-sidebar-workspace-scope .occumed-map-tools-panel .occumed-map-tools-section-title {
   margin: 0 0 7px !important;
   padding: 0 !important;
-  color: #dcebf2 !important;
+  color: var(--workspace-text) !important;
   background: transparent !important;
   border: 0 !important;
   font-size: 10.5px !important;
@@ -174,73 +344,55 @@ html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body
   letter-spacing: .045em !important;
 }
 
-html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body .app-wrap .app-body
-  .sidebar.occumed-sidebar-workspace-scope .occumed-map-tools-panel :is(
-    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
-    select,
-    textarea
-  ) {
+/* Shared controls: same height, typography and selected-state treatment. */
+html[data-occumed-workspace-ready="true"] body :is(
+  .sidebar.occumed-sidebar-workspace-scope,
+  .live-panel,
+  .provider-explorer-drawer
+) :is(
+  button,
+  .mbtn,
+  .vbtn,
+  .fbtn,
+  .lp-act,
+  .lp-chip,
+  .provider-explorer-launch,
+  .diagnostics-toggle
+):not(.command-section-toggle):not(.command-search-clear):not(.mobile-menu-button):not(.occumed-sidebar-workspace-tab):not(.rp-close) {
   box-sizing: border-box !important;
-  width: 100% !important;
-  min-width: 0 !important;
-  min-height: 38px !important;
-  color: #e7f5f9 !important;
-  background: #061522 !important;
-  border: 1px solid rgba(72, 139, 174, 0.34) !important;
-  border-radius: 9px !important;
-  opacity: 1 !important;
-}
-
-html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body .app-wrap .app-body
-  .sidebar.occumed-sidebar-workspace-scope .occumed-map-tools-panel :is(input, textarea)::placeholder {
-  color: #829ead !important;
-  opacity: 1 !important;
-}
-
-html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body .app-wrap .app-body
-  .sidebar.occumed-sidebar-workspace-scope .occumed-map-tools-panel :is(
-    button,
-    .mbtn,
-    .vbtn,
-    .fbtn
-  ) {
-  min-height: 34px !important;
-  color: #dcebf2 !important;
-  background: #071d30 !important;
+  min-height: 36px !important;
+  color: var(--workspace-text) !important;
+  background: var(--workspace-control-bg) !important;
   border: 1px solid rgba(72, 139, 174, 0.46) !important;
   border-radius: 9px !important;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.03) !important;
-  font-size: 11px !important;
+  font-size: 11.5px !important;
   font-weight: 760 !important;
+  line-height: 1.2 !important;
+  text-shadow: none !important;
+  transform: none !important;
 }
 
-html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body .app-wrap .app-body
-  .sidebar.occumed-sidebar-workspace-scope .occumed-map-tools-panel :is(
-    button.active,
-    button[aria-pressed="true"],
-    button[data-active="true"]
-  ) {
+html[data-occumed-workspace-ready="true"] body :is(
+  .sidebar.occumed-sidebar-workspace-scope,
+  .live-panel,
+  .provider-explorer-drawer
+) :is(
+  button,
+  .mbtn,
+  .vbtn,
+  .fbtn,
+  .lp-act,
+  .lp-chip,
+  .provider-explorer-launch,
+  .diagnostics-toggle
+):not(.command-section-toggle):not(.command-search-clear):not(.mobile-menu-button):not(.occumed-sidebar-workspace-tab):not(.rp-close):hover:not(:disabled) {
   color: #ffffff !important;
-  background: linear-gradient(180deg, #123f5d, #08283f) !important;
-  border-color: rgba(113, 192, 224, 0.70) !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 0 12px rgba(40, 125, 164, 0.18) !important;
+  background: var(--workspace-control-hover) !important;
+  border-color: var(--workspace-border-strong) !important;
+  box-shadow: 0 0 12px rgba(40, 125, 164, 0.16) !important;
 }
 
-html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body .app-wrap .app-body
-  .sidebar.occumed-sidebar-workspace-scope .occumed-map-tools-panel .occumed-mapbox-status {
-  box-sizing: border-box !important;
-  width: 100% !important;
-  margin: 0 !important;
-  padding: 9px 10px !important;
-  color: #abc5d2 !important;
-  background: #071a29 !important;
-  border: 1px solid rgba(72, 139, 174, 0.24) !important;
-  border-radius: 9px !important;
-  font-size: 10.5px !important;
-}
-
-/* Keep all workspace controls in the requested navy family instead of the
-   bright cyan selected state inherited from older themes. */
 html[data-occumed-workspace-ready="true"] body .app-wrap .app-body :is(
   .sidebar.occumed-sidebar-workspace-scope,
   .live-panel,
@@ -263,6 +415,84 @@ html[data-occumed-workspace-ready="true"] body .app-wrap .app-body :is(
   box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 0 12px rgba(40, 125, 164, 0.18) !important;
 }
 
+html[data-occumed-workspace-ready="true"] body :is(
+  .sidebar.occumed-sidebar-workspace-scope,
+  .live-panel,
+  .provider-explorer-drawer
+) :is(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea
+) {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 38px !important;
+  color: #e7f5f9 !important;
+  background: #061522 !important;
+  border: 1px solid rgba(72, 139, 174, 0.34) !important;
+  border-radius: 9px !important;
+  font-size: 11.5px !important;
+  opacity: 1 !important;
+}
+
+html[data-occumed-workspace-ready="true"] body :is(
+  .sidebar.occumed-sidebar-workspace-scope,
+  .live-panel,
+  .provider-explorer-drawer
+) :is(input, textarea)::placeholder {
+  color: #829ead !important;
+  opacity: 1 !important;
+}
+
+html[data-occumed-workspace-ready="true"] body :is(
+  .occumed-map-tools-section,
+  .provider-drawer-section,
+  .live-panel .lp-item,
+  .live-panel .lp-controls > div,
+  .sidebar.occumed-sidebar-workspace-scope .hero-card,
+  .sidebar.occumed-sidebar-workspace-scope > .sb-section
+) {
+  box-sizing: border-box !important;
+  max-width: 100% !important;
+  color: var(--workspace-text) !important;
+  background: var(--workspace-card-bg) !important;
+  border-color: rgba(72, 139, 174, 0.24) !important;
+  box-shadow: none !important;
+}
+
+html[data-occumed-workspace-ready="true"] body :is(
+  .sidebar.occumed-sidebar-workspace-scope,
+  .live-panel,
+  .provider-explorer-drawer
+) :is(
+  small,
+  .command-section-help,
+  .workflow-layer-status,
+  .provider-drawer-section-title small,
+  .provider-field-label,
+  .occumed-provider-location-description,
+  .occumed-mapbox-status
+) {
+  color: var(--workspace-muted) !important;
+}
+
+html[data-occumed-workspace-ready="true"] body :is(
+  .sidebar.occumed-sidebar-workspace-scope,
+  .live-panel,
+  .provider-explorer-drawer
+) * {
+  min-width: 0;
+}
+
+html[data-occumed-workspace-ready="true"] body :is(
+  .sidebar.occumed-sidebar-workspace-scope,
+  .live-panel,
+  .provider-explorer-drawer
+) :is(p, span, strong, small, label) {
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 1200px) and (min-width: 769px) {
   :root {
     --command-sidebar-width: 292px;
@@ -272,11 +502,44 @@ html[data-occumed-workspace-ready="true"] body .app-wrap .app-body :is(
 @media (max-width: 768px) {
   :root {
     --command-sidebar-width: 100vw;
+    --workspace-shell-gap: 0px;
+    --workspace-shell-padding: 0px;
+  }
+
+  html[data-occumed-workspace-ready="true"] body .app-wrap .app-body,
+  html[data-occumed-workspace-ready="true"] body .app-wrap .app-body:has(.live-panel.open) {
+    grid-template-columns: minmax(0, 1fr) !important;
+    padding: 0 !important;
   }
 
   html[data-occumed-workspace-ready="true"] body .app-wrap .app-body .sidebar.occumed-sidebar-workspace-scope {
+    position: fixed !important;
+    inset: 0 !important;
     width: 100vw !important;
     min-width: 0 !important;
     max-width: none !important;
+    height: 100dvh !important;
+    border-radius: 0 !important;
+    z-index: 5200 !important;
+  }
+
+  html[data-occumed-workspace-ready="true"] body .app-wrap .app-body .map-wrap {
+    grid-column: 1 !important;
+    border-radius: 0 !important;
+  }
+
+  html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+    > .occumed-sidebar-workspace-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    min-height: 92px !important;
+  }
+
+  html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body .live-panel.open,
+  html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body .provider-explorer-drawer.open {
+    inset: var(--workspace-panel-top) 0 0 0 !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    border-radius: 0 !important;
   }
 }

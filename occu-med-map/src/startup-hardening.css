@@ -1,0 +1,130 @@
+/* Startup, recovery, and high-contrast safeguards. Loaded after the shared UI layers. */
+
+:root {
+  color-scheme: dark;
+}
+
+#root[aria-busy="true"] {
+  cursor: progress;
+}
+
+.app-fatal-state {
+  box-sizing: border-box;
+  display: grid;
+  min-height: 100dvh;
+  width: 100%;
+  place-items: center;
+  padding: max(24px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
+  overflow: auto;
+  background:
+    radial-gradient(circle at 50% 12%, rgba(39, 117, 153, 0.20), transparent 34%),
+    linear-gradient(180deg, #071421 0%, #030911 100%);
+  color: #dcebf2;
+}
+
+.app-fatal-card {
+  box-sizing: border-box;
+  width: min(620px, 100%);
+  max-height: calc(100dvh - 48px);
+  padding: clamp(22px, 4vw, 36px);
+  overflow: auto;
+  border: 1px solid rgba(111, 198, 229, 0.42);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(10, 28, 44, 0.98), rgba(5, 14, 24, 0.98));
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.46);
+}
+
+.app-fatal-kicker {
+  margin: 0 0 8px;
+  color: #77cbe8;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.app-fatal-card h1 {
+  margin: 0;
+  color: #f3fbff;
+  font-size: clamp(1.4rem, 4vw, 2rem);
+  line-height: 1.15;
+}
+
+.app-fatal-card > p:not(.app-fatal-kicker) {
+  margin: 14px 0 0;
+  color: #aac1cf;
+  line-height: 1.6;
+}
+
+.app-fatal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.app-fatal-actions button {
+  min-height: 42px;
+  padding: 0 16px;
+  border: 1px solid rgba(117, 211, 242, 0.62);
+  border-radius: 10px;
+  background: linear-gradient(180deg, #0d4262, #092c45);
+  color: #f3fbff;
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.app-fatal-actions button:hover {
+  border-color: rgba(160, 230, 251, 0.92);
+  background: linear-gradient(180deg, #135477, #0b3854);
+}
+
+.app-fatal-actions button.secondary {
+  border-color: rgba(119, 157, 178, 0.42);
+  background: #081a2a;
+  color: #c4d7e2;
+}
+
+.app-fatal-card details {
+  margin-top: 22px;
+  color: #9db5c3;
+}
+
+.app-fatal-card summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.app-fatal-card pre {
+  max-width: 100%;
+  max-height: 240px;
+  margin: 12px 0 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid rgba(100, 157, 185, 0.24);
+  border-radius: 10px;
+  background: #030a11;
+  color: #bcd5e2;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 520px) {
+  .app-fatal-actions {
+    display: grid;
+  }
+
+  .app-fatal-actions button {
+    width: 100%;
+  }
+}
+
+@media (forced-colors: active) {
+  .app-fatal-card,
+  .app-fatal-actions button,
+  .app-fatal-card pre {
+    border: 1px solid CanvasText;
+  }
+}

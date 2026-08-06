@@ -64,6 +64,9 @@ jobs:
       - name: Run Mapbox map lifecycle hardening smoke test
         run: pnpm --filter @workspace/occu-med-map test:mapbox-lifecycle-hardening
 
+      - name: Run Mapbox source pipeline hardening smoke test
+        run: pnpm --filter @workspace/occu-med-map test:mapbox-source-pipeline-hardening
+
       - name: Run P1 data stabilization smoke tests
         run: pnpm --filter @workspace/api-server test:p1-data
 

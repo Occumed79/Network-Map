@@ -7,7 +7,9 @@ type FailureScreenProps = {
   onRetry?: () => void;
 };
 
-type AppErrorBoundaryProps = React.PropsWithChildren<Record<string, never>>;
+type AppErrorBoundaryProps = {
+  children?: React.ReactNode;
+};
 
 export function ApplicationFailureScreen({ title, message, onRetry }: FailureScreenProps) {
   const copyDiagnostics = async (): Promise<void> => {

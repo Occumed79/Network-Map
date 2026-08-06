@@ -1,10 +1,10 @@
 import mapboxgl from "mapbox-gl";
+import { registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
 
 const DATA_URL = "/api/healthsites/flatgeobuf";
 const FLATGEOBUF_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/flatgeobuf@4.4.0/dist/flatgeobuf-geojson.min.js";
 const SOURCE_ID = "healthsites-flat-dots";
 const LAYER_ID = "healthsites-flat-dots-layer";
-const PATCH_FLAG = "__occumedHealthsitesFlatDotsPatched";
 const PANEL_FLAG = "healthsitesFlatDotsReady";
 const MINIMUM_QUERY_ZOOM = 4.5;
 const MAX_VISIBLE_DOTS = 75_000;
@@ -315,44 +315,37 @@ function scheduleRefresh(delay = 320): void {
   }, delay);
 }
 
-function registerMap(map: mapboxgl.Map, originalOn: (...args: any[]) => mapboxgl.Map): void {
-  if (trackedMaps.has(map)) return;
+function registerMap(map: mapboxgl.Map): () => void {
+  if (trackedMaps.has(map)) return () => undefined;
   trackedMaps.add(map);
 
-  originalOn.call(map, "load", () => {
+  const onLoad = () => {
     ensureMapLayer(map);
     if (enabled) scheduleRefresh(0);
-  });
-  originalOn.call(map, "style.load", () => {
+  };
+  const onStyleLoad = () => {
     ensureMapLayer(map);
     pushCollection(latestCollection);
-  });
-  originalOn.call(map, "moveend", () => scheduleRefresh());
-  originalOn.call(map, "zoomend", () => scheduleRefresh());
+  };
+  const onViewportChanged = () => scheduleRefresh();
+
+  map.on("load", onLoad);
+  map.on("style.load", onStyleLoad);
+  map.on("moveend", onViewportChanged);
+  map.on("zoomend", onViewportChanged);
 
   if (map.loaded()) {
     ensureMapLayer(map);
     if (enabled) scheduleRefresh(0);
   }
-}
 
-function patchMapboxRegistration(): void {
-  const prototype = mapboxgl.Map.prototype as any;
-  if (prototype[PATCH_FLAG]) return;
-
-  const originalOn = prototype.on;
-  prototype.on = function patchedOn(this: mapboxgl.Map, ...args: any[]): mapboxgl.Map {
-    registerMap(this, originalOn);
-    return originalOn.apply(this, args);
+  return () => {
+    map.off("load", onLoad);
+    map.off("style.load", onStyleLoad);
+    map.off("moveend", onViewportChanged);
+    map.off("zoomend", onViewportChanged);
+    trackedMaps.delete(map);
   };
-
-  const originalRemove = prototype.remove;
-  prototype.remove = function patchedRemove(this: mapboxgl.Map, ...args: any[]): unknown {
-    trackedMaps.delete(this);
-    return originalRemove.apply(this, args);
-  };
-
-  prototype[PATCH_FLAG] = true;
 }
 
 function toggleHealthsites(): void {
@@ -419,7 +412,11 @@ function startObserver(): void {
   window.setTimeout(() => scheduleScan(0), 500);
 }
 
-patchMapboxRegistration();
+registerMapboxMapInitializer({
+  id: "healthsites-flat-dots",
+  priority: 30,
+  initialize: registerMap,
+});
 window.addEventListener("network-map:mode-changed", () => scheduleRefresh(80));
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", startObserver, { once: true });
 else startObserver();

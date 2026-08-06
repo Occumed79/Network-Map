@@ -1,5 +1,6 @@
 import L from "leaflet";
 import { registerLeafletMapInitializer } from "./leafletMapLifecycleRuntime";
+import { registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
 import mapboxgl from "mapbox-gl";
 
 const NETWORK_SOURCE_ID = "network-overlays";
@@ -470,7 +471,6 @@ function installMapboxOwnership(): void {
     this: mapboxgl.Map,
     id: string,
   ) => mapboxgl.Map;
-  const originalRemove = prototype.remove as (this: mapboxgl.Map, ...args: any[]) => any;
 
   prototype.addSource = function controlledAddSource(
     this: mapboxgl.Map,
@@ -479,7 +479,6 @@ function installMapboxOwnership(): void {
   ): mapboxgl.Map {
     const result = originalAddSource.call(this, id, source);
     if (id === NETWORK_SOURCE_ID) {
-      trackMap(this);
       wrapNetworkSource(this);
       window.queueMicrotask(() => {
         ensureOverlayLayers(this);
@@ -497,10 +496,6 @@ function installMapboxOwnership(): void {
     return originalRemoveSource.call(this, id);
   };
 
-  prototype.remove = function controlledRemove(this: mapboxgl.Map, ...args: any[]): any {
-    untrackMap(this);
-    return originalRemove.apply(this, args);
-  };
 
   prototype[MAP_PATCH_FLAG] = true;
 }
@@ -541,6 +536,14 @@ registerLeafletMapInitializer({
   id: "overlay-synchronization",
   priority: 30,
   initialize: bindCanonicalMap,
+});
+registerMapboxMapInitializer({
+  id: "overlay-synchronization",
+  priority: 20,
+  initialize: (map) => {
+    trackMap(map);
+    return () => untrackMap(map);
+  },
 });
 installMapboxOwnership();
 document.addEventListener(STABILITY_EVENT, onStabilityEvent);

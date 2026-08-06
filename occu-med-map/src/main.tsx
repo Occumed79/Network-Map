@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import "leaflet/dist/leaflet.css";
 import "mapbox-gl/dist/mapbox-gl.css";
 import "./leafletMapLifecycleRuntime";
+import "./mapboxMapLifecycleRuntime";
 import "./networkRequestPipelineRuntime";
 import "./adminApiRuntime";
 import "./mapControlsBridgeRuntime";

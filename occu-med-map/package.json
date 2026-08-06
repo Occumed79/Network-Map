@@ -35,7 +35,8 @@
     "import:providers:dry": "tsx scripts/import-provider-json-to-neon.ts --dry-run",
     "import:providers:bluehive": "tsx scripts/import-provider-json-to-neon.ts --source bluehive",
     "import:providers:dentists": "tsx scripts/import-provider-json-to-neon.ts --source dentists",
-    "test:leaflet-map-lifecycle-hardening": "tsx scripts/leaflet-map-lifecycle-hardening-smoke.ts"
+    "test:leaflet-map-lifecycle-hardening": "tsx scripts/leaflet-map-lifecycle-hardening-smoke.ts",
+    "test:mapbox-lifecycle-hardening": "tsx scripts/mapbox-lifecycle-hardening-smoke.ts"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",

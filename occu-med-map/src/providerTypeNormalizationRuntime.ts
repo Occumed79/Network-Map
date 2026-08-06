@@ -3,7 +3,6 @@ import mapboxgl from "mapbox-gl";
 const SOURCE_ID = "provider-location-search-results";
 const LAYER_ID = "provider-location-search-dots";
 const SOURCE_PATCH_FLAG = "__occumedProviderTypeSourcePatched";
-const EVENT_PATCH_FLAG = "__occumedProviderTypeEventsPatched";
 const WRAPPED_SOURCE_FLAG = "__occumedProviderTypeSetDataWrapped";
 
 type ProviderTypeKey =
@@ -320,7 +319,7 @@ function popupHtml(properties: Record<string, unknown>): string {
   </div>`;
 }
 
-function normalizedClickListener(event: mapboxgl.MapLayerMouseEvent): void {
+export function normalizedProviderClickListener(event: mapboxgl.MapLayerMouseEvent): void {
   const raw = event.features?.[0];
   if (!raw || raw.geometry.type !== "Point") return;
   const coordinates = raw.geometry.coordinates.slice() as [number, number];
@@ -333,20 +332,6 @@ function normalizedClickListener(event: mapboxgl.MapLayerMouseEvent): void {
     .addTo(event.target);
 }
 
-function patchFinderClickPopup(): void {
-  const prototype = mapboxgl.Map.prototype as any;
-  if (prototype[EVENT_PATCH_FLAG]) return;
-  const originalOn = prototype.on;
-  prototype.on = function patchedOn(this: mapboxgl.Map, ...args: any[]): mapboxgl.Map {
-    if (args[0] === "click" && args[1] === LAYER_ID && typeof args[2] === "function") {
-      return originalOn.call(this, "click", LAYER_ID, normalizedClickListener);
-    }
-    return originalOn.apply(this, args);
-  };
-  prototype[EVENT_PATCH_FLAG] = true;
-}
-
 patchSourceRegistration();
-patchFinderClickPopup();
 
 export {};

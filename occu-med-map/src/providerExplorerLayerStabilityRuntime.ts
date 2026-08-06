@@ -67,10 +67,7 @@ const activeRequests = new Map<RequestChannel, ActiveRequest>();
 let requestSequence = 0;
 let activeAggregateDrawRequestId: number | null = null;
 
-function emit(
-  phase: string,
-  detail: Record<string, unknown> = {},
-): void {
+function emit(phase: string, detail: Record<string, unknown> = {}): void {
   document.dispatchEvent(new CustomEvent(EVENT_NAME, {
     detail: {
       phase,
@@ -277,18 +274,19 @@ function installProviderExplorerLayerStability(): void {
     }, 0);
   }
 
-  function cleanupRequest(record: ActiveRequest): void {
-    if (record.completed) return;
+  function cleanupRequest(record: ActiveRequest): boolean {
+    if (record.completed) return false;
     record.completed = true;
     window.clearTimeout(record.timeoutId);
     if (record.callerSignal && record.callerAbortHandler) {
       record.callerSignal.removeEventListener("abort", record.callerAbortHandler);
     }
     if (activeRequests.get(record.channel)?.id === record.id) activeRequests.delete(record.channel);
+    return true;
   }
 
   function completeRequest(record: ActiveRequest): void {
-    cleanupRequest(record);
+    if (!cleanupRequest(record)) return;
     if (record.channel === "aggregate" && runtime.requestId === record.id) {
       runtime.requestActive = false;
       runtime.lastCompletedRequestId = record.id;
@@ -297,8 +295,7 @@ function installProviderExplorerLayerStability(): void {
   }
 
   function failRequest(record: ActiveRequest, error: unknown): void {
-    const wasCurrent = activeRequests.get(record.channel)?.id === record.id;
-    cleanupRequest(record);
+    if (!cleanupRequest(record)) return;
     if (record.channel === "aggregate") {
       cancelAggregateReplacement(record.id, error instanceof Error ? error.message : String(error));
       if (runtime.requestId === record.id) {
@@ -310,7 +307,6 @@ function installProviderExplorerLayerStability(): void {
         });
       }
     }
-    if (!wasCurrent) return;
   }
 
   function abortActiveChannel(channel: RequestChannel): void {
@@ -336,8 +332,10 @@ function installProviderExplorerLayerStability(): void {
       ? () => controller.abort(callerSignal.reason || abortError("Provider Explorer request was cancelled."))
       : undefined;
 
-    if (callerSignal?.aborted) callerAbortHandler?.();
-    else callerSignal?.addEventListener("abort", callerAbortHandler!, { once: true });
+    if (callerSignal && callerAbortHandler) {
+      if (callerSignal.aborted) callerAbortHandler();
+      else callerSignal.addEventListener("abort", callerAbortHandler, { once: true });
+    }
 
     const record: ActiveRequest = {
       id,
@@ -431,6 +429,21 @@ function installProviderExplorerLayerStability(): void {
   prototype.clearLayers = function patchedClearLayers(this: StableLayerGroup): L.LayerGroup {
     if (!this.__occumedAggregateGroup || (!hasVisibleLayers(this) && !this.__occumedAggregateState?.replacing)) {
       return originalClearLayers.call(this);
+    }
+
+    const state = this.__occumedAggregateState;
+    if (
+      state?.replacing
+      && activeAggregateDrawRequestId !== null
+      && state.requestId === activeAggregateDrawRequestId
+    ) {
+      // drawProviderDensity/drawProviderDotDensity clears the group again after
+      // response.json(). Keep the visible field, discard only staged remnants,
+      // and preserve the active request transaction.
+      clearTimer(state.commitTimer);
+      state.commitTimer = null;
+      state.stagedLayers = [];
+      return this;
     }
 
     beginReplacement(this);

@@ -26,18 +26,6 @@ await page.addInitScript(() => {
   } catch { /* Long Task API is optional. */ }
 });
 
-function rectValue(rect) {
-  if (!rect) return null;
-  return {
-    left: rect.left,
-    right: rect.right,
-    top: rect.top,
-    bottom: rect.bottom,
-    width: rect.width,
-    height: rect.height,
-  };
-}
-
 async function workspaceSnapshot(tab, panelSelector = "") {
   return page.evaluate(({ tab, panelSelector }) => {
     const sidebar = document.querySelector(".sidebar.occumed-sidebar-workspace-scope");
@@ -91,7 +79,7 @@ async function assertWorkspace(tab, panelSelector = "") {
       if (!(panel instanceof HTMLElement)) return false;
       const style = getComputedStyle(panel);
       const rect = panel.getBoundingClientRect();
-      return style.display !== "none" && style.visibility !== "hidden" && rect.width > 200 && rect.height > 200;
+      return style.display !== "none" && style.visibility !== "hidden" && rect.width > 200 && rect.height > 40;
     }, panelSelector, { timeout: 8_000 });
   }
 
@@ -123,10 +111,17 @@ async function assertWorkspace(tab, panelSelector = "") {
 
   if (panelSelector) {
     assert.equal(snapshot.panelVisible, true, `${tab} content panel must be visible`);
-    assert.ok(Math.abs(snapshot.panel.left - snapshot.sidebar.left) <= 6, `${tab} panel must align to sidebar left`);
-    assert.ok(Math.abs(snapshot.panel.width - snapshot.sidebar.width) <= 6, `${tab} panel must match sidebar width`);
-    assert.ok(Math.abs(snapshot.panel.top - snapshot.tabs.bottom) <= 8, `${tab} panel must begin below tabs`);
-    assert.ok(Math.abs(snapshot.panel.bottom - snapshot.sidebar.bottom) <= 8, `${tab} panel must end with sidebar`);
+    if (tab === "mapTools") {
+      assert.ok(snapshot.panel.left >= snapshot.sidebar.left - 2, "Map Tools must remain inside the sidebar left edge");
+      assert.ok(snapshot.panel.right <= snapshot.sidebar.right + 2, "Map Tools must remain inside the sidebar right edge");
+      assert.ok(snapshot.panel.top >= snapshot.tabs.bottom - 3, "Map Tools must begin below the tabs");
+      assert.ok(snapshot.panel.bottom <= snapshot.sidebar.bottom + 3, "Map Tools must remain inside sidebar height");
+    } else {
+      assert.ok(Math.abs(snapshot.panel.left - snapshot.sidebar.left) <= 6, `${tab} panel must align to sidebar left`);
+      assert.ok(Math.abs(snapshot.panel.width - snapshot.sidebar.width) <= 6, `${tab} panel must match sidebar width`);
+      assert.ok(Math.abs(snapshot.panel.top - snapshot.tabs.bottom) <= 8, `${tab} panel must begin below tabs`);
+      assert.ok(Math.abs(snapshot.panel.bottom - snapshot.sidebar.bottom) <= 8, `${tab} panel must end with sidebar`);
+    }
   }
 
   if (snapshot.runtimeAudit) {

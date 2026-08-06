@@ -1,24 +1,26 @@
 name: One-time Leaflet lifecycle refactor
 
 on:
-  push:
+  pull_request:
     branches:
-      - hardening/unify-leaflet-lifecycle
+      - main
     paths:
       - .github/workflows/refactor-leaflet-lifecycle.yml
+      - .github/scripts/refactor-leaflet-lifecycle.mjs
 
 permissions:
   contents: write
 
 jobs:
   refactor:
+    if: github.head_ref == 'hardening/unify-leaflet-lifecycle'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Check out branch
+      - name: Check out feature branch
         uses: actions/checkout@v4
         with:
-          ref: hardening/unify-leaflet-lifecycle
+          ref: ${{ github.head_ref }}
           fetch-depth: 0
 
       - name: Set up Node.js
@@ -36,4 +38,4 @@ jobs:
           git add occu-med-map/src occu-med-map/scripts occu-med-map/package.json .github/workflows/validate.yml
           git diff --cached --stat
           git commit -m "Unify Leaflet map lifecycle ownership"
-          git push origin HEAD:hardening/unify-leaflet-lifecycle
+          git push origin HEAD:${{ github.head_ref }}

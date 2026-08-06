@@ -48,6 +48,7 @@ import "./sidebar-button-theme.css";
 import "./sidebarWorkspaceControllerRuntime";
 import "./sidebar-workspace-final-fixes.css";
 import "./sidebarWorkspacePanelGuardRuntime";
+import "./liveFinderControlCleanupRuntime";
 
 async function safeLoad(name: string, loader: () => Promise<unknown>): Promise<void> {
   try {

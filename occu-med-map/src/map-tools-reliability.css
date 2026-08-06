@@ -36,6 +36,67 @@
   border-bottom: 1px solid rgba(203, 218, 232, 0.1) !important;
 }
 
+.occumed-map-tools-panel :is(
+  .occumed-mapbox-actions,
+  .occumed-route-actions,
+  .occumed-route-row,
+  .occumed-eta-actions
+) {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+.occumed-map-tools-panel :is(
+  .occumed-mapbox-actions,
+  .occumed-route-actions,
+  .occumed-eta-actions
+) {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 6px !important;
+  align-items: stretch !important;
+}
+
+.occumed-map-tools-panel :is(
+  .occumed-mapbox-actions,
+  .occumed-route-actions,
+  .occumed-eta-actions
+) > button {
+  box-sizing: border-box !important;
+  flex: 1 1 calc(50% - 6px) !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+}
+
+.occumed-map-tools-panel .occumed-route-row {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  gap: 6px !important;
+  align-items: center !important;
+}
+
+.occumed-map-tools-panel .occumed-route-row > :is(input, select, textarea, .occumed-mapbox-search) {
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+.occumed-map-tools-panel :is(
+  .occumed-eta-results,
+  .occumed-provider-location-results,
+  .occumed-mapbox-status
+) {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+  overflow-wrap: anywhere !important;
+}
+
 .occumed-map-tools-panel::-webkit-scrollbar {
   width: 7px !important;
 }
@@ -70,5 +131,9 @@
     width: min(310px, calc(100% - 20px)) !important;
     max-width: min(310px, calc(100% - 20px)) !important;
     max-height: calc(100% - 20px) !important;
+  }
+
+  .occumed-map-tools-panel .occumed-route-row {
+    grid-template-columns: minmax(0, 1fr) 76px !important;
   }
 }

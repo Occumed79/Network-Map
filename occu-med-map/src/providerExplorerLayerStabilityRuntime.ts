@@ -327,7 +327,7 @@ function installProviderExplorerLayerStability(): void {
     const id = ++requestSequence;
     const url = requestUrl(input);
     const controller = new AbortController();
-    const callerSignal = init?.signal;
+    const callerSignal = init?.signal || undefined;
     const callerAbortHandler = callerSignal
       ? () => controller.abort(callerSignal.reason || abortError("Provider Explorer request was cancelled."))
       : undefined;

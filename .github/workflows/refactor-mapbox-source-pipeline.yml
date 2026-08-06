@@ -1,0 +1,43 @@
+name: One-time Mapbox source pipeline refactor
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/refactor-mapbox-source-pipeline.yml
+      - .github/scripts/refactor-mapbox-source-pipeline.mjs
+      - occu-med-map/src/mapboxSourcePipelineRuntime.ts
+      - occu-med-map/scripts/mapbox-source-pipeline-hardening-smoke.ts
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    if: github.head_ref == 'hardening/unify-mapbox-source-pipeline' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Apply source pipeline refactor
+        run: node .github/scripts/refactor-mapbox-source-pipeline.mjs
+
+      - name: Commit source refactor
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add occu-med-map/src occu-med-map/scripts occu-med-map/package.json
+          git diff --cached --stat
+          git commit -m "Unify Mapbox source data ownership"
+          git push origin HEAD:${{ github.head_ref }}

@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import "leaflet/dist/leaflet.css";
 import "mapbox-gl/dist/mapbox-gl.css";
+import "./networkRequestPipelineRuntime";
 import "./adminApiRuntime";
 import "./mapControlsBridgeRuntime";
 import "./diagnosticsReliabilityRuntime";
@@ -10,7 +11,7 @@ import "./healthsitesFlatDotsRuntime";
 import "./providerLocationFinderRuntime";
 import "./providerTypeNormalizationRuntime";
 import "./dualMapEngineRuntime";
-import "./providerExplorerLayerStabilityRuntime";
+import "./providerExplorerStabilityRuntime";
 import "./mapOverlaySynchronizationControllerRuntime";
 import App from "./App";
 import "./dual-map-engines.css";

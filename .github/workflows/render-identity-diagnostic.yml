@@ -1,0 +1,47 @@
+name: Render Identity Diagnostic
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/render-identity-diagnostic.yml
+
+permissions:
+  contents: read
+
+jobs:
+  identify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Read deployed root and health identity
+        env:
+          NETWORK_MAP_URL: https://network-map-tool-mqib.onrender.com
+          EXPECTED_COMMIT: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -u
+          cache_buster="$(date +%s)-${GITHUB_RUN_ATTEMPT}"
+          root_file="$(mktemp)"
+          health_file="$(mktemp)"
+          root_headers="$(mktemp)"
+          health_headers="$(mktemp)"
+
+          curl --location --silent --show-error --max-time 60 \
+            --dump-header "$root_headers" --output "$root_file" \
+            "${NETWORK_MAP_URL}/?render-identity=${cache_buster}" || true
+          curl --location --silent --show-error --max-time 60 \
+            --dump-header "$health_headers" --output "$health_file" \
+            "${NETWORK_MAP_URL}/api/health?render-identity=${cache_buster}" || true
+
+          echo '--- ROOT HEADERS ---'
+          cat "$root_headers"
+          echo '--- ROOT TITLE / MARKERS ---'
+          grep -Eo '<title>[^<]*</title>|TanStack Start Starter|Occu-Med Network Management Map|Network Map — Page Not Found' "$root_file" || true
+          echo '--- HEALTH HEADERS ---'
+          cat "$health_headers"
+          echo '--- HEALTH BODY ---'
+          cat "$health_file"
+          echo
+          echo "--- EXPECTED MAIN COMMIT ---"
+          echo "$EXPECTED_COMMIT"

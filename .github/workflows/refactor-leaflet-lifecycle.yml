@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/refactor-leaflet-lifecycle.yml
       - .github/scripts/refactor-leaflet-lifecycle.mjs
+      - .github/scripts/fix-refactor-generator.mjs
 
 permissions:
   contents: write
@@ -27,6 +28,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - name: Correct generator syntax
+        run: node .github/scripts/fix-refactor-generator.mjs
 
       - name: Apply lifecycle refactor
         run: node .github/scripts/refactor-leaflet-lifecycle.mjs

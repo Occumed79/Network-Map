@@ -5,6 +5,10 @@ let content = fs.readFileSync(file, "utf8");
 
 const replacements = [
   [
+    'import fs from "node:fs";',
+    'import fs, { readdirSync, statSync } from "node:fs";',
+  ],
+  [
     '    console.error(`Leaflet initializer failed: ${initializer.id}`, error);',
     '    console.error("Leaflet initializer failed: " + initializer.id, error);',
   ],
@@ -33,4 +37,4 @@ for (const [before, after] of replacements) {
 }
 
 fs.writeFileSync(file, content);
-console.log("Refactor generator syntax corrected.");
+console.log("Refactor generator syntax and filesystem imports corrected.");

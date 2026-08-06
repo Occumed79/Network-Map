@@ -206,12 +206,20 @@ function handleBasemapClick(event: Event): void {
   void applyBasemapStyle(style);
 }
 
-function rehomeMapToolsPanel(): void {
+function prepareMapToolsPanel(): void {
   const shell = document.querySelector<HTMLElement>(".dual-engine-map-shell");
-  if (!shell) return;
+  const workspaceReady = document.documentElement.dataset.occumedWorkspaceReady === "true";
 
   document.querySelectorAll<HTMLElement>(".occumed-map-tools-panel").forEach((panel) => {
-    if (panel.parentElement !== shell) shell.appendChild(panel);
+    const sidebarOwned = workspaceReady
+      || panel.dataset.sidebarDocked === "true"
+      || Boolean(panel.closest(".occumed-sidebar-workspace-host"));
+
+    // The sidebar workspace controller is the final owner once it is ready.
+    // Before that point only, keep the control visible in the map shell while
+    // React and the sidebar initialize. Never pull a docked panel back out.
+    if (!sidebarOwned && shell && panel.parentElement !== shell) shell.appendChild(panel);
+
     panel.dataset.mapToolsVisible = "true";
     panel.setAttribute("role", "region");
     panel.setAttribute("aria-label", "Map tools and basemap styles");
@@ -224,7 +232,7 @@ function scheduleScan(delay = 0): void {
   if (scanTimer !== null) window.clearTimeout(scanTimer);
   scanTimer = window.setTimeout(() => {
     scanTimer = null;
-    rehomeMapToolsPanel();
+    prepareMapToolsPanel();
   }, delay);
 }
 

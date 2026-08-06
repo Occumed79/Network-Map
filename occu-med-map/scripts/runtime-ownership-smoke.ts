@@ -45,6 +45,8 @@ const requiredOwners: Record<string, string> = {
   "providerLocationFinderRuntime.ts": "provider-location-finder",
   "mapEngineFinalFixRuntime.ts": "map-engine-final-fixes",
   "mapboxGlobeLoadHardeningRuntime.ts": "mapbox-globe-load-hardening",
+  "dialogControllerRuntime.ts": "dialog-controller",
+  "generalUiIntegrityRuntime.ts": "general-ui-integrity",
 };
 
 for (const [file, id] of Object.entries(requiredOwners)) {
@@ -63,6 +65,8 @@ const sharedObserverConsumers = [
   "mapEngineLoadingCleanupRuntime.ts",
   "mapEngineFinalFixRuntime.ts",
   "mapboxGlobeLoadHardeningRuntime.ts",
+  "dialogControllerRuntime.ts",
+  "generalUiIntegrityRuntime.ts",
 ];
 
 for (const file of sharedObserverConsumers) {
@@ -77,6 +81,10 @@ for (const file of ["routePlannerControlsRuntime.ts", "healthsitesFlatDotsRuntim
   assert(!text.includes("new MutationObserver"), `${file} must not own a DOM observer after Map Tools ownership migration`);
   assert(!text.includes("subscribeToSharedDomObserver"), `${file} must not scan the DOM after Map Tools ownership migration`);
 }
+
+const integrity = source("generalUiIntegrityRuntime.ts");
+assert(!integrity.includes("addEventListener(\"keydown\""), "UI integrity monitor must not own dialog keyboard behavior");
+assert(!integrity.includes("dispatchEvent(new Event(\"resize\")"), "UI integrity monitor must not repair layout with synthetic resize events");
 
 const ownerIds = new Map<string, string[]>();
 for (const file of filesUnder(root)) {
@@ -98,10 +106,13 @@ for (const runtime of [
   "./leafletMapLifecycleRuntime",
   "./mapboxMapLifecycleRuntime",
   "./networkRequestPipelineRuntime",
+  "./dialogControllerRuntime",
+  "./generalUiIntegrityRuntime",
 ]) {
   const count = main.split(runtime).length - 1;
   assert(count === 1, `${runtime} must be loaded exactly once by main.tsx; found ${count}`);
 }
+assert(main.indexOf('import "./dialogControllerRuntime";') < main.indexOf('import "./generalUiIntegrityRuntime";'), "dialog behavior owner must load before integrity diagnostics");
 
 const directObserverFiles = filesUnder(root)
   .filter((file) => fs.readFileSync(file, "utf8").includes("new MutationObserver"))
@@ -110,7 +121,6 @@ const directObserverFiles = filesUnder(root)
   .sort();
 
 const allowedDirectObservers = new Set([
-  "generalUiIntegrityRuntime.ts",
   "sidebarWorkspaceControllerRuntime.ts",
   "unifiedProviderToolsRuntime.ts",
 ]);

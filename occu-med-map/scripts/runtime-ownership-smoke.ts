@@ -30,6 +30,8 @@ const requiredOwners: Record<string, string> = {
   "leafletMapLifecycleRuntime.ts": "leaflet-map-lifecycle",
   "mapboxMapLifecycleRuntime.ts": "mapbox-map-lifecycle",
   "networkRequestPipelineRuntime.ts": "network-request-pipeline",
+  "mapToolsPanelRegistry.ts": "map-tools-section-registry",
+  "mapToolsCommandPanel.ts": "map-tools-command-panel",
   "mapControlsBridgeRuntime.ts": "map-controls-bridge",
   "uploadedDatasetLabelRuntime.ts": "uploaded-dataset-labels",
   "providerLayerTelemetryRuntime.ts": "provider-layer-telemetry",
@@ -57,7 +59,6 @@ const sharedObserverConsumers = [
   "usDiagnosticsGate.ts",
   "modalLabelScrubber.ts",
   "mapEngineLoadingCleanupRuntime.ts",
-  "routePlannerControlsRuntime.ts",
   "mapEngineFinalFixRuntime.ts",
   "mapboxGlobeLoadHardeningRuntime.ts",
 ];
@@ -67,6 +68,10 @@ for (const file of sharedObserverConsumers) {
   assert(!text.includes("new MutationObserver"), `${file} still owns an independent MutationObserver`);
   assert(text.includes("subscribeToSharedDomObserver"), `${file} is not using the shared DOM observer`);
 }
+
+const routePlannerSource = source("routePlannerControlsRuntime.ts");
+assert(routePlannerSource.includes("registerMapToolsSection"), "route planner must register with the authoritative Map Tools section registry");
+assert(!routePlannerSource.includes("subscribeToSharedDomObserver"), "route planner must not scan the DOM after Map Tools ownership migration");
 
 const ownerIds = new Map<string, string[]>();
 for (const file of filesUnder(root)) {

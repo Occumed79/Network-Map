@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { chromium } from "playwright";
 
 const baseUrl = process.env.NETWORK_MAP_SMOKE_URL || "http://127.0.0.1:4173";
 const expectHardening = process.env.NETWORK_MAP_EXPECT_HARDENING === "1";
+const artifactDirectory = path.resolve(
+  process.env.NETWORK_MAP_SMOKE_ARTIFACT_DIR || "test-results/production-smoke",
+);
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({
   viewport: { width: 1440, height: 900 },
@@ -13,6 +18,7 @@ const consoleErrors = [];
 const pageErrors = [];
 const providerRequests = [];
 const failedRequests = [];
+const attemptDiagnostics = [];
 
 page.on("console", message => {
   if (message.type() === "error") consoleErrors.push(message.text());
@@ -64,6 +70,66 @@ async function hardeningIsReady() {
   });
 }
 
+async function captureAttempt(attempt, response, error) {
+  const browserState = await page.evaluate(() => ({
+    href: window.location.href,
+    title: document.title,
+    readyState: document.readyState,
+    bodyText: (document.body?.innerText || "").replace(/\s+/g, " ").trim().slice(0, 2000),
+    rootHtml: document.getElementById("root")?.innerHTML.slice(0, 2000) || "",
+    scriptSources: Array.from(document.scripts).map(script => script.src).filter(Boolean),
+    selectors: {
+      root: document.querySelectorAll("#root").length,
+      sidebar: document.querySelectorAll(".sidebar").length,
+      leaflet: document.querySelectorAll(".leaflet-container").length,
+      mapShell: document.querySelectorAll(".dual-engine-map-shell").length,
+      mapbox2dHost: document.querySelectorAll(".mapbox-2d-host").length,
+      mapboxMap: document.querySelectorAll(".mapboxgl-map").length,
+      mapboxCanvas: document.querySelectorAll(".mapboxgl-canvas").length,
+      loadingPanels: document.querySelectorAll(".dual-engine-loading").length,
+    },
+    globals: {
+      leafletLifecycle: Boolean(window.__NETWORK_MAP_LEAFLET_LIFECYCLE__),
+      mapboxLifecycle: Boolean(window.__NETWORK_MAP_MAPBOX_LIFECYCLE__),
+      sourcePipeline: Boolean(window.__NETWORK_MAP_MAPBOX_SOURCE_PIPELINE__),
+      requestPipeline: Boolean(window.__NETWORK_MAP_REQUEST_PIPELINE__),
+      overlaySync: Boolean(window.__NETWORK_MAP_OVERLAY_SYNC__),
+      sidebarWorkspaces: Boolean(window.__NETWORK_MAP_SIDEBAR_WORKSPACES__),
+    },
+  })).catch(stateError => ({ evaluationError: stateError instanceof Error ? stateError.message : String(stateError) }));
+
+  const record = {
+    attempt,
+    timestamp: new Date().toISOString(),
+    navigationStatus: response?.status?.() ?? null,
+    navigationUrl: response?.url?.() ?? null,
+    contentType: response?.headers?.()["content-type"] ?? null,
+    server: response?.headers?.().server ?? null,
+    error: error instanceof Error ? error.message : String(error),
+    browserState,
+    consoleErrors: [...consoleErrors],
+    pageErrors: [...pageErrors],
+    failedRequests: [...failedRequests],
+    providerRequests: [...providerRequests],
+  };
+  attemptDiagnostics.push(record);
+
+  await mkdir(artifactDirectory, { recursive: true });
+  await page.screenshot({
+    path: path.join(artifactDirectory, `attempt-${attempt}.png`),
+    fullPage: true,
+  }).catch(() => undefined);
+  await writeFile(
+    path.join(artifactDirectory, `attempt-${attempt}.json`),
+    `${JSON.stringify(record, null, 2)}\n`,
+  );
+  await writeFile(
+    path.join(artifactDirectory, "attempts.json"),
+    `${JSON.stringify(attemptDiagnostics, null, 2)}\n`,
+  );
+  console.error(`Production smoke attempt ${attempt} diagnostics:\n${JSON.stringify(record, null, 2)}`);
+}
+
 async function openApplication() {
   const attempts = expectHardening ? 6 : 1;
   let lastError;
@@ -72,10 +138,11 @@ async function openApplication() {
     pageErrors.length = 0;
     providerRequests.length = 0;
     failedRequests.length = 0;
+    let response;
     try {
-      await page.goto(attemptUrl(attempt), { waitUntil: "domcontentloaded", timeout: 120_000 });
-      await page.locator(".mapbox-2d-host .mapboxgl-map").waitFor({ state: "visible", timeout: 60_000 });
-      await page.locator(".mapbox-2d-host canvas").first().waitFor({ state: "visible", timeout: 60_000 });
+      response = await page.goto(attemptUrl(attempt), { waitUntil: "domcontentloaded", timeout: 120_000 });
+      await page.locator(".mapbox-2d-host .mapboxgl-map").waitFor({ state: "visible", timeout: 35_000 });
+      await page.locator(".mapbox-2d-host canvas").first().waitFor({ state: "visible", timeout: 35_000 });
       if (!expectHardening) return;
       await page.waitForFunction(() => {
         const sources = window.__NETWORK_MAP_MAPBOX_SOURCE_PIPELINE__?.getDiagnostics?.();
@@ -90,14 +157,20 @@ async function openApplication() {
           && window.__NETWORK_MAP_OVERLAY_SYNC__
           && window.__NETWORK_MAP_SIDEBAR_WORKSPACES__
         );
-      }, undefined, { timeout: 25_000 });
+      }, undefined, { timeout: 20_000 });
       if (await hardeningIsReady()) return;
+      throw new Error("Production hardening diagnostics were incomplete after the map became visible");
     } catch (error) {
       lastError = error;
+      await captureAttempt(attempt, response, error);
     }
-    if (attempt < attempts) await page.waitForTimeout(30_000);
+    if (attempt < attempts) await page.waitForTimeout(15_000);
   }
-  throw lastError || new Error("Production hardening diagnostics did not become ready");
+  const finalState = attemptDiagnostics.at(-1);
+  throw new Error(
+    `${lastError instanceof Error ? lastError.message : "Production application did not become ready"}\n`
+    + `Final production state: ${JSON.stringify(finalState, null, 2)}`,
+  );
 }
 
 try {

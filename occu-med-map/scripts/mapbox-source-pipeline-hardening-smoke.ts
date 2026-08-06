@@ -35,7 +35,11 @@ assert.match(pipeline, /writer: "external"/, "direct source.setData calls must b
 assert.match(pipeline, /writer: "initial"/, "initial GeoJSON payloads must pass through the pipeline");
 assert.match(pipeline, /write-suppressed/, "suppressed writes must be observable");
 assert.match(pipeline, /lastRequestedData/, "the pipeline must retain the last authoritative payload for late middleware replay");
-assert.match(pipeline, /applySourceData(state, state.lastRequestedData, state.lastWriter)/, "late middleware registration must replay the current source frame");
+assert.match(
+  pipeline,
+  /applySourceData\(state, state\.lastRequestedData, state\.lastWriter\)/,
+  "late middleware registration must replay the current source frame",
+);
 assert.match(pipeline, /__NETWORK_MAP_MAPBOX_SOURCE_PIPELINE__/, "source pipeline diagnostics must be exposed");
 
 const addSourceOwners: string[] = [];
@@ -53,8 +57,8 @@ assert.deepEqual(removeSourceOwners, ["src/mapboxSourcePipelineRuntime.ts"], "on
 assert.deepEqual(setDataAssignmentOwners, ["src/mapboxSourcePipelineRuntime.ts"], "only the source pipeline may replace GeoJSONSource.setData");
 
 const dualEngine = source("src/dualMapEngineRuntime.ts");
-assert.doesNotMatch(dualEngine, /setIntervals*(/, "the dual engine must not periodically rebuild overlay GeoJSON");
-assert.doesNotMatch(dualEngine, /source?.setData(collection)/, "the dual engine must not compete with authoritative overlay writes");
+assert.doesNotMatch(dualEngine, /setInterval\s*\(/, "the dual engine must not periodically rebuild overlay GeoJSON");
+assert.doesNotMatch(dualEngine, /source\?\.setData\(collection\)/, "the dual engine must not compete with authoritative overlay writes");
 assert.doesNotMatch(dualEngine, /collectRenderableLayers/, "the retired dual-engine overlay collector must remain removed");
 assert.match(dualEngine, /requestOverlaySync/, "the dual engine may request synchronization without owning source data");
 

@@ -21,7 +21,11 @@ declare global {
   }
 }
 
-const DIALOG_SELECTOR = ".modal-backdrop.open .modal-box, .modal-backdrop:not([hidden]) .modal-box";
+const DIALOG_SELECTOR = [
+  ".modal-backdrop.open .modal-box",
+  ".modal-backdrop:not([hidden]) .modal-box",
+  ".pdf-modal-wrap",
+].join(", ");
 const OVERLAY_SELECTOR = [
   ".command-search-results",
   ".local-pop-card",
@@ -29,10 +33,13 @@ const OVERLAY_SELECTOR = [
   ".leaflet-popup",
   ".mapboxgl-popup",
   ".modal-backdrop.open .modal-box",
+  ".pdf-modal-wrap",
+  ".pdf-toolbar",
 ].join(", ");
 const CLOSE_SELECTOR = [
   ".modal-close",
   ".rp-close",
+  ".pdf-toolbar button[aria-label*='close' i]",
   "button[aria-label*='close' i]",
   "button[title*='close' i]",
 ].join(", ");
@@ -47,9 +54,14 @@ const FOCUSABLE_SELECTOR = [
 
 let observer: MutationObserver | null = null;
 let frame: number | null = null;
+let resizeTimer: number | null = null;
 let lastAudit: GeneralUiAuditResult | null = null;
 let activeDialogs: DialogState[] = [];
 let dialogSequence = 0;
+
+function normalizedText(node: Element | null): string {
+  return (node?.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+}
 
 function isVisible(element: Element | null): element is HTMLElement {
   if (!(element instanceof HTMLElement)) return false;
@@ -78,7 +90,8 @@ function focusableElements(dialog: HTMLElement): HTMLElement[] {
 
 function titleFor(dialog: HTMLElement): HTMLElement | null {
   return dialog.querySelector<HTMLElement>(
-    ".modal-header h1, .modal-header h2, .modal-header h3, .modal-header strong, .modal-title, [data-dialog-title]",
+    ".modal-header h1, .modal-header h2, .modal-header h3, .modal-header strong, " +
+    ".modal-title, [data-dialog-title], .pdf-toolbar > span",
   );
 }
 
@@ -193,11 +206,19 @@ function audit(): GeneralUiAuditResult {
   return result;
 }
 
+function emitResize(): void {
+  window.dispatchEvent(new Event("resize"));
+}
+
 function recover(): void {
   syncDialogs();
-  window.requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
-  window.setTimeout(() => window.dispatchEvent(new Event("resize")), 120);
-  audit();
+  window.requestAnimationFrame(emitResize);
+  if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+  resizeTimer = window.setTimeout(() => {
+    resizeTimer = null;
+    emitResize();
+    audit();
+  }, 120);
 }
 
 function scheduleAudit(): void {
@@ -208,12 +229,19 @@ function scheduleAudit(): void {
   });
 }
 
+function closeButtonFor(dialog: HTMLElement): HTMLButtonElement | null {
+  const direct = dialog.querySelector<HTMLButtonElement>(CLOSE_SELECTOR);
+  if (direct) return direct;
+  return Array.from(dialog.querySelectorAll<HTMLButtonElement>("button"))
+    .find((button) => normalizedText(button) === "close") || null;
+}
+
 function handleKeydown(event: KeyboardEvent): void {
   const dialog = topDialog();
   if (!dialog) return;
 
   if (event.key === "Escape") {
-    const close = dialog.querySelector<HTMLButtonElement>(CLOSE_SELECTOR);
+    const close = closeButtonFor(dialog);
     if (close && !close.disabled) {
       event.preventDefault();
       close.click();
@@ -241,6 +269,10 @@ function handleKeydown(event: KeyboardEvent): void {
   }
 }
 
+function handleVisibilityChange(): void {
+  if (!document.hidden) scheduleAudit();
+}
+
 function install(): void {
   if (!document.body || observer) return;
   observer = new MutationObserver(scheduleAudit);
@@ -255,9 +287,7 @@ function install(): void {
   window.addEventListener("resize", scheduleAudit, { passive: true });
   window.addEventListener("orientationchange", scheduleAudit, { passive: true });
   window.addEventListener("focus", scheduleAudit, { passive: true });
-  document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) scheduleAudit();
-  });
+  document.addEventListener("visibilitychange", handleVisibilityChange);
 
   window.__NETWORK_MAP_GENERAL_UI__ = {
     audit,
@@ -273,9 +303,15 @@ function install(): void {
 function cleanup(): void {
   if (frame !== null) window.cancelAnimationFrame(frame);
   frame = null;
+  if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+  resizeTimer = null;
   observer?.disconnect();
   observer = null;
   document.removeEventListener("keydown", handleKeydown, true);
+  window.removeEventListener("resize", scheduleAudit);
+  window.removeEventListener("orientationchange", scheduleAudit);
+  window.removeEventListener("focus", scheduleAudit);
+  document.removeEventListener("visibilitychange", handleVisibilityChange);
 }
 
 if (document.readyState === "loading") {

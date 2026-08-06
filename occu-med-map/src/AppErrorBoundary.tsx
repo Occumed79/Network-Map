@@ -7,8 +7,10 @@ type FailureScreenProps = {
   onRetry?: () => void;
 };
 
+type AppErrorBoundaryProps = React.PropsWithChildren<Record<string, never>>;
+
 export function ApplicationFailureScreen({ title, message, onRetry }: FailureScreenProps) {
-  const copyDiagnostics = async () => {
+  const copyDiagnostics = async (): Promise<void> => {
     const diagnostics = window.__NETWORK_MAP_BOOT__?.snapshot();
     const payload = JSON.stringify(diagnostics || { message }, null, 2);
     try {
@@ -42,7 +44,7 @@ type ErrorBoundaryState = {
   error: Error | null;
 };
 
-export default class AppErrorBoundary extends React.Component<React.PropsWithChildren, ErrorBoundaryState> {
+export default class AppErrorBoundary extends React.Component<AppErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { error: null };
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {

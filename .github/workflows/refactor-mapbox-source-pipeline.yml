@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/refactor-mapbox-source-pipeline.yml
       - .github/scripts/refactor-mapbox-source-pipeline.mjs
+      - .github/scripts/fix-mapbox-source-refactor.mjs
       - occu-med-map/src/mapboxSourcePipelineRuntime.ts
       - occu-med-map/scripts/mapbox-source-pipeline-hardening-smoke.ts
 
@@ -29,6 +30,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - name: Correct refactor matcher
+        run: node .github/scripts/fix-mapbox-source-refactor.mjs
 
       - name: Apply source pipeline refactor
         run: node .github/scripts/refactor-mapbox-source-pipeline.mjs

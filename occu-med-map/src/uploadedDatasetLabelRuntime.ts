@@ -76,8 +76,8 @@ function popupAddress(card: Element): string {
   const children = Array.from(card.children);
   const addressNode = children.find((child, index) => {
     if (index === 0) return false;
-    const text = normalized(child.textContent);
-    return Boolean(text) && text !== "my clinic" && !/^\+?[\d\s().-]+$/.test(text);
+    const value = normalized(child.textContent);
+    return Boolean(value) && value !== "my clinic" && !/^\+?[\d\s().-]+$/.test(value);
   });
   return normalized(addressNode?.textContent);
 }
@@ -105,7 +105,7 @@ function relabelFooter(node: Element): void {
 
 function relabelVisiblePopups(root: ParentNode = document): void {
   const candidates = root.querySelectorAll(".leaflet-popup-content div");
-  for (const candidate of candidates) relabelFooter(candidate);
+  for (const candidate of Array.from(candidates)) relabelFooter(candidate);
 }
 
 async function captureUploadedDatasetLabels(
@@ -139,7 +139,7 @@ registerNetworkRequestMiddleware(
 
 const observer = new MutationObserver((mutations) => {
   for (const mutation of mutations) {
-    for (const node of mutation.addedNodes) {
+    for (const node of Array.from(mutation.addedNodes)) {
       if (!(node instanceof Element)) continue;
       relabelFooter(node);
       relabelVisiblePopups(node);

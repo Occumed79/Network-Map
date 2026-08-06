@@ -1,9 +1,8 @@
 import mapboxgl from "mapbox-gl";
+import { registerMapboxSourceDataMiddleware, type MapboxGeoJsonData } from "./mapboxSourcePipelineRuntime";
 
 const SOURCE_ID = "provider-location-search-results";
 const LAYER_ID = "provider-location-search-dots";
-const SOURCE_PATCH_FLAG = "__occumedProviderTypeSourcePatched";
-const WRAPPED_SOURCE_FLAG = "__occumedProviderTypeSetDataWrapped";
 
 type ProviderTypeKey =
   | "urgentCare"
@@ -256,42 +255,6 @@ function normalizeGeoJsonData(data: unknown): unknown {
   return data;
 }
 
-function wrapFinderSource(map: mapboxgl.Map, initialData?: unknown): void {
-  const source = map.getSource(SOURCE_ID) as (mapboxgl.GeoJSONSource & Record<string, unknown>) | undefined;
-  if (!source || source[WRAPPED_SOURCE_FLAG]) return;
-  const originalSetData = source.setData.bind(source);
-  source.setData = ((data: string | GeoJSON.GeoJSON) => originalSetData(normalizeGeoJsonData(data) as string | GeoJSON.GeoJSON)) as typeof source.setData;
-  source[WRAPPED_SOURCE_FLAG] = true;
-  if (initialData && typeof initialData === "object") {
-    originalSetData(normalizeGeoJsonData(initialData) as GeoJSON.GeoJSON);
-  }
-}
-
-function patchSourceRegistration(): void {
-  const prototype = mapboxgl.Map.prototype as any;
-  if (prototype[SOURCE_PATCH_FLAG]) return;
-  const originalAddSource = prototype.addSource;
-  prototype.addSource = function patchedAddSource(
-    this: mapboxgl.Map,
-    id: string,
-    source: mapboxgl.AnySourceData,
-  ): mapboxgl.Map {
-    let nextSource = source;
-    let initialData: unknown;
-    if (id === SOURCE_ID && source && source.type === "geojson") {
-      initialData = source.data;
-      nextSource = {
-        ...source,
-        data: normalizeGeoJsonData(source.data) as string | GeoJSON.GeoJSON,
-      } as mapboxgl.GeoJSONSourceSpecification;
-    }
-    const result = originalAddSource.call(this, id, nextSource);
-    if (id === SOURCE_ID) wrapFinderSource(this, initialData);
-    return result;
-  };
-  prototype[SOURCE_PATCH_FLAG] = true;
-}
-
 function popupHtml(properties: Record<string, unknown>): string {
   const classification = classify(properties);
   const rows = ([
@@ -332,6 +295,11 @@ export function normalizedProviderClickListener(event: mapboxgl.MapLayerMouseEve
     .addTo(event.target);
 }
 
-patchSourceRegistration();
+registerMapboxSourceDataMiddleware({
+  id: "provider-type-normalization",
+  sourceId: SOURCE_ID,
+  priority: 10,
+  transform: (_context, data) => normalizeGeoJsonData(data) as MapboxGeoJsonData,
+});
 
 export {};

@@ -1,8 +1,5 @@
 import { runWithoutObserverFeedback } from "./settledMutationObserver";
-
-const MAPBOX_PATCH_FLAG = "__networkMapDensityFilterPatched";
-const SOURCE_PATCH_FLAG = "__networkMapDensitySourcePatched";
-const MAPBOX_SCRIPT_PATCH_FLAG = "networkMapDensityPatchBound";
+import { registerMapboxSourceDataMiddleware } from "./mapboxSourcePipelineRuntime";
 
 function featureIsDensityBlob(feature: any): boolean {
   if (!feature || feature.geometry?.type !== "Point") return false;
@@ -24,38 +21,12 @@ function filterDensityFeatures(data: any): any {
   return features.length === data.features.length ? data : { ...data, features };
 }
 
-function patchNetworkOverlaySource(map: any, sourceId: string): void {
-  const source = map?.getSource?.(sourceId);
-  if (!source || source[SOURCE_PATCH_FLAG] || typeof source.setData !== "function") return;
-
-  const originalSetData = source.setData.bind(source);
-  source.setData = (data: any) => originalSetData(filterDensityFeatures(data));
-  source[SOURCE_PATCH_FLAG] = true;
-}
-
-function patchMapboxDensityMirroring(): void {
-  const MapCtor = (window as any).mapboxgl?.Map;
-  const prototype = MapCtor?.prototype;
-  if (!prototype || prototype[MAPBOX_PATCH_FLAG]) return;
-
-  const originalAddSource = prototype.addSource;
-  if (typeof originalAddSource !== "function") return;
-
-  prototype.addSource = function patchedAddSource(id: string, source: any): any {
-    const result = originalAddSource.call(this, id, source);
-    if (id === "network-overlays") patchNetworkOverlaySource(this, id);
-    return result;
-  };
-
-  prototype[MAPBOX_PATCH_FLAG] = true;
-}
-
-function bindMapboxScriptPatch(): void {
-  const script = document.getElementById("network-map-mapbox-gl-sdk") as HTMLScriptElement | null;
-  if (!script || script.dataset[MAPBOX_SCRIPT_PATCH_FLAG] === "true") return;
-  script.dataset[MAPBOX_SCRIPT_PATCH_FLAG] = "true";
-  script.addEventListener("load", patchMapboxDensityMirroring, { once: true });
-}
+registerMapboxSourceDataMiddleware({
+  id: "network-overlay-density-filter",
+  sourceId: "network-overlays",
+  priority: 20,
+  transform: (_context, data) => filterDensityFeatures(data),
+});
 
 function removeFinishedLoadingPanels(): void {
   document.querySelectorAll<HTMLElement>(".dual-engine-map-shell").forEach((shell) => {
@@ -93,7 +64,6 @@ document.addEventListener("click", (event) => {
   const button = target?.closest<HTMLButtonElement>(".map-dimension-toggle button[data-map-mode]");
   if (!button || button.disabled) return;
 
-  patchMapboxDensityMirroring();
   const requestedMode = button.dataset.mapMode === "3d" ? "3d" : "2d";
   const isAlreadyActive = button.classList.contains("active") || button.getAttribute("aria-pressed") === "true";
   if (!isAlreadyActive) {
@@ -113,22 +83,16 @@ const observer = new MutationObserver(() => runWithoutObserverFeedback(
   document.documentElement,
   observerOptions,
   () => {
-    bindMapboxScriptPatch();
-    patchMapboxDensityMirroring();
     removeFinishedLoadingPanels();
     cleanupFinishedTransition();
   },
 ));
 
 function initialize(): void {
-  bindMapboxScriptPatch();
-  patchMapboxDensityMirroring();
   removeFinishedLoadingPanels();
   cleanupFinishedTransition();
   observer.observe(document.documentElement, observerOptions);
 }
-
-bindMapboxScriptPatch();
 
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", initialize, { once: true });

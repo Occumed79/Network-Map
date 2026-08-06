@@ -21,6 +21,7 @@ function sourceFiles(directory: string): string[] {
 
 const main = source("src/main.tsx");
 const lifecycle = source("src/mapboxMapLifecycleRuntime.ts");
+const sourcePipeline = source("src/mapboxSourcePipelineRuntime.ts");
 const lifecycleImport = main.indexOf('import "./mapboxMapLifecycleRuntime";');
 const firstInitializerImport = Math.min(
   main.indexOf('import "./mapControlsBridgeRuntime";'),
@@ -76,12 +77,9 @@ assert.doesNotMatch(globeHardening, /patchMapboxReadiness/, "globe readiness mus
 assert.doesNotMatch(globeHardening, /prototype\.once\s*=/, "globe readiness must not patch Map.prototype.once");
 
 const overlay = source("src/mapOverlaySynchronizationControllerRuntime.ts");
-assert.doesNotMatch(
-  overlay,
-  /prototype\.remove\s*=\s*function/,
-  "overlay cleanup must be lifecycle-owned rather than patching Map.prototype.remove",
-);
-assert.match(overlay, /prototype\.addSource = function controlledAddSource/, "network overlay source ownership must remain narrowly scoped");
-assert.match(overlay, /prototype\.removeSource = function controlledRemoveSource/, "network overlay source cleanup must remain narrowly scoped");
+assert.doesNotMatch(overlay, /prototype\.(addSource|removeSource)\s*=/, "overlay source behavior must use the source pipeline");
+assert.match(overlay, /registerMapboxSourceDataMiddleware/, "overlay authority must register through the source pipeline");
+assert.match(sourcePipeline, /prototype\.addSource = function pipelineAddSource/, "source pipeline must own Map.prototype.addSource");
+assert.match(sourcePipeline, /prototype\.removeSource = function pipelineRemoveSource/, "source pipeline must own Map.prototype.removeSource");
 
 console.log("Mapbox map lifecycle hardening smoke test passed.");

@@ -1,14 +1,17 @@
 import L from "leaflet";
 import { registerLeafletMapInitializer } from "./leafletMapLifecycleRuntime";
 import { registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
+import {
+  getMapboxSourcePipelineDiagnostics,
+  registerMapboxSourceDataMiddleware,
+  setMapboxGeoJsonSourceData,
+} from "./mapboxSourcePipelineRuntime";
 import mapboxgl from "mapbox-gl";
 
 const NETWORK_SOURCE_ID = "network-overlays";
 const MAX_MIRRORED_FEATURES = 75_000;
 const SYNC_DEBOUNCE_MS = 90;
 const EMPTY_RELEASE_GRACE_MS = 360;
-const MAP_PATCH_FLAG = "__occumedUnifiedOverlayControllerMapPatched";
-const SOURCE_PATCH_FLAG = "__occumedUnifiedOverlayControllerSourcePatched";
 const STABILITY_EVENT = "occumed:provider-explorer-stability";
 
 type StabilitySnapshot = {
@@ -27,14 +30,7 @@ type OverlayControllerStats = {
   pending: boolean;
 };
 
-type GuardedSource = mapboxgl.GeoJSONSource & {
-  [SOURCE_PATCH_FLAG]?: boolean;
-};
-
 type SourceState = {
-  source: GuardedSource;
-  originalSetData: mapboxgl.GeoJSONSource["setData"];
-  externalWritesSuppressed: number;
   lastAppliedRevision: number;
 };
 
@@ -308,29 +304,6 @@ function bindCanonicalMap(map: L.Map): void {
   markDirty("canonical-map-ready", 0);
 }
 
-function wrapNetworkSource(instance: mapboxgl.Map): SourceState | null {
-  const source = instance.getSource(NETWORK_SOURCE_ID) as GuardedSource | undefined;
-  if (!source || typeof source.setData !== "function") return null;
-
-  const existing = sourceStates.get(instance);
-  if (existing?.source === source) return existing;
-
-  const state: SourceState = {
-    source,
-    originalSetData: source.setData.bind(source),
-    externalWritesSuppressed: 0,
-    lastAppliedRevision: -1,
-  };
-
-  source.setData = ((_data: string | GeoJSON.GeoJSON) => {
-    state.externalWritesSuppressed += 1;
-    return source;
-  }) as mapboxgl.GeoJSONSource["setData"];
-  source[SOURCE_PATCH_FLAG] = true;
-  sourceStates.set(instance, state);
-  return state;
-}
-
 function ensureOverlayLayers(instance: mapboxgl.Map): void {
   if (!instance.isStyleLoaded()) return;
 
@@ -385,15 +358,24 @@ function ensureOverlayLayers(instance: mapboxgl.Map): void {
     });
   }
 
-  wrapNetworkSource(instance);
 }
 
 function applyCollectionToMap(instance: mapboxgl.Map): void {
   if (!instance.isStyleLoaded()) return;
   ensureOverlayLayers(instance);
-  const state = wrapNetworkSource(instance);
-  if (!state || state.lastAppliedRevision === appliedRevision) return;
-  state.originalSetData(lastCollection);
+  let state = sourceStates.get(instance);
+  if (!state) {
+    state = { lastAppliedRevision: -1 };
+    sourceStates.set(instance, state);
+  }
+  if (state.lastAppliedRevision === appliedRevision) return;
+  const source = setMapboxGeoJsonSourceData(
+    instance,
+    NETWORK_SOURCE_ID,
+    lastCollection,
+    "overlay-synchronization",
+  );
+  if (!source) return;
   state.lastAppliedRevision = appliedRevision;
 }
 
@@ -458,48 +440,6 @@ function untrackMap(instance: mapboxgl.Map): void {
   trackedMaps.delete(instance);
 }
 
-function installMapboxOwnership(): void {
-  const prototype = mapboxgl.Map.prototype as any;
-  if (prototype[MAP_PATCH_FLAG]) return;
-
-  const originalAddSource = prototype.addSource as (
-    this: mapboxgl.Map,
-    id: string,
-    source: mapboxgl.AnySourceData,
-  ) => mapboxgl.Map;
-  const originalRemoveSource = prototype.removeSource as (
-    this: mapboxgl.Map,
-    id: string,
-  ) => mapboxgl.Map;
-
-  prototype.addSource = function controlledAddSource(
-    this: mapboxgl.Map,
-    id: string,
-    source: mapboxgl.AnySourceData,
-  ): mapboxgl.Map {
-    const result = originalAddSource.call(this, id, source);
-    if (id === NETWORK_SOURCE_ID) {
-      wrapNetworkSource(this);
-      window.queueMicrotask(() => {
-        ensureOverlayLayers(this);
-        applyCollectionToMap(this);
-      });
-    }
-    return result;
-  };
-
-  prototype.removeSource = function controlledRemoveSource(
-    this: mapboxgl.Map,
-    id: string,
-  ): mapboxgl.Map {
-    if (id === NETWORK_SOURCE_ID) sourceStates.delete(this);
-    return originalRemoveSource.call(this, id);
-  };
-
-
-  prototype[MAP_PATCH_FLAG] = true;
-}
-
 function onStabilityEvent(event: Event): void {
   const phase = String((event as CustomEvent<{ phase?: string }>).detail?.phase || "");
   if (phase === "commit-end") {
@@ -527,11 +467,17 @@ function onVisibilityChange(): void {
 }
 
 function totalExternalWritesSuppressed(): number {
-  let count = 0;
-  sourceStates.forEach((state) => { count += state.externalWritesSuppressed; });
-  return count;
+  const middleware = getMapboxSourcePipelineDiagnostics().middlewares
+    .find((item) => item.id === "network-overlay-authority");
+  return middleware?.suppressedWrites || 0;
 }
 
+registerMapboxSourceDataMiddleware({
+  id: "network-overlay-authority",
+  sourceId: NETWORK_SOURCE_ID,
+  priority: 10,
+  allowWrite: (context) => context.writer === "initial" || context.writer === "overlay-synchronization",
+});
 registerLeafletMapInitializer({
   id: "overlay-synchronization",
   priority: 30,
@@ -545,7 +491,6 @@ registerMapboxMapInitializer({
     return () => untrackMap(map);
   },
 });
-installMapboxOwnership();
 document.addEventListener(STABILITY_EVENT, onStabilityEvent);
 document.addEventListener("visibilitychange", onVisibilityChange);
 

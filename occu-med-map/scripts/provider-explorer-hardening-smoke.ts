@@ -11,18 +11,21 @@ function source(relativePath: string): string {
 }
 
 const main = source("src/main.tsx");
-const stability = source("src/providerExplorerLayerStabilityRuntime.ts");
+const stability = source("src/providerExplorerStabilityRuntime.ts");
 const overlayController = source("src/mapOverlaySynchronizationControllerRuntime.ts");
 
+const pipelineImport = main.indexOf('import "./networkRequestPipelineRuntime";');
 const dualMapImport = main.indexOf('import "./dualMapEngineRuntime";');
-const stabilityImport = main.indexOf('import "./providerExplorerLayerStabilityRuntime";');
+const stabilityImport = main.indexOf('import "./providerExplorerStabilityRuntime";');
 const controllerImport = main.indexOf('import "./mapOverlaySynchronizationControllerRuntime";');
 const appImport = main.indexOf('import App from "./App";');
 
-assert.ok(dualMapImport >= 0, "dualMapEngineRuntime must be imported");
+assert.ok(pipelineImport >= 0, "unified request pipeline must be imported");
+assert.ok(dualMapImport > pipelineImport, "request pipeline must initialize before map request middleware");
 assert.ok(stabilityImport > dualMapImport, "Provider Explorer stability must load after the dual-map prototype patches");
 assert.ok(controllerImport > stabilityImport, "Unified overlay controller must load after the aggregate transaction runtime");
 assert.ok(appImport > controllerImport, "All rendering guards must load before React mounts App");
+assert.doesNotMatch(main, /providerExplorerLayerStabilityRuntime/, "fetch-patching Provider Explorer runtime must remain retired");
 assert.doesNotMatch(main, /completeProviderPinMirrorRuntime/, "legacy complete-pin mirror must remain retired");
 assert.doesNotMatch(main, /providerExplorerMapboxCommitGuardRuntime/, "legacy Mapbox commit guard must remain retired");
 
@@ -32,6 +35,8 @@ assert.match(stability, /REQUEST_TIMEOUT_MS\s*=\s*25_000/, "Provider Explorer vi
 assert.match(stability, /Ignored stale Provider Explorer/, "stale responses must be rejected before drawing");
 assert.match(stability, /activeAggregateDrawRequestId/, "nested draw clears must preserve the active aggregate transaction");
 assert.match(stability, /commitGroup\(group, "explicit-clear"\)/, "switching away from aggregate mode must still clear intentionally");
+assert.match(stability, /registerNetworkRequestMiddleware\("provider-explorer-stability"/, "Provider Explorer must register with the shared request pipeline");
+assert.doesNotMatch(stability, /window\.fetch\s*=/, "Provider Explorer must not own window.fetch");
 assert.doesNotMatch(stability, /text\.includes\("8px points"\)/, "hardening must not depend on visible button labels");
 assert.doesNotMatch(stability, /text\.includes\("clear filters"\)/, "hardening must not depend on visible button labels");
 

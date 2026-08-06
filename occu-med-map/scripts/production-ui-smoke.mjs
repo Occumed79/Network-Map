@@ -11,7 +11,6 @@ const artifactDirectory = path.resolve(
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({
   viewport: { width: 1440, height: 900 },
-  extraHTTPHeaders: { "Cache-Control": "no-cache" },
 });
 const page = await context.newPage();
 const consoleErrors = [];
@@ -35,12 +34,21 @@ page.on("requestfailed", request => {
 
 await page.addInitScript(() => {
   window.__smoke = { mutations: 0, longTasks: 0 };
-  new MutationObserver(records => { window.__smoke.mutations += records.length; })
-    .observe(document.documentElement, { subtree: true, childList: true, attributes: true });
-  try {
-    new PerformanceObserver(list => { window.__smoke.longTasks += list.getEntries().length; })
-      .observe({ type: "longtask", buffered: true });
-  } catch { /* Long Task API is optional. */ }
+
+  const startObservers = () => {
+    const target = document.documentElement;
+    if (!target || window.__smoke.observersStarted) return;
+    window.__smoke.observersStarted = true;
+    new MutationObserver(records => { window.__smoke.mutations += records.length; })
+      .observe(target, { subtree: true, childList: true, attributes: true });
+    try {
+      new PerformanceObserver(list => { window.__smoke.longTasks += list.getEntries().length; })
+        .observe({ type: "longtask", buffered: true });
+    } catch { /* Long Task API is optional. */ }
+  };
+
+  if (document.documentElement) startObservers();
+  else document.addEventListener("DOMContentLoaded", startObservers, { once: true });
 });
 
 function attemptUrl(attempt) {

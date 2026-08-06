@@ -1,6 +1,7 @@
 import L from "leaflet";
 import { registerLeafletMapInitializer } from "./leafletMapLifecycleRuntime";
 import { mapboxDirections, mapboxGeocode } from "./mapboxServices";
+import { registerRuntimeOwner, subscribeToSharedDomObserver } from "./runtimeControllerRegistry";
 
 type Point = { lat: number; lng: number; label?: string };
 
@@ -11,7 +12,6 @@ let toPoint: Point | null = null;
 let fromMarker: L.Marker | null = null;
 let toMarker: L.Marker | null = null;
 let routeLayer: L.LayerGroup | null = null;
-let observer: MutationObserver | null = null;
 let scanTimer: number | null = null;
 
 function status(text: string): void {
@@ -233,28 +233,38 @@ function bindMap(map: L.Map): void {
   scheduleScan(0);
 }
 
-function startObserver(): void {
-  if (observer || !document.body) return;
-  observer = new MutationObserver(() => scheduleScan(30));
-  observer.observe(document.body, { childList: true, subtree: true });
+function installRoutePlannerControls(): void {
+  if (!registerRuntimeOwner("route-planner-controls", "Map Tools From/To route planner")) return;
+
+  window.addEventListener("occumed:route-to-point", ((event: Event) => {
+    const detail = (event as CustomEvent<Point>).detail;
+    if (!canonicalMap || !detail || !Number.isFinite(detail.lat) || !Number.isFinite(detail.lng)) return;
+    const point = { lat: detail.lat, lng: detail.lng, label: detail.label || "Selected provider" };
+    setPoint(canonicalMap, "to", point);
+    if (fromPoint) void drawRoute(canonicalMap, fromPoint, point);
+    else status("Destination selected. Enter the starting location, then press Route.");
+  }) as EventListener);
+
+  registerLeafletMapInitializer({
+    id: "route-planner-controls",
+    priority: 50,
+    initialize: bindMap,
+  });
+
+  subscribeToSharedDomObserver("route-planner-controls", (mutations) => {
+    if (!mutations.some((mutation) => {
+      const target = mutation.target instanceof Element ? mutation.target : null;
+      return Boolean(target?.closest(".occumed-map-tools-panel, .occumed-sidebar-workspace-host, .sidebar"));
+    })) return;
+    scheduleScan(30);
+  });
   scheduleScan();
 }
 
-window.addEventListener("occumed:route-to-point", ((event: Event) => {
-  const detail = (event as CustomEvent<Point>).detail;
-  if (!canonicalMap || !detail || !Number.isFinite(detail.lat) || !Number.isFinite(detail.lng)) return;
-  const point = { lat: detail.lat, lng: detail.lng, label: detail.label || "Selected provider" };
-  setPoint(canonicalMap, "to", point);
-  if (fromPoint) void drawRoute(canonicalMap, fromPoint, point);
-  else status("Destination selected. Enter the starting location, then press Route.");
-}) as EventListener);
-
-registerLeafletMapInitializer({
-  id: "route-planner-controls",
-  priority: 50,
-  initialize: bindMap,
-});
-if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", startObserver, { once: true });
-else startObserver();
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", installRoutePlannerControls, { once: true });
+} else {
+  installRoutePlannerControls();
+}
 
 export {};

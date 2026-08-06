@@ -68,12 +68,16 @@ async function openApplication() {
   const attempts = expectHardening ? 6 : 1;
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    consoleErrors.length = 0;
+    pageErrors.length = 0;
+    providerRequests.length = 0;
+    failedRequests.length = 0;
     try {
       await page.goto(attemptUrl(attempt), { waitUntil: "domcontentloaded", timeout: 120_000 });
       await page.locator(".mapbox-2d-host .mapboxgl-map").waitFor({ state: "visible", timeout: 60_000 });
       await page.locator(".mapbox-2d-host canvas").first().waitFor({ state: "visible", timeout: 60_000 });
       if (!expectHardening) return;
-      await page.waitForFunction(async () => {
+      await page.waitForFunction(() => {
         const sources = window.__NETWORK_MAP_MAPBOX_SOURCE_PIPELINE__?.getDiagnostics?.();
         const sourceIds = new Set(sources?.middlewares?.map(item => item.id) || []);
         return Boolean(
@@ -86,7 +90,7 @@ async function openApplication() {
           && window.__NETWORK_MAP_OVERLAY_SYNC__
           && window.__NETWORK_MAP_SIDEBAR_WORKSPACES__
         );
-      }, { timeout: 25_000 });
+      }, undefined, { timeout: 25_000 });
       if (await hardeningIsReady()) return;
     } catch (error) {
       lastError = error;
@@ -162,7 +166,7 @@ try {
   await mapToolsTab.click({ timeout: 10_000 });
   await page.waitForFunction(() =>
     window.__NETWORK_MAP_SIDEBAR_WORKSPACES__?.getActiveTab?.() === "mapTools",
-  { timeout: 10_000 });
+  undefined, { timeout: 10_000 });
   assert.equal(
     await page.locator(".sidebar > .occumed-sidebar-workspace-host > .occumed-map-tools-panel").count(),
     1,
@@ -177,7 +181,7 @@ try {
   await providersTab.click({ timeout: 10_000 });
   await page.waitForFunction(() =>
     window.__NETWORK_MAP_SIDEBAR_WORKSPACES__?.getActiveTab?.() === "providers",
-  { timeout: 10_000 });
+  undefined, { timeout: 10_000 });
 
   const twoD = page.locator(".map-dimension-toggle button[data-map-mode='2d']");
   assert.equal(await twoD.isEnabled(), true, "2D map control must remain enabled");

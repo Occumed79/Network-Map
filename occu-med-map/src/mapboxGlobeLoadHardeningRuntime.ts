@@ -7,15 +7,11 @@ declare global {
 const MAPBOX_VERSION = "3.25.0";
 const MAPBOX_SCRIPT_ID = "network-map-mapbox-gl-sdk";
 const MAPBOX_CSS_ID = "network-map-mapbox-gl-css";
-const PATCH_FLAG = "__networkMapLoadReadinessPatched";
 
 let preloadPromise: Promise<void> | null = null;
 
 function ensureMapboxAssets(): Promise<void> {
-  if (window.mapboxgl) {
-    patchMapboxReadiness();
-    return Promise.resolve();
-  }
+  if (window.mapboxgl) return Promise.resolve();
   if (preloadPromise) return preloadPromise;
 
   if (!document.getElementById(MAPBOX_CSS_ID)) {
@@ -44,7 +40,6 @@ function ensureMapboxAssets(): Promise<void> {
       if (settled) return;
       if (window.mapboxgl) {
         settled = true;
-        patchMapboxReadiness();
         resolve();
         return;
       }
@@ -69,41 +64,6 @@ function ensureMapboxAssets(): Promise<void> {
   });
 
   return preloadPromise;
-}
-
-function patchMapboxReadiness(): void {
-  const MapCtor = window.mapboxgl?.Map;
-  const prototype = MapCtor?.prototype as any;
-  if (!prototype || prototype[PATCH_FLAG]) return;
-
-  const originalOnce = prototype.once;
-  if (typeof originalOnce !== "function") return;
-
-  prototype.once = function patchedOnce(type: string, listener?: (...args: any[]) => void): any {
-    if (type !== "load" || typeof listener !== "function") {
-      return originalOnce.call(this, type, listener);
-    }
-
-    let fired = false;
-    const complete = (event?: any) => {
-      if (fired) return;
-      fired = true;
-      listener.call(this, event || { type: "style.load", target: this });
-    };
-
-    originalOnce.call(this, "load", complete);
-    originalOnce.call(this, "style.load", complete);
-
-    try {
-      if (this.isStyleLoaded?.()) queueMicrotask(() => complete());
-    } catch {
-      // The normal load/style.load listeners remain active.
-    }
-
-    return this;
-  };
-
-  prototype[PATCH_FLAG] = true;
 }
 
 function prepareGlobeContainer(button: HTMLButtonElement): void {

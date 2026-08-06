@@ -1,5 +1,6 @@
 import L from "leaflet";
 import { registerLeafletMapInitializer } from "./leafletMapLifecycleRuntime";
+import { registerMapboxMap, unregisterMapboxMap } from "./mapboxMapLifecycleRuntime";
 import mapboxgl from "mapbox-gl";
 
 type MapMode = "2d" | "3d";
@@ -275,6 +276,7 @@ async function createMapboxMap(mode: MapMode): Promise<void> {
     dragRotate: !is2d,
     pitchWithRotate: !is2d,
   });
+  registerMapboxMap(instance, { mode });
 
   if (is2d) mapbox2dMap = instance;
   else mapboxGlobeMap = instance;
@@ -618,14 +620,22 @@ function syncLeafletCameraFromMapbox(instance: mapboxgl.Map, mode: MapMode): voi
 }
 
 function destroyMapbox2dView(): void {
-  mapbox2dMap?.remove();
+  const instance = mapbox2dMap;
   mapbox2dMap = null;
+  if (instance) {
+    unregisterMapboxMap(instance);
+    instance.remove();
+  }
   mapbox2dHost?.classList.remove("ready", "engine-render-ready");
 }
 
 function destroyMapboxGlobeView(): void {
-  mapboxGlobeMap?.remove();
+  const instance = mapboxGlobeMap;
   mapboxGlobeMap = null;
+  if (instance) {
+    unregisterMapboxMap(instance);
+    instance.remove();
+  }
   mapboxGlobeHost?.classList.remove("ready", "engine-render-ready");
 }
 

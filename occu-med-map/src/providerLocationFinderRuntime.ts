@@ -1,10 +1,11 @@
 import mapboxgl from "mapbox-gl";
 import { mapboxGeocode, type MapboxBounds, type MapboxPlace } from "./mapboxServices";
+import { registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
+import { normalizedProviderClickListener } from "./providerTypeNormalizationRuntime";
 
 const SOURCE_ID = "provider-location-search-results";
 const LAYER_ID = "provider-location-search-dots";
 const PANEL_FLAG = "providerLocationFinderReady";
-const PATCH_FLAG = "__occumedProviderLocationFinderPatched";
 const FLATGEOBUF_URL = "/api/healthsites/flatgeobuf";
 const FLATGEOBUF_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/flatgeobuf@4.4.0/dist/flatgeobuf-geojson.min.js";
 const PAGE_SIZE = 5_000;
@@ -176,18 +177,7 @@ function bindInteractions(map: mapboxgl.Map): void {
   clickBoundMaps.add(map);
   map.on("mouseenter", LAYER_ID, () => { map.getCanvas().style.cursor = "pointer"; });
   map.on("mouseleave", LAYER_ID, () => { map.getCanvas().style.cursor = ""; });
-  map.on("click", LAYER_ID, (event) => {
-    const raw = event.features?.[0];
-    if (!raw || raw.geometry.type !== "Point") return;
-    const coordinates = raw.geometry.coordinates.slice() as [number, number];
-    while (Math.abs(event.lngLat.lng - coordinates[0]) > 180) {
-      coordinates[0] += event.lngLat.lng > coordinates[0] ? 360 : -360;
-    }
-    new mapboxgl.Popup({ closeButton: true, maxWidth: "360px" })
-      .setLngLat(coordinates)
-      .setHTML(popupHtml(raw.properties as unknown as ResultProperties))
-      .addTo(map);
-  });
+  map.on("click", LAYER_ID, normalizedProviderClickListener);
 }
 
 function ensureLayer(map: mapboxgl.Map): void {
@@ -233,37 +223,31 @@ function pushCollection(collection: ResultCollection): void {
   }
 }
 
-function registerMap(map: mapboxgl.Map, originalOn: (...args: any[]) => mapboxgl.Map): void {
-  if (trackedMaps.has(map)) return;
+function registerMap(map: mapboxgl.Map): () => void {
+  if (trackedMaps.has(map)) return () => undefined;
   trackedMaps.add(map);
-  originalOn.call(map, "load", () => {
+
+  const onLoad = () => {
     ensureLayer(map);
     pushCollection(latestCollection);
-  });
-  originalOn.call(map, "style.load", () => {
+  };
+  const onStyleLoad = () => {
     ensureLayer(map);
     pushCollection(latestCollection);
-  });
+  };
+
+  map.on("load", onLoad);
+  map.on("style.load", onStyleLoad);
   if (map.loaded()) {
     ensureLayer(map);
     pushCollection(latestCollection);
   }
-}
 
-function patchMapboxRegistration(): void {
-  const prototype = mapboxgl.Map.prototype as any;
-  if (prototype[PATCH_FLAG]) return;
-  const originalOn = prototype.on;
-  prototype.on = function patchedOn(this: mapboxgl.Map, ...args: any[]): mapboxgl.Map {
-    registerMap(this, originalOn);
-    return originalOn.apply(this, args);
+  return () => {
+    map.off("load", onLoad);
+    map.off("style.load", onStyleLoad);
+    trackedMaps.delete(map);
   };
-  const originalRemove = prototype.remove;
-  prototype.remove = function patchedRemove(this: mapboxgl.Map, ...args: any[]): unknown {
-    trackedMaps.delete(this);
-    return originalRemove.apply(this, args);
-  };
-  prototype[PATCH_FLAG] = true;
 }
 
 function loadFlatGeobuf(): Promise<FlatGeobufApi> {
@@ -763,7 +747,11 @@ function startObserver(): void {
   window.setTimeout(() => scheduleScan(0), 500);
 }
 
-patchMapboxRegistration();
+registerMapboxMapInitializer({
+  id: "provider-location-finder",
+  priority: 40,
+  initialize: registerMap,
+});
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", startObserver, { once: true });
 else startObserver();
 

@@ -1,4 +1,5 @@
 import mapboxgl from "mapbox-gl";
+import { registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
 
 type BasemapStyle = "streets-v12" | "light-v11" | "outdoors-v12" | "satellite-streets-v12";
 
@@ -16,33 +17,14 @@ const LABEL_BY_STYLE: Record<BasemapStyle, string> = {
   "satellite-streets-v12": "Satellite",
 };
 
-const PATCH_FLAG = "__occumedMapControlsBridgePatched";
 const trackedMaps = new Set<mapboxgl.Map>();
 let selectedStyle: BasemapStyle = "streets-v12";
 let observer: MutationObserver | null = null;
 let scanTimer: number | null = null;
 
-function registerMap(instance: mapboxgl.Map): void {
+function registerMap(instance: mapboxgl.Map): () => void {
   trackedMaps.add(instance);
-}
-
-function patchMapboxRegistration(): void {
-  const prototype = mapboxgl.Map.prototype as any;
-  if (prototype[PATCH_FLAG]) return;
-
-  const originalOn = prototype.on;
-  prototype.on = function trackedOn(this: mapboxgl.Map, ...args: any[]) {
-    registerMap(this);
-    return originalOn.apply(this, args);
-  };
-
-  const originalRemove = prototype.remove;
-  prototype.remove = function trackedRemove(this: mapboxgl.Map, ...args: any[]) {
-    trackedMaps.delete(this);
-    return originalRemove.apply(this, args);
-  };
-
-  prototype[PATCH_FLAG] = true;
+  return () => { trackedMaps.delete(instance); };
 }
 
 function mapStyleUri(style: BasemapStyle): string {
@@ -245,7 +227,11 @@ function startObserver(): void {
   window.setTimeout(() => scheduleScan(), 1_000);
 }
 
-patchMapboxRegistration();
+registerMapboxMapInitializer({
+  id: "map-controls-bridge",
+  priority: 10,
+  initialize: registerMap,
+});
 document.addEventListener("click", handleBasemapClick, true);
 
 if (document.readyState === "loading") {

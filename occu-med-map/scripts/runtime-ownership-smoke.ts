@@ -42,6 +42,7 @@ const requiredOwners: Record<string, string> = {
   "mapEngineLoadingCleanupRuntime.ts": "map-engine-loading-cleanup",
   "routePlannerControlsRuntime.ts": "route-planner-controls",
   "healthsitesFlatDotsRuntime.ts": "healthsites-flat-dots",
+  "providerLocationFinderRuntime.ts": "provider-location-finder",
   "mapEngineFinalFixRuntime.ts": "map-engine-final-fixes",
   "mapboxGlobeLoadHardeningRuntime.ts": "mapbox-globe-load-hardening",
 };
@@ -70,7 +71,7 @@ for (const file of sharedObserverConsumers) {
   assert(text.includes("subscribeToSharedDomObserver"), `${file} is not using the shared DOM observer`);
 }
 
-for (const file of ["routePlannerControlsRuntime.ts", "healthsitesFlatDotsRuntime.ts"]) {
+for (const file of ["routePlannerControlsRuntime.ts", "healthsitesFlatDotsRuntime.ts", "providerLocationFinderRuntime.ts"]) {
   const text = source(file);
   assert(text.includes("registerMapToolsSection"), `${file} must register with the authoritative Map Tools section registry`);
   assert(!text.includes("new MutationObserver"), `${file} must not own a DOM observer after Map Tools ownership migration`);
@@ -110,7 +111,6 @@ const directObserverFiles = filesUnder(root)
 
 const allowedDirectObservers = new Set([
   "generalUiIntegrityRuntime.ts",
-  "providerLocationFinderRuntime.ts",
   "sidebarWorkspaceControllerRuntime.ts",
   "unifiedProviderToolsRuntime.ts",
 ]);

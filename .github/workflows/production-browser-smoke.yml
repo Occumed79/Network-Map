@@ -43,6 +43,51 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Capture Render deployment identity
+        env:
+          NETWORK_MAP_URL: https://network-map-tool-mqib.onrender.com
+          EXPECTED_COMMIT: ${{ github.event.pull_request.base.sha || github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          mkdir -p test-results/production-smoke
+          cache_buster="$(date +%s)-${GITHUB_RUN_ATTEMPT}"
+          curl --fail-with-body --location --silent --show-error \
+            --dump-header test-results/production-smoke/root-headers.txt \
+            --output test-results/production-smoke/root.html \
+            "${NETWORK_MAP_URL}/?deployment-identity=${cache_buster}" || true
+          curl --fail-with-body --location --silent --show-error \
+            --dump-header test-results/production-smoke/health-headers.txt \
+            --output test-results/production-smoke/health.json \
+            "${NETWORK_MAP_URL}/api/health?deployment-identity=${cache_buster}" || true
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from 'node:fs/promises';
+
+          async function optional(path) {
+            try { return await readFile(path, 'utf8'); } catch { return ''; }
+          }
+
+          const rootHtml = await optional('test-results/production-smoke/root.html');
+          const healthText = await optional('test-results/production-smoke/health.json');
+          let health = null;
+          try { health = healthText ? JSON.parse(healthText) : null; } catch {}
+
+          const title = rootHtml.match(/<title>([^<]*)<\/title>/i)?.[1] || '';
+          const identity = {
+            expectedCommit: process.env.EXPECTED_COMMIT || '',
+            deployedCommit: health?.commit || null,
+            health,
+            title,
+            expectedTitlePresent: rootHtml.includes('Occu-Med Network Management Map'),
+            tanStackStarterPresent: rootHtml.includes('TanStack Start Starter'),
+            networkMapNotFoundPresent: rootHtml.includes('Network Map — Page Not Found'),
+            rootBytes: Buffer.byteLength(rootHtml),
+          };
+          await writeFile(
+            'test-results/production-smoke/deployment-identity.json',
+            `${JSON.stringify(identity, null, 2)}\n`,
+          );
+          console.log(JSON.stringify(identity, null, 2));
+          NODE
+
       - name: Install Chromium
         run: pnpm --filter @workspace/occu-med-map exec playwright install --with-deps chromium
 

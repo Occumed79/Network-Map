@@ -1,4 +1,5 @@
 import L from "leaflet";
+import { registerLeafletMapInitializer } from "./leafletMapLifecycleRuntime";
 
 type DiagnosticLabel =
   | "State Labels"
@@ -151,15 +152,6 @@ function bindMap(map: L.Map): void {
   });
 }
 
-function patchLeafletMapFactory(): void {
-  const originalMap = L.map.bind(L);
-  (L as any).map = (element: string | HTMLElement, options?: L.MapOptions) => {
-    const map = originalMap(element, options);
-    bindMap(map);
-    return map;
-  };
-}
-
 function patchGeoJsonStyleRefresh(): void {
   const prototype = L.GeoJSON.prototype as L.GeoJSON & {
     __occumedDiagnosticsStylePatched?: boolean;
@@ -191,7 +183,11 @@ function installDiagnosticDomListeners(): void {
   }, true);
 }
 
-patchLeafletMapFactory();
+registerLeafletMapInitializer({
+  id: "diagnostics-reliability",
+  priority: 20,
+  initialize: bindMap,
+});
 patchGeoJsonStyleRefresh();
 installDiagnosticDomListeners();
 

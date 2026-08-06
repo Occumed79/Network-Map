@@ -1,4 +1,5 @@
 import L from "leaflet";
+import { registerLeafletMapInitializer } from "./leafletMapLifecycleRuntime";
 import { mapboxDirections, mapboxGeocode } from "./mapboxServices";
 
 type Point = { lat: number; lng: number; label?: string };
@@ -232,15 +233,6 @@ function bindMap(map: L.Map): void {
   scheduleScan(0);
 }
 
-function patchLeafletFactory(): void {
-  const originalMap = L.map.bind(L);
-  (L as any).map = (element: string | HTMLElement, options?: L.MapOptions) => {
-    const map = originalMap(element, options);
-    bindMap(map);
-    return map;
-  };
-}
-
 function startObserver(): void {
   if (observer || !document.body) return;
   observer = new MutationObserver(() => scheduleScan(30));
@@ -257,7 +249,11 @@ window.addEventListener("occumed:route-to-point", ((event: Event) => {
   else status("Destination selected. Enter the starting location, then press Route.");
 }) as EventListener);
 
-patchLeafletFactory();
+registerLeafletMapInitializer({
+  id: "route-planner-controls",
+  priority: 50,
+  initialize: bindMap,
+});
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", startObserver, { once: true });
 else startObserver();
 

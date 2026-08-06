@@ -1,10 +1,10 @@
 import L from "leaflet";
+import { registerLeafletMapInitializer } from "./leafletMapLifecycleRuntime";
 import { hasMapboxToken, mapboxDirections, mapboxGeocode, mapboxIsochrone, mapboxReverseGeocode } from "./mapboxServices";
 
 type Point = { lat: number; lng: number; label?: string };
 type RankedPin = Point & { name: string; driveMiles: number; driveMinutes: number; coordinates: Array<[number, number]> };
 
-const originalMap = L.map.bind(L);
 const mapboxToken = import.meta.env.VITE_MAPBOX_TOKEN || "";
 let installed = false;
 let origin: Point | null = null;
@@ -351,11 +351,11 @@ function installOnMap(map: L.Map): void {
 export function installMapToolsCommandPanel(): void {
   if (installed || !hasMapboxToken()) return;
   installed = true;
-  (L as any).map = (...args: Parameters<typeof L.map>) => {
-    const map = originalMap(...args);
-    window.setTimeout(() => installOnMap(map), 0);
-    return map;
-  };
+  registerLeafletMapInitializer({
+    id: "map-tools-command-panel",
+    priority: 40,
+    initialize: (map) => { window.setTimeout(() => installOnMap(map), 0); },
+  });
 }
 
 installMapToolsCommandPanel();

@@ -1,4 +1,5 @@
 import L from "leaflet";
+import { registerLeafletMapInitializer } from "./leafletMapLifecycleRuntime";
 import mapboxgl from "mapbox-gl";
 
 const NETWORK_SOURCE_ID = "network-overlays";
@@ -306,15 +307,6 @@ function bindCanonicalMap(map: L.Map): void {
   markDirty("canonical-map-ready", 0);
 }
 
-function installLeafletRegistration(): void {
-  const originalMapFactory = L.map.bind(L);
-  (L as any).map = (element: string | HTMLElement, options?: L.MapOptions) => {
-    const map = originalMapFactory(element, options);
-    bindCanonicalMap(map);
-    return map;
-  };
-}
-
 function wrapNetworkSource(instance: mapboxgl.Map): SourceState | null {
   const source = instance.getSource(NETWORK_SOURCE_ID) as GuardedSource | undefined;
   if (!source || typeof source.setData !== "function") return null;
@@ -545,7 +537,11 @@ function totalExternalWritesSuppressed(): number {
   return count;
 }
 
-installLeafletRegistration();
+registerLeafletMapInitializer({
+  id: "overlay-synchronization",
+  priority: 30,
+  initialize: bindCanonicalMap,
+});
 installMapboxOwnership();
 document.addEventListener(STABILITY_EVENT, onStabilityEvent);
 document.addEventListener("visibilitychange", onVisibilityChange);

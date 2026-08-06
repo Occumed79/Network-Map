@@ -1,7 +1,7 @@
 import L from "leaflet";
+import { registerLeafletMapInitializer } from "../../leafletMapLifecycleRuntime";
 import { installLeafletEtaRouteLayer } from "./leafletEtaRouteLayer";
 
-const originalMap = L.map.bind(L);
 let installed = false;
 
 function nativeDriveTimeEnabled(): boolean {
@@ -15,11 +15,11 @@ function installOnMap(map: L.Map): void {
 export function installNativeDriveTimeRuntime(): void {
   if (installed || !nativeDriveTimeEnabled()) return;
   installed = true;
-  (L as any).map = (...args: Parameters<typeof L.map>) => {
-    const map = originalMap(...args);
-    window.setTimeout(() => installOnMap(map), 0);
-    return map;
-  };
+  registerLeafletMapInitializer({
+    id: "native-drive-time",
+    priority: 60,
+    initialize: (map) => { window.setTimeout(() => installOnMap(map), 0); },
+  });
 }
 
 installNativeDriveTimeRuntime();

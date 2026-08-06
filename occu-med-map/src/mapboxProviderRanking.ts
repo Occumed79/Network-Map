@@ -1,11 +1,11 @@
 import L from "leaflet";
+import { registerLeafletMapInitializer } from "./leafletMapLifecycleRuntime";
 import { hasMapboxToken, mapboxDirections, mapboxReverseGeocode } from "./mapboxServices";
 
 type Point = { lat: number; lng: number; label?: string };
 type Candidate = Point & { layer: L.Layer; straightMiles: number; name: string };
 type RankedCandidate = Candidate & { driveMiles: number; driveMinutes: number; coordinates: Array<[number, number]> };
 
-const originalMap = L.map.bind(L);
 let installed = false;
 let origin: Point | null = null;
 let rankLayer: L.LayerGroup | null = null;
@@ -206,11 +206,11 @@ function installOnMap(map: L.Map): void {
 export function installMapboxProviderRanking(): void {
   if (installed || !hasMapboxToken()) return;
   installed = true;
-  (L as any).map = (...args: Parameters<typeof L.map>) => {
-    const map = originalMap(...args);
-    window.setTimeout(() => installOnMap(map), 0);
-    return map;
-  };
+  registerLeafletMapInitializer({
+    id: "mapbox-provider-ranking",
+    priority: 80,
+    initialize: (map) => { window.setTimeout(() => installOnMap(map), 0); },
+  });
 }
 
 installMapboxProviderRanking();

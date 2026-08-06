@@ -1,6 +1,6 @@
 import L from "leaflet";
+import { registerLeafletMapInitializer } from "./leafletMapLifecycleRuntime";
 
-const originalMap = L.map.bind(L);
 let installed = false;
 let densityLayer: L.LayerGroup | null = null;
 let statusNode: HTMLDivElement | null = null;
@@ -94,11 +94,11 @@ function installOnMap(map: L.Map): void {
 export function installProviderDensityField(): void {
   if (installed) return;
   installed = true;
-  (L as any).map = (...args: Parameters<typeof L.map>) => {
-    const map = originalMap(...args);
-    window.setTimeout(() => installOnMap(map), 0);
-    return map;
-  };
+  registerLeafletMapInitializer({
+    id: "provider-density-field",
+    priority: 70,
+    initialize: (map) => { window.setTimeout(() => installOnMap(map), 0); },
+  });
 }
 
 installProviderDensityField();

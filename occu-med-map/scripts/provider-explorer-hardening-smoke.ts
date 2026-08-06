@@ -12,17 +12,19 @@ function source(relativePath: string): string {
 
 const main = source("src/main.tsx");
 const stability = source("src/providerExplorerLayerStabilityRuntime.ts");
-const mapboxGuard = source("src/providerExplorerMapboxCommitGuardRuntime.ts");
+const overlayController = source("src/mapOverlaySynchronizationControllerRuntime.ts");
 
 const dualMapImport = main.indexOf('import "./dualMapEngineRuntime";');
 const stabilityImport = main.indexOf('import "./providerExplorerLayerStabilityRuntime";');
-const guardImport = main.indexOf('import "./providerExplorerMapboxCommitGuardRuntime";');
+const controllerImport = main.indexOf('import "./mapOverlaySynchronizationControllerRuntime";');
 const appImport = main.indexOf('import App from "./App";');
 
 assert.ok(dualMapImport >= 0, "dualMapEngineRuntime must be imported");
 assert.ok(stabilityImport > dualMapImport, "Provider Explorer stability must load after the dual-map prototype patches");
-assert.ok(guardImport > stabilityImport, "Mapbox commit guard must load after the aggregate transaction runtime");
-assert.ok(appImport > guardImport, "All rendering guards must load before React mounts App");
+assert.ok(controllerImport > stabilityImport, "Unified overlay controller must load after the aggregate transaction runtime");
+assert.ok(appImport > controllerImport, "All rendering guards must load before React mounts App");
+assert.doesNotMatch(main, /completeProviderPinMirrorRuntime/, "legacy complete-pin mirror must remain retired");
+assert.doesNotMatch(main, /providerExplorerMapboxCommitGuardRuntime/, "legacy Mapbox commit guard must remain retired");
 
 assert.match(stability, /stagedLayers:\s*L\.Layer\[\]/, "aggregate replacements must use a staging buffer");
 assert.match(stability, /Superseded by a newer Provider Explorer/, "latest-request-wins cancellation must remain enabled");
@@ -33,9 +35,10 @@ assert.match(stability, /commitGroup\(group, "explicit-clear"\)/, "switching awa
 assert.doesNotMatch(stability, /text\.includes\("8px points"\)/, "hardening must not depend on visible button labels");
 assert.doesNotMatch(stability, /text\.includes\("clear filters"\)/, "hardening must not depend on visible button labels");
 
-assert.match(mapboxGuard, /NETWORK_SOURCE_ID\s*=\s*"network-overlays"/, "Mapbox guard must wrap the mirrored overlay source");
-assert.match(mapboxGuard, /runtime\?\.requestActive/, "Mapbox guard must preserve the last good frame during aggregate requests");
-assert.match(mapboxGuard, /runtime\?\.commitDepth/, "Mapbox guard must buffer snapshots during atomic commits");
-assert.match(mapboxGuard, /RELEASE_GRACE_MS\s*=\s*240/, "Mapbox empty-frame release must remain delayed beyond the overlay debounce");
+assert.match(overlayController, /STABILITY_EVENT\s*=\s*"occumed:provider-explorer-stability"/, "overlay controller must consume aggregate transaction events");
+assert.match(overlayController, /snapshot\.requestActive/, "overlay controller must hold the last frame during aggregate requests");
+assert.match(overlayController, /snapshot\.commitDepth/, "overlay controller must avoid rebuilding during atomic commits");
+assert.match(overlayController, /EMPTY_RELEASE_GRACE_MS\s*=\s*360/, "temporary empty frames must remain delayed beyond the layer debounce");
+assert.match(overlayController, /phase === "commit-end"/, "successful aggregate commits must trigger one final mirror rebuild");
 
 console.log("Provider Explorer hardening smoke test passed.");

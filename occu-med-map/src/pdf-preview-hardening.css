@@ -1,0 +1,153 @@
+/* Report preview is a full application dialog, not a loose page overlay. */
+
+.pdf-modal-wrap {
+  box-sizing: border-box !important;
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 13000 !important;
+  display: flex !important;
+  width: 100vw !important;
+  height: 100dvh !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding:
+    max(10px, env(safe-area-inset-top))
+    max(10px, env(safe-area-inset-right))
+    max(10px, env(safe-area-inset-bottom))
+    max(10px, env(safe-area-inset-left)) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain !important;
+  background: rgba(1, 6, 12, 0.88) !important;
+  backdrop-filter: blur(16px) saturate(125%) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(125%) !important;
+}
+
+.pdf-toolbar,
+.pdf-tip {
+  box-sizing: border-box !important;
+  width: min(920px, 100%) !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  flex: 0 0 auto !important;
+  color: var(--ui-text) !important;
+  background: linear-gradient(180deg, #091827, #061421) !important;
+  border: 1px solid var(--ui-border) !important;
+  box-shadow: 0 14px 36px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.035) !important;
+}
+
+.pdf-toolbar {
+  position: sticky !important;
+  top: max(0px, env(safe-area-inset-top)) !important;
+  z-index: 3 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  padding: 10px 12px !important;
+  border-radius: 12px !important;
+}
+
+.pdf-toolbar > * {
+  min-width: 0 !important;
+}
+
+.pdf-toolbar > div {
+  display: flex !important;
+  min-width: 0 !important;
+  flex-wrap: wrap !important;
+  justify-content: flex-end !important;
+  gap: 7px !important;
+}
+
+.pdf-toolbar button {
+  min-width: 0 !important;
+  min-height: 36px !important;
+  max-width: 100% !important;
+  padding: 7px 12px !important;
+  color: var(--ui-text) !important;
+  background: var(--ui-control) !important;
+  border: 1px solid var(--ui-border) !important;
+  border-radius: 9px !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035) !important;
+  white-space: normal !important;
+}
+
+.pdf-toolbar button:hover {
+  color: #ffffff !important;
+  background: var(--ui-control-hover) !important;
+  border-color: var(--ui-border-strong) !important;
+}
+
+.pdf-tip {
+  padding: 8px 12px !important;
+  color: var(--ui-muted) !important;
+  border-radius: 10px !important;
+  overflow-wrap: anywhere !important;
+}
+
+.pdf-tip strong {
+  color: #9edff4 !important;
+}
+
+.pdf-modal-wrap > div:last-child {
+  box-sizing: border-box !important;
+  width: min(920px, 100%) !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  min-height: 0 !important;
+  flex: 1 1 auto !important;
+  padding: 0 !important;
+}
+
+.pdf-modal-wrap iframe {
+  box-sizing: border-box !important;
+  display: block !important;
+  width: min(860px, 100%) !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: min(82dvh, 1040px) !important;
+  min-height: 420px !important;
+  margin: 0 auto !important;
+  border: 1px solid rgba(82, 157, 190, 0.32) !important;
+  border-radius: 10px !important;
+  background: #ffffff !important;
+  box-shadow: 0 20px 58px rgba(0,0,0,.48) !important;
+}
+
+@media (max-width: 768px) {
+  .pdf-modal-wrap {
+    gap: 8px !important;
+    padding:
+      max(8px, env(safe-area-inset-top))
+      max(8px, env(safe-area-inset-right))
+      max(8px, env(safe-area-inset-bottom))
+      max(8px, env(safe-area-inset-left)) !important;
+  }
+
+  .pdf-toolbar {
+    position: relative !important;
+    top: auto !important;
+    align-items: stretch !important;
+    flex-direction: column !important;
+  }
+
+  .pdf-toolbar > div {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    justify-content: stretch !important;
+  }
+
+  .pdf-toolbar button:last-child {
+    grid-column: 1 / -1 !important;
+  }
+
+  .pdf-modal-wrap iframe {
+    width: 100% !important;
+    height: calc(100dvh - 230px) !important;
+    min-height: 320px !important;
+  }
+}

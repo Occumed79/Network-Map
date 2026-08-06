@@ -3,6 +3,7 @@ import {
   type NetworkRequestContext,
   type NetworkRequestNext,
 } from "./networkRequestPipelineRuntime";
+import { registerRuntimeOwner, subscribeToSharedDomObserver } from "./runtimeControllerRegistry";
 
 type UploadedProvider = Record<string, unknown> & {
   name?: unknown;
@@ -147,31 +148,32 @@ async function captureUploadedDatasetLabels(
   return response;
 }
 
-registerNetworkRequestMiddleware(
-  "uploaded-dataset-popup-labels",
-  captureUploadedDatasetLabels,
-  -50,
-);
+function installUploadedDatasetLabelRuntime(): void {
+  if (!registerRuntimeOwner("uploaded-dataset-labels", "Uploaded dataset labels in upload controls and map popups")) return;
 
-const observer = new MutationObserver((mutations) => {
-  for (const mutation of mutations) {
-    for (const node of Array.from(mutation.addedNodes)) {
-      if (!(node instanceof Element)) continue;
-      relabelFooter(node);
-      relabelVisiblePopups(node);
-      relabelUploadControls(node);
+  registerNetworkRequestMiddleware(
+    "uploaded-dataset-popup-labels",
+    captureUploadedDatasetLabels,
+    -50,
+  );
+
+  subscribeToSharedDomObserver("uploaded-dataset-labels", (mutations) => {
+    for (const mutation of mutations) {
+      for (const node of Array.from(mutation.addedNodes)) {
+        if (!(node instanceof Element)) continue;
+        relabelFooter(node);
+        relabelVisiblePopups(node);
+        relabelUploadControls(node);
+      }
     }
-  }
-});
+  });
 
-function installPopupObserver(): void {
-  if (!document.body) {
-    window.addEventListener("DOMContentLoaded", installPopupObserver, { once: true });
-    return;
-  }
-  observer.observe(document.body, { childList: true, subtree: true });
   relabelVisiblePopups();
   relabelUploadControls();
 }
 
-installPopupObserver();
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", installUploadedDatasetLabelRuntime, { once: true });
+} else {
+  installUploadedDatasetLabelRuntime();
+}

@@ -31,7 +31,11 @@ assert.ok(pipelineImport >= 0, "Mapbox source pipeline must be imported");
 assert.ok(pipelineImport < firstSourceMiddlewareImport, "source pipeline must load before source middleware registrations");
 assert.match(pipeline, /orderedMiddleware/, "source middleware order must be deterministic");
 assert.match(pipeline, /left\.priority - right\.priority/, "source middleware priorities must control execution order");
-assert.match(pipeline, /writer: "external"/, "direct source.setData calls must be classified as external writes");
+assert.match(
+  pipeline,
+  /applySourceData\(state, data, "external"\)/,
+  "direct source.setData calls must be classified as external writes",
+);
 assert.match(pipeline, /writer: "initial"/, "initial GeoJSON payloads must pass through the pipeline");
 assert.match(pipeline, /write-suppressed/, "suppressed writes must be observable");
 assert.match(pipeline, /lastRequestedData/, "the pipeline must retain the last authoritative payload for late middleware replay");

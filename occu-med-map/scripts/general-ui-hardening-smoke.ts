@@ -16,6 +16,8 @@ const visualCss = source("src/general-ui-visual-consistency.css");
 const pdfCss = source("src/pdf-preview-hardening.css");
 const runtime = source("src/generalUiIntegrityRuntime.ts");
 const productionSmoke = source("scripts/production-ui-smoke.mjs");
+const productionPdfSmoke = source("scripts/production-pdf-ui-smoke.mjs");
+const packageJson = source("package.json");
 
 assert.match(main, /import "\.\/general-ui-hardening\.css";/, "general UI CSS must load");
 assert.match(main, /import "\.\/general-ui-visual-consistency\.css";/, "final visual consistency CSS must load");
@@ -71,5 +73,11 @@ assert.match(productionSmoke, /modal-backdrop open/, "production UI smoke must e
 assert.match(productionSmoke, /Escape/, "production UI smoke must exercise dialog keyboard closing");
 assert.match(productionSmoke, /width: 390, height: 844/, "production UI smoke must include a mobile viewport");
 assert.match(productionSmoke, /smoke-search-results/, "production UI smoke must exercise long search results");
+
+assert.match(productionPdfSmoke, /pdf-modal-wrap smoke-pdf-preview/, "production smoke must exercise report preview geometry");
+assert.match(productionPdfSmoke, /desktop report preview/, "report preview must be checked on desktop");
+assert.match(productionPdfSmoke, /mobile report preview/, "report preview must be checked on mobile");
+assert.match(productionPdfSmoke, /keyboard focus must remain inside preview/, "report preview must trap focus");
+assert.match(packageJson, /production-ui-smoke\.mjs && node scripts\/production-pdf-ui-smoke\.mjs/, "post-deployment UI suite must include report preview acceptance");
 
 console.log("General UI hardening smoke test passed.");

@@ -18,6 +18,15 @@ import "./dualMapEngineRuntime";
 import "./providerExplorerStabilityRuntime";
 import "./mapOverlaySynchronizationControllerRuntime";
 import App from "./App";
+import AppErrorBoundary, { ApplicationFailureScreen } from "./AppErrorBoundary";
+import {
+  installGlobalBootDiagnostics,
+  loadOptionalRuntime,
+  markApplicationInteractive,
+  markOptionalRuntimesComplete,
+  recordBootFailure,
+  setBootPhase,
+} from "./startupDiagnostics";
 import "./dual-map-engines.css";
 import "./dual-map-transition-opaque.css";
 import "./map-engine-final-fixes.css";
@@ -52,17 +61,15 @@ import "./liveFinderControlCleanupRuntime";
 import "./general-ui-hardening.css";
 import "./general-ui-visual-consistency.css";
 import "./pdf-preview-hardening.css";
+import "./startup-hardening.css";
 import "./generalUiIntegrityRuntime";
 
 async function safeLoad(name: string, loader: () => Promise<unknown>): Promise<void> {
-  try {
-    await loader();
-  } catch (error) {
-    console.error(`Network Map optional runtime failed: ${name}`, error);
-  }
+  await loadOptionalRuntime(name, loader);
 }
 
 async function loadOptionalRuntimes(): Promise<void> {
+  setBootPhase("optional-runtimes");
   await safeLoad("Mapbox load hardening", () => import("./mapboxGlobeLoadHardeningRuntime"));
   await safeLoad("transition sound and cleanup", () => import("./mapEngineFinalFixRuntime"));
   await safeLoad("map transition", () => import("./dualMapTransitionRuntime"));
@@ -75,33 +82,72 @@ async function loadOptionalRuntimes(): Promise<void> {
     safeLoad("U.S. diagnostics", () => import("./usDiagnosticsGate")),
     safeLoad("drive time", () => import("./features/driveTime/nativeDriveTimeRuntime")),
   ]);
+  markOptionalRuntimesComplete();
+}
+
+function scheduleOptionalRuntimes(): void {
+  const idleWindow = window as typeof window & {
+    requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+  };
+  const start = () => { void loadOptionalRuntimes(); };
+  if (idleWindow.requestIdleCallback) {
+    idleWindow.requestIdleCallback(start, { timeout: 1600 });
+    return;
+  }
+  window.setTimeout(start, 180);
 }
 
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("Network Map root element is missing");
+rootElement.setAttribute("aria-busy", "true");
+installGlobalBootDiagnostics();
 const root = createRoot(rootElement);
 const phaseTwoPreview = new URLSearchParams(window.location.search).get("p2-preview") === "1";
 
-async function boot(): Promise<void> {
-  if (!phaseTwoPreview) {
-    root.render(<App />);
-    window.setTimeout(() => { void loadOptionalRuntimes(); }, 0);
-    return;
-  }
-
-  try {
-    await Promise.all([
-      import("./phaseTwoMapBridge"),
-      import("./phase-two-shell.css"),
-      import("./phase-two-control-fix.css"),
-    ]);
-    const { default: PhaseTwoShell } = await import("./PhaseTwoShell");
-    root.render(<PhaseTwoShell><App /></PhaseTwoShell>);
-  } catch (error) {
-    console.error("Phase Two preview failed; loading standard map", error);
-    root.render(<App />);
-  }
-  window.setTimeout(() => { void loadOptionalRuntimes(); }, 0);
+function renderStandardApplication(): void {
+  root.render(
+    <AppErrorBoundary>
+      <App />
+    </AppErrorBoundary>,
+  );
 }
 
-void boot();
+async function boot(): Promise<void> {
+  setBootPhase("rendering");
+  if (!phaseTwoPreview) {
+    renderStandardApplication();
+  } else {
+    try {
+      await Promise.all([
+        import("./phaseTwoMapBridge"),
+        import("./phase-two-shell.css"),
+        import("./phase-two-control-fix.css"),
+      ]);
+      const { default: PhaseTwoShell } = await import("./PhaseTwoShell");
+      root.render(
+        <AppErrorBoundary>
+          <PhaseTwoShell><App /></PhaseTwoShell>
+        </AppErrorBoundary>,
+      );
+    } catch (error) {
+      recordBootFailure("phase-two-preview", error, false);
+      console.error("Phase Two preview failed; loading standard map", error);
+      renderStandardApplication();
+    }
+  }
+
+  window.requestAnimationFrame(() => markApplicationInteractive(rootElement));
+  scheduleOptionalRuntimes();
+}
+
+void boot().catch((error) => {
+  recordBootFailure("application-boot", error, true);
+  setBootPhase("failed");
+  rootElement.setAttribute("aria-busy", "false");
+  root.render(
+    <ApplicationFailureScreen
+      title="Network Map could not start"
+      message="The application stopped safely before entering a frozen state. Reload to retry the startup sequence."
+    />,
+  );
+});

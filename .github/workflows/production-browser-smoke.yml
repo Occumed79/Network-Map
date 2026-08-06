@@ -50,7 +50,7 @@ jobs:
         env:
           NETWORK_MAP_SMOKE_URL: https://network-map-tool-mqib.onrender.com
           NETWORK_MAP_EXPECT_HARDENING: "1"
-          NETWORK_MAP_SMOKE_ARTIFACT_DIR: test-results/production-smoke
+          NETWORK_MAP_SMOKE_ARTIFACT_DIR: ${{ github.workspace }}/test-results/production-smoke
         run: pnpm --filter @workspace/occu-med-map test:ui-production
 
       - name: Upload production browser evidence

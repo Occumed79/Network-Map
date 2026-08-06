@@ -12,14 +12,20 @@ function source(relativePath: string): string {
 
 const main = source("src/main.tsx");
 const css = source("src/general-ui-hardening.css");
+const visualCss = source("src/general-ui-visual-consistency.css");
 const runtime = source("src/generalUiIntegrityRuntime.ts");
 const productionSmoke = source("scripts/production-ui-smoke.mjs");
 
-assert.match(main, /import "\.\/general-ui-hardening\.css";/, "general UI CSS must load last");
+assert.match(main, /import "\.\/general-ui-hardening\.css";/, "general UI CSS must load");
+assert.match(main, /import "\.\/general-ui-visual-consistency\.css";/, "final visual consistency CSS must load");
 assert.match(main, /import "\.\/generalUiIntegrityRuntime";/, "general UI integrity runtime must load");
 assert.ok(
   main.indexOf('import "./general-ui-hardening.css";') > main.indexOf('import "./sidebar-workspace-final-fixes.css";'),
   "general UI CSS must load after feature-specific styling",
+);
+assert.ok(
+  main.indexOf('import "./general-ui-visual-consistency.css";') > main.indexOf('import "./general-ui-hardening.css";'),
+  "visual consistency CSS must be the final styling authority",
 );
 
 assert.match(css, /html,\s*body,\s*#root,\s*\.app-wrap\s*\{[^}]*overflow: hidden !important;/s, "document shell must prohibit horizontal overflow");
@@ -30,6 +36,11 @@ assert.match(css, /@media \(max-width: 768px\)[\s\S]*\.modal-box\s*\{[^}]*height
 assert.match(css, /\.leaflet-popup-content\s*\{[^}]*overflow-y: auto !important;/s, "Leaflet popup content must scroll instead of escaping the viewport");
 assert.match(css, /@media \(prefers-reduced-motion: reduce\)/, "reduced-motion preferences must be respected");
 assert.match(css, /button:focus-visible[\s\S]*outline:/, "interactive controls must retain visible keyboard focus");
+
+assert.match(visualCss, /\.local-pop-card\s*\{[^}]*right:/s, "map information cards must stay on the map side");
+assert.match(visualCss, /\.modal-box,\s*\.modal-box \*/, "legacy pale modal text rules must be overridden");
+assert.match(visualCss, /background: linear-gradient\(180deg, #091827 0%, #050d16 100%\)/, "dialogs must use the shared navy shell");
+assert.match(visualCss, /\.leaflet-popup-content-wrapper,[\s\S]*\.mapboxgl-popup-content/, "both map engines must share popup styling");
 
 assert.equal((runtime.match(/new MutationObserver/g) || []).length, 1, "general UI integrity must use one lifecycle observer");
 assert.doesNotMatch(runtime, /setInterval\s*\(/, "general UI integrity must not poll continuously");
@@ -45,5 +56,7 @@ assert.match(runtime, /beforeunload.*cleanup/s, "runtime observers and listeners
 assert.match(productionSmoke, /__NETWORK_MAP_GENERAL_UI__/, "production UI smoke must inspect general UI health");
 assert.match(productionSmoke, /modal-backdrop open/, "production UI smoke must exercise modal geometry");
 assert.match(productionSmoke, /Escape/, "production UI smoke must exercise dialog keyboard closing");
+assert.match(productionSmoke, /width: 390, height: 844/, "production UI smoke must include a mobile viewport");
+assert.match(productionSmoke, /smoke-search-results/, "production UI smoke must exercise long search results");
 
 console.log("General UI hardening smoke test passed.");

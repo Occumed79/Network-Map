@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const root = path.resolve(process.cwd(), "src");
+const SHARED_OBSERVER_OWNER = "runtimeControllerRegistry.ts";
 
 function filesUnder(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -19,10 +20,11 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
-const registrySource = source("runtimeControllerRegistry.ts");
+const registrySource = source(SHARED_OBSERVER_OWNER);
 assert(registrySource.includes("registerRuntimeOwner"), "runtime owner registry is missing registerRuntimeOwner");
 assert(registrySource.includes("subscribeToSharedDomObserver"), "runtime owner registry is missing the shared DOM observer");
 assert(registrySource.includes("duplicateAttempts"), "runtime owner registry must record blocked duplicate registrations");
+assert((registrySource.match(/new MutationObserver/g) || []).length === 1, "runtime owner registry must own exactly one shared MutationObserver");
 
 const requiredOwners: Record<string, string> = {
   "leafletMapLifecycleRuntime.ts": "leaflet-map-lifecycle",
@@ -88,6 +90,7 @@ for (const runtime of [
 const directObserverFiles = filesUnder(root)
   .filter((file) => fs.readFileSync(file, "utf8").includes("new MutationObserver"))
   .map((file) => path.relative(root, file))
+  .filter((file) => file !== SHARED_OBSERVER_OWNER)
   .sort();
 
 const allowedDirectObservers = new Set([
@@ -103,4 +106,4 @@ const allowedDirectObservers = new Set([
 const unexpectedObservers = directObserverFiles.filter((file) => !allowedDirectObservers.has(file));
 assert(!unexpectedObservers.length, `Unexpected independent MutationObserver owners: ${unexpectedObservers.join(", ")}`);
 
-console.log(`Runtime ownership smoke passed: ${ownerIds.size} registered owners; ${directObserverFiles.length} legacy direct observers remain on the explicit migration allowlist.`);
+console.log(`Runtime ownership smoke passed: ${ownerIds.size} registered owners; one shared observer owner; ${directObserverFiles.length} legacy direct observers remain on the explicit migration allowlist.`);

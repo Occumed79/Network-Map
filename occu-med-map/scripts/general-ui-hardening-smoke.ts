@@ -14,7 +14,8 @@ const main = source("src/main.tsx");
 const css = source("src/general-ui-hardening.css");
 const visualCss = source("src/general-ui-visual-consistency.css");
 const pdfCss = source("src/pdf-preview-hardening.css");
-const runtime = source("src/generalUiIntegrityRuntime.ts");
+const runtimeEntry = source("src/generalUiIntegrityRuntime.ts");
+const runtime = source("src/generalUiIntegrityController.ts");
 const productionSmoke = source("scripts/production-ui-smoke.mjs");
 const productionPdfSmoke = source("scripts/production-pdf-ui-smoke.mjs");
 const packageJson = source("package.json");
@@ -23,6 +24,7 @@ assert.match(main, /import "\.\/general-ui-hardening\.css";/, "general UI CSS mu
 assert.match(main, /import "\.\/general-ui-visual-consistency\.css";/, "final visual consistency CSS must load");
 assert.match(main, /import "\.\/pdf-preview-hardening\.css";/, "report preview hardening must load");
 assert.match(main, /import "\.\/generalUiIntegrityRuntime";/, "general UI integrity runtime must load");
+assert.match(runtimeEntry, /import "\.\/generalUiIntegrityController";/, "the compatibility entry must load the authoritative controller");
 assert.ok(
   main.indexOf('import "./general-ui-hardening.css";') > main.indexOf('import "./sidebar-workspace-final-fixes.css";'),
   "general UI CSS must load after feature-specific styling",
@@ -57,6 +59,10 @@ assert.match(pdfCss, /@media \(max-width: 768px\)[\s\S]*grid-template-columns: r
 
 assert.equal((runtime.match(/new MutationObserver/g) || []).length, 1, "general UI integrity must use one lifecycle observer");
 assert.doesNotMatch(runtime, /setInterval\s*\(/, "general UI integrity must not poll continuously");
+assert.match(runtime, /new ResizeObserver\(scheduleAudit\)/, "geometry changes must use ResizeObserver instead of mutation polling");
+assert.match(runtime, /MIN_AUDIT_INTERVAL_MS/, "UI audits must be throttled");
+assert.match(runtime, /mutationsAffectAudit/, "unrelated DOM mutations must be ignored");
+assert.match(runtime, /AUDIT_RELEVANT_SELECTOR/, "mutation filtering must target known UI ownership surfaces");
 assert.match(runtime, /__NETWORK_MAP_GENERAL_UI__/, "general UI runtime must expose diagnostics");
 assert.match(runtime, /document\.documentElement\.dataset\.occumedGeneralUi/, "general UI health must be externally inspectable");
 assert.match(runtime, /\.pdf-modal-wrap/, "report preview must participate in dialog integrity checks");
@@ -66,6 +72,7 @@ assert.match(runtime, /event\.key !== "Tab"/, "modal keyboard focus must remain 
 assert.match(runtime, /document overflow/, "runtime must detect viewport overflow");
 assert.match(runtime, /offscreen overlay/, "runtime must detect offscreen overlays");
 assert.match(runtime, /removeEventListener\("resize", scheduleAudit\)/, "runtime resize listener must be removed during cleanup");
+assert.match(runtime, /resizeObserver\?\.disconnect\(\)/, "resize observation must be cleaned up");
 assert.match(runtime, /beforeunload.*cleanup/s, "runtime observers and listeners must be cleaned up");
 
 assert.match(productionSmoke, /__NETWORK_MAP_GENERAL_UI__/, "production UI smoke must inspect general UI health");

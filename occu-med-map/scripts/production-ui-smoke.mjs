@@ -5,13 +5,12 @@ import { chromium } from "playwright";
 
 const baseUrl = process.env.NETWORK_MAP_SMOKE_URL || "http://127.0.0.1:4173";
 const expectHardening = process.env.NETWORK_MAP_EXPECT_HARDENING === "1";
+const expectedCommit = (process.env.NETWORK_MAP_EXPECTED_COMMIT || "").trim();
 const artifactDirectory = path.resolve(
   process.env.NETWORK_MAP_SMOKE_ARTIFACT_DIR || "test-results/production-smoke",
 );
 const browser = await chromium.launch({ headless: true });
-const context = await browser.newContext({
-  viewport: { width: 1440, height: 900 },
-});
+const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 const page = await context.newPage();
 const consoleErrors = [];
 const pageErrors = [];
@@ -34,7 +33,6 @@ page.on("requestfailed", request => {
 
 await page.addInitScript(() => {
   window.__smoke = { mutations: 0, longTasks: 0 };
-
   const startObservers = () => {
     const target = document.documentElement;
     if (!target || window.__smoke.observersStarted) return;
@@ -46,7 +44,6 @@ await page.addInitScript(() => {
         .observe({ type: "longtask", buffered: true });
     } catch { /* Long Task API is optional. */ }
   };
-
   if (document.documentElement) startObservers();
   else document.addEventListener("DOMContentLoaded", startObservers, { once: true });
 });
@@ -55,6 +52,26 @@ function attemptUrl(attempt) {
   const target = new URL(baseUrl);
   target.searchParams.set("production-smoke", `${Date.now()}-${attempt}`);
   return target.toString();
+}
+
+async function deploymentHealth(attempt) {
+  const healthUrl = new URL("/api/health", baseUrl);
+  healthUrl.searchParams.set("production-smoke", `${Date.now()}-${attempt}`);
+  try {
+    const response = await context.request.get(healthUrl.toString(), {
+      headers: { Accept: "application/json" },
+      timeout: 30_000,
+    });
+    const payload = await response.json().catch(() => null);
+    return { status: response.status(), payload };
+  } catch (error) {
+    return { status: null, error: error instanceof Error ? error.message : String(error), payload: null };
+  }
+}
+
+function commitMatches(actual) {
+  if (!expectedCommit || !actual || actual === "unknown") return !expectedCommit;
+  return expectedCommit === actual || expectedCommit.startsWith(actual) || actual.startsWith(expectedCommit);
 }
 
 async function hardeningIsReady() {
@@ -78,7 +95,7 @@ async function hardeningIsReady() {
   });
 }
 
-async function captureAttempt(attempt, response, error) {
+async function captureAttempt(attempt, response, error, health) {
   const browserState = await page.evaluate(() => ({
     href: window.location.href,
     title: document.title,
@@ -109,6 +126,8 @@ async function captureAttempt(attempt, response, error) {
   const record = {
     attempt,
     timestamp: new Date().toISOString(),
+    expectedCommit: expectedCommit || null,
+    deploymentHealth: health,
     navigationStatus: response?.status?.() ?? null,
     navigationUrl: response?.url?.() ?? null,
     contentType: response?.headers?.()["content-type"] ?? null,
@@ -123,18 +142,10 @@ async function captureAttempt(attempt, response, error) {
   attemptDiagnostics.push(record);
 
   await mkdir(artifactDirectory, { recursive: true });
-  await page.screenshot({
-    path: path.join(artifactDirectory, `attempt-${attempt}.png`),
-    fullPage: true,
-  }).catch(() => undefined);
-  await writeFile(
-    path.join(artifactDirectory, `attempt-${attempt}.json`),
-    `${JSON.stringify(record, null, 2)}\n`,
-  );
-  await writeFile(
-    path.join(artifactDirectory, "attempts.json"),
-    `${JSON.stringify(attemptDiagnostics, null, 2)}\n`,
-  );
+  await page.screenshot({ path: path.join(artifactDirectory, `attempt-${attempt}.png`), fullPage: true })
+    .catch(() => undefined);
+  await writeFile(path.join(artifactDirectory, `attempt-${attempt}.json`), `${JSON.stringify(record, null, 2)}\n`);
+  await writeFile(path.join(artifactDirectory, "attempts.json"), `${JSON.stringify(attemptDiagnostics, null, 2)}\n`);
   console.error(`Production smoke attempt ${attempt} diagnostics:\n${JSON.stringify(record, null, 2)}`);
 }
 
@@ -147,7 +158,12 @@ async function openApplication() {
     providerRequests.length = 0;
     failedRequests.length = 0;
     let response;
+    const health = await deploymentHealth(attempt);
     try {
+      const deployedCommit = health.payload?.commit;
+      if (expectedCommit && !commitMatches(deployedCommit)) {
+        throw new Error(`Render is serving commit ${deployedCommit || "unknown"}; expected ${expectedCommit}`);
+      }
       response = await page.goto(attemptUrl(attempt), { waitUntil: "domcontentloaded", timeout: 120_000 });
       await page.locator(".mapbox-2d-host .mapboxgl-map").waitFor({ state: "visible", timeout: 35_000 });
       await page.locator(".mapbox-2d-host canvas").first().waitFor({ state: "visible", timeout: 35_000 });
@@ -170,7 +186,7 @@ async function openApplication() {
       throw new Error("Production hardening diagnostics were incomplete after the map became visible");
     } catch (error) {
       lastError = error;
-      await captureAttempt(attempt, response, error);
+      await captureAttempt(attempt, response, error, health);
     }
     if (attempt < attempts) await page.waitForTimeout(15_000);
   }
@@ -185,11 +201,8 @@ try {
   await openApplication();
   await page.waitForTimeout(2_000);
 
-  assert.equal(
-    await page.locator(".mapbox-2d-host .dual-engine-loading").count(),
-    0,
-    "Mapbox loading panel must be removed after the 2D map is ready",
-  );
+  assert.equal(await page.locator(".mapbox-2d-host .dual-engine-loading").count(), 0,
+    "Mapbox loading panel must be removed after the 2D map is ready");
   assert.equal(await page.locator(".leaflet-tile:visible").count(), 0, "Leaflet raster tiles must not be visible");
   assert.deepEqual(providerRequests, [], "provider APIs must remain lazy at startup");
 
@@ -216,9 +229,7 @@ try {
   const box = await mapHost.boundingBox();
   assert.ok(box && box.width > 500 && box.height > 300, "map must fill its grid cell");
 
-  const zoomBefore = await page.evaluate(() =>
-    window.__NETWORK_MAP_MAPBOX_LIFECYCLE__.getMaps()[0].getZoom(),
-  );
+  const zoomBefore = await page.evaluate(() => window.__NETWORK_MAP_MAPBOX_LIFECYCLE__.getMaps()[0].getZoom());
   await page.locator(".mapbox-2d-host .mapboxgl-ctrl-zoom-in").first().click({ timeout: 10_000 });
   await page.waitForFunction(previous =>
     window.__NETWORK_MAP_MAPBOX_LIFECYCLE__.getMaps()[0].getZoom() > previous,
@@ -278,8 +289,7 @@ try {
   assert.equal(consoleErrors.length, 0, `console errors: ${consoleErrors.join("\n")}`);
 
   const relevantFailures = failedRequests.filter(entry =>
-    !entry.includes("ERR_ABORTED")
-    && !entry.includes("mapbox.com/events/v2"),
+    !entry.includes("ERR_ABORTED") && !entry.includes("mapbox.com/events/v2"),
   );
   assert.equal(relevantFailures.length, 0, `failed requests: ${relevantFailures.join("\n")}`);
 } finally {

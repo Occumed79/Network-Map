@@ -15,6 +15,7 @@
     "test:map-synchronization-hardening": "tsx scripts/map-synchronization-hardening-smoke.ts",
     "test:sidebar-workspace-hardening": "tsx scripts/sidebar-workspace-hardening-smoke.ts",
     "test:general-ui-hardening": "tsx scripts/general-ui-hardening-smoke.ts",
+    "test:startup-hardening": "tsx scripts/startup-hardening-smoke.ts",
     "test:network-request-hardening": "tsx scripts/network-request-hardening-smoke.ts",
     "test:ui-production": "node scripts/production-ui-smoke.mjs && node scripts/production-pdf-ui-smoke.mjs",
     "scrape:bluehive": "tsx scripts/scrape-bluehive.ts",

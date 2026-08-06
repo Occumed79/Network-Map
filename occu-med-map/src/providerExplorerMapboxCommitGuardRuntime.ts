@@ -13,11 +13,16 @@ type RuntimeSnapshot = {
   lastCompletedRequestId: number;
 };
 
+type StabilityEventDetail = {
+  phase?: string;
+};
+
 type GuardedSource = mapboxgl.GeoJSONSource & {
   [WRAPPED_FLAG]?: boolean;
 };
 
 type SourceState = {
+  map: mapboxgl.Map;
   source: GuardedSource;
   originalSetData: mapboxgl.GeoJSONSource["setData"];
   pendingData: string | GeoJSON.GeoJSON | null;
@@ -32,6 +37,7 @@ declare global {
 }
 
 const sourceStates = new Set<SourceState>();
+const stateBySource = new WeakMap<GuardedSource, SourceState>();
 
 function runtimeState(): RuntimeSnapshot | undefined {
   return window.__OCCUMED_PROVIDER_EXPLORER_STABILITY__;
@@ -69,6 +75,13 @@ function applyData(state: SourceState, data: string | GeoJSON.GeoJSON): mapboxgl
   return state.originalSetData(data);
 }
 
+function discardUnsafeEmptyPending(state: SourceState): void {
+  if (state.pendingData && featureCount(state.pendingData) === 0 && state.lastAppliedFeatureCount > 0) {
+    clearReleaseTimer(state);
+    state.pendingData = null;
+  }
+}
+
 function flushPending(state: SourceState): void {
   state.releaseTimer = null;
   const pending = state.pendingData;
@@ -88,11 +101,19 @@ function scheduleFlush(state: SourceState, delay = RELEASE_GRACE_MS): void {
   state.releaseTimer = window.setTimeout(() => flushPending(state), delay);
 }
 
+function detachState(state: SourceState): void {
+  clearReleaseTimer(state);
+  state.pendingData = null;
+  sourceStates.delete(state);
+  stateBySource.delete(state.source);
+}
+
 function wrapNetworkSource(map: mapboxgl.Map): void {
   const source = map.getSource(NETWORK_SOURCE_ID) as GuardedSource | undefined;
   if (!source || source[WRAPPED_FLAG]) return;
 
   const state: SourceState = {
+    map,
     source,
     originalSetData: source.setData.bind(source),
     pendingData: null,
@@ -111,6 +132,7 @@ function wrapNetworkSource(map: mapboxgl.Map): void {
 
   source[WRAPPED_FLAG] = true;
   sourceStates.add(state);
+  stateBySource.set(source, state);
 }
 
 function installGuard(): void {
@@ -122,6 +144,11 @@ function installGuard(): void {
     id: string,
     source: mapboxgl.AnySourceData,
   ) => mapboxgl.Map;
+  const originalRemoveSource = prototype.removeSource as (
+    this: mapboxgl.Map,
+    id: string,
+  ) => mapboxgl.Map;
+  const originalRemove = prototype.remove as (this: mapboxgl.Map) => void;
 
   prototype.addSource = function guardedAddSource(
     this: mapboxgl.Map,
@@ -133,8 +160,30 @@ function installGuard(): void {
     return result;
   };
 
-  document.addEventListener(EVENT_NAME, () => {
+  prototype.removeSource = function guardedRemoveSource(this: mapboxgl.Map, id: string): mapboxgl.Map {
+    if (id === NETWORK_SOURCE_ID) {
+      const source = this.getSource(id) as GuardedSource | undefined;
+      const state = source ? stateBySource.get(source) : undefined;
+      if (state) detachState(state);
+    }
+    return originalRemoveSource.call(this, id);
+  };
+
+  prototype.remove = function guardedRemove(this: mapboxgl.Map): void {
     sourceStates.forEach((state) => {
+      if (state.map === this) detachState(state);
+    });
+    originalRemove.call(this);
+  };
+
+  document.addEventListener(EVENT_NAME, (event) => {
+    const phase = (event as CustomEvent<StabilityEventDetail>).detail?.phase || "";
+    sourceStates.forEach((state) => {
+      if (phase === "request-error" || phase === "request-cancelled") {
+        // A failed refresh must leave the last known-good Mapbox frame intact.
+        discardUnsafeEmptyPending(state);
+        return;
+      }
       if (state.pendingData) scheduleFlush(state);
     });
   });

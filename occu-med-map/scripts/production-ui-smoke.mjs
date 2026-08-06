@@ -48,6 +48,7 @@ async function workspaceSnapshot(tab, panelSelector = "") {
       expectedTab: tab,
       reportedTab: document.documentElement.dataset.occumedworkspace || "",
       integrity: document.documentElement.dataset.occumedUiIntegrity || "",
+      generalIntegrity: document.documentElement.dataset.occumedGeneralUi || "",
       sidebar: toRect(sidebar),
       tabs: toRect(tabs),
       map: toRect(map),
@@ -60,6 +61,7 @@ async function workspaceSnapshot(tab, panelSelector = "") {
       panelScrollOverflow: panel instanceof HTMLElement ? panel.scrollWidth - panel.clientWidth : 0,
       viewportWidth: window.innerWidth,
       runtimeAudit: window.__NETWORK_MAP_UI_INTEGRITY__?.audit?.() || null,
+      generalAudit: window.__NETWORK_MAP_GENERAL_UI__?.audit?.() || null,
     };
   }, { tab, panelSelector });
 }
@@ -127,6 +129,173 @@ async function assertWorkspace(tab, panelSelector = "") {
   if (snapshot.runtimeAudit) {
     assert.equal(snapshot.runtimeAudit.healthy, true, `${tab} runtime UI audit failed: ${snapshot.runtimeAudit.failures?.join(", ")}`);
   }
+  if (snapshot.generalAudit) {
+    assert.equal(snapshot.generalAudit.healthy, true, `${tab} general UI audit failed: ${snapshot.generalAudit.failures?.join(", ")}`);
+  }
+}
+
+async function generalSnapshot() {
+  return page.evaluate(() => {
+    const rect = element => {
+      if (!(element instanceof HTMLElement)) return null;
+      const value = element.getBoundingClientRect();
+      return { left: value.left, right: value.right, top: value.top, bottom: value.bottom, width: value.width, height: value.height };
+    };
+    return {
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      documentWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
+      header: rect(document.querySelector(".command-header")),
+      search: rect(document.querySelector(".command-search")),
+      audit: window.__NETWORK_MAP_GENERAL_UI__?.audit?.() || null,
+    };
+  });
+}
+
+async function assertGeneralGeometry(label) {
+  await page.waitForTimeout(300);
+  const snapshot = await generalSnapshot();
+  assert.ok(snapshot.header, `${label}: header must exist`);
+  assert.ok(snapshot.search, `${label}: map search must exist`);
+  assert.ok(snapshot.header.left >= -2 && snapshot.header.right <= snapshot.viewport.width + 2, `${label}: header must fit viewport`);
+  assert.ok(snapshot.search.left >= -2 && snapshot.search.right <= snapshot.viewport.width + 2, `${label}: search must fit viewport`);
+  assert.ok(snapshot.search.height >= 38, `${label}: search must remain usable`);
+  assert.ok(snapshot.documentWidth <= snapshot.viewport.width + 3, `${label}: document must not overflow horizontally`);
+  assert.ok(snapshot.audit, `${label}: general UI runtime must be available`);
+  assert.equal(snapshot.audit.healthy, true, `${label}: general UI audit failed: ${snapshot.audit.failures?.join(", ")}`);
+}
+
+async function exerciseSearchDropdown() {
+  await page.evaluate(() => {
+    document.querySelector(".smoke-search-results")?.remove();
+    const host = document.querySelector(".command-search");
+    if (!(host instanceof HTMLElement)) throw new Error("Search host missing");
+    const results = document.createElement("div");
+    results.className = "command-search-results smoke-search-results";
+    for (let index = 0; index < 30; index += 1) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.innerHTML = `<strong>Result ${index + 1}</strong><span>Long address content used to verify constrained scrolling and viewport geometry</span>`;
+      results.appendChild(button);
+    }
+    host.appendChild(results);
+  });
+  await page.waitForTimeout(200);
+  const result = await page.evaluate(() => {
+    const element = document.querySelector(".smoke-search-results");
+    if (!(element instanceof HTMLElement)) return null;
+    const rect = element.getBoundingClientRect();
+    return {
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: rect.bottom,
+      scrollable: element.scrollHeight > element.clientHeight,
+      overflow: element.scrollWidth - element.clientWidth,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+    };
+  });
+  assert.ok(result, "synthetic search results must render");
+  assert.ok(result.left >= -2 && result.right <= result.viewportWidth + 2, "search results must remain inside viewport width");
+  assert.ok(result.top >= -2 && result.bottom <= result.viewportHeight + 2, "search results must remain inside viewport height");
+  assert.equal(result.scrollable, true, "long search results must scroll vertically");
+  assert.ok(result.overflow <= 2, "search results must not overflow horizontally");
+  await page.evaluate(() => document.querySelector(".smoke-search-results")?.remove());
+}
+
+async function exerciseSyntheticDialog(expectMobile = false) {
+  await page.evaluate(() => {
+    document.querySelector(".smoke-dialog-backdrop")?.remove();
+    document.querySelector(".smoke-dialog-opener")?.remove();
+
+    const opener = document.createElement("button");
+    opener.type = "button";
+    opener.className = "smoke-dialog-opener";
+    opener.textContent = "Open test dialog";
+    document.body.appendChild(opener);
+    opener.focus();
+
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop open smoke-dialog-backdrop";
+    const dialog = document.createElement("div");
+    dialog.className = "modal-box smoke-dialog";
+    const header = document.createElement("div");
+    header.className = "modal-header";
+    const title = document.createElement("h2");
+    title.textContent = "UI hardening dialog";
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "modal-close";
+    close.setAttribute("aria-label", "Close test dialog");
+    close.textContent = "Close";
+    close.addEventListener("click", () => backdrop.remove());
+    header.append(title, close);
+    const body = document.createElement("div");
+    body.className = "modal-body";
+    for (let index = 0; index < 80; index += 1) {
+      const row = document.createElement("p");
+      row.textContent = `Scrollable dialog row ${index + 1} with deliberately long content to verify wrapping and vertical containment.`;
+      body.appendChild(row);
+    }
+    dialog.append(header, body);
+    backdrop.appendChild(dialog);
+    document.body.appendChild(backdrop);
+  });
+
+  await page.waitForFunction(() => {
+    const dialog = document.querySelector(".smoke-dialog");
+    return dialog?.getAttribute("role") === "dialog" && dialog?.getAttribute("aria-modal") === "true";
+  }, { timeout: 4_000 });
+
+  const geometry = await page.evaluate(() => {
+    const dialog = document.querySelector(".smoke-dialog");
+    const body = document.querySelector(".smoke-dialog .modal-body");
+    if (!(dialog instanceof HTMLElement) || !(body instanceof HTMLElement)) return null;
+    const rect = dialog.getBoundingClientRect();
+    return {
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: rect.bottom,
+      width: rect.width,
+      height: rect.height,
+      scrollable: body.scrollHeight > body.clientHeight,
+      overflow: dialog.scrollWidth - dialog.clientWidth,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      activeInside: dialog.contains(document.activeElement),
+    };
+  });
+
+  assert.ok(geometry, "synthetic modal must render");
+  assert.ok(geometry.left >= -2 && geometry.right <= geometry.viewportWidth + 2, "modal must remain inside viewport width");
+  assert.ok(geometry.top >= -2 && geometry.bottom <= geometry.viewportHeight + 2, "modal must remain inside viewport height");
+  assert.ok(geometry.overflow <= 2, "modal must not overflow horizontally");
+  assert.equal(geometry.scrollable, true, "long modal content must scroll inside the modal");
+  assert.equal(geometry.activeInside, true, "new modal must receive keyboard focus");
+  if (expectMobile) {
+    assert.ok(Math.abs(geometry.width - geometry.viewportWidth) <= 3, "mobile modal must use full viewport width");
+    assert.ok(Math.abs(geometry.height - geometry.viewportHeight) <= 3, "mobile modal must use full viewport height");
+  } else {
+    assert.ok(geometry.width <= 925, "desktop modal must retain a readable maximum width");
+    assert.ok(geometry.height <= geometry.viewportHeight * 0.9, "desktop modal must retain viewport breathing room");
+  }
+
+  await page.keyboard.press("Tab");
+  assert.equal(
+    await page.evaluate(() => document.querySelector(".smoke-dialog")?.contains(document.activeElement) || false),
+    true,
+    "Tab focus must remain inside the modal",
+  );
+  await page.keyboard.press("Escape");
+  await page.locator(".smoke-dialog-backdrop").waitFor({ state: "detached", timeout: 4_000 });
+  await page.waitForTimeout(150);
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.classList.contains("smoke-dialog-opener") || false),
+    true,
+    "closing a modal must restore focus to its opener",
+  );
+  await page.evaluate(() => document.querySelector(".smoke-dialog-opener")?.remove());
 }
 
 try {
@@ -134,6 +303,7 @@ try {
   await page.locator(".mapbox-2d-host .mapboxgl-map").waitFor({ state: "visible", timeout: 45_000 });
   await page.locator(".mapbox-2d-host canvas").first().waitFor({ state: "visible", timeout: 45_000 });
   await page.locator(".occumed-sidebar-workspace-tabs").waitFor({ state: "visible", timeout: 15_000 });
+  await page.waitForFunction(() => Boolean(window.__NETWORK_MAP_GENERAL_UI__), { timeout: 10_000 });
   await page.waitForTimeout(2_000);
 
   assert.equal(
@@ -146,6 +316,10 @@ try {
   assert.deepEqual(initial.providerRequests, [], "provider APIs must be lazy at startup");
   assert.deepEqual(initial.tileProxyRequests || [], [], "2D must not request raster proxy tiles");
   assert.equal(await page.locator(".leaflet-tile:visible").count(), 0, "Leaflet raster tiles must not be visible");
+
+  await assertGeneralGeometry("desktop startup");
+  await exerciseSearchDropdown();
+  await exerciseSyntheticDialog(false);
 
   await assertWorkspace("providers");
   await assertWorkspace("mapTools", ".occumed-sidebar-workspace-host > .occumed-map-tools-panel");
@@ -161,13 +335,21 @@ try {
 
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.waitForTimeout(500);
+  await assertGeneralGeometry("compact desktop");
   await assertWorkspace("mapTools", ".occumed-sidebar-workspace-host > .occumed-map-tools-panel");
   await assertWorkspace("liveFinder", ".live-panel.open");
   await assertWorkspace("explorer", ".provider-explorer-drawer.open");
   await assertWorkspace("providers");
 
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(600);
+  await assertGeneralGeometry("mobile");
+  await exerciseSearchDropdown();
+  await exerciseSyntheticDialog(true);
+
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.waitForTimeout(500);
+  await assertGeneralGeometry("desktop restored");
   const map = page.locator(".mapbox-2d-host");
   await page.locator(".mapbox-2d-host .mapboxgl-ctrl-zoom-in").first().click();
   await map.hover();
@@ -195,9 +377,10 @@ try {
   const mutationsBeforeSettle = await page.evaluate(() => window.__smoke.mutations);
   await page.waitForTimeout(30_000);
   const settled = await page.evaluate(() => ({ ...window.__smoke }));
-  assert.ok(settled.mutations - mutationsBeforeSettle < 70, "DOM mutations must settle");
+  assert.ok(settled.mutations - mutationsBeforeSettle < 90, "DOM mutations must settle");
   assert.ok(settled.longTasks < 10, "page must not accumulate long tasks");
   assert.deepEqual(settled.providerRequests, [], "provider APIs must remain idle without an enabled source");
+  await assertGeneralGeometry("settled production UI");
   assert.equal(consoleErrors.length, 0, `console errors: ${consoleErrors.join("\n")}`);
 } finally {
   await browser.close();

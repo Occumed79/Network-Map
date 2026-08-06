@@ -5,6 +5,7 @@ import "./leafletMapLifecycleRuntime";
 import "./mapboxMapLifecycleRuntime";
 import "./mapboxSourcePipelineRuntime";
 import "./networkRequestPipelineRuntime";
+import "./uploadedDatasetLabelRuntime";
 import "./adminApiRuntime";
 import "./mapControlsBridgeRuntime";
 import "./diagnosticsReliabilityRuntime";

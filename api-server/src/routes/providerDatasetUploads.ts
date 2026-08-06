@@ -1,12 +1,14 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Router, type NextFunction, type Request, type Response } from "express";
-import { getPool, type PoolClient } from "@workspace/db";
+import { getPool } from "@workspace/db";
 import { isPersistenceConfigured } from "../lib/networkMapPersistence";
 import { hasValidCoordinates, parseOptionalNumber } from "../lib/providerCoordinates";
 import { isUsableProviderName, normalizedProviderName, providerQualityReasons } from "../lib/providerDataQuality";
 
 const router = Router();
 const MAX_ROWS_PER_REQUEST = 5000;
+const MAX_PAGE_SIZE = 5000;
+const MAX_ALL_ROWS = 25000;
 const DEFAULT_SOURCE_KEY = "my_clinics_upload";
 
 const PROVIDER_TYPES = new Set([
@@ -24,7 +26,50 @@ const PROVIDER_TYPES = new Set([
   "unknown",
 ]);
 
+const COUNTRY_NAME_TO_CODE = new Map<string, string>([
+  ["united states", "US"],
+  ["united states of america", "US"],
+  ["usa", "US"],
+  ["canada", "CA"],
+  ["mexico", "MX"],
+  ["united kingdom", "GB"],
+  ["great britain", "GB"],
+  ["australia", "AU"],
+  ["new zealand", "NZ"],
+  ["south korea", "KR"],
+  ["republic of korea", "KR"],
+  ["north korea", "KP"],
+  ["china", "CN"],
+  ["people's republic of china", "CN"],
+  ["japan", "JP"],
+  ["germany", "DE"],
+  ["france", "FR"],
+  ["italy", "IT"],
+  ["spain", "ES"],
+  ["poland", "PL"],
+  ["greece", "GR"],
+  ["saudi arabia", "SA"],
+  ["united arab emirates", "AE"],
+  ["kuwait", "KW"],
+  ["qatar", "QA"],
+  ["bahrain", "BH"],
+  ["oman", "OM"],
+  ["india", "IN"],
+  ["pakistan", "PK"],
+  ["lebanon", "LB"],
+  ["jordan", "JO"],
+  ["israel", "IL"],
+  ["egypt", "EG"],
+  ["south africa", "ZA"],
+  ["brazil", "BR"],
+  ["argentina", "AR"],
+  ["chile", "CL"],
+  ["colombia", "CO"],
+  ["peru", "PE"],
+]);
+
 type IncomingRow = Record<string, unknown>;
+
 type NormalizedRow = {
   sourceRecordId: string;
   fileRowNumber: number;
@@ -52,12 +97,22 @@ type NormalizedRow = {
   raw: IncomingRow;
 };
 
+type PreparedRow = NormalizedRow & {
+  rawId: string;
+  stageId: string;
+  masterKey: string;
+  coordinatesReady: boolean;
+  errorMessage: string | null;
+};
+
 type LayerProvider = Record<string, unknown> & {
-  name?: string;
-  clinic_name?: string;
-  lat?: number;
-  lng?: number;
-  source_id?: string | null;
+  name?: unknown;
+  clinic_name?: unknown;
+  address_1?: unknown;
+  city?: unknown;
+  state?: unknown;
+  zip?: unknown;
+  source_id?: unknown;
 };
 
 type Bounds = { north: number; south: number; east: number; west: number };
@@ -67,7 +122,9 @@ function text(value: unknown): string {
 }
 
 function asBoolean(value: unknown): boolean {
-  return value === true || value === "true" || value === "1";
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  return typeof value === "string" && ["true", "1", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
 function normalizedLookup(row: IncomingRow): Map<string, unknown> {
@@ -121,6 +178,14 @@ function sourceKeyForLabel(label: string): string {
   return `user_upload_${slug}_${contentHash(normalized).slice(0, 8)}`;
 }
 
+function countryCodeFor(value: string): string {
+  const raw = value.trim();
+  if (!raw) return "US";
+  const mapped = COUNTRY_NAME_TO_CODE.get(raw.toLowerCase());
+  if (mapped) return mapped;
+  return /^[A-Za-z]{2,3}$/.test(raw) ? raw.toUpperCase() : "";
+}
+
 function parseStringList(value: unknown): string[] {
   if (Array.isArray(value)) return [...new Set(value.map(text).filter(Boolean))];
   const raw = text(value);
@@ -159,9 +224,9 @@ function classify(row: IncomingRow, name: string, notes: string, taxonomy: strin
   if (/occupational|occ\s*med|employee health|workers? comp|fit[- ]?for[- ]?duty|ffd/.test(blob)) add("occupational_health_clinic");
   if (/\bdot\b|department of transportation|cdl|medical examiner/.test(blob)) add("dot_provider");
   if (/\bfaa\b|aviation medical|\bame\b/.test(blob)) add("faa_provider");
-  if (/lab|toxicology|drug|urine|screen|specimen|collection|mro/.test(blob)) add("lab");
+  if (/\blabs?\b|\blaboratory\b|toxicology|drug|urine|screen|specimen|collection|\bmro\b/.test(blob)) add("lab");
   if (/dental|dentist|orthodont|periodont|endodont|dd\s*2813/.test(blob)) add("dental");
-  if (/x[- ]?ray|imaging|radiology|mammogram|ultrasound|mri|ct\b|b[- ]?read/.test(blob)) add("imaging");
+  if (/x[- ]?ray|imaging|radiology|mammogram|ultrasound|\bmri\b|\bct\b|b[- ]?read/.test(blob)) add("imaging");
   if (/pharmacy|vaccin|immuni[sz]ation|travel medicine|typhoid|hepatitis|tdap|mmr/.test(blob)) add("pharmacy_vaccination");
   if (/hospital|medical center|emergency room|\ber\b/.test(blob)) add("hospital");
   if (/family medicine|internal medicine|primary care|general practice|physician|doctor|\bmd\b|\bdo\b/.test(blob)) add("general_practitioner");
@@ -181,7 +246,7 @@ function normalizeRow(row: IncomingRow, index: number): NormalizedRow {
   const city = first(row, "geocodedCity", "geocoded_city", "originalCity", "original_city", "city", "town", "locality");
   const state = first(row, "stateRegion", "state_region", "state", "st", "adminArea", "admin_area", "region", "province").toUpperCase().slice(0, 80);
   const postalCode = first(row, "postalCode", "postal_code", "zip", "zipcode", "zipCode", "postal");
-  const countryCode = (first(row, "countryCode", "country_code", "country") || "US").toUpperCase().slice(0, 3);
+  const countryCode = countryCodeFor(first(row, "countryCode", "country_code", "country"));
   const phone = first(row, "internationalPhone", "international_phone", "localPhone", "local_phone", "phone", "telephone", "tel");
   const email = first(row, "email", "emailAddress", "email_address");
   const website = first(row, "website", "url", "sourceUrl", "source_url");
@@ -201,13 +266,17 @@ function normalizeRow(row: IncomingRow, index: number): NormalizedRow {
     postalCode,
     npi,
   }).slice(0, 32);
+  const suppliedRowNumber = parseOptionalNumber(first(row, "fileRowNumber", "file_row_number", "sourceRow", "source_row", "sequence"));
+  const fileRowNumber = suppliedRowNumber !== null && suppliedRowNumber > 0 ? Math.trunc(suppliedRowNumber) : index + 1;
   const qualityReasons = providerQualityReasons({ name, address, lat, lng });
   const providedQuality = parseOptionalNumber(first(row, "qualityScore", "quality_score"));
-  const qualityScore = providedQuality ?? (hasValidCoordinates(lat, lng) && isUsableProviderName(name) ? 0.95 : 0.35);
+  const qualityScore = providedQuality === null
+    ? (hasValidCoordinates(lat, lng) && isUsableProviderName(name) ? 0.95 : 0.35)
+    : Math.min(Math.max(providedQuality, 0), 1);
 
   return {
     sourceRecordId,
-    fileRowNumber: index + 1,
+    fileRowNumber,
     name,
     normalizedName,
     address,
@@ -242,51 +311,33 @@ function masterKeyFor(row: NormalizedRow): string {
     city: row.city.toLowerCase(),
     state: row.state.toLowerCase(),
     postal: row.postalCode,
-    lat: row.lat,
-    lng: row.lng,
   })}`;
+}
+
+function prepareRows(rows: IncomingRow[]): PreparedRow[] {
+  return rows.map((row, index) => {
+    const normalized = normalizeRow(row || {}, index);
+    const fatalReasons = normalized.qualityReasons.filter((reason) => reason === "blank_name" || reason === "placeholder_name");
+    return {
+      ...normalized,
+      rawId: randomUUID(),
+      stageId: randomUUID(),
+      masterKey: masterKeyFor(normalized),
+      coordinatesReady: hasValidCoordinates(normalized.lat, normalized.lng),
+      errorMessage: fatalReasons.length ? fatalReasons.join(",") : null,
+    };
+  });
+}
+
+function uniqueBy<T>(values: T[], keyFor: (value: T) => string): T[] {
+  const unique = new Map<string, T>();
+  for (const value of values) unique.set(keyFor(value), value);
+  return [...unique.values()];
 }
 
 function isBulkDatasetUpload(req: Request): boolean {
   const filename = text(req.body?.filename || req.body?.originalFilename);
   return Boolean(req.body?.sourceLabel || req.body?.datasetLabel || /\.(csv|xlsx?|xls)$/i.test(filename));
-}
-
-async function upsertMasterSource(client: PoolClient, input: {
-  sourceKey: string;
-  masterProviderId: string;
-  stageRecordId: string;
-  rawRecordId: string;
-  sourceRecordId: string;
-  sourceUrl: string | null;
-  qualityScore: number;
-  raw: IncomingRow;
-}) {
-  const existing = await client.query(
-    `SELECT id FROM public.provider_master_sources
-     WHERE source_key=$1 AND source_record_id=$2
-     ORDER BY created_at ASC LIMIT 1`,
-    [input.sourceKey, input.sourceRecordId],
-  );
-  if (existing.rows[0]?.id) {
-    await client.query(
-      `UPDATE public.provider_master_sources
-       SET master_provider_id=$2, stage_record_id=$3, raw_record_id=$4,
-           source_url=COALESCE($5, source_url),
-           source_confidence_score=GREATEST(COALESCE(source_confidence_score,0),$6),
-           raw_payload=$7::jsonb, updated_at=now()
-       WHERE id=$1`,
-      [existing.rows[0].id, input.masterProviderId, input.stageRecordId, input.rawRecordId, input.sourceUrl, input.qualityScore, JSON.stringify(input.raw)],
-    );
-    return;
-  }
-  await client.query(
-    `INSERT INTO public.provider_master_sources (
-       master_provider_id, stage_record_id, raw_record_id, source_key, source_record_id,
-       source_url, source_confidence_score, raw_payload
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`,
-    [input.masterProviderId, input.stageRecordId, input.rawRecordId, input.sourceKey, input.sourceRecordId, input.sourceUrl, input.qualityScore, JSON.stringify(input.raw)],
-  );
 }
 
 router.post("/my-clinics/upload", async (req: Request, res: Response, next: NextFunction) => {
@@ -298,6 +349,7 @@ router.post("/my-clinics/upload", async (req: Request, res: Response, next: Next
     res.status(503).json({ error: "DATABASE_URL is required for provider dataset upload." });
     return;
   }
+
   const rows = Array.isArray(req.body?.rows)
     ? req.body.rows as IncomingRow[]
     : Array.isArray(req.body?.clinics)
@@ -308,30 +360,51 @@ router.post("/my-clinics/upload", async (req: Request, res: Response, next: Next
     return;
   }
   if (rows.length > MAX_ROWS_PER_REQUEST) {
-    res.status(413).json({ error: `Too many rows in one request. Send ${MAX_ROWS_PER_REQUEST} or fewer rows per chunk.`, maxRows: MAX_ROWS_PER_REQUEST });
+    res.status(413).json({
+      error: `Too many rows in one request. Send ${MAX_ROWS_PER_REQUEST} or fewer rows per chunk.`,
+      maxRows: MAX_ROWS_PER_REQUEST,
+    });
     return;
   }
 
   const dryRun = asBoolean(req.body?.dryRun) || asBoolean(req.query.dryRun);
   const mirrorLegacy = req.body?.mirrorLegacy === undefined ? true : asBoolean(req.body?.mirrorLegacy);
   const originalFilename = text(req.body?.filename || req.body?.originalFilename) || "front-end-upload";
-  const sourceLabel = normalizeSourceLabel(req.body?.sourceLabel || req.body?.datasetLabel || req.body?.groupName || req.body?.uploadLabel, originalFilename);
+  const sourceLabel = normalizeSourceLabel(
+    req.body?.sourceLabel || req.body?.datasetLabel || req.body?.groupName || req.body?.uploadLabel,
+    originalFilename,
+  );
   const sourceKey = sourceKeyForLabel(sourceLabel);
   const uploadLabel = text(req.body?.uploadLabel || req.body?.groupName) || sourceLabel;
   const uploadedBy = text(req.body?.uploadedBy) || null;
+  const prepared = prepareRows(rows);
+  const staged = prepared.filter((row) => !row.errorMessage);
+  const mapReady = staged.filter((row) => row.coordinatesReady);
+  const masters = uniqueBy(mapReady, (row) => row.masterKey);
+  const lineage = uniqueBy(mapReady, (row) => `${row.masterKey}|${row.sourceRecordId}`);
+  const typeRows = uniqueBy(
+    mapReady.flatMap((row) => [...new Set([row.primaryProviderType, ...row.capabilityTags])]
+      .filter((typeKey) => PROVIDER_TYPES.has(typeKey))
+      .map((typeKey) => ({ masterKey: row.masterKey, typeKey, qualityScore: row.qualityScore }))),
+    (row) => `${row.masterKey}|${row.typeKey}`,
+  );
+
+  const errorRows = prepared.filter((row) => row.errorMessage).length;
+  const needsGeocodeRows = staged.filter((row) => !row.coordinatesReady).length;
+  const rowErrors = prepared
+    .filter((row) => row.errorMessage || !row.coordinatesReady)
+    .slice(0, 100)
+    .map((row) => ({
+      row: row.fileRowNumber,
+      reasons: row.errorMessage ? row.errorMessage.split(",") : ["needs_geocode"],
+    }));
+
   const client = await getPool().connect();
-
-  let rawRows = 0;
-  let stagedRows = 0;
-  let masteredRows = 0;
-  let mirroredRows = 0;
-  let errorRows = 0;
-  let needsGeocodeRows = 0;
-  let duplicateMasterRows = 0;
-  const rowErrors: Array<{ row: number; reasons: string[] }> = [];
-
   try {
     await client.query("BEGIN");
+    await client.query("SET LOCAL statement_timeout = '180s'");
+    await client.query("SET LOCAL idle_in_transaction_session_timeout = '60s'");
+
     await client.query(
       `INSERT INTO public.provider_source_catalog (
          source_key, display_name, source_kind, trust_tier, active, notes
@@ -344,67 +417,150 @@ router.post("/my-clinics/upload", async (req: Request, res: Response, next: Next
          updated_at=now()`,
       [sourceKey, sourceLabel, `Uploaded from ${originalFilename}`],
     );
+
     const batch = await client.query(
       `INSERT INTO public.provider_ingest_batches (
          source_key, upload_label, upload_method, original_filename, uploaded_by,
          status, total_rows, metadata
        ) VALUES ($1,$2,$3,$4,$5,'raw_loaded',$6,$7::jsonb)
        RETURNING id`,
-      [sourceKey, uploadLabel, dryRun ? "dry_run" : "front_end_upload", originalFilename, uploadedBy, rows.length, JSON.stringify({ frontend: true, dryRun, mirrorLegacy, sourceLabel, sourceKey })],
+      [
+        sourceKey,
+        uploadLabel,
+        dryRun ? "dry_run" : "front_end_upload",
+        originalFilename,
+        uploadedBy,
+        rows.length,
+        JSON.stringify({ frontend: true, dryRun, mirrorLegacy, sourceLabel, sourceKey }),
+      ],
     );
     const batchId = batch.rows[0].id as string;
 
-    for (let index = 0; index < rows.length; index += 1) {
-      const normalized = normalizeRow(rows[index] || {}, index);
-      const fatalReasons = normalized.qualityReasons.filter((reason) => reason === "blank_name" || reason === "placeholder_name");
-      const rowError = fatalReasons.length ? fatalReasons.join(",") : null;
-      const raw = await client.query(
-        `INSERT INTO public.provider_raw_records (
-           batch_id, source_key, source_record_id, file_row_number, content_hash,
-           raw_payload, raw_text, status, error_message
-         ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9)
-         RETURNING id`,
-        [batchId, sourceKey, normalized.sourceRecordId, normalized.fileRowNumber, contentHash(normalized.raw), JSON.stringify(normalized.raw), JSON.stringify(normalized.raw), rowError ? "error" : "raw_loaded", rowError],
-      );
-      rawRows += 1;
-      if (rowError) {
-        errorRows += 1;
-        rowErrors.push({ row: normalized.fileRowNumber, reasons: fatalReasons });
-        continue;
-      }
+    const rawPayload = prepared.map((row) => ({
+      raw_id: row.rawId,
+      source_record_id: row.sourceRecordId,
+      file_row_number: row.fileRowNumber,
+      content_hash: contentHash(row.raw),
+      raw_payload: row.raw,
+      raw_text: JSON.stringify(row.raw),
+      status: row.errorMessage ? "error" : "raw_loaded",
+      error_message: row.errorMessage,
+    }));
+    await client.query(
+      `INSERT INTO public.provider_raw_records (
+         id, batch_id, source_key, source_record_id, file_row_number, content_hash,
+         raw_payload, raw_text, status, error_message
+       )
+       SELECT x.raw_id,$2,$3,x.source_record_id,x.file_row_number,x.content_hash,
+              x.raw_payload,x.raw_text,x.status,x.error_message
+       FROM jsonb_to_recordset($1::jsonb) AS x(
+         raw_id uuid, source_record_id text, file_row_number integer, content_hash text,
+         raw_payload jsonb, raw_text text, status text, error_message text
+       )`,
+      [JSON.stringify(rawPayload), batchId, sourceKey],
+    );
 
-      const coordinatesReady = hasValidCoordinates(normalized.lat, normalized.lng);
-      const stage = await client.query(
+    if (staged.length) {
+      const stagePayload = staged.map((row) => ({
+        stage_id: row.stageId,
+        raw_id: row.rawId,
+        source_record_id: row.sourceRecordId,
+        name: row.name,
+        normalized_name: row.normalizedName,
+        address: row.address,
+        city: row.city,
+        state: row.state,
+        postal_code: row.postalCode,
+        country_code: row.countryCode,
+        lat: row.lat,
+        lng: row.lng,
+        phone: row.phone || null,
+        email: row.email || null,
+        website: row.website || null,
+        npi: row.npi || null,
+        taxonomy_code: row.taxonomyCode || null,
+        taxonomy_description: row.taxonomyDescription || null,
+        primary_provider_type: row.primaryProviderType,
+        capability_tags: row.capabilityTags,
+        quality_score: row.qualityScore,
+        normalization_status: row.coordinatesReady ? "staged" : "needs_geocode",
+        normalized_payload: row,
+      }));
+      await client.query(
         `INSERT INTO public.provider_stage_records (
-           raw_record_id, batch_id, source_key, source_record_id, name, normalized_name,
+           id, raw_record_id, batch_id, source_key, source_record_id, name, normalized_name,
            address_line1, formatted_address, city, state_region, postal_code, country_code,
            lat, lng, phone, email, website, npi, taxonomy_code, taxonomy_description,
            primary_provider_type, capability_tags, confidence_score, normalization_status,
            normalized_payload
-         ) VALUES (
-           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25::jsonb
-         ) RETURNING id`,
-        [raw.rows[0].id, batchId, sourceKey, normalized.sourceRecordId, normalized.name, normalized.normalizedName, normalized.address, normalized.address, normalized.city, normalized.state, normalized.postalCode, normalized.countryCode, normalized.lat, normalized.lng, normalized.phone || null, normalized.email || null, normalized.website || null, normalized.npi || null, normalized.taxonomyCode || null, normalized.taxonomyDescription || null, normalized.primaryProviderType, normalized.capabilityTags, normalized.qualityScore, coordinatesReady ? "staged" : "needs_geocode", JSON.stringify(normalized)],
+         )
+         SELECT x.stage_id,x.raw_id,$2,$3,x.source_record_id,x.name,x.normalized_name,
+                NULLIF(x.address,''),NULLIF(x.address,''),NULLIF(x.city,''),NULLIF(x.state,''),
+                NULLIF(x.postal_code,''),NULLIF(x.country_code,''),x.lat,x.lng,x.phone,x.email,
+                x.website,x.npi,x.taxonomy_code,x.taxonomy_description,x.primary_provider_type,
+                ARRAY(SELECT jsonb_array_elements_text(COALESCE(x.capability_tags,'[]'::jsonb))),
+                x.quality_score,x.normalization_status,x.normalized_payload
+         FROM jsonb_to_recordset($1::jsonb) AS x(
+           stage_id uuid, raw_id uuid, source_record_id text, name text, normalized_name text,
+           address text, city text, state text, postal_code text, country_code text,
+           lat double precision, lng double precision, phone text, email text, website text,
+           npi text, taxonomy_code text, taxonomy_description text, primary_provider_type text,
+           capability_tags jsonb, quality_score numeric, normalization_status text,
+           normalized_payload jsonb
+         )`,
+        [JSON.stringify(stagePayload), batchId, sourceKey],
       );
-      stagedRows += 1;
-      if (!coordinatesReady) {
-        needsGeocodeRows += 1;
-        rowErrors.push({ row: normalized.fileRowNumber, reasons: ["needs_geocode"] });
-        continue;
-      }
+    }
 
-      const masterKey = masterKeyFor(normalized);
-      const existingMaster = await client.query("SELECT id FROM public.provider_master WHERE master_key=$1 LIMIT 1", [masterKey]);
-      if (existingMaster.rows.length) duplicateMasterRows += 1;
-      const master = await client.query(
+    let duplicateMasterRows = mapReady.length - masters.length;
+    if (masters.length) {
+      const existing = await client.query(
+        `SELECT count(*)::int AS total
+         FROM public.provider_master
+         WHERE master_key = ANY($1::text[])`,
+        [masters.map((row) => row.masterKey)],
+      );
+      duplicateMasterRows += Number(existing.rows[0]?.total || 0);
+
+      const masterPayload = masters.map((row) => ({
+        master_key: row.masterKey,
+        name: row.name,
+        normalized_name: row.normalizedName,
+        address: row.address,
+        city: row.city,
+        state: row.state,
+        postal_code: row.postalCode,
+        country_code: row.countryCode,
+        lat: row.lat,
+        lng: row.lng,
+        phone: row.phone || null,
+        email: row.email || null,
+        website: row.website || null,
+        npi: row.npi || null,
+        primary_provider_type: row.primaryProviderType,
+        capability_tags: row.capabilityTags,
+        quality_score: row.qualityScore,
+        raw_payload: row.raw,
+      }));
+      await client.query(
         `INSERT INTO public.provider_master (
            master_key, name, normalized_name, address_line1, formatted_address, city,
            state_region, postal_code, country_code, lat, lng, phone, email, website, npi,
            primary_provider_type, capability_tags, primary_source_key, quality_score,
            last_seen_at, updated_at
-         ) VALUES (
-           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,now(),now()
-         ) ON CONFLICT (master_key) DO UPDATE SET
+         )
+         SELECT x.master_key,x.name,x.normalized_name,NULLIF(x.address,''),NULLIF(x.address,''),
+                NULLIF(x.city,''),NULLIF(x.state,''),NULLIF(x.postal_code,''),NULLIF(x.country_code,''),
+                x.lat,x.lng,x.phone,x.email,x.website,x.npi,x.primary_provider_type,
+                ARRAY(SELECT jsonb_array_elements_text(COALESCE(x.capability_tags,'[]'::jsonb))),
+                $2,x.quality_score,now(),now()
+         FROM jsonb_to_recordset($1::jsonb) AS x(
+           master_key text, name text, normalized_name text, address text, city text, state text,
+           postal_code text, country_code text, lat double precision, lng double precision,
+           phone text, email text, website text, npi text, primary_provider_type text,
+           capability_tags jsonb, quality_score numeric, raw_payload jsonb
+         )
+         ON CONFLICT (master_key) DO UPDATE SET
            name=EXCLUDED.name,
            normalized_name=EXCLUDED.normalized_name,
            address_line1=COALESCE(NULLIF(EXCLUDED.address_line1,''),provider_master.address_line1),
@@ -421,54 +577,110 @@ router.post("/my-clinics/upload", async (req: Request, res: Response, next: Next
            npi=COALESCE(NULLIF(EXCLUDED.npi,''),provider_master.npi),
            primary_provider_type=EXCLUDED.primary_provider_type,
            capability_tags=ARRAY(
-             SELECT DISTINCT value FROM unnest(provider_master.capability_tags || EXCLUDED.capability_tags) value
+             SELECT DISTINCT value
+             FROM unnest(
+               COALESCE(provider_master.capability_tags,ARRAY[]::text[])
+               || COALESCE(EXCLUDED.capability_tags,ARRAY[]::text[])
+             ) value
              WHERE value IS NOT NULL AND value <> ''
            ),
-           primary_source_key=EXCLUDED.primary_source_key,
+           primary_source_key=CASE
+             WHEN provider_master.primary_source_key IS NULL
+               OR provider_master.primary_source_key = 'my_clinics_upload'
+               OR provider_master.primary_source_key LIKE 'user_upload_%'
+             THEN EXCLUDED.primary_source_key
+             ELSE provider_master.primary_source_key
+           END,
            quality_score=GREATEST(COALESCE(provider_master.quality_score,0),COALESCE(EXCLUDED.quality_score,0)),
            active=true,
            last_seen_at=now(),
-           updated_at=now()
-         RETURNING id`,
-        [masterKey, normalized.name, normalized.normalizedName, normalized.address, normalized.address, normalized.city, normalized.state, normalized.postalCode, normalized.countryCode, normalized.lat, normalized.lng, normalized.phone || null, normalized.email || null, normalized.website || null, normalized.npi || null, normalized.primaryProviderType, normalized.capabilityTags, sourceKey, normalized.qualityScore],
+           updated_at=now()`,
+        [JSON.stringify(masterPayload), sourceKey],
       );
-      masteredRows += 1;
-      const masterProviderId = master.rows[0].id as string;
 
-      await upsertMasterSource(client, {
-        sourceKey,
-        masterProviderId,
-        stageRecordId: stage.rows[0].id as string,
-        rawRecordId: raw.rows[0].id as string,
-        sourceRecordId: normalized.sourceRecordId,
-        sourceUrl: normalized.website || null,
-        qualityScore: normalized.qualityScore,
-        raw: normalized.raw,
-      });
+      const lineagePayload = lineage.map((row) => ({
+        master_key: row.masterKey,
+        stage_id: row.stageId,
+        raw_id: row.rawId,
+        source_record_id: row.sourceRecordId,
+        source_url: row.website || null,
+        quality_score: row.qualityScore,
+        raw_payload: row.raw,
+      }));
+      await client.query(
+        `INSERT INTO public.provider_master_sources (
+           master_provider_id, stage_record_id, raw_record_id, source_key, source_record_id,
+           source_url, source_confidence_score, raw_payload
+         )
+         SELECT pm.id,x.stage_id,x.raw_id,$2,x.source_record_id,x.source_url,x.quality_score,x.raw_payload
+         FROM jsonb_to_recordset($1::jsonb) AS x(
+           master_key text, stage_id uuid, raw_id uuid, source_record_id text,
+           source_url text, quality_score numeric, raw_payload jsonb
+         )
+         INNER JOIN public.provider_master pm ON pm.master_key=x.master_key
+         ON CONFLICT (master_provider_id, source_key, (COALESCE(source_record_id,'')))
+         DO UPDATE SET
+           stage_record_id=EXCLUDED.stage_record_id,
+           raw_record_id=EXCLUDED.raw_record_id,
+           source_url=COALESCE(EXCLUDED.source_url,provider_master_sources.source_url),
+           source_confidence_score=GREATEST(
+             COALESCE(provider_master_sources.source_confidence_score,0),
+             COALESCE(EXCLUDED.source_confidence_score,0)
+           ),
+           raw_payload=EXCLUDED.raw_payload,
+           updated_at=now()`,
+        [JSON.stringify(lineagePayload), sourceKey],
+      );
 
-      for (const providerType of new Set([normalized.primaryProviderType, ...normalized.capabilityTags])) {
-        if (!PROVIDER_TYPES.has(providerType)) continue;
+      if (typeRows.length) {
         await client.query(
           `INSERT INTO public.provider_master_types (
              master_provider_id, type_key, source_key, confidence_score
-           ) VALUES ($1,$2,$3,$4)
+           )
+           SELECT pm.id,x.type_key,$2,x.quality_score
+           FROM jsonb_to_recordset($1::jsonb) AS x(
+             master_key text, type_key text, quality_score numeric
+           )
+           INNER JOIN public.provider_master pm ON pm.master_key=x.master_key
            ON CONFLICT (master_provider_id,type_key) DO UPDATE SET
              source_key=EXCLUDED.source_key,
-             confidence_score=GREATEST(COALESCE(provider_master_types.confidence_score,0),COALESCE(EXCLUDED.confidence_score,0))`,
-          [masterProviderId, providerType, sourceKey, normalized.qualityScore],
+             confidence_score=GREATEST(
+               COALESCE(provider_master_types.confidence_score,0),
+               COALESCE(EXCLUDED.confidence_score,0)
+             )`,
+          [JSON.stringify(typeRows.map((row) => ({
+            master_key: row.masterKey,
+            type_key: row.typeKey,
+            quality_score: row.qualityScore,
+          }))), sourceKey],
         );
       }
 
       if (mirrorLegacy) {
-        const legacySourceId = `${sourceKey}:${masterKey}`;
         await client.query(
           `INSERT INTO public.medical_providers (
              place_id, name, formatted_address, lat, lng, types, category, phone, website,
              country_code, locality, administrative_area_level_1, postal_code, data_source,
              source_id, source_type, confidence_score, raw_data, scraped_at, updated_at
-           ) VALUES (
-             $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'user_upload',$16,$17::jsonb,now(),now()
-           ) ON CONFLICT (source_id) DO UPDATE SET
+           )
+           SELECT $2 || ':' || x.master_key,x.name,NULLIF(x.address,''),x.lat,x.lng,
+                  ARRAY(SELECT jsonb_array_elements_text(COALESCE(x.capability_tags,'[]'::jsonb))),
+                  x.primary_provider_type,x.phone,x.website,NULLIF(x.country_code,''),
+                  NULLIF(x.city,''),NULLIF(x.state,''),NULLIF(x.postal_code,''),$3,
+                  $2 || ':' || x.master_key,'user_upload',x.quality_score,
+                  x.raw_payload || jsonb_build_object(
+                    'provider_master_key',x.master_key,
+                    'source_key',$2,
+                    'source_label',$3,
+                    'upload_label',$4
+                  ),now(),now()
+           FROM jsonb_to_recordset($1::jsonb) AS x(
+             master_key text, name text, normalized_name text, address text, city text, state text,
+             postal_code text, country_code text, lat double precision, lng double precision,
+             phone text, email text, website text, npi text, primary_provider_type text,
+             capability_tags jsonb, quality_score double precision, raw_payload jsonb
+           )
+           ON CONFLICT (source_id) DO UPDATE SET
              name=EXCLUDED.name,
              formatted_address=EXCLUDED.formatted_address,
              lat=EXCLUDED.lat,
@@ -486,9 +698,8 @@ router.post("/my-clinics/upload", async (req: Request, res: Response, next: Next
              confidence_score=EXCLUDED.confidence_score,
              raw_data=EXCLUDED.raw_data,
              updated_at=now()`,
-          [legacySourceId, normalized.name, normalized.address, normalized.lat, normalized.lng, normalized.capabilityTags, normalized.primaryProviderType, normalized.phone || null, normalized.website || null, normalized.countryCode, normalized.city, normalized.state, normalized.postalCode, sourceLabel, legacySourceId, normalized.qualityScore, JSON.stringify({ ...normalized.raw, provider_master_id: masterProviderId, source_key: sourceKey, source_label: sourceLabel, upload_label: uploadLabel })],
+          [JSON.stringify(masterPayload), sourceKey, sourceLabel, uploadLabel],
         );
-        mirroredRows += 1;
       }
     }
 
@@ -497,7 +708,15 @@ router.post("/my-clinics/upload", async (req: Request, res: Response, next: Next
        SET status=$2, raw_rows=$3, staged_rows=$4, mastered_rows=$5, error_rows=$6,
            completed_at=now(), updated_at=now(), metadata=metadata || $7::jsonb
        WHERE id=$1`,
-      [batchId, errorRows ? "completed_with_errors" : "completed", rawRows, stagedRows, masteredRows, errorRows, JSON.stringify({ dryRun, mirrorLegacy, needsGeocodeRows, duplicateMasterRows, sourceLabel, sourceKey })],
+      [
+        batchId,
+        errorRows ? "completed_with_errors" : "completed",
+        prepared.length,
+        staged.length,
+        mapReady.length,
+        errorRows,
+        JSON.stringify({ dryRun, mirrorLegacy, needsGeocodeRows, duplicateMasterRows, sourceLabel, sourceKey }),
+      ],
     );
 
     if (dryRun) await client.query("ROLLBACK");
@@ -509,22 +728,23 @@ router.post("/my-clinics/upload", async (req: Request, res: Response, next: Next
       sourceLabel,
       dryRun,
       committed: !dryRun,
-      totalRows: rows.length,
-      rawRows,
-      stagedRows,
-      masteredRows,
-      mirroredRows,
+      totalRows: prepared.length,
+      rawRows: prepared.length,
+      stagedRows: staged.length,
+      masteredRows: mapReady.length,
+      mirroredRows: mirrorLegacy ? masters.length : 0,
       needsGeocodeRows,
       duplicateMasterRows,
       errorRows,
-      rowErrors: rowErrors.slice(0, 100),
+      rowErrors,
       message: dryRun
-        ? `Dry run validated ${rows.length} rows; no database changes were committed.`
-        : `Uploaded ${masteredRows} mapped rows as "${sourceLabel}".`,
+        ? `Dry run validated ${prepared.length} rows; no database changes were committed.`
+        : `Uploaded ${mapReady.length} mapped rows as "${sourceLabel}".`,
     });
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
-    res.status(500).json({ error: error instanceof Error ? error.message : "Provider dataset upload failed" });
+    console.error("[ProviderDatasetUploads] upload failed:", error);
+    res.status(500).json({ error: "Provider dataset upload failed" });
   } finally {
     client.release();
   }
@@ -536,21 +756,16 @@ function addParam(params: Array<string | number>, value: string | number): strin
 }
 
 function providerIdentity(provider: LayerProvider): string {
-  const name = String(provider.name || provider.clinic_name || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  const lat = Number(provider.lat);
-  const lng = Number(provider.lng);
-  if (name && Number.isFinite(lat) && Number.isFinite(lng)) return `${name}|${lat.toFixed(5)}|${lng.toFixed(5)}`;
-  return String(provider.source_id || `${name}|${provider.city || ""}|${provider.state || ""}`);
+  const name = text(provider.name || provider.clinic_name).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const address = text(provider.address_1).toLowerCase().replace(/\s+/g, " ").trim();
+  const city = text(provider.city).toLowerCase();
+  const state = text(provider.state).toLowerCase();
+  const postal = text(provider.zip).toLowerCase();
+  if (name && (address || city || state || postal)) return `${name}|${address}|${city}|${state}|${postal}`;
+  return text(provider.source_id) || name;
 }
 
-async function relationExists(relation: string): Promise<boolean> {
-  const result = await getPool().query("SELECT to_regclass($1) IS NOT NULL AS ok", [`public.${relation}`]);
-  return result.rows[0]?.ok === true;
-}
-
-async function loadSavedCandidates(bounds: Bounds | null, clinicType: string): Promise<LayerProvider[]> {
-  if (!(await relationExists("provider_candidates"))) return [];
-  const params: Array<string | number> = [];
+function savedCandidateConditions(bounds: Bounds | null, clinicType: string, params: Array<string | number>): string[] {
   const conditions = [
     "status='saved'",
     "lat IS NOT NULL",
@@ -558,6 +773,7 @@ async function loadSavedCandidates(bounds: Bounds | null, clinicType: string): P
     "lat BETWEEN -90 AND 90",
     "lng BETWEEN -180 AND 180",
     "(lat <> 0 OR lng <> 0)",
+    "NULLIF(btrim(name),'') IS NOT NULL",
   ];
   if (bounds) {
     conditions.push(`lat BETWEEN ${addParam(params, bounds.south)} AND ${addParam(params, bounds.north)}`);
@@ -567,18 +783,58 @@ async function loadSavedCandidates(bounds: Bounds | null, clinicType: string): P
   }
   if (clinicType) {
     const placeholder = addParam(params, clinicType);
-    conditions.push(`(clinic_type=${placeholder} OR array_to_string(services,',') ILIKE '%' || ${placeholder} || '%')`);
+    conditions.push(`(
+      clinic_type=${placeholder}
+      OR array_to_string(COALESCE(services,ARRAY[]::text[]),',') ILIKE '%' || ${placeholder} || '%'
+      OR array_to_string(COALESCE(categories,ARRAY[]::text[]),',') ILIKE '%' || ${placeholder} || '%'
+    )`);
   }
+  return conditions;
+}
+
+async function relationExists(relation: string): Promise<boolean> {
+  const result = await getPool().query("SELECT to_regclass($1) IS NOT NULL AS ok", [`public.${relation}`]);
+  return result.rows[0]?.ok === true;
+}
+
+async function countSavedCandidates(bounds: Bounds | null, clinicType: string): Promise<number> {
+  if (!(await relationExists("provider_candidates"))) return 0;
+  const params: Array<string | number> = [];
+  const conditions = savedCandidateConditions(bounds, clinicType, params);
+  const result = await getPool().query(
+    `SELECT count(*)::int AS total
+     FROM public.provider_candidates
+     WHERE ${conditions.join(" AND ")}`,
+    params,
+  );
+  return Number(result.rows[0]?.total || 0);
+}
+
+async function loadSavedCandidates(
+  bounds: Bounds | null,
+  clinicType: string,
+  limit: number,
+  offset: number,
+): Promise<LayerProvider[]> {
+  if (!limit || !(await relationExists("provider_candidates"))) return [];
+  const params: Array<string | number> = [];
+  const conditions = savedCandidateConditions(bounds, clinicType, params);
+  const limitPlaceholder = addParam(params, limit);
+  const offsetPlaceholder = addParam(params, offset);
   const result = await getPool().query(
     `SELECT id::text, name, address, city, admin_area, postal_code, lat, lng, phone, website,
             source_url, trust_tier, confidence_score, clinic_type, services, categories
      FROM public.provider_candidates
      WHERE ${conditions.join(" AND ")}
-     ORDER BY name ASC`,
+     ORDER BY name ASC, id ASC
+     LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder}`,
     params,
   );
   return result.rows.map((row: Record<string, unknown>) => {
-    const tags = [...new Set([...(Array.isArray(row.services) ? row.services : []), ...(Array.isArray(row.categories) ? row.categories : [])].map(String))];
+    const tags = [...new Set([
+      ...(Array.isArray(row.services) ? row.services : []),
+      ...(Array.isArray(row.categories) ? row.categories : []),
+    ].map(String))];
     return {
       clinic_name: row.name,
       name: row.name,
@@ -609,12 +865,16 @@ async function loadSavedCandidates(bounds: Bounds | null, clinicType: string): P
 
 router.get("/provider-layers/my-clinics", async (req: Request, res: Response) => {
   if (!isPersistenceConfigured()) {
-    res.json({ providers: [], count: 0, loaded: 0, total: 0, source: "my-clinics", page: 1, limit: 0, hasMore: false, all: false, storage: "none", visibleCapped: false });
+    res.json({
+      providers: [], count: 0, loaded: 0, total: 0, source: "my-clinics",
+      page: 1, limit: 0, hasMore: false, all: false, storage: "none", visibleCapped: false,
+    });
     return;
   }
+
   try {
     const all = req.query.all === "true";
-    const limit = Math.min(Math.max(Number(req.query.limit) || 2000, 1), 5000);
+    const limit = Math.min(Math.max(Number(req.query.limit) || 2000, 1), MAX_PAGE_SIZE);
     const page = Math.max(Number(req.query.page) || 1, 1);
     const north = parseOptionalNumber(req.query.north);
     const south = parseOptionalNumber(req.query.south);
@@ -633,12 +893,17 @@ router.get("/provider-layers/my-clinics", async (req: Request, res: Response) =>
     const params: Array<string | number> = [];
     const conditions = [
       "pm.active=true",
-      "psc.source_kind='user_upload'",
       "pm.lat IS NOT NULL",
       "pm.lng IS NOT NULL",
       "pm.lat BETWEEN -90 AND 90",
       "pm.lng BETWEEN -180 AND 180",
       "(pm.lat <> 0 OR pm.lng <> 0)",
+      `EXISTS (
+        SELECT 1
+        FROM public.provider_master_sources pms_check
+        INNER JOIN public.provider_source_catalog psc_check ON psc_check.source_key=pms_check.source_key
+        WHERE pms_check.master_provider_id=pm.id AND psc_check.source_kind='user_upload'
+      )`,
     ];
     if (bounds) {
       conditions.push(`pm.lat BETWEEN ${addParam(params, bounds.south)} AND ${addParam(params, bounds.north)}`);
@@ -648,33 +913,50 @@ router.get("/provider-layers/my-clinics", async (req: Request, res: Response) =>
     }
     if (clinicType) {
       const placeholder = addParam(params, clinicType);
-      conditions.push(`(pm.primary_provider_type=${placeholder} OR array_to_string(COALESCE(pm.capability_tags,ARRAY[]::text[]),',') ILIKE '%' || ${placeholder} || '%')`);
+      conditions.push(`(
+        pm.primary_provider_type=${placeholder}
+        OR array_to_string(COALESCE(pm.capability_tags,ARRAY[]::text[]),',') ILIKE '%' || ${placeholder} || '%'
+      )`);
     }
     const whereSql = conditions.join(" AND ");
+
     const countResult = await getPool().query(
       `SELECT count(*)::int AS total
        FROM public.provider_master pm
-       INNER JOIN public.provider_source_catalog psc ON psc.source_key=pm.primary_source_key
        WHERE ${whereSql}`,
       params,
     );
     const uploadTotal = Number(countResult.rows[0]?.total || 0);
-    const savedCandidates = await loadSavedCandidates(bounds, clinicType);
-    const total = uploadTotal + savedCandidates.length;
-    const offset = (page - 1) * limit;
+    const candidateTotal = await countSavedCandidates(bounds, clinicType);
+    const total = uploadTotal + candidateTotal;
+    const requestLimit = all ? MAX_ALL_ROWS : limit;
+    const offset = all ? 0 : (page - 1) * limit;
     const uploadOffset = Math.min(offset, uploadTotal);
-    const uploadLimit = all ? uploadTotal : Math.max(Math.min(limit, uploadTotal - uploadOffset), 0);
+    const uploadLimit = Math.max(Math.min(requestLimit, uploadTotal - uploadOffset), 0);
+    const candidateOffset = Math.max(offset - uploadTotal, 0);
+    const candidateLimit = Math.max(requestLimit - uploadLimit, 0);
     const providers: LayerProvider[] = [];
 
     if (uploadLimit > 0) {
-      const dataParams = [...params, uploadLimit, uploadOffset];
+      const dataParams = [...params];
+      const limitPlaceholder = addParam(dataParams, uploadLimit);
+      const offsetPlaceholder = addParam(dataParams, uploadOffset);
       const result = await getPool().query(
-        `SELECT pm.*, psc.display_name AS source_display_name, psc.trust_tier AS source_trust_tier
+        `SELECT pm.*, upload_source.source_key AS uploaded_source_key,
+                upload_source.display_name AS source_display_name,
+                upload_source.trust_tier AS source_trust_tier
          FROM public.provider_master pm
-         INNER JOIN public.provider_source_catalog psc ON psc.source_key=pm.primary_source_key
+         INNER JOIN LATERAL (
+           SELECT pms.source_key, psc.display_name, psc.trust_tier
+           FROM public.provider_master_sources pms
+           INNER JOIN public.provider_source_catalog psc ON psc.source_key=pms.source_key
+           WHERE pms.master_provider_id=pm.id AND psc.source_kind='user_upload'
+           ORDER BY pms.updated_at DESC, pms.created_at DESC, pms.id DESC
+           LIMIT 1
+         ) upload_source ON true
          WHERE ${whereSql}
          ORDER BY pm.name ASC, pm.id ASC
-         LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`,
+         LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder}`,
         dataParams,
       );
       providers.push(...result.rows.map((row: Record<string, unknown>) => {
@@ -696,7 +978,7 @@ router.get("/provider-layers/my-clinics", async (req: Request, res: Response) =>
           source_type: "user_upload",
           data_source: row.source_display_name,
           source: row.source_display_name,
-          source_key: row.primary_source_key,
+          source_key: row.uploaded_source_key,
           trust_tier: row.source_trust_tier || "verified",
           confidence_score: row.quality_score == null ? null : Number(row.quality_score),
           category: providerType,
@@ -709,12 +991,7 @@ router.get("/provider-layers/my-clinics", async (req: Request, res: Response) =>
       }));
     }
 
-    if (all) {
-      providers.push(...savedCandidates);
-    } else if (providers.length < limit) {
-      const candidateOffset = Math.max(offset - uploadTotal, 0);
-      providers.push(...savedCandidates.slice(candidateOffset, candidateOffset + (limit - providers.length)));
-    }
+    providers.push(...await loadSavedCandidates(bounds, clinicType, candidateLimit, candidateOffset));
 
     const deduped = new Map<string, LayerProvider>();
     for (const provider of providers) {
@@ -722,6 +999,8 @@ router.get("/provider-layers/my-clinics", async (req: Request, res: Response) =>
       if (!deduped.has(key)) deduped.set(key, provider);
     }
     const pageProviders = [...deduped.values()];
+    const visibleCapped = all && total > MAX_ALL_ROWS;
+
     res.json({
       providers: pageProviders,
       count: pageProviders.length,
@@ -730,15 +1009,28 @@ router.get("/provider-layers/my-clinics", async (req: Request, res: Response) =>
       source: "my-clinics",
       page: all ? 1 : page,
       limit: all ? pageProviders.length : limit,
-      hasMore: all ? false : offset + pageProviders.length < total,
+      hasMore: all ? visibleCapped : offset + requestLimit < total,
       all,
       storage: "provider_master_user_uploads",
-      visibleCapped: false,
+      visibleCapped,
     });
   } catch (error) {
-    const warning = error instanceof Error ? error.message : "Uploaded dataset layer query failed";
     console.error("[ProviderDatasetUploads] layer query failed:", error);
-    res.status(503).json({ providers: [], count: 0, loaded: 0, total: 0, source: "my-clinics", warning, transientFailure: true, visibleCapped: false });
+    res.status(503).json({
+      providers: [],
+      count: 0,
+      loaded: 0,
+      total: 0,
+      source: "my-clinics",
+      page: 1,
+      limit: 0,
+      hasMore: false,
+      all: false,
+      storage: "none",
+      warning: "Uploaded dataset layer query unavailable",
+      transientFailure: true,
+      visibleCapped: false,
+    });
   }
 });
 

@@ -34,11 +34,14 @@ const requiredOwners: Record<string, string> = {
   "rightPanelCompactor.ts": "right-panel-compactor",
   "liveFinderDriveTools.ts": "live-finder-drive-tools",
   "usDiagnosticsGate.ts": "us-diagnostics-gate",
+  "modalLabelScrubber.ts": "modal-label-scrubber",
+  "mapEngineLoadingCleanupRuntime.ts": "map-engine-loading-cleanup",
+  "routePlannerControlsRuntime.ts": "route-planner-controls",
 };
 
 for (const [file, id] of Object.entries(requiredOwners)) {
   const text = source(file);
-  assert(text.includes(`registerRuntimeOwner(\"${id}\"`) || text.includes(`registerRuntimeOwner("${id}"`), `${file} does not register runtime owner ${id}`);
+  assert(text.includes(`registerRuntimeOwner("${id}"`), `${file} does not register runtime owner ${id}`);
 }
 
 for (const file of [
@@ -48,6 +51,9 @@ for (const file of [
   "rightPanelCompactor.ts",
   "liveFinderDriveTools.ts",
   "usDiagnosticsGate.ts",
+  "modalLabelScrubber.ts",
+  "mapEngineLoadingCleanupRuntime.ts",
+  "routePlannerControlsRuntime.ts",
 ]) {
   const text = source(file);
   assert(!text.includes("new MutationObserver"), `${file} still owns an independent MutationObserver`);
@@ -88,11 +94,8 @@ const allowedDirectObservers = new Set([
   "generalUiIntegrityRuntime.ts",
   "healthsitesFlatDotsRuntime.ts",
   "mapEngineFinalFixRuntime.ts",
-  "mapEngineLoadingCleanupRuntime.ts",
   "mapboxGlobeLoadHardeningRuntime.ts",
-  "modalLabelScrubber.ts",
   "providerLocationFinderRuntime.ts",
-  "routePlannerControlsRuntime.ts",
   "sidebarWorkspaceControllerRuntime.ts",
   "unifiedProviderToolsRuntime.ts",
 ]);

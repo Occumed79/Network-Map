@@ -1,4 +1,5 @@
 import L from "leaflet";
+import { registerNetworkRequestMiddleware } from "./networkRequestPipelineRuntime";
 
 const PATCH_FLAG = "__occumedProviderExplorerLayerStabilityPatched";
 const EVENT_NAME = "occumed:provider-explorer-stability";
@@ -23,7 +24,6 @@ type RuntimeSnapshot = {
 
 type GroupState = {
   replacing: boolean;
-  replacementToken: number;
   requestId: number | null;
   requestSettled: boolean;
   expectedCellCount: number | null;
@@ -110,7 +110,6 @@ function isAggregateLayer(layer: unknown): boolean {
 function createGroupState(): GroupState {
   return {
     replacing: false,
-    replacementToken: 0,
     requestId: null,
     requestSettled: false,
     expectedCellCount: null,
@@ -150,20 +149,22 @@ function abortError(message: string): DOMException {
 }
 
 function timeoutError(url: string): DOMException {
-  return new DOMException(`Provider Explorer request timed out after ${Math.round(REQUEST_TIMEOUT_MS / 1000)} seconds: ${url}`, "TimeoutError");
+  return new DOMException(
+    `Provider Explorer request timed out after ${Math.round(REQUEST_TIMEOUT_MS / 1000)} seconds: ${url}`,
+    "TimeoutError",
+  );
 }
 
 function hasVisibleLayers(group: StableLayerGroup): boolean {
   return group.getLayers().length > 0;
 }
 
-function installProviderExplorerLayerStability(): void {
+function installLayerTransactions(): void {
   const prototype = L.LayerGroup.prototype as any;
   if (prototype[PATCH_FLAG]) return;
 
   const originalAddLayer = prototype.addLayer as (this: L.LayerGroup, layer: L.Layer) => L.LayerGroup;
   const originalClearLayers = prototype.clearLayers as (this: L.LayerGroup) => L.LayerGroup;
-  const originalFetch = window.fetch.bind(window);
 
   function commitGroup(group: StableLayerGroup, reason: string): void {
     const state = groupState(group);
@@ -185,7 +186,7 @@ function installProviderExplorerLayerStability(): void {
 
     try {
       originalClearLayers.call(group);
-      for (const layer of stagedLayers) originalAddLayer.call(group, layer);
+      stagedLayers.forEach((layer) => originalAddLayer.call(group, layer));
     } finally {
       resetReplacementState(state);
       runtime.commitDepth = Math.max(0, runtime.commitDepth - 1);
@@ -212,14 +213,11 @@ function installProviderExplorerLayerStability(): void {
     const state = groupState(group);
     clearGroupTimers(state);
     state.replacing = true;
-    state.replacementToken += 1;
     state.requestId = null;
     state.requestSettled = false;
     state.expectedCellCount = null;
     state.stagedLayers = [];
 
-    // A switch to pins or an explicit clear has no aggregate request following it.
-    // Wait briefly for a density/hex request; otherwise commit the empty state.
     state.fallbackClearTimer = window.setTimeout(() => {
       state.fallbackClearTimer = null;
       if (state.replacing && state.requestId === null) commitGroup(group, "explicit-clear");
@@ -243,7 +241,6 @@ function installProviderExplorerLayerStability(): void {
     aggregateGroups.forEach((group) => {
       const state = groupState(group);
       if (!state.replacing || state.requestId !== requestId) return;
-      // Keep the last known-good visualization visible on errors, aborts, and timeouts.
       resetReplacementState(state);
     });
     emit("request-cancelled", { cancelledRequestId: requestId, reason });
@@ -260,16 +257,16 @@ function installProviderExplorerLayerStability(): void {
       if (!state.replacing || state.requestId !== requestId) return;
       state.requestSettled = true;
       state.expectedCellCount = cells?.length ?? null;
-      scheduleCommit(group, "aggregate-response", COMMIT_IDLE_MS);
+      scheduleCommit(group, "aggregate-response");
     });
 
-    // The caller resumes from response.json() in a microtask and draws all cells
-    // synchronously. This timer runs only after that drawing pass has completed.
     window.setTimeout(() => {
       if (activeAggregateDrawRequestId === requestId) activeAggregateDrawRequestId = null;
       aggregateGroups.forEach((group) => {
         const state = groupState(group);
-        if (state.replacing && state.requestId === requestId) scheduleCommit(group, "aggregate-draw-complete", COMMIT_IDLE_MS);
+        if (state.replacing && state.requestId === requestId) {
+          scheduleCommit(group, "aggregate-draw-complete");
+        }
       });
     }, 0);
   }
@@ -356,7 +353,6 @@ function installProviderExplorerLayerStability(): void {
     }, REQUEST_TIMEOUT_MS);
 
     activeRequests.set(channel, record);
-
     if (channel === "aggregate") {
       runtime.requestId = id;
       runtime.requestActive = true;
@@ -364,10 +360,7 @@ function installProviderExplorerLayerStability(): void {
       emit("request-start", { startedRequestId: id, url });
     }
 
-    return {
-      record,
-      init: { ...init, signal: controller.signal },
-    };
+    return { record, init: { ...init, signal: controller.signal } };
   }
 
   function wrapResponse(response: Response, record: ActiveRequest): Response {
@@ -376,15 +369,10 @@ function installProviderExplorerLayerStability(): void {
         if (activeRequests.get(record.channel)?.id !== record.id) {
           throw abortError(`Ignored stale Provider Explorer ${record.channel} response.`);
         }
-        if (!response.ok) {
-          throw new Error(`Provider Explorer ${record.channel} request failed with HTTP ${response.status}.`);
-        }
-
         const payload = await response.json();
         if (activeRequests.get(record.channel)?.id !== record.id) {
           throw abortError(`Ignored stale Provider Explorer ${record.channel} response.`);
         }
-
         if (record.channel === "aggregate") markAggregateResponseReady(record.id, payload);
         completeRequest(record);
         return payload;
@@ -411,18 +399,14 @@ function installProviderExplorerLayerStability(): void {
 
     const state = this.__occumedAggregateState;
     if (!this.__occumedAggregateGroup || !state?.replacing) return originalAddLayer.call(this, layer);
-
-    // A stale response must never contaminate a newer replacement transaction.
     if (
       state.requestId !== null
       && activeAggregateDrawRequestId !== null
       && state.requestId !== activeAggregateDrawRequestId
-    ) {
-      return this;
-    }
+    ) return this;
 
     state.stagedLayers.push(layer);
-    if (state.requestSettled) scheduleCommit(this, "staged-layer-idle", COMMIT_IDLE_MS);
+    if (state.requestSettled) scheduleCommit(this, "staged-layer-idle");
     return this;
   };
 
@@ -437,9 +421,6 @@ function installProviderExplorerLayerStability(): void {
       && activeAggregateDrawRequestId !== null
       && state.requestId === activeAggregateDrawRequestId
     ) {
-      // drawProviderDensity/drawProviderDotDensity clears the group again after
-      // response.json(). Keep the visible field, discard only staged remnants,
-      // and preserve the active request transaction.
       clearTimer(state.commitTimer);
       state.commitTimer = null;
       state.stagedLayers = [];
@@ -450,28 +431,30 @@ function installProviderExplorerLayerStability(): void {
     return this;
   };
 
-  window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-    const channel = requestChannel(input);
-    if (!channel) return originalFetch(input, init);
+  registerNetworkRequestMiddleware("provider-explorer-stability", async (context, next) => {
+    const channel = requestChannel(context.input);
+    if (!channel) return next();
 
-    const started = startRequest(channel, input, init);
-    return originalFetch(input, started.init)
-      .then((response) => {
-        if (activeRequests.get(channel)?.id !== started.record.id) {
-          throw abortError(`Ignored stale Provider Explorer ${channel} response.`);
-        }
-        return wrapResponse(response, started.record);
-      })
-      .catch((error) => {
-        failRequest(started.record, error);
-        throw error;
-      });
-  }) as typeof window.fetch;
+    const started = startRequest(channel, context.input, context.init);
+    try {
+      const response = await next({ init: started.init });
+      if (activeRequests.get(channel)?.id !== started.record.id) {
+        throw abortError(`Ignored stale Provider Explorer ${channel} response.`);
+      }
+      if (!response.ok) {
+        throw new Error(`Provider Explorer ${channel} request failed with HTTP ${response.status}.`);
+      }
+      return wrapResponse(response, started.record);
+    } catch (error) {
+      failRequest(started.record, error);
+      throw error;
+    }
+  }, 200);
 
   prototype[PATCH_FLAG] = true;
   emit("installed");
 }
 
-installProviderExplorerLayerStability();
+installLayerTransactions();
 
 export {};

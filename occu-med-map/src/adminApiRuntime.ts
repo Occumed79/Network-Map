@@ -1,3 +1,5 @@
+import { registerNetworkRequestMiddleware } from "./networkRequestPipelineRuntime";
+
 const TOKEN_STORAGE_KEY = "network-map-admin-token";
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const PROTECTED_PREFIXES = [
@@ -9,19 +11,6 @@ const PROTECTED_PREFIXES = [
   "/api/browser-extraction",
   "/api/google-places",
 ];
-
-function requestUrl(input: RequestInfo | URL): URL | null {
-  try {
-    if (input instanceof Request) return new URL(input.url, window.location.origin);
-    return new URL(input.toString(), window.location.origin);
-  } catch {
-    return null;
-  }
-}
-
-function requestMethod(input: RequestInfo | URL, init?: RequestInit): string {
-  return String(init?.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
-}
 
 function isProtected(url: URL | null, method: string): boolean {
   if (!url || url.origin !== window.location.origin || SAFE_METHODS.has(method)) return false;
@@ -44,23 +33,19 @@ function withToken(init: RequestInit | undefined, token: string): RequestInit {
   return { ...init, headers };
 }
 
-const nativeFetch = window.fetch.bind(window);
-
-window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-  const url = requestUrl(input);
-  const method = requestMethod(input, init);
-  if (!isProtected(url, method)) return nativeFetch(input, init);
+registerNetworkRequestMiddleware("admin-auth", async (context, next) => {
+  if (!isProtected(context.url, context.method)) return next();
 
   let token = askForToken();
-  let response = await nativeFetch(input, withToken(init, token));
+  let response = await next({ init: withToken(context.init, token) });
 
   if ((response.status === 401 || response.status === 403) && token) {
     window.localStorage.removeItem(TOKEN_STORAGE_KEY);
     token = askForToken();
-    if (token) response = await nativeFetch(input, withToken(init, token));
+    if (token) response = await next({ init: withToken(context.init, token) });
   }
 
   return response;
-}) as typeof window.fetch;
+}, 100);
 
 export {};

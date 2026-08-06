@@ -1,4 +1,5 @@
 import L from 'leaflet';
+import { registerLeafletMapInitializer } from './leafletMapLifecycleRuntime';
 
 export type PhaseTwoMapSnapshot = {
   zoom: number;
@@ -55,15 +56,11 @@ function registerMap(map: L.Map): void {
 export function installPhaseTwoMapBridge(): void {
   if (leafletRuntime[INSTALL_KEY]) return;
   leafletRuntime[INSTALL_KEY] = true;
-
-  const currentMapFactory = L.map;
-  (L as typeof L & { map: typeof L.map }).map = (...args: Parameters<typeof L.map>) => {
-    const map = currentMapFactory(...args);
-    // Register immediately. Deferring this with setTimeout(0) allowed startup DOM
-    // work to starve the timer, leaving the UI permanently at “Map connecting”.
-    registerMap(map);
-    return map;
-  };
+  registerLeafletMapInitializer({
+    id: 'phase-two-map-bridge',
+    priority: 0,
+    initialize: registerMap,
+  });
 }
 
 installPhaseTwoMapBridge();

@@ -1,4 +1,5 @@
 import L from "leaflet";
+import { registerLeafletMapInitializer } from "./leafletMapLifecycleRuntime";
 import mapboxgl from "mapbox-gl";
 
 type MapMode = "2d" | "3d";
@@ -40,15 +41,14 @@ let lastEngineDrivenLeafletMove = 0;
 let mapResizeObserver: ResizeObserver | null = null;
 let mapResizeFrame = 0;
 
-const originalMapFactory = L.map.bind(L);
-(L as any).map = (element: string | HTMLElement, options?: L.MapOptions) => {
-  const map = originalMapFactory(element, options);
-  canonicalMap = map;
-  map.whenReady(() => {
-    void initializeDualEngines(map);
-  });
-  return map;
-};
+registerLeafletMapInitializer({
+  id: "dual-map-engine",
+  priority: 10,
+  initialize: (map) => {
+    canonicalMap = map;
+    map.whenReady(() => { void initializeDualEngines(map); });
+  },
+});
 
 async function initializeDualEngines(map: L.Map): Promise<void> {
   const mapContainer = map.getContainer();

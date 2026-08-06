@@ -58,6 +58,9 @@ jobs:
       - name: Run network request pipeline hardening smoke test
         run: pnpm --filter @workspace/occu-med-map test:network-request-hardening
 
+      - name: Run Leaflet map lifecycle hardening smoke test
+        run: pnpm --filter @workspace/occu-med-map test:leaflet-map-lifecycle-hardening
+
       - name: Run P1 data stabilization smoke tests
         run: pnpm --filter @workspace/api-server test:p1-data
 

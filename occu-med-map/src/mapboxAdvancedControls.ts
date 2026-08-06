@@ -1,10 +1,10 @@
 import L from "leaflet";
+import { registerLeafletMapInitializer } from "./leafletMapLifecycleRuntime";
 import { hasMapboxToken, mapboxDirections, mapboxIsochrone, mapboxReverseGeocode } from "./mapboxServices";
 
 type Point = { lat: number; lng: number; label?: string };
 type TravelMode = "driving-traffic" | "driving" | "walking";
 
-const originalMap = L.map.bind(L);
 let installed = false;
 let origin: Point | null = null;
 let routeLayer: L.LayerGroup | null = null;
@@ -163,11 +163,11 @@ function installOnMap(map: L.Map) {
 export function installMapboxAdvancedControls() {
   if (installed || !hasMapboxToken()) return;
   installed = true;
-  (L as any).map = (...args: Parameters<typeof L.map>) => {
-    const map = originalMap(...args);
-    window.setTimeout(() => installOnMap(map), 0);
-    return map;
-  };
+  registerLeafletMapInitializer({
+    id: "mapbox-advanced-controls",
+    priority: 90,
+    initialize: (map) => { window.setTimeout(() => installOnMap(map), 0); },
+  });
 }
 
 installMapboxAdvancedControls();

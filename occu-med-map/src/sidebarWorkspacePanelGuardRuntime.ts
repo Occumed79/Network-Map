@@ -2,16 +2,47 @@ type GuardedWorkspaceTab = "providers" | "mapTools" | "liveFinder" | "explorer";
 
 type SidebarWorkspaceController = {
   getActiveTab?: () => GuardedWorkspaceTab;
+  setActiveTab?: (tab: GuardedWorkspaceTab, managePanels?: boolean) => void;
   sync?: () => void;
 };
 
-const RETRY_DELAYS_MS = [0, 80, 220, 480, 850, 1350, 2200];
+type UiIntegrityResult = {
+  tab: GuardedWorkspaceTab;
+  healthy: boolean;
+  failures: string[];
+  measuredAt: number;
+};
+
+declare global {
+  interface Window {
+    __NETWORK_MAP_UI_INTEGRITY__?: {
+      audit: () => UiIntegrityResult;
+      recover: () => void;
+      lastResult: () => UiIntegrityResult | null;
+    };
+  }
+}
+
+const RETRY_DELAYS_MS = [0, 90, 240, 520, 900, 1500, 2300];
 const PANEL_SELECTORS: Partial<Record<GuardedWorkspaceTab, string>> = {
   liveFinder: ".live-panel.open",
   explorer: ".provider-explorer-drawer.open",
 };
+const CLOSE_SELECTOR = [
+  ".live-panel .rp-close",
+  ".provider-explorer-drawer .provider-drawer-header > button",
+  ".live-panel button[aria-label*='close' i]",
+  ".provider-explorer-drawer button[aria-label*='close' i]",
+  ".live-panel button[title*='close' i]",
+  ".provider-explorer-drawer button[title*='close' i]",
+].join(", ");
 
 let recoveryGeneration = 0;
+let retryTimers: number[] = [];
+let auditTimers: number[] = [];
+let closeIntentUntil = 0;
+let lastLaunchAt = 0;
+let lastAudit: UiIntegrityResult | null = null;
 
 function controller(): SidebarWorkspaceController | null {
   return (window as typeof window & {
@@ -33,9 +64,22 @@ function currentTab(): GuardedWorkspaceTab {
   return "providers";
 }
 
-function panelIsOpen(tab: GuardedWorkspaceTab): boolean {
+function elementIsVisible(element: Element | null): element is HTMLElement {
+  if (!(element instanceof HTMLElement)) return false;
+  const style = window.getComputedStyle(element);
+  if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
+  const rect = element.getBoundingClientRect();
+  return rect.width > 40 && rect.height > 40;
+}
+
+function panelFor(tab: GuardedWorkspaceTab): HTMLElement | null {
   const selector = PANEL_SELECTORS[tab];
-  return selector ? Boolean(document.querySelector(selector)) : true;
+  return selector ? document.querySelector<HTMLElement>(selector) : null;
+}
+
+function panelIsOpen(tab: GuardedWorkspaceTab): boolean {
+  if (tab !== "liveFinder" && tab !== "explorer") return true;
+  return elementIsVisible(panelFor(tab));
 }
 
 function liveLauncher(): HTMLButtonElement | null {
@@ -61,35 +105,126 @@ function launcherFor(tab: GuardedWorkspaceTab): HTMLButtonElement | null {
   return null;
 }
 
+function clearTimers(timers: number[]): void {
+  timers.forEach((timer) => window.clearTimeout(timer));
+  timers.length = 0;
+}
+
 function settleMapLayout(): void {
   const emitResize = () => window.dispatchEvent(new Event("resize"));
   window.requestAnimationFrame(emitResize);
-  window.setTimeout(emitResize, 90);
-  window.setTimeout(emitResize, 280);
+  auditTimers.push(window.setTimeout(emitResize, 80));
+  auditTimers.push(window.setTimeout(emitResize, 240));
+}
+
+function closeEnough(a: number, b: number, tolerance = 5): boolean {
+  return Math.abs(a - b) <= tolerance;
+}
+
+function auditLayout(): UiIntegrityResult {
+  const failures: string[] = [];
+  const tab = currentTab();
+  const desktop = window.innerWidth > 768;
+  const sidebar = document.querySelector<HTMLElement>(".sidebar.occumed-sidebar-workspace-scope");
+  const tabs = document.querySelector<HTMLElement>(".occumed-sidebar-workspace-tabs");
+  const map = document.querySelector<HTMLElement>(".map-wrap");
+  const activeTabs = Array.from(document.querySelectorAll<HTMLElement>(".occumed-sidebar-workspace-tab[aria-selected='true']"));
+
+  if (!sidebar) failures.push("sidebar-missing");
+  if (!tabs) failures.push("tabs-missing");
+  if (!map) failures.push("map-missing");
+  if (activeTabs.length !== 1) failures.push("active-tab-count");
+
+  if (desktop && sidebar && map && tabs) {
+    const sidebarRect = sidebar.getBoundingClientRect();
+    const tabsRect = tabs.getBoundingClientRect();
+    const mapRect = map.getBoundingClientRect();
+
+    if (sidebarRect.width < 275 || sidebarRect.width > 345) failures.push("sidebar-width");
+    if (sidebarRect.height < 300) failures.push("sidebar-height");
+    if (tabsRect.left < sidebarRect.left - 2 || tabsRect.right > sidebarRect.right + 2) failures.push("tabs-overflow");
+    if (mapRect.width < Math.max(420, window.innerWidth - sidebarRect.width - 80)) failures.push("map-width");
+    if (mapRect.right < window.innerWidth - 18) failures.push("phantom-right-column");
+    if (mapRect.left < sidebarRect.right + 4) failures.push("map-sidebar-overlap");
+
+    if (tab === "liveFinder" || tab === "explorer") {
+      const panel = panelFor(tab);
+      if (!elementIsVisible(panel)) {
+        failures.push(`${tab}-panel-hidden`);
+      } else {
+        const panelRect = panel.getBoundingClientRect();
+        if (!closeEnough(panelRect.left, sidebarRect.left)) failures.push(`${tab}-panel-left`);
+        if (!closeEnough(panelRect.width, sidebarRect.width)) failures.push(`${tab}-panel-width`);
+        if (!closeEnough(panelRect.top, tabsRect.bottom, 7)) failures.push(`${tab}-panel-top`);
+        if (!closeEnough(panelRect.bottom, sidebarRect.bottom, 7)) failures.push(`${tab}-panel-bottom`);
+        if (panel.scrollWidth > panel.clientWidth + 2) failures.push(`${tab}-horizontal-overflow`);
+      }
+    }
+
+    if (tab === "mapTools") {
+      const tools = document.querySelector<HTMLElement>(".occumed-sidebar-workspace-host > .occumed-map-tools-panel");
+      if (!elementIsVisible(tools)) failures.push("map-tools-hidden");
+      else if (tools.scrollWidth > tools.clientWidth + 2) failures.push("map-tools-horizontal-overflow");
+    }
+  }
+
+  const inactiveLive = tab !== "liveFinder" && elementIsVisible(document.querySelector(".live-panel"));
+  const inactiveExplorer = tab !== "explorer" && elementIsVisible(document.querySelector(".provider-explorer-drawer"));
+  if (inactiveLive) failures.push("inactive-finder-visible");
+  if (inactiveExplorer) failures.push("inactive-explorer-visible");
+
+  lastAudit = {
+    tab,
+    healthy: failures.length === 0,
+    failures,
+    measuredAt: Date.now(),
+  };
+  document.documentElement.dataset.occumedUiIntegrity = lastAudit.healthy ? "healthy" : "repairing";
+  return lastAudit;
+}
+
+function scheduleAudit(): void {
+  clearTimers(auditTimers);
+  [0, 120, 360, 900].forEach((delay) => {
+    auditTimers.push(window.setTimeout(() => {
+      const result = auditLayout();
+      if (!result.healthy) {
+        controller()?.sync?.();
+        settleMapLayout();
+      }
+    }, delay));
+  });
 }
 
 function recoverPanel(tab: GuardedWorkspaceTab): void {
   recoveryGeneration += 1;
   const generation = recoveryGeneration;
+  clearTimers(retryTimers);
   settleMapLayout();
+  scheduleAudit();
 
   if (tab !== "liveFinder" && tab !== "explorer") return;
+  if (Date.now() < closeIntentUntil) return;
 
   RETRY_DELAYS_MS.forEach((delay) => {
-    window.setTimeout(() => {
-      if (generation !== recoveryGeneration || currentTab() !== tab) return;
+    retryTimers.push(window.setTimeout(() => {
+      if (generation !== recoveryGeneration || currentTab() !== tab || Date.now() < closeIntentUntil) return;
       if (panelIsOpen(tab)) {
         controller()?.sync?.();
-        settleMapLayout();
+        scheduleAudit();
         return;
       }
 
       const launcher = launcherFor(tab);
       if (!launcher || launcher.disabled) return;
+      const now = performance.now();
+      if (now - lastLaunchAt < 180) return;
+      lastLaunchAt = now;
       launcher.click();
       controller()?.sync?.();
       settleMapLayout();
-    }, delay);
+      scheduleAudit();
+    }, delay));
   });
 }
 
@@ -99,40 +234,70 @@ function tabFromEvent(event: Event): GuardedWorkspaceTab | null {
   return tab === "providers" || tab === "mapTools" || tab === "liveFinder" || tab === "explorer" ? tab : null;
 }
 
+function handleWorkspaceEvent(event: Event): void {
+  recoverPanel(tabFromEvent(event) || currentTab());
+}
+
+function handleDocumentClick(event: MouseEvent): void {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+
+  if (target.closest(CLOSE_SELECTOR)) {
+    closeIntentUntil = Date.now() + 1200;
+    recoveryGeneration += 1;
+    clearTimers(retryTimers);
+    settleMapLayout();
+    scheduleAudit();
+    return;
+  }
+
+  const tabButton = target.closest<HTMLButtonElement>(".occumed-sidebar-workspace-tab");
+  const tab = tabButton?.dataset.workspaceTab as GuardedWorkspaceTab | undefined;
+  if (tab === "providers" || tab === "mapTools" || tab === "liveFinder" || tab === "explorer") {
+    closeIntentUntil = 0;
+    window.setTimeout(() => recoverPanel(tab), 0);
+  }
+}
+
+function handleFocus(): void {
+  recoverPanel(currentTab());
+}
+
+function handleVisibility(): void {
+  if (!document.hidden) recoverPanel(currentTab());
+}
+
+function handleResize(): void {
+  scheduleAudit();
+}
+
+function cleanup(): void {
+  recoveryGeneration += 1;
+  clearTimers(retryTimers);
+  clearTimers(auditTimers);
+  window.removeEventListener("network-map:sidebar-workspace", handleWorkspaceEvent);
+  document.removeEventListener("click", handleDocumentClick, true);
+  window.removeEventListener("focus", handleFocus);
+  document.removeEventListener("visibilitychange", handleVisibility);
+  window.removeEventListener("resize", handleResize);
+}
+
 function install(): void {
-  window.addEventListener("network-map:sidebar-workspace", (event) => {
-    recoverPanel(tabFromEvent(event) || currentTab());
-  });
+  window.addEventListener("network-map:sidebar-workspace", handleWorkspaceEvent);
+  document.addEventListener("click", handleDocumentClick, true);
+  window.addEventListener("focus", handleFocus, { passive: true });
+  document.addEventListener("visibilitychange", handleVisibility);
+  window.addEventListener("resize", handleResize, { passive: true });
+  window.addEventListener("beforeunload", cleanup, { once: true });
 
-  document.addEventListener("click", (event) => {
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-
-    const closeButton = target.closest(
-      ".live-panel .rp-close, .provider-explorer-drawer .provider-drawer-header > button, " +
-      ".live-panel button[aria-label*='close' i], .provider-explorer-drawer button[aria-label*='close' i], " +
-      ".live-panel button[title*='close' i], .provider-explorer-drawer button[title*='close' i]",
-    );
-    if (closeButton) {
-      recoveryGeneration += 1;
-      settleMapLayout();
-      return;
-    }
-
-    const tabButton = target.closest<HTMLButtonElement>(".occumed-sidebar-workspace-tab");
-    const tab = tabButton?.dataset.workspaceTab as GuardedWorkspaceTab | undefined;
-    if (tab === "providers" || tab === "mapTools" || tab === "liveFinder" || tab === "explorer") {
-      window.setTimeout(() => recoverPanel(tab), 0);
-    }
-  }, true);
-
-  window.addEventListener("focus", () => recoverPanel(currentTab()), { passive: true });
-  document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) recoverPanel(currentTab());
-  });
+  window.__NETWORK_MAP_UI_INTEGRITY__ = {
+    audit: auditLayout,
+    recover: () => recoverPanel(currentTab()),
+    lastResult: () => lastAudit,
+  };
 
   recoverPanel(currentTab());
-  window.setTimeout(() => recoverPanel(currentTab()), 450);
+  retryTimers.push(window.setTimeout(() => recoverPanel(currentTab()), 450));
 }
 
 if (document.readyState === "loading") {

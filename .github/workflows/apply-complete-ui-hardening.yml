@@ -67,3 +67,5 @@ jobs:
           git diff --cached --check
           git commit -m "Complete UI ownership consolidation [ui-refactor-applied]"
           git push origin HEAD:hardening/complete-ui-audit
+
+# Re-triggered after connector interruption on 2026-08-06.

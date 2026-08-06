@@ -51,6 +51,7 @@ import "./sidebarWorkspacePanelGuardRuntime";
 import "./liveFinderControlCleanupRuntime";
 import "./general-ui-hardening.css";
 import "./general-ui-visual-consistency.css";
+import "./pdf-preview-hardening.css";
 import "./generalUiIntegrityRuntime";
 
 async function safeLoad(name: string, loader: () => Promise<unknown>): Promise<void> {

@@ -1,0 +1,53 @@
+name: Production Browser Smoke
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - occu-med-map/scripts/production-ui-smoke.mjs
+      - .github/workflows/production-browser-smoke.yml
+  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - Validate
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-browser-smoke
+  cancel-in-progress: true
+
+jobs:
+  verify-production:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm --filter @workspace/occu-med-map exec playwright install --with-deps chromium
+
+      - name: Verify deployed Network Map
+        env:
+          NETWORK_MAP_SMOKE_URL: https://network-map-tool-mqib.onrender.com
+          NETWORK_MAP_EXPECT_HARDENING: "1"
+        run: pnpm --filter @workspace/occu-med-map test:ui-production

@@ -35,6 +35,8 @@ type SourceState = {
   nativeSetData: mapboxgl.GeoJSONSource["setData"];
   writesApplied: number;
   writesSuppressed: number;
+  lastRequestedData?: MapboxGeoJsonData;
+  lastWriter?: MapboxSourceWriter;
 };
 
 type MiddlewareStats = {
@@ -168,6 +170,8 @@ function applySourceData(
   }
 
   state.writesApplied += 1;
+  state.lastRequestedData = data;
+  state.lastWriter = writer;
   state.nativeSetData(result.data);
   emit("write-applied", { sourceId: state.sourceId, writer });
   return state.source;
@@ -257,6 +261,12 @@ export function registerMapboxSourceDataMiddleware(
   };
   middlewares.set(id, registered);
   statsFor(id);
+  statesByMap.forEach((states) => {
+    const state = states.get(sourceId);
+    if (state?.lastRequestedData !== undefined && state.lastWriter) {
+      applySourceData(state, state.lastRequestedData, state.lastWriter);
+    }
+  });
   emit("middleware-registered", { id, sourceId, priority: registered.priority });
 
   return () => {

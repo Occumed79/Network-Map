@@ -21,7 +21,6 @@ declare global {
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || import.meta.env.VITE_MAPBOX_ACCESS_TOKEN || "";
 const MAPBOX_2D_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN_2 || "";
-const MAX_MIRRORED_FEATURES = 12_000;
 const MAP_LOAD_TIMEOUT_MS = 30_000;
 
 let canonicalMap: L.Map | null = null;
@@ -36,8 +35,6 @@ let mapbox2dViewPromise: Promise<void> | null = null;
 let mapboxGlobeViewPromise: Promise<void> | null = null;
 let mapbox2dMap: mapboxgl.Map | null = null;
 let mapboxGlobeMap: mapboxgl.Map | null = null;
-let syncTimer: number | null = null;
-let periodicTimer: number | null = null;
 let lastEngineDrivenLeafletMove = 0;
 let mapResizeObserver: ResizeObserver | null = null;
 let mapResizeFrame = 0;
@@ -88,7 +85,6 @@ async function initializeDualEngines(map: L.Map): Promise<void> {
   statusNode = toggleControl.querySelector(".map-dimension-status");
 
   mapWrap.append(mapbox2dHost, mapboxGlobeHost, toggleControl);
-  map.on("layeradd layerremove overlayadd overlayremove", queueOverlaySync);
   map.on("moveend zoomend", onCanonicalViewChanged);
   map.once("unload", cleanupDualEngines);
   observeMapSize();
@@ -96,7 +92,7 @@ async function initializeDualEngines(map: L.Map): Promise<void> {
   try {
     await ensureMapbox2d();
     mapWrap.classList.add("visible-engine-ready");
-    syncAllOverlays();
+    requestOverlaySync();
     setStatus("Mapbox 2D active");
   } catch (error) {
     console.error("Mapbox 2D map failed", error);
@@ -114,7 +110,7 @@ function showMapbox2dError(error: unknown): void {
     mapbox2dHost.innerHTML = loadingMarkup("Starting Mapbox 2D map", "Loading the Mapbox streets basemap…");
     setStatus("Retrying Mapbox 2D…", "loading");
     void ensureMapbox2d().then(() => {
-      syncAllOverlays();
+      requestOverlaySync();
       setStatus("Mapbox 2D active");
     }).catch((nextError) => {
       showMapbox2dError(nextError);
@@ -189,8 +185,7 @@ async function setMode(nextMode: MapMode): Promise<void> {
       updateToggle();
       mapboxGlobeMap?.resize();
       syncMapboxCameraFromLeaflet(false, "3d");
-      syncAllOverlays();
-      startPeriodicSync();
+      requestOverlaySync();
       setStatus("Mapbox 3D globe active");
       return;
     } catch (error) {
@@ -205,7 +200,6 @@ async function setMode(nextMode: MapMode): Promise<void> {
   }
 
   setStatus("Loading Mapbox 2D…", "loading");
-  stopPeriodicSync();
   await ensureMapbox2d();
   currentMode = "2d";
   mapWrap.classList.remove("mapbox-globe-active", "mapbox-globe-loading");
@@ -214,7 +208,7 @@ async function setMode(nextMode: MapMode): Promise<void> {
   updateToggle();
   mapbox2dMap?.resize();
   syncMapboxCameraFromLeaflet(false, "2d");
-  syncAllOverlays();
+  requestOverlaySync();
   setStatus("Mapbox 2D active");
 }
 
@@ -292,8 +286,8 @@ async function createMapboxMap(mode: MapMode): Promise<void> {
   await waitForMapReady(instance, is2d ? "Mapbox 2D map" : "Mapbox 3D globe");
 
   if (!is2d) configureGlobe(instance);
-  installMapboxOverlayLayers(instance);
   installMapboxInteractions(instance, mode);
+  requestOverlaySync();
   host.classList.add("ready", "engine-render-ready");
   host.querySelectorAll<HTMLElement>(":scope > .dual-engine-loading").forEach((node) => node.remove());
 
@@ -382,201 +376,12 @@ function installMapboxInteractions(instance: mapboxgl.Map, mode: MapMode): void 
   });
 }
 
-function installMapboxOverlayLayers(targetMap: mapboxgl.Map): void {
-  if (targetMap.getSource("network-overlays")) return;
-  targetMap.addSource("network-overlays", {
-    type: "geojson",
-    data: emptyFeatureCollection() as GeoJSON.FeatureCollection,
-  });
-  targetMap.addLayer({
-    id: "network-fills",
-    type: "fill",
-    source: "network-overlays",
-    filter: ["==", ["geometry-type"], "Polygon"],
-    paint: {
-      "fill-color": ["coalesce", ["get", "fillColor"], "#0e7490"],
-      "fill-opacity": ["coalesce", ["get", "fillOpacity"], 0.2],
-      "fill-outline-color": ["coalesce", ["get", "lineColor"], "#ffffff"],
-    },
-  });
-  targetMap.addLayer({
-    id: "network-lines",
-    type: "line",
-    source: "network-overlays",
-    filter: ["==", ["geometry-type"], "LineString"],
-    paint: {
-      "line-color": ["coalesce", ["get", "lineColor"], "#67e8f9"],
-      "line-opacity": ["coalesce", ["get", "lineOpacity"], 0.9],
-      "line-width": ["coalesce", ["get", "lineWidth"], 2],
-    },
-  });
-  targetMap.addLayer({
-    id: "network-points",
-    type: "circle",
-    source: "network-overlays",
-    filter: ["==", ["geometry-type"], "Point"],
-    paint: {
-      "circle-radius": ["coalesce", ["get", "pointRadius"], 5],
-      "circle-color": ["coalesce", ["get", "fillColor"], "#0e7490"],
-      "circle-opacity": ["coalesce", ["get", "fillOpacity"], 0.9],
-      "circle-stroke-color": ["coalesce", ["get", "lineColor"], "#ffffff"],
-      "circle-stroke-width": ["coalesce", ["get", "lineWidth"], 1],
-    },
-  });
-}
-
-function queueOverlaySync(): void {
-  if (syncTimer !== null) window.clearTimeout(syncTimer);
-  syncTimer = window.setTimeout(() => {
-    syncTimer = null;
-    syncAllOverlays();
-  }, 140);
-}
-
-function startPeriodicSync(): void {
-  stopPeriodicSync();
-  periodicTimer = window.setInterval(syncAllOverlays, 1_800);
-}
-
-function stopPeriodicSync(): void {
-  if (periodicTimer !== null) {
-    window.clearInterval(periodicTimer);
-    periodicTimer = null;
-  }
-}
-
-function syncAllOverlays(): void {
-  if (!canonicalMap) return;
-  const features: GeoJSON.Feature[] = [];
-  for (const layer of collectRenderableLayers(canonicalMap)) {
-    const feature = leafletToGeoJsonFeature(layer);
-    if (feature) features.push(feature as GeoJSON.Feature);
-    if (features.length >= MAX_MIRRORED_FEATURES) break;
-  }
-
-  const collection: GeoJSON.FeatureCollection = { type: "FeatureCollection", features };
-  for (const instance of [mapbox2dMap, mapboxGlobeMap]) {
-    const source = instance?.getSource("network-overlays") as mapboxgl.GeoJSONSource | undefined;
-    source?.setData(collection);
-  }
-}
-
-function collectRenderableLayers(map: L.Map): any[] {
-  const result: any[] = [];
-  const seen = new Set<number>();
-  const visit = (layer: any) => {
-    if (!layer) return;
-    if (
-      layer instanceof L.TileLayer ||
-      layer instanceof L.GridLayer ||
-      layer instanceof L.ImageOverlay ||
-      layer instanceof L.Popup ||
-      layer instanceof L.Tooltip
-    ) return;
-    if (layer instanceof L.LayerGroup) {
-      layer.eachLayer((child: any) => visit(child));
-      return;
-    }
-    const id = Number(layer._leaflet_id || 0);
-    if (id && seen.has(id)) return;
-    if (id) seen.add(id);
-    result.push(layer);
-  };
-  map.eachLayer((layer: L.Layer) => visit(layer));
-  return result;
-}
-
-function leafletToGeoJsonFeature(layer: any): GeoJSON.Feature | null {
-  const options = layer.options || {};
-  const properties = {
-    popupHtml: popupHtmlFor(layer),
-    fillColor: String(options.fillColor || options.color || "#0e7490"),
-    fillOpacity: clampNumber(options.fillOpacity, 0.9),
-    lineColor: String(options.color || "#ffffff"),
-    lineOpacity: clampNumber(options.opacity, 0.95),
-    lineWidth: Math.max(0.5, Number(options.weight || 1)),
-    pointRadius: Math.max(4, Number(options.radius || 4) * 1.15),
-  };
-
-  if (layer instanceof L.Circle) {
-    const center = layer.getLatLng();
-    return geoJsonFeature({ type: "Polygon", coordinates: [geodesicRing(center.lat, center.lng, layer.getRadius())] }, properties);
-  }
-  if (layer instanceof L.CircleMarker || layer instanceof L.Marker) {
-    const center = layer.getLatLng();
-    return geoJsonFeature({ type: "Point", coordinates: [center.lng, center.lat] }, properties);
-  }
-  if (layer instanceof L.Polygon) {
-    const rings: number[][][] = [];
-    collectCoordinatePaths(layer.getLatLngs(), rings);
-    return rings.length ? geoJsonFeature({ type: "Polygon", coordinates: rings }, properties) : null;
-  }
-  if (layer instanceof L.Polyline) {
-    const paths: number[][][] = [];
-    collectCoordinatePaths(layer.getLatLngs(), paths);
-    if (!paths.length) return null;
-    const geometry = paths.length === 1
-      ? { type: "LineString", coordinates: paths[0] }
-      : { type: "MultiLineString", coordinates: paths };
-    return geoJsonFeature(geometry as GeoJSON.Geometry, properties);
-  }
-  return null;
-}
-
-function geoJsonFeature(geometry: GeoJSON.Geometry, properties: GeoJSON.GeoJsonProperties): GeoJSON.Feature {
-  return { type: "Feature", geometry, properties };
-}
-
-function emptyFeatureCollection(): GeoJSON.FeatureCollection {
-  return { type: "FeatureCollection", features: [] };
-}
-
-function popupHtmlFor(layer: any): string {
-  const popup = typeof layer.getPopup === "function" ? layer.getPopup() : null;
-  const tooltip = typeof layer.getTooltip === "function" ? layer.getTooltip() : null;
-  const raw = popup?.getContent?.() || tooltip?.getContent?.();
-  if (typeof raw === "string") return raw;
-  if (raw instanceof HTMLElement) return raw.outerHTML;
-  return "";
-}
-
-function collectCoordinatePaths(value: any, output: number[][][]): void {
-  if (!Array.isArray(value) || value.length === 0) return;
-  if (typeof value[0]?.lat === "number" && typeof value[0]?.lng === "number") {
-    output.push(value.map((point: L.LatLng) => [point.lng, point.lat]));
-    return;
-  }
-  value.forEach((child: any) => collectCoordinatePaths(child, output));
-}
-
-function geodesicRing(lat: number, lng: number, radiusMeters: number): number[][] {
-  const earthRadius = 6_378_137;
-  const angularDistance = Math.max(1, radiusMeters) / earthRadius;
-  const latitude = lat * Math.PI / 180;
-  const longitude = lng * Math.PI / 180;
-  const ring: number[][] = [];
-  for (let index = 0; index <= 72; index += 1) {
-    const bearing = index / 72 * Math.PI * 2;
-    const destinationLat = Math.asin(
-      Math.sin(latitude) * Math.cos(angularDistance) +
-      Math.cos(latitude) * Math.sin(angularDistance) * Math.cos(bearing),
-    );
-    const destinationLng = longitude + Math.atan2(
-      Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(latitude),
-      Math.cos(angularDistance) - Math.sin(latitude) * Math.sin(destinationLat),
-    );
-    ring.push([destinationLng * 180 / Math.PI, destinationLat * 180 / Math.PI]);
-  }
-  return ring;
-}
-
-function clampNumber(value: unknown, fallback: number): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed)) : fallback;
+function requestOverlaySync(): void {
+  const sync = window.__NETWORK_MAP_OVERLAY_SYNC__?.sync;
+  if (typeof sync === "function") sync();
 }
 
 function onCanonicalViewChanged(): void {
-  queueOverlaySync();
   if (Date.now() - lastEngineDrivenLeafletMove < 450) return;
   syncMapboxCameraFromLeaflet(false, currentMode);
 }
@@ -644,8 +449,6 @@ function errorMessage(error: unknown): string {
 }
 
 function cleanupDualEngines(): void {
-  stopPeriodicSync();
-  if (syncTimer !== null) window.clearTimeout(syncTimer);
   window.cancelAnimationFrame(mapResizeFrame);
   mapResizeObserver?.disconnect();
   mapResizeObserver = null;
@@ -662,7 +465,7 @@ function cleanupDualEngines(): void {
 window.__NETWORK_MAP_GLOBE__ = {
   getMode: () => currentMode,
   setMode,
-  sync: queueOverlaySync,
+  sync: requestOverlaySync,
 };
 
 window.addEventListener("beforeunload", cleanupDualEngines);

@@ -15,12 +15,19 @@ This document defines the authoritative owners for global browser behavior. New 
 | Finder result-card ETA decoration | `right-panel-compactor` | `rightPanelCompactor.ts` |
 | Finder drive-time action strip | `live-finder-drive-tools` | `liveFinderDriveTools.ts` |
 | U.S. diagnostics visibility/synchronization | `us-diagnostics-gate` | `usDiagnosticsGate.ts` |
+| Legacy modal label cleanup | `modal-label-scrubber` | `modalLabelScrubber.ts` |
+| Map engine loading-state cleanup | `map-engine-loading-cleanup` | `mapEngineLoadingCleanupRuntime.ts` |
+| Map Tools From/To route planner | `route-planner-controls` | `routePlannerControlsRuntime.ts` |
+| Final map-engine transition/loading reconciliation and density filtering | `map-engine-final-fixes` | `mapEngineFinalFixRuntime.ts` |
+| Mapbox globe preload and transition preparation | `mapbox-globe-load-hardening` | `mapboxGlobeLoadHardeningRuntime.ts` |
 
 ## DOM observation policy
 
-`runtimeControllerRegistry.ts` owns the shared application `MutationObserver`. Legacy or third-party DOM integrations subscribe to it through `subscribeToSharedDomObserver` rather than creating another full-document observer.
+`runtimeControllerRegistry.ts` owns the single shared application `MutationObserver`. Legacy or third-party DOM integrations subscribe to it through `subscribeToSharedDomObserver` rather than creating another full-document observer.
 
 Direct `MutationObserver` ownership is temporarily allow-listed only for runtimes not yet migrated. `scripts/runtime-ownership-smoke.ts` contains that explicit migration list and fails when a new independent observer appears outside it. The allow-list must shrink over time; adding new entries requires justification in the pull request.
+
+The remaining migration allow-list is intentionally small and currently limited to the UI integrity runtime, Healthsites panel integration, provider-location finder, sidebar workspace controller, and unified provider-tools compatibility layer. These are migration targets, not examples for new code.
 
 The integrity monitor is diagnostic. It must not become the authority that repeatedly repairs ownership conflicts after render.
 
@@ -56,6 +63,7 @@ Broad `!important` override layers are transitional. New global override files a
 
 `pnpm --filter @workspace/occu-med-map test:runtime-ownership` verifies:
 
+- the shared registry owns exactly one application-level `MutationObserver`;
 - required global owners are registered;
 - duplicate owner IDs are absent;
 - foundational runtimes are imported exactly once;

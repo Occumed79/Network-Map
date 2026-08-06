@@ -55,6 +55,9 @@ jobs:
       - name: Run sidebar workspace hardening smoke test
         run: pnpm --filter @workspace/occu-med-map test:sidebar-workspace-hardening
 
+      - name: Run network request pipeline hardening smoke test
+        run: pnpm --filter @workspace/occu-med-map test:network-request-hardening
+
       - name: Run P1 data stabilization smoke tests
         run: pnpm --filter @workspace/api-server test:p1-data
 

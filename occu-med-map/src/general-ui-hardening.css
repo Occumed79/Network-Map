@@ -1,0 +1,497 @@
+/*
+ * Authoritative application-wide UI hardening layer.
+ * Loaded last, after feature and theme styles, to stabilize geometry and
+ * interaction states without redesigning individual workflows.
+ */
+
+:root {
+  --ui-safe-gap: 10px;
+  --ui-panel-radius: 14px;
+  --ui-control-min-height: 36px;
+  --ui-focus-ring: 0 0 0 3px rgba(86, 177, 216, 0.28);
+  --ui-surface: #071421;
+  --ui-surface-raised: #0a1c2c;
+  --ui-control: #071d30;
+  --ui-control-hover: #0a2940;
+  --ui-border: rgba(82, 157, 190, 0.34);
+  --ui-border-strong: rgba(112, 196, 226, 0.70);
+  --ui-text: #dcebf2;
+  --ui-muted: #9fb7c5;
+}
+
+html,
+body,
+#root,
+.app-wrap {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:is(.app-wrap, .app-body, .command-header, .sidebar, .map-wrap, .modal-box, .provider-explorer-drawer, .live-panel) > * {
+  min-width: 0;
+}
+
+button,
+input,
+select,
+textarea,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+[role="button"],
+input,
+select,
+textarea {
+  max-width: 100%;
+}
+
+button:not(.leaflet-control-zoom-in):not(.leaflet-control-zoom-out):not(.mapboxgl-ctrl-icon),
+[role="button"]:not(.mapboxgl-ctrl-icon) {
+  overflow-wrap: anywhere;
+}
+
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid rgba(137, 217, 241, 0.92) !important;
+  outline-offset: 2px !important;
+  box-shadow: var(--ui-focus-ring) !important;
+}
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed !important;
+  opacity: 0.55 !important;
+}
+
+/* Header and search ------------------------------------------------------- */
+.command-header {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: visible !important;
+}
+
+.command-brand,
+.command-search,
+.command-header-actions,
+.provider-source-health,
+.command-action {
+  min-width: 0 !important;
+}
+
+.command-brand > span:last-child,
+.command-brand strong,
+.command-brand small,
+.provider-source-health span,
+.command-action span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-search {
+  isolation: isolate;
+}
+
+.command-search input {
+  min-width: 0 !important;
+}
+
+.command-search-results {
+  z-index: 10050 !important;
+  max-height: min(420px, calc(100vh - var(--command-header-height, 70px) - 24px)) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain !important;
+  scrollbar-gutter: stable !important;
+}
+
+.command-search-results button {
+  min-height: 46px !important;
+  overflow: hidden !important;
+}
+
+.command-search-results :is(strong, span) {
+  max-width: 100% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+/* Stable cards, controls, status blocks --------------------------------- */
+:is(
+  .sidebar,
+  .live-panel,
+  .provider-explorer-drawer,
+  .modal-box,
+  .local-pop-card,
+  .occumed-map-tools-panel
+) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea) {
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: var(--ui-control-min-height) !important;
+}
+
+:is(
+  .sidebar,
+  .live-panel,
+  .provider-explorer-drawer,
+  .modal-box,
+  .local-pop-card,
+  .occumed-map-tools-panel
+) textarea {
+  resize: vertical !important;
+}
+
+:is(
+  .workflow-service-status,
+  .provider-map-status,
+  .occumed-provider-location-status,
+  .occumed-mapbox-status,
+  .lp-empty,
+  .provider-tool-mode-prompt
+) {
+  max-width: 100% !important;
+  overflow-wrap: anywhere !important;
+}
+
+:is(.lp-item, .provider-drawer-section, .workflow-layer, .dir-app, .local-pop-card) {
+  max-width: 100% !important;
+  overflow-wrap: anywhere !important;
+}
+
+:is(.lp-name, .lp-addr, .provider-field-value, .workflow-layer-status, .dir-app-name, .dir-app-tag) {
+  max-width: 100% !important;
+  overflow-wrap: anywhere !important;
+}
+
+/* Floating map cards and map controls ----------------------------------- */
+.local-pop-card,
+.tz-legend,
+.occumed-basemap-control,
+.occumed-map-tools-panel:not([data-sidebar-docked="true"]) {
+  box-sizing: border-box !important;
+  max-width: min(360px, calc(100vw - 24px)) !important;
+  max-height: calc(100vh - var(--command-header-height, 70px) - 24px) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain !important;
+}
+
+.local-pop-card {
+  left: max(12px, env(safe-area-inset-left)) !important;
+  right: auto !important;
+}
+
+.map-wrap,
+.dual-engine-map-shell,
+.mapbox-2d-host,
+.mapbox-3d-host,
+#map,
+.leaflet-container,
+.mapboxgl-map,
+.mapboxgl-canvas-container,
+.mapboxgl-canvas {
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: 100% !important;
+}
+
+.leaflet-control-container,
+.mapboxgl-control-container {
+  pointer-events: none;
+}
+
+.leaflet-control-container > *,
+.mapboxgl-control-container > * {
+  pointer-events: auto;
+}
+
+/* Modal and dialog ownership -------------------------------------------- */
+.modal-backdrop,
+.modal-backdrop.open {
+  box-sizing: border-box !important;
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 12000 !important;
+  width: 100vw !important;
+  height: 100dvh !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  padding:
+    max(14px, env(safe-area-inset-top))
+    max(14px, env(safe-area-inset-right))
+    max(14px, env(safe-area-inset-bottom))
+    max(14px, env(safe-area-inset-left)) !important;
+  align-items: center !important;
+  justify-content: center !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain !important;
+}
+
+.modal-backdrop.open {
+  display: flex !important;
+}
+
+.modal-box {
+  box-sizing: border-box !important;
+  position: relative !important;
+  inset: auto !important;
+  display: flex !important;
+  width: min(920px, 100%) !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: auto !important;
+  max-height: min(88dvh, 900px) !important;
+  flex-direction: column !important;
+  margin: auto !important;
+  overflow: hidden !important;
+  border-radius: var(--ui-panel-radius) !important;
+}
+
+.modal-header {
+  box-sizing: border-box !important;
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 3 !important;
+  display: flex !important;
+  min-width: 0 !important;
+  flex: 0 0 auto !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  padding: 14px 16px !important;
+}
+
+.modal-header > * {
+  min-width: 0 !important;
+}
+
+.modal-header :is(h1, h2, h3, strong, span) {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.modal-body {
+  box-sizing: border-box !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  flex: 1 1 auto !important;
+  padding: 14px 16px 18px !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain !important;
+  scrollbar-gutter: stable !important;
+}
+
+.modal-close,
+.modal-box .rp-close,
+.provider-drawer-header > button,
+.leaflet-popup-close-button {
+  flex: 0 0 auto !important;
+  min-width: 34px !important;
+  min-height: 34px !important;
+}
+
+.dir-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  min-width: 0 !important;
+}
+
+.dir-app {
+  min-width: 0 !important;
+}
+
+html[data-occumed-modal-open="true"] body {
+  overscroll-behavior: none !important;
+}
+
+/* Popups ---------------------------------------------------------------- */
+.leaflet-popup {
+  max-width: min(380px, calc(100vw - 28px)) !important;
+}
+
+.leaflet-popup-content-wrapper {
+  max-width: 100% !important;
+  overflow: hidden !important;
+  border-radius: 13px !important;
+}
+
+.leaflet-popup-content {
+  width: auto !important;
+  max-width: 100% !important;
+  max-height: min(420px, calc(100dvh - 140px)) !important;
+  margin: 14px 16px !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overflow-wrap: anywhere !important;
+}
+
+.leaflet-popup-content :is(a, button, input, select, textarea) {
+  max-width: 100% !important;
+}
+
+.mapboxgl-popup {
+  max-width: min(380px, calc(100vw - 28px)) !important;
+}
+
+.mapboxgl-popup-content {
+  max-height: min(420px, calc(100dvh - 140px)) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overflow-wrap: anywhere !important;
+}
+
+/* Tables and long content ----------------------------------------------- */
+.modal-box table,
+.provider-explorer-drawer table,
+.live-panel table {
+  width: 100% !important;
+  max-width: 100% !important;
+  border-collapse: collapse !important;
+}
+
+.modal-box :is(.table-wrap, [class*="table-container"]),
+.provider-explorer-drawer :is(.table-wrap, [class*="table-container"]),
+.live-panel :is(.table-wrap, [class*="table-container"]) {
+  max-width: 100% !important;
+  overflow-x: auto !important;
+}
+
+/* Responsive header and overlays --------------------------------------- */
+@media (max-width: 1180px) {
+  .command-header {
+    grid-template-columns: minmax(168px, 220px) minmax(220px, 1fr) auto !important;
+    gap: 10px !important;
+    padding-inline: 12px !important;
+  }
+
+  .provider-source-health span,
+  .command-action span {
+    display: none !important;
+  }
+
+  .provider-source-health,
+  .command-action {
+    min-width: 38px !important;
+    justify-content: center !important;
+    padding-inline: 9px !important;
+  }
+}
+
+@media (max-width: 768px) {
+  :root {
+    --command-header-height: 112px;
+  }
+
+  .command-header {
+    display: grid !important;
+    grid-template-columns: auto minmax(0, 1fr) auto !important;
+    grid-template-rows: 42px 48px !important;
+    gap: 8px !important;
+    height: var(--command-header-height) !important;
+    padding: 8px 10px 10px !important;
+  }
+
+  .mobile-menu-button {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+  }
+
+  .command-brand {
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+  }
+
+  .command-brand small {
+    display: none !important;
+  }
+
+  .command-header-actions {
+    grid-column: 3 !important;
+    grid-row: 1 !important;
+  }
+
+  .provider-source-health {
+    display: none !important;
+  }
+
+  .command-search {
+    grid-column: 1 / -1 !important;
+    grid-row: 2 !important;
+    width: 100% !important;
+    height: 44px !important;
+  }
+
+  .command-search-results {
+    max-height: calc(100dvh - var(--command-header-height) - 16px) !important;
+  }
+
+  .modal-backdrop,
+  .modal-backdrop.open {
+    align-items: stretch !important;
+    padding: 0 !important;
+  }
+
+  .modal-box {
+    width: 100vw !important;
+    height: 100dvh !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+  }
+
+  .modal-header {
+    padding-top: max(12px, env(safe-area-inset-top)) !important;
+  }
+
+  .modal-body {
+    padding-bottom: max(18px, env(safe-area-inset-bottom)) !important;
+  }
+
+  .dir-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .local-pop-card,
+  .tz-legend,
+  .occumed-basemap-control,
+  .occumed-map-tools-panel:not([data-sidebar-docked="true"]) {
+    max-width: calc(100vw - 20px) !important;
+    max-height: calc(100dvh - var(--command-header-height) - 20px) !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

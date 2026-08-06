@@ -12,6 +12,7 @@ function source(relativePath: string): string {
 
 const main = source("src/main.tsx");
 const controller = source("src/sidebarWorkspaceControllerRuntime.ts");
+const mapControls = source("src/mapControlsBridgeRuntime.ts");
 
 assert.match(main, /import "\.\/sidebarWorkspaceControllerRuntime";/, "unified sidebar controller must load");
 assert.doesNotMatch(main, /sidebarWorkspaceTabsRuntime/, "legacy tab runtime must remain retired");
@@ -35,5 +36,15 @@ assert.match(controller, /\.unified-explorer-tool/, "Explorer must prefer a stab
 assert.match(controller, /ArrowLeft.*ArrowRight.*Home.*End/s, "workspace tabs must support keyboard navigation");
 assert.match(controller, /__NETWORK_MAP_SIDEBAR_WORKSPACES__/, "sidebar controller must expose diagnostics and explicit control");
 assert.match(controller, /beforeunload.*cleanup/s, "sidebar observers must be cleaned up");
+
+assert.match(mapControls, /workspaceReady/, "Map Controls must detect final sidebar ownership");
+assert.match(mapControls, /panel\.dataset\.sidebarDocked === "true"/, "Map Controls must respect a docked panel marker");
+assert.match(mapControls, /panel\.closest\("\.occumed-sidebar-workspace-host"\)/, "Map Controls must recognize the sidebar host");
+assert.match(mapControls, /if \(!sidebarOwned && shell/, "Map Controls may use the map shell only before sidebar ownership begins");
+assert.doesNotMatch(
+  mapControls,
+  /if \(panel\.parentElement !== shell\) shell\.appendChild\(panel\)/,
+  "Map Controls must never unconditionally pull the panel out of the sidebar",
+);
 
 console.log("Sidebar workspace hardening smoke test passed.");

@@ -1,0 +1,69 @@
+name: Apply Complete UI Hardening
+
+on:
+  push:
+    branches:
+      - hardening/complete-ui-audit
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: complete-ui-hardening-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  refactor-and-validate:
+    if: ${{ !contains(github.event.head_commit.message || '', '[ui-refactor-applied]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out hardening branch
+        uses: actions/checkout@v4
+        with:
+          ref: hardening/complete-ui-audit
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Reconstruct and apply deterministic refactor
+        shell: bash
+        run: |
+          cat .hardening/uihardening.part* | base64 --decode | gunzip > /tmp/apply-complete-ui-hardening.mjs
+          node --check /tmp/apply-complete-ui-hardening.mjs
+          node /tmp/apply-complete-ui-hardening.mjs
+          printf 'import "./general-ui-hardening-smoke.ts";\n' > occu-med-map/scripts/sidebar-workspace-hardening-smoke.ts
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck frontend
+        run: pnpm --filter @workspace/occu-med-map typecheck
+
+      - name: Run complete UI ownership smoke test
+        run: pnpm --filter @workspace/occu-med-map test:general-ui-hardening
+
+      - name: Run workspace compatibility smoke test
+        run: pnpm --filter @workspace/occu-med-map test:sidebar-workspace-hardening
+
+      - name: Build frontend
+        run: pnpm --filter @workspace/occu-med-map build
+
+      - name: Commit validated refactor
+        shell: bash
+        run: |
+          rm -rf .hardening
+          rm -f .github/workflows/apply-complete-ui-hardening.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Complete UI ownership consolidation [ui-refactor-applied]"
+          git push origin HEAD:hardening/complete-ui-audit

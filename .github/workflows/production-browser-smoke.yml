@@ -44,6 +44,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Capture Render deployment identity
+        id: deployment
         env:
           NETWORK_MAP_URL: https://network-map-tool-mqib.onrender.com
           EXPECTED_COMMIT: ${{ github.event.pull_request.base.sha || github.event.workflow_run.head_sha || github.sha }}
@@ -59,7 +60,7 @@ jobs:
             --output test-results/production-smoke/health.json \
             "${NETWORK_MAP_URL}/api/health?deployment-identity=${cache_buster}" || true
           node --input-type=module <<'NODE'
-          import { readFile, writeFile } from 'node:fs/promises';
+          import { appendFile, readFile, writeFile } from 'node:fs/promises';
 
           async function optional(path) {
             try { return await readFile(path, 'utf8'); } catch { return ''; }
@@ -70,13 +71,25 @@ jobs:
           let health = null;
           try { health = healthText ? JSON.parse(healthText) : null; } catch {}
 
+          const expectedCommit = process.env.EXPECTED_COMMIT || '';
+          const deployedCommit = health?.commit || '';
           const title = rootHtml.match(/<title>([^<]*)<\/title>/i)?.[1] || '';
+          const expectedTitlePresent = rootHtml.includes('Occu-Med Network Management Map');
+          const commitMatches = Boolean(expectedCommit && deployedCommit === expectedCommit);
+          const ready = Boolean(
+            health?.ok === true
+            && health?.service === 'network-map'
+            && expectedTitlePresent
+            && commitMatches,
+          );
           const identity = {
-            expectedCommit: process.env.EXPECTED_COMMIT || '',
-            deployedCommit: health?.commit || null,
+            ready,
+            expectedCommit,
+            deployedCommit: deployedCommit || null,
+            commitMatches,
             health,
             title,
-            expectedTitlePresent: rootHtml.includes('Occu-Med Network Management Map'),
+            expectedTitlePresent,
             tanStackStarterPresent: rootHtml.includes('TanStack Start Starter'),
             networkMapNotFoundPresent: rootHtml.includes('Network Map — Page Not Found'),
             rootBytes: Buffer.byteLength(rootHtml),
@@ -85,17 +98,31 @@ jobs:
             'test-results/production-smoke/deployment-identity.json',
             `${JSON.stringify(identity, null, 2)}\n`,
           );
+          await appendFile(process.env.GITHUB_OUTPUT, `ready=${ready}\n`);
+          await appendFile(process.env.GITHUB_OUTPUT, `expected_commit=${expectedCommit}\n`);
+          await appendFile(process.env.GITHUB_OUTPUT, `deployed_commit=${deployedCommit}\n`);
           console.log(JSON.stringify(identity, null, 2));
           NODE
 
+      - name: Reject stale or incorrect Render deployment
+        if: steps.deployment.outputs.ready != 'true'
+        run: |
+          echo "Render is not serving the expected Network Map commit."
+          echo "Expected: ${{ steps.deployment.outputs.expected_commit }}"
+          echo "Deployed: ${{ steps.deployment.outputs.deployed_commit || 'unknown' }}"
+          echo "Open the Render service settings, confirm Branch is main and Auto-Deploy is enabled, then deploy the latest commit."
+          exit 1
+
       - name: Install Chromium
+        if: steps.deployment.outputs.ready == 'true'
         run: pnpm --filter @workspace/occu-med-map exec playwright install --with-deps chromium
 
       - name: Verify deployed Network Map
+        if: steps.deployment.outputs.ready == 'true'
         env:
           NETWORK_MAP_SMOKE_URL: https://network-map-tool-mqib.onrender.com
           NETWORK_MAP_EXPECT_HARDENING: "1"
-          NETWORK_MAP_EXPECTED_COMMIT: ${{ github.event.pull_request.base.sha || github.event.workflow_run.head_sha || github.sha }}
+          NETWORK_MAP_EXPECTED_COMMIT: ${{ steps.deployment.outputs.expected_commit }}
           NETWORK_MAP_SMOKE_ARTIFACT_DIR: ${{ github.workspace }}/test-results/production-smoke
         run: pnpm --filter @workspace/occu-med-map test:ui-production
 

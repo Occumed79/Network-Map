@@ -1,11 +1,12 @@
 import mapboxgl from "mapbox-gl";
 import { mapboxGeocode, type MapboxBounds, type MapboxPlace } from "./mapboxServices";
 import { registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
+import { registerMapToolsSection } from "./mapToolsPanelRegistry";
 import { normalizedProviderClickListener } from "./providerTypeNormalizationRuntime";
+import { registerRuntimeOwner } from "./runtimeControllerRegistry";
 
 const SOURCE_ID = "provider-location-search-results";
 const LAYER_ID = "provider-location-search-dots";
-const PANEL_FLAG = "providerLocationFinderReady";
 const FLATGEOBUF_URL = "/api/healthsites/flatgeobuf";
 const FLATGEOBUF_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/flatgeobuf@4.4.0/dist/flatgeobuf-geojson.min.js";
 const PAGE_SIZE = 5_000;
@@ -66,8 +67,6 @@ const trackedMaps = new Set<mapboxgl.Map>();
 const clickBoundMaps = new WeakSet<mapboxgl.Map>();
 let latestCollection: ResultCollection = emptyCollection();
 let flatGeobufPromise: Promise<FlatGeobufApi> | null = null;
-let scanTimer: number | null = null;
-let observer: MutationObserver | null = null;
 let searchGeneration = 0;
 let activeController: AbortController | null = null;
 let currentCountry = "";
@@ -654,12 +653,12 @@ function ensureCountryList(): void {
   document.body.appendChild(list);
 }
 
-function installPanel(panel: HTMLElement): void {
-  if (panel.dataset[PANEL_FLAG] === "true") return;
+function mountProviderLocationPanel(panel: HTMLElement): () => void {
   ensureCountryList();
 
   const section = document.createElement("section");
   section.className = "occumed-map-tools-section occumed-provider-location-finder";
+  section.dataset.mapToolsSection = "provider-location-finder";
 
   const title = document.createElement("div");
   title.className = "occumed-map-tools-section-title";
@@ -707,52 +706,54 @@ function installPanel(panel: HTMLElement): void {
 
   const status = document.createElement("div");
   status.className = "occumed-provider-location-status";
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
   status.textContent = "Choose a country. Add a city to narrow the individual provider dots.";
 
   const legend = document.createElement("div");
   legend.className = "occumed-provider-location-legend";
   legend.innerHTML = '<span><i data-source="network"></i>Network</span><span><i data-source="saved"></i>Saved</span><span><i data-source="healthsites"></i>Healthsites</span>';
 
-  form.addEventListener("submit", (event) => {
+  const onSubmit = (event: SubmitEvent) => {
     event.preventDefault();
     void runSearch(countryInput.value, cityInput.value);
-  });
-  countryInput.addEventListener("input", () => { currentCountry = countryInput.value; });
-  cityInput.addEventListener("input", () => { currentCity = cityInput.value; });
+  };
+  const onCountryInput = () => { currentCountry = countryInput.value; };
+  const onCityInput = () => { currentCity = cityInput.value; };
+
+  form.addEventListener("submit", onSubmit);
+  countryInput.addEventListener("input", onCountryInput);
+  cityInput.addEventListener("input", onCityInput);
 
   form.append(countryLabel, cityLabel, actions);
   section.append(title, description, form, status, legend);
   panel.appendChild(section);
-  panel.dataset[PANEL_FLAG] = "true";
   syncForms();
+
+  return () => {
+    form.removeEventListener("submit", onSubmit);
+    countryInput.removeEventListener("input", onCountryInput);
+    cityInput.removeEventListener("input", onCityInput);
+    clear.removeEventListener("click", clearSearch);
+    section.remove();
+  };
 }
 
-function scanForPanels(): void {
-  document.querySelectorAll<HTMLElement>(".occumed-map-tools-panel").forEach(installPanel);
+function installProviderLocationFinderRuntime(): void {
+  if (!registerRuntimeOwner("provider-location-finder", "Provider country/city Mapbox layer and Map Tools section")) return;
+
+  registerMapboxMapInitializer({
+    id: "provider-location-finder",
+    priority: 40,
+    initialize: registerMap,
+  });
+  registerMapToolsSection({
+    id: "provider-location-finder",
+    priority: 180,
+    mount: (panel) => mountProviderLocationPanel(panel),
+  });
 }
 
-function scheduleScan(delay = 0): void {
-  if (scanTimer !== null) window.clearTimeout(scanTimer);
-  scanTimer = window.setTimeout(() => {
-    scanTimer = null;
-    scanForPanels();
-  }, delay);
-}
-
-function startObserver(): void {
-  if (observer || !document.body) return;
-  observer = new MutationObserver(() => scheduleScan(40));
-  observer.observe(document.body, { childList: true, subtree: true });
-  scheduleScan(0);
-  window.setTimeout(() => scheduleScan(0), 500);
-}
-
-registerMapboxMapInitializer({
-  id: "provider-location-finder",
-  priority: 40,
-  initialize: registerMap,
-});
-if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", startObserver, { once: true });
-else startObserver();
+installProviderLocationFinderRuntime();
 
 export {};

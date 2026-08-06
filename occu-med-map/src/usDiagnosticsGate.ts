@@ -1,4 +1,5 @@
 import "./us-diagnostics-gate.css";
+import { registerRuntimeOwner, subscribeToSharedDomObserver } from "./runtimeControllerRegistry";
 
 let installed = false;
 let lastState = "";
@@ -46,6 +47,7 @@ function isDiagnosticsInteraction(event: Event): boolean {
 
 export function installUsDiagnosticsGate(): void {
   if (installed) return;
+  if (!registerRuntimeOwner("us-diagnostics-gate", "Diagnostics visibility and map synchronization")) return;
   installed = true;
   syncDiagnosticsClass();
   scheduleDiagnosticsSync(250);
@@ -62,8 +64,13 @@ export function installUsDiagnosticsGate(): void {
     scheduleVisibleMapSync();
   }, true);
 
-  const observer = new MutationObserver(() => scheduleDiagnosticsSync());
-  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+  subscribeToSharedDomObserver("us-diagnostics-gate", (mutations) => {
+    if (!mutations.some((mutation) => {
+      const target = mutation.target instanceof Element ? mutation.target : null;
+      return Boolean(target?.closest(".diagnostics-section, .diagnostics-toggle, .local-pop-card, .tz-legend"));
+    })) return;
+    scheduleDiagnosticsSync();
+  });
 }
 
 installUsDiagnosticsGate();

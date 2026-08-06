@@ -50,4 +50,14 @@ jobs:
         env:
           NETWORK_MAP_SMOKE_URL: https://network-map-tool-mqib.onrender.com
           NETWORK_MAP_EXPECT_HARDENING: "1"
+          NETWORK_MAP_SMOKE_ARTIFACT_DIR: test-results/production-smoke
         run: pnpm --filter @workspace/occu-med-map test:ui-production
+
+      - name: Upload production browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-browser-evidence
+          path: test-results/production-smoke
+          if-no-files-found: ignore
+          retention-days: 7

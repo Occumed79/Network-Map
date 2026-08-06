@@ -1,0 +1,59 @@
+name: Production UI Smoke
+
+on:
+  workflow_run:
+    workflows: ["Validate"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-ui-smoke
+  cancel-in-progress: true
+
+jobs:
+  sidebar-workspaces:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NETWORK_MAP_SMOKE_URL: https://network-map-tool-mqib.onrender.com
+    steps:
+      - name: Check out validated revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm --filter @workspace/occu-med-map exec playwright install --with-deps chromium
+
+      - name: Wait for Render deployment
+        shell: bash
+        run: |
+          sleep 90
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error --max-time 25 "$NETWORK_MAP_SMOKE_URL" > /dev/null; then
+              echo "Production site is responding."
+              exit 0
+            fi
+            echo "Waiting for production deployment ($attempt/30)..."
+            sleep 10
+          done
+          echo "Production site did not become available in time."
+          exit 1
+
+      - name: Run workspace visual acceptance test
+        run: pnpm --filter @workspace/occu-med-map test:ui-production

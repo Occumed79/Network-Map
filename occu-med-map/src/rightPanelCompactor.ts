@@ -1,3 +1,5 @@
+import { registerRuntimeOwner, subscribeToSharedDomObserver } from "./runtimeControllerRegistry";
+
 let installed = false;
 let scanQueued = false;
 
@@ -76,7 +78,6 @@ function applyEtaToCards(inner: Element): void {
     if (acts?.parentElement === card) card.insertBefore(bar, acts);
     else card.appendChild(bar);
   });
-
 }
 
 function scanPanels(): void {
@@ -85,10 +86,10 @@ function scanPanels(): void {
 
 export function installRightPanelCompactor(): void {
   if (installed || import.meta.env.VITE_NATIVE_DRIVE_TIME === "true") return;
+  if (!registerRuntimeOwner("right-panel-compactor", "Finder result-card ETA decoration")) return;
   installed = true;
   window.setTimeout(scanPanels, 250);
-  const observer = new MutationObserver(() => scheduleScan());
-  observer.observe(document.body, { childList: true, subtree: true });
+  subscribeToSharedDomObserver("right-panel-compactor", () => scheduleScan());
   window.addEventListener("occumed:provider-eta-rankings", ((event: Event) => {
     latestRankings = Array.isArray((event as CustomEvent<RankedProvider[]>).detail) ? (event as CustomEvent<RankedProvider[]>).detail : [];
     scheduleScan();

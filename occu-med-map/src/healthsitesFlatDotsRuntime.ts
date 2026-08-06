@@ -1,11 +1,12 @@
 import mapboxgl from "mapbox-gl";
 import { registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
+import { registerMapToolsSection } from "./mapToolsPanelRegistry";
+import { registerRuntimeOwner } from "./runtimeControllerRegistry";
 
 const DATA_URL = "/api/healthsites/flatgeobuf";
 const FLATGEOBUF_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/flatgeobuf@4.4.0/dist/flatgeobuf-geojson.min.js";
 const SOURCE_ID = "healthsites-flat-dots";
 const LAYER_ID = "healthsites-flat-dots-layer";
-const PANEL_FLAG = "healthsitesFlatDotsReady";
 const MINIMUM_QUERY_ZOOM = 4.5;
 const MAX_VISIBLE_DOTS = 75_000;
 
@@ -34,9 +35,7 @@ let enabled = false;
 let latestCollection: PointCollection = { type: "FeatureCollection", features: [] };
 let flatGeobufPromise: Promise<FlatGeobufApi> | null = null;
 let refreshTimer: number | null = null;
-let scanTimer: number | null = null;
 let requestGeneration = 0;
-let observer: MutationObserver | null = null;
 
 function emptyCollection(): PointCollection {
   return { type: "FeatureCollection", features: [] };
@@ -363,11 +362,10 @@ function toggleHealthsites(): void {
   scheduleRefresh(0);
 }
 
-function installPanel(panel: HTMLElement): void {
-  if (panel.dataset[PANEL_FLAG] === "true") return;
-
+function mountHealthsitesPanel(panel: HTMLElement): () => void {
   const section = document.createElement("div");
   section.className = "occumed-map-tools-section occumed-healthsites-section";
+  section.dataset.mapToolsSection = "healthsites-flat-dots";
 
   const title = document.createElement("div");
   title.className = "occumed-map-tools-section-title";
@@ -380,6 +378,8 @@ function installPanel(panel: HTMLElement): void {
 
   const status = document.createElement("div");
   status.className = "occumed-healthsites-status";
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
   status.textContent = "Healthsites is off. No data is loaded until you turn it on.";
 
   const credit = document.createElement("div");
@@ -388,37 +388,30 @@ function installPanel(panel: HTMLElement): void {
 
   section.append(title, toggle, status, credit);
   panel.appendChild(section);
-  panel.dataset[PANEL_FLAG] = "true";
   syncToggleButtons();
+
+  return () => {
+    toggle.removeEventListener("click", toggleHealthsites);
+    section.remove();
+  };
 }
 
-function scanForPanels(): void {
-  document.querySelectorAll<HTMLElement>(".occumed-map-tools-panel").forEach(installPanel);
+function installHealthsitesFlatDotsRuntime(): void {
+  if (!registerRuntimeOwner("healthsites-flat-dots", "Healthsites Mapbox layer and Map Tools section")) return;
+
+  registerMapboxMapInitializer({
+    id: "healthsites-flat-dots",
+    priority: 30,
+    initialize: registerMap,
+  });
+  registerMapToolsSection({
+    id: "healthsites-flat-dots",
+    priority: 200,
+    mount: (panel) => mountHealthsitesPanel(panel),
+  });
+  window.addEventListener("network-map:mode-changed", () => scheduleRefresh(80));
 }
 
-function scheduleScan(delay = 0): void {
-  if (scanTimer !== null) window.clearTimeout(scanTimer);
-  scanTimer = window.setTimeout(() => {
-    scanTimer = null;
-    scanForPanels();
-  }, delay);
-}
-
-function startObserver(): void {
-  if (observer || !document.body) return;
-  observer = new MutationObserver(() => scheduleScan(40));
-  observer.observe(document.body, { childList: true, subtree: true });
-  scheduleScan(0);
-  window.setTimeout(() => scheduleScan(0), 500);
-}
-
-registerMapboxMapInitializer({
-  id: "healthsites-flat-dots",
-  priority: 30,
-  initialize: registerMap,
-});
-window.addEventListener("network-map:mode-changed", () => scheduleRefresh(80));
-if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", startObserver, { once: true });
-else startObserver();
+installHealthsitesFlatDotsRuntime();
 
 export {};

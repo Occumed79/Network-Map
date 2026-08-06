@@ -13,13 +13,16 @@ function source(relativePath: string): string {
 const main = source("src/main.tsx");
 const controller = source("src/sidebarWorkspaceControllerRuntime.ts");
 const panelGuard = source("src/sidebarWorkspacePanelGuardRuntime.ts");
+const cleanupRuntime = source("src/liveFinderControlCleanupRuntime.ts");
 const finalFixes = source("src/sidebar-workspace-final-fixes.css");
 const mapControls = source("src/mapControlsBridgeRuntime.ts");
+const productionUi = source("scripts/production-ui-smoke.mjs");
 const indexHtml = source("index.html");
 
 assert.match(main, /import "\.\/sidebarWorkspaceControllerRuntime";/, "unified sidebar controller must load");
-assert.match(main, /import "\.\/sidebar-workspace-final-fixes\.css";/, "final sidebar layout corrections must load");
+assert.match(main, /import "\.\/sidebar-workspace-final-fixes\.css";/, "authoritative sidebar layout layer must load");
 assert.match(main, /import "\.\/sidebarWorkspacePanelGuardRuntime";/, "event-driven panel recovery must load");
+assert.match(main, /import "\.\/liveFinderControlCleanupRuntime";/, "obsolete Finder controls must be removed");
 assert.doesNotMatch(main, /sidebarWorkspaceTabsRuntime/, "legacy tab runtime must remain retired");
 assert.doesNotMatch(main, /sidebarWorkspaceConsistencyRuntime/, "legacy consistency runtime must remain retired");
 assert.doesNotMatch(indexHtml, /sidebarWorkspacePersistence/, "duplicate public persistence observer must remain removed");
@@ -31,14 +34,10 @@ for (const tab of ["providers", "mapTools", "liveFinder", "explorer"]) {
 assert.match(controller, /occumed-sidebar-workspace-host/, "Map Tools must use a dedicated sidebar host");
 assert.match(controller, /host\.appendChild\(panel\)/, "Map Tools must be physically docked into the sidebar");
 assert.match(controller, /> \.occumed-map-tools-panel \{\s*position: static !important;/s, "docked Map Tools must never float over the map");
-assert.match(controller, /font-size: 11px !important;/, "workspace tab labels must retain the larger text size");
-assert.match(controller, /font-size: 11\.5px !important;/, "workspace controls must retain the Explorer-sized text");
+assert.match(controller, /font-size: 11px !important;/, "workspace tab labels must retain readable text");
+assert.match(controller, /font-size: 11\.5px !important;/, "workspace controls must retain readable text");
 assert.match(controller, /new MutationObserver/, "one DOM lifecycle observer must keep late panels synchronized");
 assert.equal((controller.match(/new MutationObserver/g) || []).length, 1, "sidebar controller must have exactly one MutationObserver owner");
-assert.doesNotMatch(panelGuard, /new MutationObserver/, "panel recovery must not add a competing DOM observer");
-assert.match(panelGuard, /RETRY_DELAYS_MS/, "panel recovery must retry late Finder and Explorer launchers");
-assert.match(panelGuard, /network-map:sidebar-workspace/, "panel recovery must follow explicit workspace events");
-assert.match(panelGuard, /dispatchEvent\(new Event\("resize"\)\)/, "workspace changes must resize the map engines");
 assert.match(controller, /new ResizeObserver/, "sidebar dimensions must update without polling");
 assert.doesNotMatch(controller, /setInterval\s*\(/, "sidebar synchronization must not poll continuously");
 assert.match(controller, /\.unified-live-tool/, "Finder must prefer a stable launcher selector");
@@ -47,11 +46,40 @@ assert.match(controller, /ArrowLeft.*ArrowRight.*Home.*End/s, "workspace tabs mu
 assert.match(controller, /__NETWORK_MAP_SIDEBAR_WORKSPACES__/, "sidebar controller must expose diagnostics and explicit control");
 assert.match(controller, /beforeunload.*cleanup/s, "sidebar observers must be cleaned up");
 
-assert.match(finalFixes, /\.app-body:has\(\.live-panel\.open\)/, "Finder must override the legacy third application column");
-assert.match(finalFixes, /grid-template-columns: var\(--command-sidebar-width\) minmax\(0, 1fr\) 0 !important;/, "Finder must not leave a black right-side gutter");
+assert.doesNotMatch(panelGuard, /new MutationObserver/, "panel recovery must not add a competing DOM observer");
+assert.doesNotMatch(panelGuard, /setInterval\s*\(/, "panel recovery must remain event-driven");
+assert.match(panelGuard, /RETRY_DELAYS_MS/, "panel recovery must retry late Finder and Explorer launchers");
+assert.match(panelGuard, /network-map:sidebar-workspace/, "panel recovery must follow explicit workspace events");
+assert.match(panelGuard, /dispatchEvent\(new Event\("resize"\)\)/, "workspace changes must resize the map engines");
+assert.match(panelGuard, /phantom-right-column/, "runtime audit must detect the black right-side gutter");
+assert.match(panelGuard, /map-tools-horizontal-overflow/, "runtime audit must detect Map Tools overflow");
+assert.match(panelGuard, /__NETWORK_MAP_UI_INTEGRITY__/, "runtime UI audit must be externally inspectable");
+assert.match(panelGuard, /removeEventListener/, "UI integrity listeners must be cleaned up");
+
+assert.doesNotMatch(cleanupRuntime, /new MutationObserver/, "Finder control cleanup must not add another observer");
+assert.match(cleanupRuntime, /leadership.*export/s, "Leadership export control must remain targeted for removal");
+assert.match(cleanupRuntime, /network-map:sidebar-workspace/, "Finder cleanup must run when its workspace opens");
+assert.match(cleanupRuntime, /beforeunload/, "Finder cleanup timers and listeners must be cleaned up");
+
+assert.match(finalFixes, /grid-template-columns: var\(--command-sidebar-width\) minmax\(0, 1fr\) !important;/, "desktop layout must have only sidebar and map columns");
+assert.doesNotMatch(finalFixes, /minmax\(0, 1fr\) 0 !important/, "a zero-width legacy third column must not remain");
+assert.match(finalFixes, /phantom|legacy right drawer/i, "final layout must document right-drawer ownership");
+assert.match(finalFixes, /position: fixed !important;[\s\S]*--workspace-panel-top/, "Finder and Explorer must align to measured sidebar geometry");
 assert.match(finalFixes, /data-occumedworkspace="mapTools"/, "Map Tools must have a workspace-scoped final theme");
-assert.match(finalFixes, /background: #0a1c2c !important;/, "Map Tools cards must use the same navy panel palette");
+assert.match(finalFixes, /background: var\(--workspace-card-bg\) !important;/, "workspace cards must share the navy panel palette");
 assert.match(finalFixes, /--command-sidebar-width: clamp\(292px, 21vw, 320px\)/, "desktop workspace width must remain consistent across tabs");
+assert.match(finalFixes, /overflow-x: hidden !important;/, "workspace panels must prevent horizontal overflow");
+assert.match(finalFixes, /data-occumedworkspace\]:not\(\[data-occumedworkspace="liveFinder"\]\)/, "inactive Finder must be forcibly hidden");
+assert.match(finalFixes, /data-occumedworkspace\]:not\(\[data-occumedworkspace="explorer"\]\)/, "inactive Explorer must be forcibly hidden");
+
+assert.match(productionUi, /assertWorkspace\("providers"\)/, "production UI smoke must exercise Providers");
+assert.match(productionUi, /assertWorkspace\("mapTools"/, "production UI smoke must exercise Map Tools");
+assert.match(productionUi, /assertWorkspace\("liveFinder"/, "production UI smoke must exercise Finder");
+assert.match(productionUi, /assertWorkspace\("explorer"/, "production UI smoke must exercise Explorer");
+assert.match(productionUi, /phantom right-side column/, "production UI smoke must reject map gutters");
+assert.match(productionUi, /setViewportSize\(\{ width: 1024, height: 768 \}\)/, "workspace UI must be checked at a narrower desktop viewport");
+assert.match(productionUi, /leadership export/i, "production UI smoke must reject the obsolete report control");
+assert.match(productionUi, /__NETWORK_MAP_UI_INTEGRITY__/, "production UI smoke must consume the runtime audit");
 
 assert.match(mapControls, /workspaceReady/, "Map Controls must detect final sidebar ownership");
 assert.match(mapControls, /panel\.dataset\.sidebarDocked === "true"/, "Map Controls must respect a docked panel marker");

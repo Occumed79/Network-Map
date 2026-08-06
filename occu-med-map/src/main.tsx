@@ -97,8 +97,9 @@ function scheduleOptionalRuntimes(): void {
   window.setTimeout(start, 180);
 }
 
-const rootElement = document.getElementById("root");
-if (!rootElement) throw new Error("Network Map root element is missing");
+const rootHost = document.getElementById("root");
+if (!rootHost) throw new Error("Network Map root element is missing");
+const rootElement: HTMLElement = rootHost;
 rootElement.setAttribute("aria-busy", "true");
 installGlobalBootDiagnostics();
 const root = createRoot(rootElement);

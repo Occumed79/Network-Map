@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   refactor:
-    if: github.head_ref == 'hardening/unify-leaflet-lifecycle'
+    if: github.head_ref == 'hardening/unify-leaflet-lifecycle' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -35,11 +35,11 @@ jobs:
       - name: Apply lifecycle refactor
         run: node .github/scripts/refactor-leaflet-lifecycle.mjs
 
-      - name: Commit refactor
+      - name: Commit source refactor
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add occu-med-map/src occu-med-map/scripts occu-med-map/package.json .github/workflows/validate.yml
+          git add occu-med-map/src occu-med-map/scripts occu-med-map/package.json
           git diff --cached --stat
           git commit -m "Unify Leaflet map lifecycle ownership"
           git push origin HEAD:${{ github.head_ref }}

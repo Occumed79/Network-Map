@@ -107,9 +107,12 @@ assert.doesNotMatch(shell, /new MutationObserver/);
 const bridge = readFileSync(resolve(here, '../src/phaseTwoMapBridge.ts'), 'utf8');
 assert.match(bridge, /occumed:p2-map-change/);
 assert.match(bridge, /moveend zoomend resize/);
-assert.match(bridge, /registerMap\(map\);/);
+assert.match(bridge, /registerLeafletMapInitializer/);
+assert.match(bridge, /id: 'phase-two-map-bridge'/);
+assert.match(bridge, /priority: 0/);
+assert.match(bridge, /initialize: registerMap/);
+assert.doesNotMatch(bridge, /L\.map\s*=/);
 assert.doesNotMatch(bridge, /setTimeout\(\(\) => registerMap\(map\),\s*0\)/);
-
 
 const main = readFileSync(resolve(here, '../src/main.tsx'), 'utf8');
 assert.match(main, /p2-preview/);

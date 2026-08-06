@@ -76,7 +76,12 @@ assert.doesNotMatch(globeHardening, /patchMapboxReadiness/, "globe readiness mus
 assert.doesNotMatch(globeHardening, /prototype\.once\s*=/, "globe readiness must not patch Map.prototype.once");
 
 const overlay = source("src/mapOverlaySynchronizationControllerRuntime.ts");
-assert.doesNotMatch(overlay, /controlledRemove/, "overlay cleanup must be lifecycle-owned rather than patching Map.prototype.remove");
+assert.doesNotMatch(
+  overlay,
+  /prototype\.remove\s*=\s*function/,
+  "overlay cleanup must be lifecycle-owned rather than patching Map.prototype.remove",
+);
 assert.match(overlay, /prototype\.addSource = function controlledAddSource/, "network overlay source ownership must remain narrowly scoped");
+assert.match(overlay, /prototype\.removeSource = function controlledRemoveSource/, "network overlay source cleanup must remain narrowly scoped");
 
 console.log("Mapbox map lifecycle hardening smoke test passed.");

@@ -39,6 +39,8 @@ const requiredOwners: Record<string, string> = {
   "modalLabelScrubber.ts": "modal-label-scrubber",
   "mapEngineLoadingCleanupRuntime.ts": "map-engine-loading-cleanup",
   "routePlannerControlsRuntime.ts": "route-planner-controls",
+  "mapEngineFinalFixRuntime.ts": "map-engine-final-fixes",
+  "mapboxGlobeLoadHardeningRuntime.ts": "mapbox-globe-load-hardening",
 };
 
 for (const [file, id] of Object.entries(requiredOwners)) {
@@ -46,7 +48,7 @@ for (const [file, id] of Object.entries(requiredOwners)) {
   assert(text.includes(`registerRuntimeOwner("${id}"`), `${file} does not register runtime owner ${id}`);
 }
 
-for (const file of [
+const sharedObserverConsumers = [
   "mapControlsBridgeRuntime.ts",
   "uploadedDatasetLabelRuntime.ts",
   "providerLayerTelemetryRuntime.ts",
@@ -56,7 +58,11 @@ for (const file of [
   "modalLabelScrubber.ts",
   "mapEngineLoadingCleanupRuntime.ts",
   "routePlannerControlsRuntime.ts",
-]) {
+  "mapEngineFinalFixRuntime.ts",
+  "mapboxGlobeLoadHardeningRuntime.ts",
+];
+
+for (const file of sharedObserverConsumers) {
   const text = source(file);
   assert(!text.includes("new MutationObserver"), `${file} still owns an independent MutationObserver`);
   assert(text.includes("subscribeToSharedDomObserver"), `${file} is not using the shared DOM observer`);
@@ -96,8 +102,6 @@ const directObserverFiles = filesUnder(root)
 const allowedDirectObservers = new Set([
   "generalUiIntegrityRuntime.ts",
   "healthsitesFlatDotsRuntime.ts",
-  "mapEngineFinalFixRuntime.ts",
-  "mapboxGlobeLoadHardeningRuntime.ts",
   "providerLocationFinderRuntime.ts",
   "sidebarWorkspaceControllerRuntime.ts",
   "unifiedProviderToolsRuntime.ts",

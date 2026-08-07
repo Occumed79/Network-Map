@@ -1,10 +1,17 @@
 import { getPool } from "@workspace/db";
 import { isPersistenceConfigured } from "../../lib/networkMapPersistence";
-import type { ProviderCandidate, SearchParams } from "../types";
+import type { ProviderCandidate, CoordinateStatus, SearchParams } from "../types";
 import { haversineMiles, isValidCoordinate } from "../distance";
 import { classifyHealthcareTags } from "../serviceRouting";
 
 const QUERY_TIMEOUT_MS = 3500;
+const COORDINATE_STATUSES = new Set<CoordinateStatus>([
+  "verified_exact",
+  "verified_address",
+  "city_centroid",
+  "unverified",
+  "invalid",
+]);
 
 export async function searchMapInventory(params: SearchParams): Promise<ProviderCandidate[]> {
   if (!isPersistenceConfigured() || !isValidCoordinate(params.centerLat, params.centerLng)) return [];
@@ -51,6 +58,11 @@ export async function searchMapInventory(params: SearchParams): Promise<Provider
       const postalCode = String(row.postal_code || raw.postal_code || raw.zip || "");
       const address = String(row.formatted_address || raw.formatted_address || raw.address || raw.address_1 || "");
       const sourceUrl = String(raw.source_url || "") || undefined;
+      const rawCoordinateStatus = String(raw.coordinate_status || raw.coordinateStatus || "").trim() as CoordinateStatus;
+      const coordinateStatus: CoordinateStatus = COORDINATE_STATUSES.has(rawCoordinateStatus)
+        ? rawCoordinateStatus
+        : "unverified";
+      const coordinateSource = String(raw.coordinate_source || raw.coordinateSource || "stored-provider-inventory") || undefined;
       return [{
         id: `stored-${source.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${sourceRecordId}`,
         name,
@@ -63,7 +75,8 @@ export async function searchMapInventory(params: SearchParams): Promise<Provider
         website: String(row.website || raw.website || ""),
         lat,
         lng,
-        coordinateStatus: "imported" as const,
+        coordinateStatus,
+        coordinateSource,
         providerCategory: category,
         services: [category],
         taxonomy: category,

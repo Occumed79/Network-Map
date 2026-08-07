@@ -21,6 +21,7 @@ type RuntimeRegistry = {
   domSubscribers: Map<string, DomMutationSubscriber>;
   domObserver: MutationObserver | null;
   domObserverStarted: boolean;
+  domObserverPauseDepth: number;
 };
 
 declare global {
@@ -34,6 +35,22 @@ declare global {
   }
 }
 
+const SHARED_DOM_OBSERVER_OPTIONS: MutationObserverInit = {
+  childList: true,
+  subtree: true,
+  attributes: true,
+  attributeFilter: [
+    "class",
+    "hidden",
+    "aria-hidden",
+    "aria-selected",
+    "aria-pressed",
+    "disabled",
+    "data-active",
+    "data-provider-tool",
+  ],
+};
+
 function registry(): RuntimeRegistry {
   if (!window.__NETWORK_MAP_RUNTIME_REGISTRY__) {
     window.__NETWORK_MAP_RUNTIME_REGISTRY__ = {
@@ -42,6 +59,7 @@ function registry(): RuntimeRegistry {
       domSubscribers: new Map(),
       domObserver: null,
       domObserverStarted: false,
+      domObserverPauseDepth: 0,
     };
   }
   return window.__NETWORK_MAP_RUNTIME_REGISTRY__;
@@ -89,35 +107,49 @@ export function registerRuntimeOwner(id: string, responsibility: string): boolea
   return true;
 }
 
+function observeSharedDom(): void {
+  const state = registry();
+  if (!state.domObserver || !document.body || state.domObserverPauseDepth > 0) return;
+  state.domObserver.observe(document.body, SHARED_DOM_OBSERVER_OPTIONS);
+  state.domObserverStarted = true;
+}
+
 function ensureSharedDomObserver(): void {
   const state = registry();
-  if (state.domObserverStarted || !document.body) return;
-  state.domObserverStarted = true;
-  state.domObserver = new MutationObserver((mutations) => {
-    const subscribers = Array.from(state.domSubscribers.values());
-    for (const subscriber of subscribers) {
-      try {
-        subscriber.callback(mutations);
-      } catch (error) {
-        console.error(`Network Map DOM subscriber failed: ${subscriber.id}`, error);
+  if (state.domObserverStarted || !document.body || state.domObserverPauseDepth > 0) return;
+  if (!state.domObserver) {
+    state.domObserver = new MutationObserver((mutations) => {
+      const subscribers = Array.from(state.domSubscribers.values());
+      for (const subscriber of subscribers) {
+        try {
+          subscriber.callback(mutations);
+        } catch (error) {
+          console.error(`Network Map DOM subscriber failed: ${subscriber.id}`, error);
+        }
       }
-    }
-  });
-  state.domObserver.observe(document.body, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: [
-      "class",
-      "hidden",
-      "aria-hidden",
-      "aria-selected",
-      "aria-pressed",
-      "disabled",
-      "data-active",
-      "data-provider-tool",
-    ],
-  });
+    });
+  }
+  observeSharedDom();
+}
+
+/**
+ * Runs a synchronous legacy DOM reconciliation without feeding its own writes
+ * back through the shared observer. Use this only while migrating DOM-mutating
+ * compatibility runtimes into React/source ownership.
+ */
+export function runWithoutSharedDomObservation<T>(work: () => T): T {
+  const state = registry();
+  state.domObserverPauseDepth += 1;
+  if (state.domObserverStarted && state.domObserver) {
+    state.domObserver.disconnect();
+    state.domObserverStarted = false;
+  }
+  try {
+    return work();
+  } finally {
+    state.domObserverPauseDepth = Math.max(0, state.domObserverPauseDepth - 1);
+    if (state.domObserverPauseDepth === 0 && state.domSubscribers.size) ensureSharedDomObserver();
+  }
 }
 
 /**

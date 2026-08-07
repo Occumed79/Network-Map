@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -104,25 +104,24 @@ assert.deepEqual(paged.audit.errors, []);
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "../..");
-const read = (path: string) => readFileSync(resolve(root, path), "utf8");
+const read = (filePath: string) => readFileSync(resolve(root, filePath), "utf8");
 
 const centralAdapter = read("api-server/src/providerSources/adapters/npi.ts");
 const customRoute = read("api-server/src/routes/npiCustomSearch.ts");
-const legacyRoute = read("api-server/src/routes/providerSearch.ts");
 const dentalRoute = read("api-server/src/routes/dentalProviderDiscovery.ts");
 const priceFinder = read("api-server/src/routes/priceFinder.ts");
-const priceFinderUnified = read("api-server/src/routes/priceFinderUnified.ts");
 const app = read("occu-med-map/src/App.tsx");
+const retiredProviderSearchPath = resolve(root, "api-server/src/routes/providerSearch.ts");
 
 assert.match(centralAdapter, /https:\/\/npiregistry\.cms\.hhs\.gov\/api\//);
 assert.match(customRoute, /searchNpiCustom/);
 assert.doesNotMatch(customRoute, /npiregistry\.cms\.hhs\.gov\/api/);
-assert.doesNotMatch(legacyRoute, /npiregistry\.cms\.hhs\.gov\/api/);
-assert.doesNotMatch(legacyRoute, /SERVICE_TAXONOMIES/);
-assert.match(legacyRoute, /radiusMiles:\s*0[\s\S]*centerLat:\s*0[\s\S]*centerLng:\s*0/);
-assert.match(priceFinderUnified, /radiusMiles:\s*0[\s\S]*centerLat:\s*0[\s\S]*centerLng:\s*0/);
-assert.match(dentalRoute, /from "\.\.\/providerSources\/adapters\/npi"/);
+assert.equal(existsSync(retiredProviderSearchPath), false, "obsolete providerSearch route must remain retired");
+assert.match(dentalRoute, /runUnifiedSearch/);
+assert.match(dentalRoute, /sourceIds:\s*\["npi"\]/);
+assert.doesNotMatch(dentalRoute, /from "\.\.\/providerSources\/adapters\/npi"/);
 assert.match(priceFinder, /searchNpi as searchNpiCentral/);
+assert.doesNotMatch(priceFinder, /npiregistry\.cms\.hhs\.gov\/api/);
 assert.doesNotMatch(app, /npiregistry\.cms\.hhs\.gov\/api/);
 assert.match(app, /fetch\('\/api\/provider-sources\/npi-custom'/);
 

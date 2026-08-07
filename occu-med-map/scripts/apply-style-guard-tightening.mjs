@@ -35,10 +35,18 @@ let ownership = fs.readFileSync(ownershipDocPath, "utf8");
 const styleHeading = "## Stylesheet direction\n";
 if (!ownership.includes(styleHeading)) throw new Error("Stylesheet direction section missing");
 if (!ownership.includes("Current consolidation progress:")) {
-  ownership = ownership.replace(
+  const consolidationProgress = [
     styleHeading,
-    `${styleHeading}\nCurrent consolidation progress:\n\n- `ui-system.css` now owns shared design tokens, global geometry/interactions, dialog/popup presentation, and report-preview behavior.\n- Retired superseded layers: `general-ui-hardening.css`, `general-ui-visual-consistency.css`, `pdf-preview-hardening.css`, `modal-popup-fixes.css`, `modal-content-polish.css`, `ui-cascade-stabilization.css`, `sidebar-control-fixes.css`, `professional-overrides.css`, `professional-hardening.css`, and `luminous-shell-fixes.css`.\n- The application stylesheet-import ceiling is now 22; CI prevents that count from growing during the consolidation.\n\n`,
-  );
+    "",
+    "Current consolidation progress:",
+    "",
+    "- `ui-system.css` now owns shared design tokens, global geometry/interactions, dialog/popup presentation, and report-preview behavior.",
+    "- Retired superseded layers: `general-ui-hardening.css`, `general-ui-visual-consistency.css`, `pdf-preview-hardening.css`, `modal-popup-fixes.css`, `modal-content-polish.css`, `ui-cascade-stabilization.css`, `sidebar-control-fixes.css`, `professional-overrides.css`, `professional-hardening.css`, and `luminous-shell-fixes.css`.",
+    "- The application stylesheet-import ceiling is now 22; CI prevents that count from growing during the consolidation.",
+    "",
+    "",
+  ].join("\n");
+  ownership = ownership.replace(styleHeading, consolidationProgress);
 }
 fs.writeFileSync(ownershipDocPath, ownership);
 

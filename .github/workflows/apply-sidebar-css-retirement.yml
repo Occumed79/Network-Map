@@ -1,0 +1,79 @@
+name: Apply sidebar CSS retirement
+
+on:
+  push:
+    branches:
+      - hardening/ui-ownership-consolidation-v2
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sidebar-css-retirement
+  cancel-in-progress: true
+
+jobs:
+  retire-and-validate:
+    if: ${{ !contains(github.event.head_commit.message || '', '[sidebar-css-retired]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out consolidation branch
+        uses: actions/checkout@v4
+        with:
+          ref: hardening/ui-ownership-consolidation-v2
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Retire superseded sidebar CSS
+        working-directory: occu-med-map
+        run: node scripts/apply-sidebar-css-retirement.mjs
+
+      - name: Validate source and build
+        run: |
+          pnpm --filter @workspace/occu-med-map typecheck
+          pnpm --filter @workspace/occu-med-map test:runtime-ownership
+          pnpm --filter @workspace/occu-med-map test:sidebar-workspace-hardening
+          pnpm --filter @workspace/occu-med-map test:general-ui-hardening
+          pnpm --filter @workspace/occu-med-map build
+
+      - name: Install Chromium
+        run: pnpm --filter @workspace/occu-med-map exec playwright install --with-deps chromium
+
+      - name: Run rendered UI acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --filter @workspace/occu-med-map exec vite --config vite.config.ts --host 127.0.0.1 --port 4173 > /tmp/network-map-vite.log 2>&1 &
+          VITE_PID=$!
+          cleanup() { kill "$VITE_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+          for attempt in {1..40}; do
+            if curl --fail --silent --show-error --max-time 5 http://127.0.0.1:4173/ > /dev/null; then break; fi
+            if ! kill -0 "$VITE_PID" 2>/dev/null; then cat /tmp/network-map-vite.log; exit 1; fi
+            if [[ "$attempt" == "40" ]]; then cat /tmp/network-map-vite.log; exit 1; fi
+            sleep 1
+          done
+          NETWORK_MAP_CI_UI_URL=http://127.0.0.1:4173 node occu-med-map/scripts/ci-ui-acceptance.mjs
+
+      - name: Commit validated retirement
+        shell: bash
+        run: |
+          rm -f occu-med-map/scripts/apply-sidebar-css-retirement.mjs
+          rm -f .github/workflows/apply-sidebar-css-retirement.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Retire superseded sidebar CSS layer [sidebar-css-retired]"
+          git push origin HEAD:hardening/ui-ownership-consolidation-v2

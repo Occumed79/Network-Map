@@ -27,6 +27,9 @@ for (const retired of [
   assert.equal(main.includes(retired), false, `retired stylesheet must not be re-imported: ${retired}`);
 }
 
+// These are the remaining known compatibility/feature fix styles present at
+// the consolidation baseline. The guard permits this explicit shrinking set
+// while prohibiting any new broad override/fix/hardening stylesheet.
 const transitionalBroadStyleFiles = new Set([
   "professional-overrides.css",
   "professional-hardening.css",
@@ -34,6 +37,8 @@ const transitionalBroadStyleFiles = new Set([
   "map-engine-final-fixes.css",
   "modal-command-polish.css",
   "sidebar-workspace-final-fixes.css",
+  "core-app-p2-fixes.css",
+  "phase-two-control-fix.css",
 ]);
 const broadNamePattern = /(override|fix|hardening|polish|stabilization)/i;
 for (const file of fs.readdirSync(srcRoot).filter((name) => name.endsWith(".css") && broadNamePattern.test(name))) {

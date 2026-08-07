@@ -68,12 +68,14 @@ cssContains(visualCss, "background:", "final visual layer must define surface ba
 
 cssContains(pdfCss, ".pdf-modal-wrap", "report preview wrapper must exist");
 cssContains(pdfCss, "position: fixed !important;", "report preview must stay viewport owned");
-cssContains(pdfCss, "height: calc(100dvh - 24px) !important;", "report preview must use dynamic viewport height");
+cssContains(pdfCss, "height: 100dvh !important;", "report preview wrapper must own the dynamic viewport height");
+cssContains(pdfCss, "env(safe-area-inset-top)", "report preview must account for safe-area insets");
 cssContains(pdfCss, ".pdf-toolbar", "report toolbar must exist");
 cssContains(pdfCss, "flex-wrap: wrap !important;", "report toolbar must wrap instead of overflowing");
-cssContains(pdfCss, ".pdf-modal-body", "report body must exist");
-cssContains(pdfCss, "overflow: hidden !important;", "report body must own iframe overflow");
-cssContains(pdfCss, "@media (max-width: 520px)", "report preview must include narrow-mobile hardening");
+cssContains(pdfCss, ".pdf-modal-wrap iframe", "report preview iframe rule must exist");
+cssContains(pdfCss, "height: min(82dvh, 1040px) !important;", "desktop report iframe must remain dynamically viewport bounded");
+cssContains(pdfCss, "height: calc(100dvh - 230px) !important;", "mobile report iframe must fit the remaining dynamic viewport height");
+cssContains(pdfCss, "@media (max-width: 768px)", "report preview must include tablet/mobile hardening");
 
 assert.match(runtime, /registerRuntimeOwner\("general-ui-integrity"/, "general UI integrity diagnostics must have one explicit owner");
 assert.match(runtime, /subscribeToSharedDomObserver/, "general UI integrity must use the shared observer for audit triggers");

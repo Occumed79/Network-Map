@@ -14,7 +14,7 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -47,43 +47,61 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
-      - name: Run Provider Explorer smoke tests
+      - name: Provider search authority
+        run: pnpm --filter @workspace/api-server test:provider-search-authority
+
+      - name: Provider integrity
+        run: pnpm --filter @workspace/api-server test:provider-integrity
+
+      - name: Upload lifecycle
+        run: pnpm --filter @workspace/api-server test:provider-upload-lifecycle
+
+      - name: API security
+        run: pnpm --filter @workspace/api-server test:api-security
+
+      - name: Database lifecycle/schema drift
+        run: pnpm --filter @workspace/api-server test:database-lifecycle
+
+      - name: Large-map rendering and memory
+        run: pnpm --filter @workspace/occu-med-map test:large-map-performance
+
+      - name: Provider Explorer API
         run: pnpm --filter @workspace/api-server test:provider-explorer
 
-      - name: Run Provider Explorer rendering hardening smoke test
+      - name: Provider Explorer UI
         run: pnpm --filter @workspace/occu-med-map test:provider-explorer-hardening
 
-      - name: Run unified map synchronization hardening smoke test
+      - name: Map synchronization
         run: pnpm --filter @workspace/occu-med-map test:map-synchronization-hardening
 
-      - name: Run sidebar workspace hardening smoke test
+      - name: Sidebar workspace
         run: pnpm --filter @workspace/occu-med-map test:sidebar-workspace-hardening
 
-      - name: Run general UI hardening smoke test
+      - name: General UI
         run: pnpm --filter @workspace/occu-med-map test:general-ui-hardening
 
-      - name: Run runtime ownership smoke test
+      - name: Runtime ownership
         run: pnpm --filter @workspace/occu-med-map test:runtime-ownership
 
-      - name: Run network request pipeline hardening smoke test
+      - name: Request pipeline
         run: pnpm --filter @workspace/occu-med-map test:network-request-hardening
 
-      - name: Run Leaflet map lifecycle hardening smoke test
+      - name: Leaflet lifecycle
         run: pnpm --filter @workspace/occu-med-map test:leaflet-map-lifecycle-hardening
 
-      - name: Run Mapbox map lifecycle hardening smoke test
+      - name: Mapbox lifecycle
         run: pnpm --filter @workspace/occu-med-map test:mapbox-lifecycle-hardening
 
-      - name: Run Mapbox source pipeline hardening smoke test
+      - name: Mapbox source pipeline
         run: pnpm --filter @workspace/occu-med-map test:mapbox-source-pipeline-hardening
 
-      - name: Run P1 data stabilization smoke tests
+      - name: P1 data stabilization
         run: pnpm --filter @workspace/api-server test:p1-data
 
-      - name: Run P2 map and layer-manager smoke tests
+      - name: P2 map
         run: pnpm --filter @workspace/occu-med-map test:p2-map
 
-      - name: Run P3 central NPI adapter smoke tests
+      - name: P3 NPI
         run: pnpm --filter @workspace/api-server test:p3-npi
 
       - name: Build frontend

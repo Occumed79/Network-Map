@@ -1,0 +1,23 @@
+@media (max-width: 768px) {
+  html[data-occumed-workspace-ready="true"] body .app-wrap .app-body .sidebar.occumed-sidebar-workspace-scope {
+    top: var(--command-header-height) !important;
+    right: auto !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    width: min(326px, 88vw) !important;
+    height: auto !important;
+    transform: translateX(-105%) !important;
+    transition: transform 200ms ease !important;
+    z-index: 2200 !important;
+    pointer-events: none !important;
+  }
+
+  html[data-occumed-workspace-ready="true"] body .app-wrap .app-body .sidebar.occumed-sidebar-workspace-scope.mobile-open {
+    transform: translateX(0) !important;
+    pointer-events: auto !important;
+  }
+
+  html[data-occumed-workspace-ready="true"] body .app-wrap .app-body .sidebar.occumed-sidebar-workspace-scope > .occumed-sidebar-workspace-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}

@@ -60,7 +60,7 @@ assert.match(panelGuard, /__NETWORK_MAP_UI_INTEGRITY__/, "runtime UI audit must 
 assert.match(panelGuard, /removeEventListener/, "UI integrity listeners must be cleaned up");
 
 assert.match(finalFixes, /\.occumed-sidebar-workspace-host > \.occumed-map-tools-panel\s*\{[\s\S]*position: static !important;/, "docked Map Tools must never float over the map");
-assert.match(finalFixes, /\.occumed-sidebar-workspace-tab\s*\{[\s\S]*font-size: 11px !important;/, "workspace tab labels must retain readable text");
+assert.match(finalFixes, /\.occumed-sidebar-workspace-tab\s*\{[\s\S]*font-size: 11\.5px !important;/, "workspace tab labels must retain readable text");
 assert.match(finalFixes, /grid-template-columns: var\(--command-sidebar-width\) minmax\(0, 1fr\) !important;/, "desktop layout must have only sidebar and map columns");
 assert.doesNotMatch(finalFixes, /minmax\(0, 1fr\) 0 !important/, "a zero-width legacy third column must not remain");
 assert.match(finalFixes, /phantom|legacy right drawer/i, "final layout must document right-drawer ownership");

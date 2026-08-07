@@ -30,11 +30,15 @@ async function installMocks(page) {
   // receives a valid empty style so the map lifecycle can initialize and the
   // browser tests exercise our UI/engine integration deterministically.
   await page.route("https://api.mapbox.com/styles/v1/**", async (route) => {
-    await json(route, { version: 8, name: "CI empty map style", sources: {}, layers: [] });
+    const url = new URL(route.request().url());
+    if (/\/sprite(?:@\dx)?\.json$/i.test(url.pathname)) return json(route, {});
+    if (/\/tilejson(?:\.json)?$/i.test(url.pathname)) return json(route, { tilejson: "3.0.0", tiles: [] });
+    return json(route, { version: 8, name: "CI empty map style", sources: {}, layers: [] });
   });
-  await page.route("https://api.mapbox.com/**", async (route) => {
-    await route.fulfill({ status: 204, body: "" });
-  });
+  // Mapbox session/config endpoints can parse their response as JSON even when
+  // the body is informational. Return an empty JSON object rather than 204 so
+  // deterministic CI does not manufacture an Unexpected end of JSON error.
+  await page.route("https://api.mapbox.com/**", async (route) => json(route, {}));
   await page.route("https://events.mapbox.com/**", async (route) => {
     await route.fulfill({ status: 204, body: "" });
   });

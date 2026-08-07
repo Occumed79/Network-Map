@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 const baseUrl = process.env.NETWORK_MAP_CI_UI_URL || "http://127.0.0.1:4173";
-const artifactDir = path.resolve(process.cwd(), "test-results", "ui-acceptance");
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const artifactDir = path.resolve(scriptDir, "../test-results/ui-acceptance");
 fs.mkdirSync(artifactDir, { recursive: true });
 
 const viewports = [
@@ -125,31 +127,56 @@ async function assertGeometry(page, viewportName) {
   }
 }
 
-async function ensureWorkspaceNavigationVisible(page) {
-  const firstTab = page.locator(".occumed-sidebar-workspace-tab").first();
-  await firstTab.waitFor({ state: "attached", timeout: 10_000 });
-  const inViewport = await firstTab.evaluate((element) => {
+async function elementViewportState(locator) {
+  return locator.evaluate((element) => {
     const rect = element.getBoundingClientRect();
-    return rect.right > 0 && rect.left < innerWidth && rect.bottom > 0 && rect.top < innerHeight;
+    const style = getComputedStyle(element);
+    return {
+      inViewport: rect.right > 0 && rect.left < innerWidth && rect.bottom > 0 && rect.top < innerHeight,
+      rect: {
+        left: Math.round(rect.left),
+        right: Math.round(rect.right),
+        top: Math.round(rect.top),
+        bottom: Math.round(rect.bottom),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      },
+      viewport: { width: innerWidth, height: innerHeight },
+      display: style.display,
+      visibility: style.visibility,
+      transform: style.transform,
+      className: String(element.className || ""),
+      sidebarClassName: String(element.closest(".sidebar")?.className || ""),
+    };
   });
-  if (inViewport) return;
+}
+
+async function ensureWorkspaceNavigationVisible(page, target, label) {
+  await target.waitFor({ state: "attached", timeout: 10_000 });
+  let state = await elementViewportState(target);
+  if (state.inViewport) return;
 
   const menu = page.locator(".mobile-menu-button:visible").first();
   if (await menu.count()) {
-    await menu.click();
-    await page.waitForTimeout(160);
+    const sidebar = page.locator(".sidebar").first();
+    const alreadyOpen = await sidebar.evaluate((element) => element.classList.contains("mobile-open")).catch(() => false);
+    if (!alreadyOpen) {
+      await menu.click();
+      await page.waitForTimeout(240);
+    }
   }
 
-  const nowInViewport = await firstTab.evaluate((element) => {
-    const rect = element.getBoundingClientRect();
-    return rect.right > 0 && rect.left < innerWidth && rect.bottom > 0 && rect.top < innerHeight;
-  });
-  assert.equal(nowInViewport, true, "workspace navigation must be reachable in the current viewport");
+  state = await elementViewportState(target);
+  assert.equal(
+    state.inViewport,
+    true,
+    `${label} workspace navigation must be reachable in the current viewport; state=${JSON.stringify(state)}`,
+  );
 }
 
 async function workspaceButton(page, label) {
-  await ensureWorkspaceNavigationVisible(page);
   const button = page.getByRole("tab", { name: new RegExp(label, "i") });
+  await ensureWorkspaceNavigationVisible(page, button, label);
   await button.waitFor({ state: "visible", timeout: 10_000 });
   return button;
 }

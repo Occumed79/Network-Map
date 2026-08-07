@@ -113,9 +113,13 @@ async function assertNoGeometryFailure(page, label) {
   }
 }
 
+async function workspaceTab(page, label) {
+  return page.locator(".occumed-sidebar-workspace-tab").filter({ hasText: label }).first();
+}
+
 async function assertWorkspace(page, label) {
   await ensureWorkspaceVisible(page);
-  const tab = page.getByRole("tab", { name: new RegExp(label, "i") });
+  const tab = await workspaceTab(page, label);
   await tab.waitFor({ state: "visible", timeout: 10_000 });
   await tab.click();
   await page.waitForTimeout(180);

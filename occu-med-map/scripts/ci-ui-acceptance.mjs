@@ -153,20 +153,27 @@ async function elementViewportState(locator) {
 
 async function ensureWorkspaceNavigationVisible(page, target, label) {
   await target.waitFor({ state: "attached", timeout: 10_000 });
-  let state = await elementViewportState(target);
-  if (state.inViewport) return;
-
   const menu = page.locator(".mobile-menu-button:visible").first();
+  const sidebar = page.locator(".sidebar").first();
+
   if (await menu.count()) {
-    const sidebar = page.locator(".sidebar").first();
-    const alreadyOpen = await sidebar.evaluate((element) => element.classList.contains("mobile-open")).catch(() => false);
-    if (!alreadyOpen) {
+    let open = await sidebar.evaluate((element) => element.classList.contains("mobile-open")).catch(() => false);
+    if (!open) {
       await menu.click();
-      await page.waitForTimeout(240);
+      await page.waitForFunction(
+        () => document.querySelector(".sidebar")?.classList.contains("mobile-open") === true,
+        null,
+        { timeout: 5_000 },
+      );
     }
+    // A workspace action can close the sidebar with a 200ms transform. Wait for
+    // the explicit reopened state to settle instead of trusting a mid-transition rect.
+    await page.waitForTimeout(240);
+    open = await sidebar.evaluate((element) => element.classList.contains("mobile-open"));
+    assert.equal(open, true, `${label}: mobile workspace navigation must remain open before interaction`);
   }
 
-  state = await elementViewportState(target);
+  const state = await elementViewportState(target);
   assert.equal(
     state.inViewport,
     true,

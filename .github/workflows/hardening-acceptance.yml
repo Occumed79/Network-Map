@@ -35,16 +35,21 @@ jobs:
           pnpm dlx \
             --package=eslint@8.57.1 \
             --package=@typescript-eslint/parser@7.18.0 \
-            eslint \
-            --no-eslintrc \
-            --parser @typescript-eslint/parser \
-            --ext .ts,.tsx \
-            --rule 'no-debugger:error' \
-            --rule 'no-duplicate-imports:error' \
-            --rule 'no-unreachable:error' \
-            --rule 'no-self-assign:error' \
-            --rule 'no-constant-binary-expression:error' \
-            occu-med-map/src api-server/src
+            sh -c '
+              set -euo pipefail
+              export NODE_PATH="$(dirname "$(dirname "$(command -v eslint)")")"
+              PARSER="$(node -e "process.stdout.write(require.resolve(\"@typescript-eslint/parser\"))")"
+              eslint \
+                --no-eslintrc \
+                --parser "$PARSER" \
+                --ext .ts,.tsx \
+                --rule "no-debugger:error" \
+                --rule "no-duplicate-imports:error" \
+                --rule "no-unreachable:error" \
+                --rule "no-self-assign:error" \
+                --rule "no-constant-binary-expression:error" \
+                occu-med-map/src api-server/src
+            '
       - name: Circular dependency and dead-source gate
         run: node scripts/architecture-quality-gates.mjs
       - name: Dependency vulnerability gate

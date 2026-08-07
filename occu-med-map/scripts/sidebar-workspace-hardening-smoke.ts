@@ -21,7 +21,7 @@ const indexHtml = source("index.html");
 
 assert.match(main, /import "\.\/sidebarWorkspaceControllerRuntime";/, "unified sidebar controller must load");
 assert.match(main, /import "\.\/sidebar-workspace-final-fixes\.css";/, "authoritative sidebar layout layer must load");
-assert.match(main, /import "\.\/sidebarWorkspacePanelGuardRuntime";/, "event-driven panel recovery must load");
+assert.match(main, /import "\.\/sidebarWorkspacePanelGuardRuntime";/, "sidebar integrity diagnostics must load");
 assert.match(main, /import "\.\/liveFinderControlCleanupRuntime";/, "obsolete Finder controls must be removed");
 assert.doesNotMatch(main, /sidebarWorkspaceTabsRuntime/, "legacy tab runtime must remain retired");
 assert.doesNotMatch(main, /sidebarWorkspaceConsistencyRuntime/, "legacy consistency runtime must remain retired");
@@ -36,8 +36,8 @@ assert.match(controller, /host\.appendChild\(panel\)/, "Map Tools must be physic
 assert.match(controller, /> \.occumed-map-tools-panel \{\s*position: static !important;/s, "docked Map Tools must never float over the map");
 assert.match(controller, /font-size: 11px !important;/, "workspace tab labels must retain readable text");
 assert.match(controller, /font-size: 11\.5px !important;/, "workspace controls must retain readable text");
-assert.match(controller, /new MutationObserver/, "one DOM lifecycle observer must keep late panels synchronized");
-assert.equal((controller.match(/new MutationObserver/g) || []).length, 1, "sidebar controller must have exactly one MutationObserver owner");
+assert.match(controller, /new MutationObserver/, "one DOM lifecycle observer must keep late panels synchronized until sidebar source ownership migration completes");
+assert.equal((controller.match(/new MutationObserver/g) || []).length, 1, "sidebar controller must have exactly one temporary MutationObserver owner");
 assert.match(controller, /new ResizeObserver/, "sidebar dimensions must update without polling");
 assert.doesNotMatch(controller, /setInterval\s*\(/, "sidebar synchronization must not poll continuously");
 assert.match(controller, /\.unified-live-tool/, "Finder must prefer a stable launcher selector");
@@ -46,11 +46,12 @@ assert.match(controller, /ArrowLeft.*ArrowRight.*Home.*End/s, "workspace tabs mu
 assert.match(controller, /__NETWORK_MAP_SIDEBAR_WORKSPACES__/, "sidebar controller must expose diagnostics and explicit control");
 assert.match(controller, /beforeunload.*cleanup/s, "sidebar observers must be cleaned up");
 
-assert.doesNotMatch(panelGuard, /new MutationObserver/, "panel recovery must not add a competing DOM observer");
-assert.doesNotMatch(panelGuard, /setInterval\s*\(/, "panel recovery must remain event-driven");
-assert.match(panelGuard, /RETRY_DELAYS_MS/, "panel recovery must retry late Finder and Explorer launchers");
-assert.match(panelGuard, /network-map:sidebar-workspace/, "panel recovery must follow explicit workspace events");
-assert.match(panelGuard, /dispatchEvent\(new Event\("resize"\)\)/, "workspace changes must resize the map engines");
+assert.match(panelGuard, /registerRuntimeOwner\("sidebar-workspace-integrity"/, "sidebar integrity diagnostics must have an explicit owner");
+assert.doesNotMatch(panelGuard, /new MutationObserver/, "sidebar integrity diagnostics must not add a competing DOM observer");
+assert.doesNotMatch(panelGuard, /setInterval\s*\(/, "sidebar integrity diagnostics must remain event-driven");
+assert.doesNotMatch(panelGuard, /RETRY_DELAYS_MS|launcher\.click\(|controller\(\)\?\.sync|dispatchEvent\(new Event\("resize"\)\)/, "sidebar integrity diagnostics must detect problems without repairing workspace ownership");
+assert.match(panelGuard, /network-map:sidebar-workspace/, "sidebar integrity diagnostics must follow explicit workspace events");
+assert.match(panelGuard, /recover: scheduleAudit/, "legacy recovery API must now be diagnostic-only");
 assert.match(panelGuard, /phantom-right-column/, "runtime audit must detect the black right-side gutter");
 assert.match(panelGuard, /map-tools-horizontal-overflow/, "runtime audit must detect Map Tools overflow");
 assert.match(panelGuard, /__NETWORK_MAP_UI_INTEGRITY__/, "runtime UI audit must be externally inspectable");

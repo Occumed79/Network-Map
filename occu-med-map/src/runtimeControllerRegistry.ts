@@ -107,7 +107,16 @@ function ensureSharedDomObserver(): void {
     childList: true,
     subtree: true,
     attributes: true,
-    attributeFilter: ["class", "hidden", "aria-selected", "aria-pressed", "disabled", "data-active"],
+    attributeFilter: [
+      "class",
+      "hidden",
+      "aria-hidden",
+      "aria-selected",
+      "aria-pressed",
+      "disabled",
+      "data-active",
+      "data-provider-tool",
+    ],
   });
 }
 

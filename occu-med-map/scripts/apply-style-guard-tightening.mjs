@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
+await import("./apply-upload-clinics-source-launcher.mjs");
+
 const root = path.resolve(process.cwd());
 const srcRoot = path.join(root, "src");
 const mainPath = path.join(srcRoot, "main.tsx");

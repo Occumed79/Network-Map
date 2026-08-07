@@ -167,7 +167,18 @@ async function runCase(browser, viewport, route) {
   }
 }
 
-const browser = await browserType.launch({ headless: true });
+const launchOptions = browserName === "firefox"
+  ? {
+      headless: true,
+      firefoxUserPrefs: {
+        "webgl.disabled": false,
+        "webgl.force-enabled": true,
+        "gfx.webrender.all": true,
+        "layers.acceleration.force-enabled": true,
+      },
+    }
+  : { headless: true };
+const browser = await browserType.launch(launchOptions);
 try {
   for (const route of routes) for (const viewport of viewports) await runCase(browser, viewport, route);
 } finally {

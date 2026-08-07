@@ -52,7 +52,10 @@ let nextLiveClass = liveClassText;
 if (!liveClassText.includes("unified-live-tool")) {
   if (/^className="/.test(liveClassText)) nextLiveClass = liveClassText.replace(/"$/, ' unified-live-tool"');
   else if (/^className='/.test(liveClassText)) nextLiveClass = liveClassText.replace(/'$/, " unified-live-tool'");
-  else throw new Error(`Live Finder className must be a simple literal: ${liveClassText}`);
+  else if (/^className=\{[\s\S]*\}$/.test(liveClassText)) {
+    const expression = liveClassText.slice("className={".length, -1);
+    nextLiveClass = `className={String(${expression} || '').concat(' unified-live-tool').trim()}`;
+  } else throw new Error(`Unsupported Live Finder className shape: ${liveClassText}`);
 }
 edits.push([liveClass.getStart(sourceFile), liveClass.getEnd(), nextLiveClass]);
 

@@ -11,6 +11,23 @@ const browser = await browserType.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1366, height: 768 }, reducedMotion: "reduce" });
 const page = await context.newPage();
 page.setDefaultTimeout(10_000);
+let traceActive = false;
+page.on("console", (message) => {
+  const text = message.text();
+  if (text.startsWith("OWNERTRACE ")) mark("owner-trace", text.slice("OWNERTRACE ".length));
+});
+page.on("request", (request) => {
+  if (!traceActive) return;
+  const url = new URL(request.url());
+  if (url.origin !== new URL(baseUrl).origin || !/\.(?:js|css)$/.test(url.pathname)) return;
+  mark("asset-request", url.pathname.split("/").pop() || url.pathname);
+});
+page.on("response", (response) => {
+  if (!traceActive) return;
+  const url = new URL(response.url());
+  if (url.origin !== new URL(baseUrl).origin || !/\.(?:js|css)$/.test(url.pathname)) return;
+  mark("asset-response", `${response.status()} ${url.pathname.split("/").pop() || url.pathname}`);
+});
 
 await page.route("https://api.mapbox.com/**", async (route) => {
   const pathname = new URL(route.request().url()).pathname;
@@ -33,6 +50,22 @@ await page.goto(baseUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
 await page.locator(".app-wrap").waitFor({ state: "visible", timeout: 20_000 });
 await page.waitForFunction(() => Boolean(window.__NETWORK_MAP_MAPBOX_LIFECYCLE__) && document.documentElement.dataset.occumedWorkspaceReady === "true", null, { timeout: 20_000 });
 mark("ready");
+
+await page.evaluate(() => {
+  let lastSignature = "";
+  const emit = () => {
+    const owners = window.__NETWORK_MAP_RUNTIME_OWNERSHIP__?.snapshot?.().owners.map(owner => owner.id) || [];
+    const signature = owners.join(",");
+    if (signature !== lastSignature) {
+      lastSignature = signature;
+      console.log(`OWNERTRACE ${signature}`);
+    }
+  };
+  emit();
+  window.setInterval(emit, 25);
+});
+traceActive = true;
+mark("trace-installed");
 
 await page.waitForTimeout(700);
 mark("after-700ms");

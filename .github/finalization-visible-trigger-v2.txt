@@ -1,3 +1,4 @@
 Run the isolated UI source finalization transaction through the visible PR runner.
 Capture post-migration browser diagnostics on failure.
 Rerun after wiring Upload Clinics to the real modal handler.
+Rerun after #189 reached exact-head green browser/API/DB/quality acceptance; finalize source before #190 integration.

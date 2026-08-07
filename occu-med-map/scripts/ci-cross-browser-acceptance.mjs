@@ -139,6 +139,34 @@ async function exerciseVisibleControls(page, label) {
   assert.equal(disabledFire, false, `${label}: disabled button must not fire action`);
 }
 
+async function assertMapEngineState(page, label) {
+  const state = await page.evaluate(() => {
+    const error = document.querySelector(".mapbox-2d-host .mapbox-load-error");
+    const leaflet = document.querySelector(".canonical-leaflet-controller");
+    if (!(error instanceof HTMLElement)) return { degraded: false, leafletUsable: true };
+    const errorStyle = getComputedStyle(error);
+    const errorRect = error.getBoundingClientRect();
+    const errorVisible = errorStyle.display !== "none" && errorStyle.visibility !== "hidden" && errorRect.width > 2 && errorRect.height > 2;
+    if (!errorVisible) return { degraded: false, leafletUsable: true };
+    if (!(leaflet instanceof HTMLElement)) return { degraded: true, leafletUsable: false };
+    const leafletStyle = getComputedStyle(leaflet);
+    const leafletRect = leaflet.getBoundingClientRect();
+    const leafletUsable = Number(leafletStyle.opacity || "0") > 0.9
+      && leafletStyle.pointerEvents !== "none"
+      && leafletRect.width > 2
+      && leafletRect.height > 2
+      && leafletRect.right > 0
+      && leafletRect.left < innerWidth
+      && leafletRect.bottom > 0
+      && leafletRect.top < innerHeight;
+    return { degraded: true, leafletUsable };
+  });
+  if (state.degraded) {
+    assert.equal(state.leafletUsable, true, `${label}: Mapbox degradation must expose the synchronized Leaflet fallback instead of a blank map`);
+  }
+  return state;
+}
+
 async function runCase(browser, viewport, route) {
   const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height }, reducedMotion: "reduce" });
   const page = await context.newPage();
@@ -155,8 +183,17 @@ async function runCase(browser, viewport, route) {
     await assertGeometry(page, label);
     await assertSourceDefaults(page, label);
     await exerciseVisibleControls(page, label);
+    const mapEngineState = await assertMapEngineState(page, label);
     assert.deepEqual(pageErrors, [], `${label}: uncaught page errors: ${pageErrors.join("; ")}`);
-    const fatalConsole = consoleErrors.filter((message) => !/favicon|ResizeObserver loop|Failed to load resource/i.test(message));
+    const fatalConsole = consoleErrors.filter((message) => {
+      if (/favicon|ResizeObserver loop|Failed to load resource/i.test(message)) return false;
+      // A headless browser may not expose a usable WebGL context. That is only
+      // tolerated when the application has proven that its real synchronized
+      // Leaflet fallback is visible and interactive. This is not a blanket
+      // Mapbox-error waiver: without the fallback, the same messages fail CI.
+      if (mapEngineState.degraded && /^(Error|Mapbox 2D map failed Error)$/.test(message.trim())) return false;
+      return true;
+    });
     assert.deepEqual(fatalConsole, [], `${label}: browser console errors: ${fatalConsole.join("; ")}`);
   } catch (error) {
     await page.screenshot({ path: path.join(artifactDir, `${route.name}-${viewport.name}-failure.png`), fullPage: true }).catch(() => undefined);

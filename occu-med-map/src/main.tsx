@@ -31,7 +31,6 @@ import "./live-finder-ux.css";
 import "./mapbox-intelligence.css";
 import "./live-finder-eta-actions.css";
 import "./luminous-shell-fixes.css";
-import "./sidebar-control-fixes.css";
 import "./modal-popup-fixes.css";
 import "./modal-content-polish.css";
 import "./performance-safety.css";

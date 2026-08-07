@@ -32,7 +32,7 @@ function visit(node, parents = []) {
     const raw = node.getText(sourceFile);
     const inGrid = parents.some((parent) => ts.isJsxElement(parent) && hasClass(parent, "command-tool-grid"));
     if (tag === "button" && inGrid && /Live Finder|Live Places/.test(raw)) liveButton = node;
-    if (tag === "button" && /Provider Explorer/.test(raw) && !inGrid) explorerButton ??= node;
+    if (tag === "button" && /Provider Explorer/.test(raw) && !/Close Provider Explorer/.test(raw) && !inGrid) explorerButton ??= node;
     if (hasClass(node, "provider-explorer-launch")) providerLaunchers.push(node);
   }
   ts.forEachChild(node, (child) => visit(child, [...parents, node]));
@@ -89,7 +89,8 @@ function verify(node, parents = []) {
     const raw = node.getText(check);
     const tag = node.openingElement.tagName.getText(check);
     const inGrid = parents.some((parent) => ts.isJsxElement(parent) && parent.getText(check).startsWith('<div className="command-tool-grid"'));
-    if (tag === "button" && /Provider Explorer/.test(raw)) {
+    const isCloseExplorerControl = /Close Provider Explorer/.test(raw);
+    if (tag === "button" && /Provider Explorer/.test(raw) && !isCloseExplorerControl) {
       if (inGrid) sourceExplorer += 1;
       else externalExplorer += 1;
     }

@@ -84,11 +84,19 @@ for (const [button, mode] of [[liveButton, "live"], [npiButton, "npi"]]) {
   if (!onClick || !ts.isJsxExpression(onClick.initializer) || !onClick.initializer.expression) {
     throw new Error(`${mode} source launcher onClick is missing`);
   }
-  const originalExpression = onClick.initializer.expression.getText(sourceFile);
+  const originalNode = onClick.initializer.expression;
+  const originalExpression = originalNode.getText(sourceFile);
+  const declaredParameterCount = (ts.isArrowFunction(originalNode) || ts.isFunctionExpression(originalNode))
+    ? originalNode.parameters.length
+    : null;
+  const wrapperParameter = declaredParameterCount === 0 ? "" : "event";
+  const invocation = declaredParameterCount === 0
+    ? `(${originalExpression})();`
+    : `(${originalExpression})(event);`;
   edits.push([
     onClick.getStart(sourceFile),
     onClick.getEnd(),
-    `onClick={(event)=>{setProviderToolMode('${mode}');document.body.dataset.providerTool='${mode}';(${originalExpression})(event);}}`,
+    `onClick={(${wrapperParameter})=>{setProviderToolMode('${mode}');document.body.dataset.providerTool='${mode}';${invocation}}}`,
   ]);
   if (mode === "npi") {
     const pressed = attribute(button, "aria-pressed");

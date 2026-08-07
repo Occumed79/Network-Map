@@ -1,3 +1,5 @@
+import { currentRequestId, recordError, recordTiming } from "../lib/observability";
+
 type SourcePolicy = {
   timeoutMs: number;
   maxAttempts: number;
@@ -22,6 +24,7 @@ type SourceHealth = {
   lastFailureAt?: string;
   lastError?: string;
   lastLatencyMs?: number;
+  lastRequestId?: string;
   circuitOpenedAt?: string;
   circuitOpenUntil?: string;
 };
@@ -114,7 +117,9 @@ function markSuccess(state: SourceState, latencyMs: number) {
   state.health.circuitOpenUntil = undefined;
   state.health.lastSuccessAt = new Date().toISOString();
   state.health.lastLatencyMs = latencyMs;
+  state.health.lastRequestId = currentRequestId();
   state.health.lastError = undefined;
+  recordTiming("external_source", state.health.sourceId, latencyMs, true, { state: state.health.state });
 }
 
 function markFailure(state: SourceState, error: ExternalSourceError, latencyMs: number) {
@@ -122,10 +127,13 @@ function markFailure(state: SourceState, error: ExternalSourceError, latencyMs: 
   state.health.consecutiveFailures += 1;
   state.health.lastFailureAt = new Date().toISOString();
   state.health.lastLatencyMs = latencyMs;
+  state.health.lastRequestId = currentRequestId();
   state.health.lastError = `${error.code}: ${error.message}`;
   if (error.code === "timeout") state.health.timeoutCount += 1;
   if (error.code === "cancelled") state.health.cancellationCount += 1;
   if (error.code !== "cancelled" && state.health.consecutiveFailures >= state.policy.circuitFailureThreshold) openCircuit(state);
+  recordTiming("external_source", state.health.sourceId, latencyMs, false, { code: error.code, state: state.health.state });
+  if (error.code !== "cancelled") recordError(`external:${state.health.sourceId}`, error, error.code);
 }
 
 async function acquire(state: SourceState, signal?: AbortSignal): Promise<() => void> {

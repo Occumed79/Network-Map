@@ -3,7 +3,8 @@ import path from "node:path";
 
 const repoRoot = process.cwd();
 const sourceRoots = ["api-server/src", "occu-med-map/src"];
-const extensions = [".ts", ".tsx", ".js", ".jsx", ".mjs"];
+const sourceExtensions = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".mts", ".cts"];
+const assetExtensions = new Set([".css", ".scss", ".sass", ".less", ".svg", ".png", ".jpg", ".jpeg", ".webp", ".json"]);
 
 function walk(relativeDir) {
   const absolute = path.join(repoRoot, relativeDir);
@@ -11,7 +12,7 @@ function walk(relativeDir) {
   return fs.readdirSync(absolute, { withFileTypes: true }).flatMap((entry) => {
     const relative = path.posix.join(relativeDir.replaceAll("\\", "/"), entry.name);
     if (entry.isDirectory()) return walk(relative);
-    return extensions.includes(path.extname(entry.name)) ? [relative] : [];
+    return sourceExtensions.includes(path.extname(entry.name)) ? [relative] : [];
   });
 }
 
@@ -20,15 +21,34 @@ const fileSet = new Set(files);
 const graph = new Map(files.map((file) => [file, new Set()]));
 const unresolvedLocal = [];
 
-function resolveLocal(fromFile, specifier) {
+function resolveLocalSource(fromFile, specifier) {
   if (!specifier.startsWith(".")) return null;
   const base = path.posix.normalize(path.posix.join(path.posix.dirname(fromFile), specifier));
-  const candidates = [
-    base,
-    ...extensions.map((extension) => `${base}${extension}`),
-    ...extensions.map((extension) => path.posix.join(base, `index${extension}`)),
-  ];
+  const explicitExtension = path.posix.extname(base);
+  const candidates = [base];
+
+  // TypeScript projects using NodeNext commonly write an emitted .js extension
+  // while the checked-in source is .ts/.tsx. Resolve that source identity before
+  // declaring the import broken.
+  if (explicitExtension === ".js" || explicitExtension === ".jsx" || explicitExtension === ".mjs" || explicitExtension === ".cjs") {
+    const withoutRuntimeExtension = base.slice(0, -explicitExtension.length);
+    candidates.push(...sourceExtensions.map((extension) => `${withoutRuntimeExtension}${extension}`));
+    candidates.push(...sourceExtensions.map((extension) => path.posix.join(withoutRuntimeExtension, `index${extension}`)));
+  }
+
+  if (!explicitExtension) {
+    candidates.push(...sourceExtensions.map((extension) => `${base}${extension}`));
+    candidates.push(...sourceExtensions.map((extension) => path.posix.join(base, `index${extension}`)));
+  }
+
   return candidates.find((candidate) => fileSet.has(candidate)) || null;
+}
+
+function localAssetExists(fromFile, specifier) {
+  const extension = path.posix.extname(specifier).toLowerCase();
+  if (!assetExtensions.has(extension)) return false;
+  const absolute = path.resolve(repoRoot, path.posix.dirname(fromFile), specifier);
+  return fs.existsSync(absolute);
 }
 
 const importPatterns = [
@@ -37,13 +57,22 @@ const importPatterns = [
   /new\s+URL\(\s*["']([^"']+)["']\s*,\s*import\.meta\.url\s*\)/g,
 ];
 
+function runtimeRelevantSource(source) {
+  // Type-only edges are erased by TypeScript and cannot form a runtime module
+  // cycle. Excluding them keeps this gate focused on real executable cycles.
+  return source
+    .replace(/\bimport\s+type\b[\s\S]*?\bfrom\s+["'][^"']+["']\s*;?/g, "")
+    .replace(/\bexport\s+type\b[\s\S]*?\bfrom\s+["'][^"']+["']\s*;?/g, "");
+}
+
 for (const file of files) {
-  const source = fs.readFileSync(path.join(repoRoot, file), "utf8");
+  const source = runtimeRelevantSource(fs.readFileSync(path.join(repoRoot, file), "utf8"));
   for (const pattern of importPatterns) {
     for (const match of source.matchAll(pattern)) {
       const specifier = match[1];
       if (!specifier.startsWith(".")) continue;
-      const resolved = resolveLocal(file, specifier);
+      if (localAssetExists(file, specifier)) continue;
+      const resolved = resolveLocalSource(file, specifier);
       if (resolved) graph.get(file).add(resolved);
       else unresolvedLocal.push({ file, specifier });
     }
@@ -51,7 +80,7 @@ for (const file of files) {
 }
 
 if (unresolvedLocal.length) {
-  console.error("Unresolved local imports:", unresolvedLocal.slice(0, 30));
+  console.error("Unresolved local source imports:", unresolvedLocal.slice(0, 30));
   process.exitCode = 1;
 }
 
@@ -100,8 +129,12 @@ const suspiciousDead = orphans.filter((file) => /(?:old|obsolete|unused|dead|bac
 
 console.log(JSON.stringify({ files: files.length, edges: [...graph.values()].reduce((sum, edges) => sum + edges.size, 0), cycles: cycles.map((item) => item.cycle), orphanCount: orphans.length, suspiciousDead }, null, 2));
 
+if (unresolvedLocal.length > 0) {
+  console.error(`Import resolution gate failed with ${unresolvedLocal.length} unresolved local source import(s).`);
+  process.exitCode = 1;
+}
 if (cycles.length > 0) {
-  console.error(`Circular dependency gate failed with ${cycles.length} cycle(s).`);
+  console.error(`Circular dependency gate failed with ${cycles.length} runtime cycle(s).`);
   process.exitCode = 1;
 }
 if (suspiciousDead.length > 0) {

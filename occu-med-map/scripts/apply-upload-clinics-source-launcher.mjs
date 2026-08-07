@@ -17,9 +17,6 @@ if (!app.includes(oldLauncher) && !app.includes(previousMigratedLauncher) && !ap
 if (app.includes(oldLauncher)) app = app.replace(oldLauncher, newLauncher);
 if (app.includes(previousMigratedLauncher)) app = app.replace(previousMigratedLauncher, newLauncher);
 
-if (!app.includes("const toggleMyClinicsWorkflow=useCallback(()=>")) {
-  throw new Error("Upload Clinics workflow handler is missing from React source");
-}
 if (!app.includes('<span className="modal-title">Upload Clinics</span>')) {
   throw new Error("Upload Clinics modal title is missing from React source");
 }

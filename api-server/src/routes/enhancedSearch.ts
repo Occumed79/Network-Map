@@ -73,7 +73,8 @@ function normalizeGooglePlace(place: GoogleHealthcarePlace, lat: number, lng: nu
     website: "",
     lat: placeLat,
     lng: placeLng,
-    coordinateStatus: "geocoded",
+    coordinateStatus: "verified_address",
+    coordinateSource: "google-places",
     source: "Google Places",
     sourceDetail: `Google Places healthcare (${category})`,
     sourceUrl: `https://www.google.com/maps/place/?q=place_id=${place.id}`,
@@ -111,11 +112,6 @@ router.get("/enhanced-search", async (req: Request, res: Response) => {
     const state = String(req.query.state || "").trim();
     const mode = String(req.query.mode || "balanced") as "fast" | "balanced" | "deep";
     const googlePlacesTrigger = req.query.googlePlacesTrigger;
-
-    // Live Finder calls this endpoint without an explicit discovery opt-in.
-    // Keep that path limited to actual place-directory results. NPI/web/AI
-    // discovery belongs to the dedicated provider-source tools and must be
-    // explicitly requested with sourceScope=all or includeDiscovery=true.
     const sourceScope = String(req.query.sourceScope || "places").trim().toLowerCase();
     const includeDiscovery = sourceScope === "all" || String(req.query.includeDiscovery || "").toLowerCase() === "true";
 
@@ -167,9 +163,7 @@ router.get("/enhanced-search", async (req: Request, res: Response) => {
         try {
           await upsertProvider(candidate, serviceType);
           savedCount += 1;
-        } catch {
-          // Individual persistence failures do not fail provider discovery.
-        }
+        } catch {}
       }
     }
 

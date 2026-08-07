@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - hardening/ui-ownership-finalized
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write

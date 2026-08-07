@@ -38,7 +38,8 @@
     "import:providers:dentists": "tsx scripts/import-provider-json-to-neon.ts --source dentists",
     "test:leaflet-map-lifecycle-hardening": "tsx scripts/leaflet-map-lifecycle-hardening-smoke.ts",
     "test:mapbox-lifecycle-hardening": "tsx scripts/mapbox-lifecycle-hardening-smoke.ts",
-    "test:mapbox-source-pipeline-hardening": "tsx scripts/mapbox-source-pipeline-hardening-smoke.ts"
+    "test:mapbox-source-pipeline-hardening": "tsx scripts/mapbox-source-pipeline-hardening-smoke.ts",
+    "test:large-map-performance": "tsx scripts/large-map-performance-smoke.ts"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",

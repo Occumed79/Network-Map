@@ -3,6 +3,7 @@ import { isPersistenceConfigured } from "../../lib/networkMapPersistence";
 import type { ProviderCandidate, SearchParams } from "../types";
 import { haversineMiles, isValidCoordinate } from "../distance";
 import { classifyHealthcareTags } from "../serviceRouting";
+import { coordinateStatusFromLegacy } from "../integrity";
 
 const QUERY_TIMEOUT_MS = 3500;
 
@@ -51,6 +52,11 @@ export async function searchMapInventory(params: SearchParams): Promise<Provider
       const postalCode = String(row.postal_code || raw.postal_code || raw.zip || "");
       const address = String(row.formatted_address || raw.formatted_address || raw.address || raw.address_1 || "");
       const sourceUrl = String(raw.source_url || "") || undefined;
+      const coordinateSource = String(raw.coordinate_source || raw.coordinateSource || source || "stored-provider");
+      const coordinateStatus = coordinateStatusFromLegacy(
+        raw.coordinate_status || raw.coordinateStatus || raw.coordinate_accuracy || raw.coordinateAccuracy,
+        true,
+      );
       return [{
         id: `stored-${source.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${sourceRecordId}`,
         name,
@@ -63,7 +69,8 @@ export async function searchMapInventory(params: SearchParams): Promise<Provider
         website: String(row.website || raw.website || ""),
         lat,
         lng,
-        coordinateStatus: "imported" as const,
+        coordinateStatus,
+        coordinateSource,
         providerCategory: category,
         services: [category],
         taxonomy: category,
@@ -81,7 +88,7 @@ export async function searchMapInventory(params: SearchParams): Promise<Provider
           confidence: 90,
           source,
         }],
-        provenance: [{ source, sourceRecordId, sourceUrl, observedAt }],
+        provenance: [{ source, sourceRecordId, sourceUrl, observedAt, coordinateSource }],
         lastSeenAt: observedAt,
         matchReason: `Stored provider within ${radiusMiles} mile search radius`,
         distanceMiles,

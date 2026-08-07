@@ -42,6 +42,7 @@ function clean(value: unknown): string {
 }
 
 function normalizeElement(element: any, centerLat: number, centerLng: number, endpoint: string): ProviderCandidate | null {
+  const hasNativePoint = Number.isFinite(Number(element?.lat)) && Number.isFinite(Number(element?.lon));
   const lat = Number(element?.lat ?? element?.center?.lat);
   const lng = Number(element?.lon ?? element?.center?.lon);
   if (!isValidCoordinate(lat, lng)) return null;
@@ -73,7 +74,8 @@ function normalizeElement(element: any, centerLat: number, centerLng: number, en
     website,
     lat,
     lng,
-    coordinateStatus: "geocoded",
+    coordinateStatus: hasNativePoint ? "verified_exact" : "verified_address",
+    coordinateSource: hasNativePoint ? "openstreetmap-native-point" : "openstreetmap-feature-center",
     providerCategory: category,
     services: [category],
     taxonomy: category,

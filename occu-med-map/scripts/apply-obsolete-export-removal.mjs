@@ -12,6 +12,14 @@ function requireOnce(content, needle, label) {
   return first;
 }
 
+function removeRequiredBlock(content, startNeedle, endNeedle, label) {
+  const anchor = requireOnce(content, startNeedle, `${label} anchor`);
+  const start = content.lastIndexOf("\n", anchor);
+  const endStart = content.indexOf(endNeedle, anchor);
+  if (endStart < 0) throw new Error(`Missing ${label} end`);
+  return content.slice(0, start < 0 ? 0 : start) + content.slice(endStart + endNeedle.length);
+}
+
 const appPath = "src/App.tsx";
 let app = read(appPath);
 const symbol = ["export", "Leadership", "Package"].join("");
@@ -51,10 +59,21 @@ write(unifiedPath, unified);
 
 const sidebarSmokePath = "scripts/sidebar-workspace-hardening-smoke.ts";
 let sidebarSmoke = read(sidebarSmokePath);
-sidebarSmoke = sidebarSmoke.replace(`const cleanupRuntime = source("src/${cleanupModule}.ts");\n`, "");
-sidebarSmoke = sidebarSmoke.replace(new RegExp(`assert\\.match\\(main, /import \\\"\\\\\\.\\\\\\/${cleanupModule}\\\\\\\";/, \\\"obsolete Finder controls must be removed\\\"\\);\\n`), "");
-sidebarSmoke = sidebarSmoke.replace(/\nassert\.doesNotMatch\(cleanupRuntime,[\s\S]*?assert\.match\(cleanupRuntime, \/beforeunload\/, "Finder cleanup timers and listeners must be cleaned up"\);\n/, "\n");
-sidebarSmoke = sidebarSmoke.replace(/\nassert\.match\(productionUi, \/leadership export\/i, "production UI smoke must reject the obsolete report control"\);/, "");
+const cleanupSourceLine = `const cleanupRuntime = source("src/${cleanupModule}.ts");\n`;
+requireOnce(sidebarSmoke, cleanupSourceLine, "cleanup smoke source line");
+sidebarSmoke = sidebarSmoke.replace(cleanupSourceLine, "");
+const cleanupImportAssertion = String.raw`assert.match(main, /import "\.\/${cleanupModule}";/, "obsolete Finder controls must be removed");` + "\n";
+requireOnce(sidebarSmoke, cleanupImportAssertion, "cleanup import smoke assertion");
+sidebarSmoke = sidebarSmoke.replace(cleanupImportAssertion, "");
+const cleanupAssertionStart = "\nassert.doesNotMatch(cleanupRuntime,";
+const cleanupAssertionEnd = 'assert.match(cleanupRuntime, /beforeunload/, "Finder cleanup timers and listeners must be cleaned up");\n';
+const cleanupAssertionIndex = requireOnce(sidebarSmoke, cleanupAssertionStart, "cleanup smoke assertion block");
+const cleanupAssertionEndIndex = sidebarSmoke.indexOf(cleanupAssertionEnd, cleanupAssertionIndex);
+if (cleanupAssertionEndIndex < 0) throw new Error("Missing cleanup smoke assertion block end");
+sidebarSmoke = sidebarSmoke.slice(0, cleanupAssertionIndex) + "\n" + sidebarSmoke.slice(cleanupAssertionEndIndex + cleanupAssertionEnd.length);
+const productionObsoleteAssertion = String.raw`assert.match(productionUi, /leadership export/i, "production UI smoke must reject the obsolete report control");` + "\n";
+requireOnce(sidebarSmoke, productionObsoleteAssertion, "obsolete production smoke assertion");
+sidebarSmoke = sidebarSmoke.replace(productionObsoleteAssertion, "");
 const sourceAnchor = 'const main = source("src/main.tsx");\n';
 if (!sidebarSmoke.includes('const appSource = source("src/App.tsx");')) {
   sidebarSmoke = sidebarSmoke.replace(sourceAnchor, sourceAnchor + 'const appSource = source("src/App.tsx");\n');
@@ -68,8 +87,13 @@ write(sidebarSmokePath, sidebarSmoke);
 
 const productionPath = "scripts/production-ui-smoke.mjs";
 let production = read(productionPath);
-production = production.replace(/\n\s*const leadershipExport = Array\.from\([\s\S]*?assert\.equal\(leadershipExport, false, [^\n]*\);/g, "");
-production = production.replace(/\n\s*assert\.equal\([^\n]*leadership export[^\n]*\);/gi, "");
+const productionLabelNeedle = `hasText: /${obsoleteLabel}/i`;
+const productionLabelIndex = requireOnce(production, productionLabelNeedle, "obsolete production UI assertion");
+const productionBlockStart = production.lastIndexOf("\n  assert.equal(", productionLabelIndex);
+const productionBlockEndNeedle = "\n  );";
+const productionBlockEndStart = production.indexOf(productionBlockEndNeedle, productionLabelIndex);
+if (productionBlockStart < 0 || productionBlockEndStart < 0) throw new Error("Could not isolate obsolete production UI assertion block");
+production = production.slice(0, productionBlockStart) + production.slice(productionBlockEndStart + productionBlockEndNeedle.length);
 write(productionPath, production);
 
 const cleanupPath = path.join(root, `src/${cleanupModule}.ts`);

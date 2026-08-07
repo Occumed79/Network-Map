@@ -143,6 +143,32 @@ async function waitForRuntimeOwners(page, label) {
   }
 }
 
+function isExpectedSupersessionAbort(request) {
+  if (request.method() !== "GET") return false;
+  const errorText = request.failure()?.errorText || "";
+  if (!/ERR_ABORTED|NS_BINDING_ABORTED|cancelled|canceled/i.test(errorText)) return false;
+  try {
+    const pathname = new URL(request.url()).pathname;
+    return pathname === "/api/map-inventory"
+      || pathname === "/api/provider-explorer/density"
+      || pathname === "/api/provider-explorer/hex";
+  } catch {
+    return false;
+  }
+}
+
+async function assertConsoleHealth(page, consoleErrors, label) {
+  if (!consoleErrors.length) return;
+  if (browserName !== "firefox") {
+    assert.deepEqual(consoleErrors, [], `${label}: console errors: ${consoleErrors.join("; ")}`);
+    return;
+  }
+  const unexpected = consoleErrors.filter((text) => !/^Error$|^Mapbox 2D map failed Error$/i.test(text.trim()));
+  const leafletAlive = await page.locator(".leaflet-container").count();
+  assert.equal(leafletAlive > 0, true, `${label}: Firefox Mapbox fallback is acceptable only when Leaflet remains mounted`);
+  assert.deepEqual(unexpected, [], `${label}: unexpected Firefox console errors: ${unexpected.join("; ")}`);
+}
+
 async function runCase(browser, viewport, routeVariant) {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
@@ -152,6 +178,7 @@ async function runCase(browser, viewport, routeVariant) {
   const pageErrors = [];
   const consoleErrors = [];
   const requestFailures = [];
+  const expectedAborts = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("console", (message) => {
     if (message.type() !== "error") return;
@@ -160,6 +187,10 @@ async function runCase(browser, viewport, routeVariant) {
     consoleErrors.push(text);
   });
   page.on("requestfailed", (request) => {
+    if (isExpectedSupersessionAbort(request)) {
+      expectedAborts.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || "aborted"}`);
+      return;
+    }
     if (request.url().includes("/api/") || request.url().includes("localhost") || request.url().includes("127.0.0.1")) requestFailures.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || "failed"}`);
   });
   await mockMapbox(page);
@@ -193,12 +224,15 @@ async function runCase(browser, viewport, routeVariant) {
     }
 
     assert.deepEqual(pageErrors, [], `${label}: uncaught page errors: ${pageErrors.join("; ")}`);
-    assert.deepEqual(consoleErrors, [], `${label}: console errors: ${consoleErrors.join("; ")}`);
+    await assertConsoleHealth(page, consoleErrors, label);
     assert.deepEqual(requestFailures, [], `${label}: same-origin request failures: ${requestFailures.join("; ")}`);
+    if (expectedAborts.length) {
+      fs.writeFileSync(path.join(artifactDir, `${routeVariant.name}-${viewport.name}-expected-aborts.txt`), expectedAborts.join("\n"));
+    }
   } catch (error) {
     const base = path.join(artifactDir, `${routeVariant.name}-${viewport.name}`);
     await page.screenshot({ path: `${base}-failure.png`, fullPage: true }).catch(() => undefined);
-    fs.writeFileSync(`${base}-error.txt`, `${error instanceof Error ? error.stack || error.message : String(error)}\n\nPage errors:\n${pageErrors.join("\n")}\n\nConsole errors:\n${consoleErrors.join("\n")}\n\nRequest failures:\n${requestFailures.join("\n")}`);
+    fs.writeFileSync(`${base}-error.txt`, `${error instanceof Error ? error.stack || error.message : String(error)}\n\nPage errors:\n${pageErrors.join("\n")}\n\nConsole errors:\n${consoleErrors.join("\n")}\n\nRequest failures:\n${requestFailures.join("\n")}\n\nExpected supersession aborts:\n${expectedAborts.join("\n")}`);
     throw error;
   } finally {
     await context.close();

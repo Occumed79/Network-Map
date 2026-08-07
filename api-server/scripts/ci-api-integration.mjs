@@ -5,7 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 const baseUrl = process.env.CI_API_BASE_URL || "http://127.0.0.1:3000";
 const writeToken = process.env.WRITE_API_TOKEN || "ci-write-token";
 const expectedOrigin = process.env.CLIENT_ORIGIN || "http://127.0.0.1:4173";
-const apiCommand = process.env.CI_API_COMMAND || "pnpm --filter @workspace/api-server dev";
+const apiCommand = process.env.CI_API_COMMAND || "pnpm --filter @workspace/api-server build && pnpm --filter @workspace/api-server start";
 const providerDbUrl = process.env.DATABASE_URL_POOLED || process.env.DATABASE_URL || "";
 
 function spawnApi() {

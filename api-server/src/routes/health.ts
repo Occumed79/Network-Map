@@ -7,6 +7,15 @@ router.get("/live", (_req, res) => {
   res.status(200).json({ ok: true });
 });
 
+// Public deployment identity contains only the immutable Git revision. Full
+// diagnostics remain admin-protected; production smoke does not need them.
+router.get("/revision", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.status(200).json({
+    revision: process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || null,
+  });
+});
+
 router.get("/ready", async (_req, res) => {
   const readiness = await checkRequiredDatabases(2500);
   res.status(readiness.ok ? 200 : 503).json({

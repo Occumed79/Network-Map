@@ -55,7 +55,8 @@ const requiredOwners: Record<string, string> = {
 
 for (const [file, id] of Object.entries(requiredOwners)) {
   const text = source(file);
-  assert(text.includes(`registerRuntimeOwner("${id}"`), `${file} does not register runtime owner ${id}`);
+  const escapedId = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  assert(new RegExp(`registerRuntimeOwner\\(\\s*["']${escapedId}["']`).test(text), `${file} does not register runtime owner ${id}`);
 }
 
 const sharedObserverConsumers = [

@@ -30,6 +30,7 @@ const selectedRoutes = requestedRoute ? routes.filter((route) => route.name === 
 const selectedViewports = requestedViewport ? viewports.filter((viewport) => viewport.name === requestedViewport) : viewports;
 if (!selectedRoutes.length) throw new Error(`Unsupported route case ${requestedRoute}`);
 if (!selectedViewports.length) throw new Error(`Unsupported viewport case ${requestedViewport}`);
+const isolatedCase = selectedRoutes.length === 1 && selectedViewports.length === 1;
 
 function json(route, payload, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(payload) });
@@ -86,7 +87,7 @@ async function ensureWorkspaceVisible(page) {
   if (await tab.evaluate(visibleInViewport)) return;
   const menu = page.locator(".mobile-menu-button:visible").first();
   if (await menu.count()) {
-    await menu.click();
+    await menu.click({ timeout: 10_000 });
     await page.waitForTimeout(220);
   }
   assert.equal(await tab.evaluate(visibleInViewport), true, "workspace tabs must become reachable from the mobile menu");
@@ -128,7 +129,7 @@ async function assertWorkspace(page, label) {
   await ensureWorkspaceVisible(page);
   const tab = await workspaceTab(page, label);
   await tab.waitFor({ state: "visible", timeout: 10_000 });
-  await tab.click();
+  await tab.click({ timeout: 10_000 });
   await page.waitForTimeout(180);
   assert.equal(await tab.getAttribute("aria-selected"), "true", `${label} tab must become active`);
 }
@@ -265,6 +266,8 @@ async function runCase(browser, viewport, routeVariant) {
     reducedMotion: "reduce",
   });
   const page = await context.newPage();
+  page.setDefaultTimeout(10_000);
+  page.setDefaultNavigationTimeout(30_000);
   const pageErrors = [];
   const consoleErrors = [];
   const requestFailures = [];
@@ -328,8 +331,22 @@ async function runCase(browser, viewport, routeVariant) {
     fs.writeFileSync(`${base}-error.txt`, `${error instanceof Error ? error.stack || error.message : String(error)}\n\nPage errors:\n${pageErrors.join("\n")}\n\nConsole errors:\n${consoleErrors.join("\n")}\n\nRequest failures:\n${requestFailures.join("\n")}\n\nExpected supersession aborts:\n${expectedAborts.join("\n")}`);
     throw error;
   } finally {
-    await teardownTrackedMapboxMaps(page, label);
-    await context.close();
+    if (!isolatedCase) {
+      await teardownTrackedMapboxMaps(page, label);
+      await context.close();
+    }
+  }
+}
+
+if (isolatedCase) {
+  const browser = await browserType.launch({ headless: true });
+  try {
+    await runCase(browser, selectedViewports[0], selectedRoutes[0]);
+    console.log(`Cross-browser acceptance passed for ${browserName}: route=${selectedRoutes[0].name}; viewport=${selectedViewports[0].name}.`);
+    process.exit(0);
+  } catch (error) {
+    console.error(error instanceof Error ? error.stack || error.message : String(error));
+    process.exit(1);
   }
 }
 

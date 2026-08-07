@@ -1,7 +1,22 @@
 import { CATS } from '../networkMap/networkMapConstants';
 import { fmtDist } from '../networkMap/networkMapUtils';
 import { escapeHtml, htmlAttr, safeTel, safeUrl } from '../../lib/htmlSafety';
-import type { LiveFinderResult } from './liveFinderSearch';
+
+export type LiveFinderResult = {
+  id: number | string;
+  lat: number;
+  lng: number;
+  name: string;
+  cat: string;
+  dist: number;
+  addr: string;
+  phone: string;
+  website: string;
+  hours: string;
+  op: string;
+  source: string;
+  raw?: unknown;
+};
 
 export function buildLiveFinderPopupHtml(result: LiveFinderResult, showGoogleMaps = true): string {
   const category = CATS[result.cat] || CATS.clinic;

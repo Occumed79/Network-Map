@@ -26,8 +26,18 @@ router.get("/diagnostics/export", async (_req, res) => {
     schemaVersions: await schemaVersions(),
     externalSources: getExternalSourceHealth(),
   });
+  const recentUploads = Array.isArray(snapshot.recentUploads) ? snapshot.recentUploads as Array<Record<string, unknown>> : [];
+  const recentUploadSummary = recentUploads.reduce((summary, upload) => {
+    summary.runs += 1;
+    summary.accepted += Number(upload.accepted || 0);
+    summary.quarantined += Number(upload.quarantined || 0);
+    summary.rejected += Number(upload.rejected || 0);
+    summary.duplicate += Number(upload.duplicate || 0);
+    return summary;
+  }, { runs: 0, accepted: 0, quarantined: 0, rejected: 0, duplicate: 0 });
+
   res.setHeader("Cache-Control", "no-store");
-  res.json({ ...snapshot, fingerprint: diagnosticsFingerprint(snapshot) });
+  res.json({ ...snapshot, recentUploadSummary, fingerprint: diagnosticsFingerprint(snapshot) });
 });
 
 export default router;

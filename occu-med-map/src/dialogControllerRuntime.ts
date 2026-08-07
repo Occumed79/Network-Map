@@ -127,7 +127,7 @@ function syncDialogs(): void {
 
   activeDialogs.forEach((state) => {
     if (current.includes(state.dialog)) return;
-    restoreFocus(state.opener);
+    if (state.opener?.isConnected) restoreFocus(state.opener);
   });
 
   activeDialogs = next;

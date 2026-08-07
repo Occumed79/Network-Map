@@ -54,13 +54,15 @@ jobs:
         run: node scripts/bundle-size-budget.mjs
 
   browser:
-    name: ${{ matrix.browser }} browser acceptance
+    name: ${{ matrix.browser }} / ${{ matrix.route }} / ${{ matrix.viewport }} browser acceptance
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 8
     strategy:
       fail-fast: false
       matrix:
         browser: [chromium, firefox, webkit]
+        route: [standard, p2]
+        viewport: [desktop, laptop, tablet, mobile]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -85,13 +87,15 @@ jobs:
       - name: Run real browser acceptance
         env:
           NETWORK_MAP_BROWSER: ${{ matrix.browser }}
+          NETWORK_MAP_ROUTE: ${{ matrix.route }}
+          NETWORK_MAP_VIEWPORT: ${{ matrix.viewport }}
           NETWORK_MAP_CI_UI_URL: http://127.0.0.1:4173
         run: pnpm --filter @workspace/occu-med-map exec node scripts/ci-cross-browser-acceptance.mjs
       - name: Upload browser failure evidence
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: hardening-browser-${{ matrix.browser }}
+          name: hardening-browser-${{ matrix.browser }}-${{ matrix.route }}-${{ matrix.viewport }}
           path: |
             occu-med-map/test-results/hardening-browser
             /tmp/network-map-preview.log

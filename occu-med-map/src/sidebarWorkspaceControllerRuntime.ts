@@ -21,10 +21,10 @@ const SYNC_DELAY_MS = 28;
 const PANEL_ACTION_GRACE_MS = 900;
 
 const TAB_DEFINITIONS: TabDefinition[] = [
-  { id: "providers", label: "Providers", ariaLabel: "Show provider layers and workflows" },
-  { id: "mapTools", label: "Map Tools", ariaLabel: "Show map routing and map tools" },
-  { id: "liveFinder", label: "Finder", ariaLabel: "Show the live provider finder" },
-  { id: "explorer", label: "Explorer", ariaLabel: "Show the provider explorer" },
+  { id: "providers", label: "Providers", ariaLabel: "Providers workspace — provider layers and workflows" },
+  { id: "mapTools", label: "Map Tools", ariaLabel: "Map Tools workspace — routing and map tools" },
+  { id: "liveFinder", label: "Finder", ariaLabel: "Finder workspace — live provider finder" },
+  { id: "explorer", label: "Explorer", ariaLabel: "Explorer workspace — provider explorer" },
 ];
 
 let activeTab: WorkspaceTab = "providers";

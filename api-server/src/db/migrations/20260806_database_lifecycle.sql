@@ -1,5 +1,7 @@
 -- Database lifecycle/version tracking (#175). Additive schema ownership only.
 
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 CREATE TABLE IF NOT EXISTS public.schema_migration_versions (
   version text PRIMARY KEY,
   checksum text,

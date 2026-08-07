@@ -126,13 +126,15 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      - name: Dependency vulnerability gate
-        run: pnpm audit --audit-level high
+      - name: Dependency vulnerability regression gate
+        run: node scripts/dependency-vulnerability-gate.mjs
       - name: Real ESLint gate
         run: pnpm dlx --package=eslint@9.39.1 --package=typescript-eslint@8.46.2 eslint -c eslint.config.mjs "api-server/src/**/*.{ts,tsx}" "occu-med-map/src/**/*.{ts,tsx}"
       - name: Dead-code and circular-dependency gate

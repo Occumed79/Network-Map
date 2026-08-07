@@ -47,6 +47,7 @@ const requiredOwners: Record<string, string> = {
   "mapboxGlobeLoadHardeningRuntime.ts": "mapbox-globe-load-hardening",
   "dialogControllerRuntime.ts": "dialog-controller",
   "generalUiIntegrityRuntime.ts": "general-ui-integrity",
+  "sidebarWorkspacePanelGuardRuntime.ts": "sidebar-workspace-integrity",
 };
 
 for (const [file, id] of Object.entries(requiredOwners)) {
@@ -85,6 +86,11 @@ for (const file of ["routePlannerControlsRuntime.ts", "healthsitesFlatDotsRuntim
 const integrity = source("generalUiIntegrityRuntime.ts");
 assert(!integrity.includes("addEventListener(\"keydown\""), "UI integrity monitor must not own dialog keyboard behavior");
 assert(!integrity.includes("dispatchEvent(new Event(\"resize\")"), "UI integrity monitor must not repair layout with synthetic resize events");
+
+const sidebarIntegrity = source("sidebarWorkspacePanelGuardRuntime.ts");
+assert(!sidebarIntegrity.includes("launcher.click("), "sidebar integrity monitor must not launch panels");
+assert(!sidebarIntegrity.includes("controller()?.sync"), "sidebar integrity monitor must not repair sidebar ownership");
+assert(!sidebarIntegrity.includes("dispatchEvent(new Event(\"resize\")"), "sidebar integrity monitor must not synthesize layout recovery events");
 
 const ownerIds = new Map<string, string[]>();
 for (const file of filesUnder(root)) {

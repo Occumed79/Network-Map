@@ -53,10 +53,9 @@ export function coordinateAllowed(status: CoordinateStatus, policy: CoordinateAc
 
 export function coordinateStatusFromLegacy(value: unknown, hasCoordinates: boolean): CoordinateStatus {
   const normalized = String(value ?? "").trim().toLowerCase();
-  if (["verified_exact", "exact"].includes(normalized)) return hasCoordinates ? "verified_exact" : "invalid";
-  if (["verified_address", "geocoded", "address"].includes(normalized)) return hasCoordinates ? "verified_address" : "invalid";
+  if (["verified_exact", "exact", "verified"].includes(normalized)) return hasCoordinates ? "verified_exact" : "invalid";
+  if (["verified_address", "geocoded", "address", "imported"].includes(normalized)) return hasCoordinates ? "verified_address" : "invalid";
   if (["city_centroid", "centroid", "city"].includes(normalized)) return hasCoordinates ? "city_centroid" : "invalid";
-  if (["imported", "verified"].includes(normalized)) return hasCoordinates ? "verified_exact" : "invalid";
   if (normalized === "invalid") return "invalid";
   return hasCoordinates ? "verified_address" : "unverified";
 }

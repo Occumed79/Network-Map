@@ -35,7 +35,7 @@ jobs:
           pnpm dlx \
             --package=eslint@8.57.1 \
             --package=@typescript-eslint/parser@7.18.0 \
-            sh -c '
+            bash -c '
               set -euo pipefail
               export NODE_PATH="$(dirname "$(dirname "$(command -v eslint)")")"
               PARSER="$(node -e "process.stdout.write(require.resolve(\"@typescript-eslint/parser\"))")"

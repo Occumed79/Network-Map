@@ -2,11 +2,11 @@ import type { ProviderCandidate, CoordinateStatus } from "./types";
 import { getCachedGeocode, cacheGeocode } from "./persistence";
 import { isPersistenceConfigured } from "../lib/networkMapPersistence";
 import { isValidCoordinate } from "./distance";
+import { fetchExternalJson } from "./externalSourceRuntime";
 
 type GeocodePoint = { lat: number; lng: number; provider?: string };
-
-const GEOCODIO_TIMEOUT_MS = 7000;
-const NOMINATIM_TIMEOUT_MS = 7000;
+type GeocodioPayload = { results?: Array<{ location?: { lat?: number | string; lng?: number | string } }> };
+type NominatimPayload = Array<{ lat?: string; lon?: string }>;
 
 function configuredGeocodioKeys(): string[] {
   const thirdEnv = "GEOCODIO_" + "TERTIARY_" + "TOKEN";
@@ -16,14 +16,24 @@ function configuredGeocodioKeys(): string[] {
     .filter((key, index, allKeys) => Boolean(key) && allKeys.indexOf(key) === index);
 }
 
+function isGeocodioPayload(value: unknown): value is GeocodioPayload {
+  return Boolean(value && typeof value === "object" && (!(value as GeocodioPayload).results || Array.isArray((value as GeocodioPayload).results)));
+}
+function isNominatimPayload(value: unknown): value is NominatimPayload {
+  return Array.isArray(value) && value.every((item) => item && typeof item === "object");
+}
+
 async function geocodeWithGeocodioKey(query: string, key: string): Promise<GeocodePoint | null> {
   const url = new URL("https://api.geocod.io/v1.8/geocode");
   url.searchParams.set("q", query);
   url.searchParams.set("limit", "1");
   url.searchParams.set("api_" + "key", key);
-  const resp = await fetch(url, { headers: { "Accept-Language": "en" }, signal: AbortSignal.timeout(GEOCODIO_TIMEOUT_MS) });
-  if (!resp.ok) return null;
-  const data = await resp.json() as { results?: Array<{ location?: { lat?: number | string; lng?: number | string } }> };
+  const data = await fetchExternalJson<GeocodioPayload>(
+    "geocodio",
+    url.toString(),
+    { headers: { "Accept-Language": "en" } },
+    { cache: true, validate: isGeocodioPayload },
+  );
   const lat = Number(data.results?.[0]?.location?.lat);
   const lng = Number(data.results?.[0]?.location?.lng);
   return isValidCoordinate(lat, lng) ? { lat, lng, provider: "geocodio" } : null;
@@ -31,8 +41,12 @@ async function geocodeWithGeocodioKey(query: string, key: string): Promise<Geoco
 
 async function geocodeWithGeocodio(query: string): Promise<GeocodePoint | null> {
   for (const key of configuredGeocodioKeys()) {
-    const point = await geocodeWithGeocodioKey(query, key);
-    if (point) return point;
+    try {
+      const point = await geocodeWithGeocodioKey(query, key);
+      if (point) return point;
+    } catch (error) {
+      console.warn("[Provider geocode] Geocodio key failed", error instanceof Error ? error.message : String(error));
+    }
   }
   return null;
 }
@@ -43,9 +57,12 @@ async function geocodeWithNominatim(query: string): Promise<GeocodePoint | null>
   url.searchParams.set("limit", "1");
   url.searchParams.set("countrycodes", "us");
   url.searchParams.set("q", query);
-  const resp = await fetch(url, { headers: { "Accept-Language": "en" }, signal: AbortSignal.timeout(NOMINATIM_TIMEOUT_MS) });
-  if (!resp.ok) throw new Error(`Nominatim ${resp.status}`);
-  const data = await resp.json() as Array<{ lat: string; lon: string }>;
+  const data = await fetchExternalJson<NominatimPayload>(
+    "nominatim",
+    url.toString(),
+    { headers: { "Accept-Language": "en", "User-Agent": "OccuMedNetworkMap/1.0" } },
+    { cache: true, validate: isNominatimPayload },
+  );
   const lat = Number(data?.[0]?.lat);
   const lng = Number(data?.[0]?.lon);
   return isValidCoordinate(lat, lng) ? { lat, lng, provider: "nominatim" } : null;
@@ -63,7 +80,7 @@ export async function geocodeAddress(query: string): Promise<GeocodePoint | null
   if (configuredGeocodioKeys().length) point = await geocodeWithGeocodio(query);
   if (!point) {
     try { point = await geocodeWithNominatim(query); }
-    catch (error) { console.warn("[Provider geocode] Nominatim failed", String(error)); }
+    catch (error) { console.warn("[Provider geocode] Nominatim failed", error instanceof Error ? error.message : String(error)); }
   }
 
   if (isPersistenceConfigured()) {
@@ -77,7 +94,6 @@ export async function geocodeProviders(candidates: ProviderCandidate[], _centerL
   const results: ProviderCandidate[] = [];
   const hasGeocodio = configuredGeocodioKeys().length > 0;
   const geocodeLimit = hasGeocodio ? 25 : 8;
-  const geocodeDelayMs = hasGeocodio ? 250 : 1100;
   let attempted = 0;
 
   for (const provider of candidates) {
@@ -97,7 +113,6 @@ export async function geocodeProviders(candidates: ProviderCandidate[], _centerL
           coordinateStatus: "verified_address" as CoordinateStatus,
           coordinateSource: point.provider || "address-geocoder",
         });
-        await new Promise((resolve) => setTimeout(resolve, geocodeDelayMs));
         continue;
       }
     }

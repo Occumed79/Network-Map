@@ -2317,31 +2317,6 @@ export default function App() {
     return { counts, missing, covered: REQUIRED_NETWORK_CATS.length - missing.length, total: REQUIRED_NETWORK_CATS.length };
   }
 
-  function exportLeadershipPackage() {
-    const summary = territoryGapSummary();
-    const payload = {
-      generatedAt: new Date().toISOString(),
-      location: liveLocation || null,
-      totalFacilities: liveResults.length,
-      requiredCategories: REQUIRED_NETWORK_CATS,
-      missingCategories: summary.missing,
-      coverageRatio: `${summary.covered}/${summary.total}`,
-      outreachStatus,
-      outreachNotes,
-      topFacilities: liveResults.slice(0, 30).map((r:any)=>({
-        id: r.id, name: r.name, category: r.cat, distanceKm: Number(r.dist.toFixed(2)),
-        phone: r.phone || '', website: r.website || '', address: r.addr || '',
-      })),
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `leadership_package_${new Date().toISOString().slice(0,10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  }
-
   async function runAutomatedPriceHunt() {
     if (!pfCity.trim()) return;
     setPhLoading(true);
@@ -4140,14 +4115,6 @@ export default function App() {
                 </div>
               </div>
               <div className="lp-controls">
-              <div style={{display:'flex',gap:6}}>
-                <button
-                  onClick={exportLeadershipPackage}
-                  style={{fontSize:8,padding:'4px 7px',borderRadius:4,border:'1px solid rgba(56,189,248,0.28)',background:'rgba(56,189,248,0.1)',color:'#38bdf8',fontFamily:"'IBM Plex Mono',monospace",cursor:'pointer'}}
-                >
-                  <Download size={13}/> Leadership export
-                </button>
-              </div>
               <div style={{fontSize:10,color:'#3d5478',lineHeight:1.5}}>
                 {liveLocation?`Center · ${liveLocation}`:'Coordinate-first live search · double-click the map or search an address.'}
                 {liveMirror&&<div style={{fontSize:9,color:'#2d4060',marginTop:3}}>{liveMirror}</div>}

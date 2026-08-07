@@ -364,7 +364,7 @@ function markControlGroups(panel: HTMLElement): void {
 
   Array.from(panel.querySelectorAll<HTMLElement>("button")).forEach((button) => {
     const text = normalizedText(button);
-    if (text.includes("export csv") || text.includes("leadership export")) button.classList.add("provider-tool-live-only");
+    if (text.includes("export csv")) button.classList.add("provider-tool-live-only");
   });
 }
 

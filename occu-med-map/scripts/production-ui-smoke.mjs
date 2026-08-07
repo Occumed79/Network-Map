@@ -324,11 +324,6 @@ try {
   await assertWorkspace("providers");
   await assertWorkspace("mapTools", ".occumed-sidebar-workspace-host > .occumed-map-tools-panel");
   await assertWorkspace("liveFinder", ".live-panel.open");
-  assert.equal(
-    await page.locator(".live-panel button", { hasText: /leadership export/i }).count(),
-    0,
-    "obsolete Leadership export control must remain removed",
-  );
   await assertWorkspace("explorer", ".provider-explorer-drawer.open");
   await assertWorkspace("liveFinder", ".live-panel.open");
   await assertWorkspace("providers");

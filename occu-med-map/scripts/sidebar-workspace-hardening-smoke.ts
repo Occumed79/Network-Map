@@ -11,9 +11,9 @@ function source(relativePath: string): string {
 }
 
 const main = source("src/main.tsx");
+const appSource = source("src/App.tsx");
 const controller = source("src/sidebarWorkspaceControllerRuntime.ts");
 const panelGuard = source("src/sidebarWorkspacePanelGuardRuntime.ts");
-const cleanupRuntime = source("src/liveFinderControlCleanupRuntime.ts");
 const finalFixes = source("src/sidebar-workspace-final-fixes.css");
 const mapControls = source("src/mapControlsBridgeRuntime.ts");
 const productionUi = source("scripts/production-ui-smoke.mjs");
@@ -22,10 +22,11 @@ const indexHtml = source("index.html");
 assert.match(main, /import "\.\/sidebarWorkspaceControllerRuntime";/, "unified sidebar controller must load");
 assert.match(main, /import "\.\/sidebar-workspace-final-fixes\.css";/, "authoritative sidebar layout layer must load");
 assert.match(main, /import "\.\/sidebarWorkspacePanelGuardRuntime";/, "sidebar integrity diagnostics must load");
-assert.match(main, /import "\.\/liveFinderControlCleanupRuntime";/, "obsolete Finder controls must be removed");
 assert.doesNotMatch(main, /sidebarWorkspaceTabsRuntime/, "legacy tab runtime must remain retired");
 assert.doesNotMatch(main, /sidebarWorkspaceConsistencyRuntime/, "legacy consistency runtime must remain retired");
 assert.doesNotMatch(indexHtml, /sidebarWorkspacePersistence/, "duplicate public persistence observer must remain removed");
+assert.doesNotMatch(appSource, new RegExp(["export", "Leadership", "Package"].join("")), "obsolete export function must stay removed");
+assert.doesNotMatch(main, new RegExp(["liveFinder", "ControlCleanupRuntime"].join("")), "obsolete Finder cleanup runtime must stay retired");
 
 for (const tab of ["providers", "mapTools", "liveFinder", "explorer"]) {
   assert.match(controller, new RegExp(`id: "${tab}"`), `workspace tab ${tab} must remain registered`);
@@ -57,10 +58,7 @@ assert.match(panelGuard, /map-tools-horizontal-overflow/, "runtime audit must de
 assert.match(panelGuard, /__NETWORK_MAP_UI_INTEGRITY__/, "runtime UI audit must be externally inspectable");
 assert.match(panelGuard, /removeEventListener/, "UI integrity listeners must be cleaned up");
 
-assert.doesNotMatch(cleanupRuntime, /new MutationObserver/, "Finder control cleanup must not add another observer");
-assert.match(cleanupRuntime, /leadership.*export/s, "Leadership export control must remain targeted for removal");
-assert.match(cleanupRuntime, /network-map:sidebar-workspace/, "Finder cleanup must run when its workspace opens");
-assert.match(cleanupRuntime, /beforeunload/, "Finder cleanup timers and listeners must be cleaned up");
+
 
 assert.match(finalFixes, /grid-template-columns: var\(--command-sidebar-width\) minmax\(0, 1fr\) !important;/, "desktop layout must have only sidebar and map columns");
 assert.doesNotMatch(finalFixes, /minmax\(0, 1fr\) 0 !important/, "a zero-width legacy third column must not remain");
@@ -79,7 +77,6 @@ assert.match(productionUi, /assertWorkspace\("liveFinder"/, "production UI smoke
 assert.match(productionUi, /assertWorkspace\("explorer"/, "production UI smoke must exercise Explorer");
 assert.match(productionUi, /phantom right-side column/, "production UI smoke must reject map gutters");
 assert.match(productionUi, /setViewportSize\(\{ width: 1024, height: 768 \}\)/, "workspace UI must be checked at a narrower desktop viewport");
-assert.match(productionUi, /leadership export/i, "production UI smoke must reject the obsolete report control");
 assert.match(productionUi, /__NETWORK_MAP_UI_INTEGRITY__/, "production UI smoke must consume the runtime audit");
 
 assert.match(mapControls, /workspaceReady/, "Map Controls must detect final sidebar ownership");

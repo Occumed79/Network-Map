@@ -48,7 +48,6 @@ import "./sidebar-button-theme.css";
 import "./sidebarWorkspaceControllerRuntime";
 import "./sidebar-workspace-final-fixes.css";
 import "./sidebarWorkspacePanelGuardRuntime";
-import "./liveFinderControlCleanupRuntime";
 import "./general-ui-hardening.css";
 import "./general-ui-visual-consistency.css";
 import "./pdf-preview-hardening.css";

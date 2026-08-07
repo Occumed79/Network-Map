@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { getDb, providersTable, providerLocationsTable, providerContactsTable, providerServicesTable, providerSourcesTable, providerEvidenceTable, geocodeCacheTable } from "@workspace/db";
 import type { ProviderCandidate, TrustTier } from "./types";
 import { assessProviderIntegrity, coordinateStatusFromLegacy, isValidNpi, normalizeNpi } from "./integrity";
@@ -162,8 +162,11 @@ async function upsertSource(db: ReturnType<typeof getDb>, providerId: number, ca
   for (const item of provenance) {
     const sourceId = item.source.toLowerCase().replace(/\s+/g, "_");
     const externalId = item.sourceRecordId || candidate.npi || null;
+    const externalIdPredicate = externalId === null
+      ? isNull(providerSourcesTable.externalId)
+      : eq(providerSourcesTable.externalId, externalId);
     const existing = await db.select().from(providerSourcesTable)
-      .where(and(eq(providerSourcesTable.providerId, providerId), eq(providerSourcesTable.sourceId, sourceId), eq(providerSourcesTable.externalId, externalId)))
+      .where(and(eq(providerSourcesTable.providerId, providerId), eq(providerSourcesTable.sourceId, sourceId), externalIdPredicate))
       .limit(1);
     if (existing.length === 0) {
       await db.insert(providerSourcesTable).values({

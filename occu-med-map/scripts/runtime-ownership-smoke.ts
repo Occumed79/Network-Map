@@ -137,9 +137,8 @@ const directObserverFiles = filesUnder(root)
   .filter((file) => file !== SHARED_OBSERVER_OWNER)
   .sort();
 
-assert.deepEqual(
-  directObserverFiles,
-  [],
+assert(
+  directObserverFiles.length === 0,
   `runtimeControllerRegistry.ts must be the only application-level MutationObserver owner; found: ${directObserverFiles.join(", ")}`,
 );
 

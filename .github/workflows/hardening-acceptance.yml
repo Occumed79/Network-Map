@@ -35,6 +35,7 @@ jobs:
           pnpm dlx \
             --package=eslint@8.57.1 \
             --package=@typescript-eslint/parser@8.46.2 \
+            --package=eslint-plugin-react-hooks@7.0.1 \
             --package=typescript@5.9.3 \
             bash -c '
               set -euo pipefail
@@ -43,9 +44,10 @@ jobs:
               eslint \
                 --no-eslintrc \
                 --parser "$PARSER" \
+                --plugin react-hooks \
                 --ext .ts,.tsx \
                 --rule "no-debugger:error" \
-                --rule "no-duplicate-imports:error" \
+                --rule "no-duplicate-imports:[\"error\",{\"allowSeparateTypeImports\":true}]" \
                 --rule "no-unreachable:error" \
                 --rule "no-self-assign:error" \
                 --rule "no-constant-binary-expression:error" \

@@ -1,34 +1,11 @@
 import type { CoordinateStatus, ProviderCandidate, TrustTier } from "../types";
+import { dedupeCandidates } from "../dedupe";
+import { getNpiTaxonomies } from "../serviceRouting";
 
 const NPI_API_URL = "https://npiregistry.cms.hhs.gov/api/";
 const DEFAULT_TIMEOUT_MS = 10_000;
 const NPI_PAGE_SIZE = 200;
 const MAX_TOTAL_RESULTS = 500;
-
-export const NPI_TAXONOMY_MAP: Record<string, string[]> = {
-  urgent: ["Clinic/Center, Urgent Care", "Urgent Care", "Urgent Care Medicine"],
-  occupational: ["Occupational Medicine", "Preventive Medicine, Occupational Medicine"],
-  primaryCare: ["Family Medicine", "General Practice", "Internal Medicine", "Pediatric Medicine"],
-  dentist: ["Dentist", "Dentist General Practice", "Dental Public Health", "Pediatric Dentistry"],
-  dental: ["Dentist", "Dentist General Practice", "Dental Public Health", "Endodontics", "Oral and Maxillofacial Surgery", "Orthodontics and Dentofacial Orthopedics", "Pediatric Dentistry", "Periodontics", "Prosthodontics"],
-  radiology: ["Diagnostic Radiology", "Radiology"],
-  pulmonary: ["Pulmonary Disease", "Internal Medicine", "Critical Care Medicine"],
-  lab: ["Clinical Medical Laboratory", "Clinical Laboratory Technician", "Phlebotomy"],
-  physio: ["Physical Therapist", "Physical Therapy"],
-  chiropractic: ["Chiropractor", "Chiropractic"],
-  audiology: ["Audiologist", "Audiologist-Hearing Aid Fitter", "Hearing Instrument Specialist"],
-  behavioral: ["Clinical Psychologist", "Psychiatry", "Mental Health Counselor"],
-  dotExam: ["Occupational Medicine", "Family Medicine", "Internal Medicine", "Chiropractor"],
-  faamedical: ["Aerospace Medicine", "Occupational Medicine", "Family Medicine"],
-  stressTest: ["Cardiovascular Disease", "Cardiology", "Internal Medicine"],
-  mammogram: ["Diagnostic Radiology", "Radiology"],
-  drugscreen: ["Clinical Medical Laboratory"],
-  urgentCare: ["Clinic/Center, Urgent Care", "Urgent Care", "Urgent Care Medicine"],
-  physicalExam: ["Occupational Medicine", "Preventive Medicine", "Family Medicine", "Internal Medicine"],
-  pharmacy: ["Pharmacy", "Community/Retail Pharmacy"],
-  vaccinations: ["Public Health & General Preventive Medicine", "Family Medicine", "Pharmacy"],
-  fqhc: ["Federally Qualified Health Center"],
-};
 
 export interface NpiCustomSearchInput {
   city: string;
@@ -117,13 +94,9 @@ function bestTaxonomy(taxonomies: NpiTaxonomy[] = [], fallbackTaxonomy = ""): Np
 }
 
 function formatAddress(address: NpiAddress): string {
-  return [
-    address.address_1,
-    address.address_2,
-    address.city,
-    address.state,
-    clean(address.postal_code).slice(0, 5),
-  ].filter(Boolean).join(", ");
+  return [address.address_1, address.address_2, address.city, address.state, clean(address.postal_code).slice(0, 5)]
+    .filter(Boolean)
+    .join(", ");
 }
 
 export function normalizeNpiResult(raw: NpiRawResult, fallbackTaxonomy = ""): ProviderCandidate | null {
@@ -132,10 +105,7 @@ export function normalizeNpiResult(raw: NpiRawResult, fallbackTaxonomy = ""): Pr
   const taxonomy = bestTaxonomy(raw.taxonomies, fallbackTaxonomy);
   const enumerationType = clean(raw.enumeration_type);
   const isOrganization = enumerationType === "NPI-2";
-  const individualName = [basic.first_name, basic.middle_name, basic.last_name]
-    .map(clean)
-    .filter(Boolean)
-    .join(" ");
+  const individualName = [basic.first_name, basic.middle_name, basic.last_name].map(clean).filter(Boolean).join(" ");
   const credential = clean(basic.credential);
   const name = isOrganization
     ? clean(basic.organization_name || basic.organization_name_2)
@@ -144,8 +114,14 @@ export function normalizeNpiResult(raw: NpiRawResult, fallbackTaxonomy = ""): Pr
   const fullAddress = formatAddress(address);
   const city = clean(address.city);
   const state = clean(address.state).toUpperCase();
+  const taxonomyDescription = clean(taxonomy.desc) || fallbackTaxonomy;
 
   if (!name || !fullAddress || !city || !state) return null;
+
+  const sourceUrl = npi
+    ? `https://npiregistry.cms.hhs.gov/provider-view/${encodeURIComponent(npi)}`
+    : "https://npiregistry.cms.hhs.gov/";
+  const observedAt = new Date().toISOString();
 
   return {
     id: npi ? `npi-${npi}` : `npi-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${city.toLowerCase()}`,
@@ -154,27 +130,33 @@ export function normalizeNpiResult(raw: NpiRawResult, fallbackTaxonomy = ""): Pr
     city,
     state,
     postalCode: clean(address.postal_code),
+    country: "US",
     phone: clean(address.telephone_number),
     fax: clean(address.fax_number) || undefined,
     website: "",
     npi,
-    taxonomy: clean(taxonomy.desc) || fallbackTaxonomy,
+    providerCategory: taxonomyDescription,
+    services: taxonomyDescription ? [taxonomyDescription] : [],
+    taxonomy: taxonomyDescription,
     taxonomyCode: clean(taxonomy.code),
     source: "NPI",
     sourceDetail: `NPI ${enumerationType}`.trim(),
-    sourceUrl: npi ? `https://npiregistry.cms.hhs.gov/provider-view/${encodeURIComponent(npi)}` : "https://npiregistry.cms.hhs.gov/",
+    sourceUrl,
     coordinateStatus: "unverified" as CoordinateStatus,
     confidence: "medium",
     trustTier: "registry" as TrustTier,
     score: isOrganization ? 35 : 30,
     badges: ["NPI Registry"],
     evidence: [{
-      serviceDetected: clean(taxonomy.desc) || fallbackTaxonomy || "NPI registration",
-      evidenceUrl: npi ? `https://npiregistry.cms.hhs.gov/provider-view/${encodeURIComponent(npi)}` : "https://npiregistry.cms.hhs.gov/",
-      evidenceTextSnippet: `${enumerationType || "NPI"} record${taxonomy.desc ? ` · ${taxonomy.desc}` : ""}`,
+      serviceDetected: taxonomyDescription || "NPI registration",
+      evidenceUrl: sourceUrl,
+      evidenceTextSnippet: `${enumerationType || "NPI"} record${taxonomyDescription ? ` · ${taxonomyDescription}` : ""}`,
       confidence: 75,
       source: "NPI Registry",
     }],
+    provenance: [{ source: "NPI Registry", sourceRecordId: npi || undefined, sourceUrl, observedAt }],
+    lastSeenAt: observedAt,
+    matchReason: taxonomyDescription ? `NPI taxonomy: ${taxonomyDescription}` : "NPI registry match",
     _rawSources: ["NPI"],
   };
 }
@@ -186,14 +168,8 @@ export function buildNpiQuery(input: NpiCustomSearchInput, options: { taxonomy?:
     state: clean(input.state).toUpperCase(),
     limit: String(Math.min(Math.max(options.pageLimit || NPI_PAGE_SIZE, 1), NPI_PAGE_SIZE)),
   });
-
   const optionalFields: Array<keyof Omit<NpiCustomSearchInput, "city" | "state" | "limit">> = [
-    "organization_name",
-    "first_name",
-    "last_name",
-    "taxonomy_description",
-    "taxonomy_code",
-    "enumeration_type",
+    "organization_name", "first_name", "last_name", "taxonomy_description", "taxonomy_code", "enumeration_type",
   ];
   for (const field of optionalFields) {
     const value = clean(input[field]);
@@ -218,10 +194,7 @@ async function requestNpiPage(
     if (!response.ok) return { rows: [], error: `NPI Registry HTTP ${response.status}` };
     const payload = await response.json() as NpiApiPayload;
     if (payload.Errors?.length) {
-      const message = payload.Errors
-        .map((error) => clean(error.description || error.field))
-        .filter(Boolean)
-        .join("; ");
+      const message = payload.Errors.map((error) => clean(error.description || error.field)).filter(Boolean).join("; ");
       return { rows: [], error: message || "NPI Registry rejected the request" };
     }
     return { rows: payload.results || [] };
@@ -231,30 +204,7 @@ async function requestNpiPage(
 }
 
 export function dedupeNpiCandidates(candidates: ProviderCandidate[]): ProviderCandidate[] {
-  const byKey = new Map<string, ProviderCandidate>();
-  for (const candidate of candidates) {
-    const key = candidate.npi
-      ? `npi:${candidate.npi}`
-      : `${candidate.name}|${candidate.address}`.toLowerCase().replace(/[^a-z0-9|]+/g, " ").trim();
-    if (!key) continue;
-    const existing = byKey.get(key);
-    if (!existing) {
-      byKey.set(key, candidate);
-      continue;
-    }
-    byKey.set(key, {
-      ...existing,
-      phone: existing.phone || candidate.phone,
-      fax: existing.fax || candidate.fax,
-      taxonomy: existing.taxonomy || candidate.taxonomy,
-      taxonomyCode: existing.taxonomyCode || candidate.taxonomyCode,
-      evidence: [...existing.evidence, ...candidate.evidence].filter((evidence, index, all) =>
-        all.findIndex((item) => `${item.source}|${item.serviceDetected}|${item.evidenceUrl}` === `${evidence.source}|${evidence.serviceDetected}|${evidence.evidenceUrl}`) === index,
-      ),
-      badges: Array.from(new Set([...existing.badges, ...candidate.badges])),
-    });
-  }
-  return Array.from(byKey.values());
+  return dedupeCandidates(candidates);
 }
 
 export async function searchNpiCustom(input: NpiCustomSearchInput, options: NpiAdapterOptions = {}): Promise<NpiSearchOutput> {
@@ -281,16 +231,10 @@ export async function searchNpiCustom(input: NpiCustomSearchInput, options: NpiA
     if (page.rows.length < pageLimit) break;
   }
 
-  const deduped = dedupeNpiCandidates(candidates).slice(0, limit);
+  const deduped = dedupeCandidates(candidates).slice(0, limit);
   return {
     candidates: deduped,
-    audit: {
-      queryCount,
-      successfulQueries,
-      rawCount,
-      normalizedCount: deduped.length,
-      errors: Array.from(new Set(errors)),
-    },
+    audit: { queryCount, successfulQueries, rawCount, normalizedCount: deduped.length, errors: Array.from(new Set(errors)) },
   };
 }
 
@@ -300,7 +244,7 @@ export async function searchNpiDetailed(
   serviceType: string,
   options: NpiAdapterOptions = {},
 ): Promise<NpiSearchOutput> {
-  const taxonomies = NPI_TAXONOMY_MAP[serviceType] || [serviceType];
+  const taxonomies = getNpiTaxonomies(serviceType);
   const settled = await Promise.all(taxonomies.map(async (taxonomy) => {
     const page = await requestNpiPage(
       { city, state, taxonomy_description: taxonomy, limit: NPI_PAGE_SIZE },
@@ -325,7 +269,7 @@ export async function searchNpiDetailed(
       .filter((candidate): candidate is ProviderCandidate => Boolean(candidate)));
   }
 
-  const deduped = dedupeNpiCandidates(candidates);
+  const deduped = dedupeCandidates(candidates);
   return {
     candidates: deduped,
     audit: {

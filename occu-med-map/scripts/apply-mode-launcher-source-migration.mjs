@@ -23,7 +23,7 @@ function hasClass(node, className) {
 
 let commandGrid = null;
 let liveButton = null;
-let explorerButton = null;
+const externalExplorerButtons = [];
 const providerLaunchers = [];
 function visit(node, parents = []) {
   if (ts.isJsxElement(node)) {
@@ -32,7 +32,7 @@ function visit(node, parents = []) {
     const raw = node.getText(sourceFile);
     const inGrid = parents.some((parent) => ts.isJsxElement(parent) && hasClass(parent, "command-tool-grid"));
     if (tag === "button" && inGrid && /Live Finder|Live Places/.test(raw)) liveButton = node;
-    if (tag === "button" && /Provider Explorer/.test(raw) && !inGrid) explorerButton ??= node;
+    if (tag === "button" && /Provider Explorer/.test(raw) && !inGrid) externalExplorerButtons.push(node);
     if (hasClass(node, "provider-explorer-launch")) providerLaunchers.push(node);
   }
   ts.forEachChild(node, (child) => visit(child, [...parents, node]));
@@ -40,8 +40,8 @@ function visit(node, parents = []) {
 visit(sourceFile);
 if (!commandGrid) throw new Error("command-tool-grid not found");
 if (!liveButton) throw new Error("source Live Finder button not found");
-if (!explorerButton) throw new Error("source Provider Explorer launcher not found");
-const explorerOnClick = attributeText(explorerButton, "onClick");
+if (!externalExplorerButtons.length) throw new Error("source Provider Explorer launcher not found");
+const explorerOnClick = attributeText(externalExplorerButtons[0], "onClick");
 if (!explorerOnClick) throw new Error("Provider Explorer onClick is missing");
 
 const edits = [];
@@ -68,7 +68,7 @@ const sourceLaunchers = `
                 </button>`;
 edits.push([liveButton.getEnd(), liveButton.getEnd(), sourceLaunchers]);
 
-const removalTargets = [explorerButton, ...providerLaunchers];
+const removalTargets = [...externalExplorerButtons, ...providerLaunchers];
 const seen = new Set();
 for (const target of removalTargets) {
   const key = `${target.getFullStart()}:${target.getEnd()}`;
@@ -179,4 +179,4 @@ inventory = inventory.replace(
 );
 fs.writeFileSync(inventoryPath, inventory);
 
-console.log("Finder/NPI/Explorer launchers migrated into React source; duplicate hidden Explorer launcher and dynamic button creation retired.");
+console.log(`Finder/NPI/Explorer launchers migrated into React source; retired ${externalExplorerButtons.length} external Explorer launcher(s) and dynamic button creation.`);

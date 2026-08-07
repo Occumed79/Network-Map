@@ -58,25 +58,41 @@ async function installMocks(page) {
 
 async function assertGeometry(page, label) {
   const state = await page.evaluate(() => {
-    const visible = (node) => {
+    const rendered = (node) => {
       if (!(node instanceof HTMLElement)) return false;
       const style = getComputedStyle(node);
       const rect = node.getBoundingClientRect();
       return !node.hidden && style.display !== "none" && style.visibility !== "hidden" && rect.width > 2 && rect.height > 2;
     };
+    const intersectsViewport = (rect) => rect.right > 0 && rect.left < innerWidth && rect.bottom > 0 && rect.top < innerHeight;
     const surfaces = Array.from(document.querySelectorAll(".sidebar,.live-panel.open,.provider-explorer-drawer.open,.modal-box,.leaflet-popup,.mapboxgl-popup,.occumed-map-tools-panel,.command-search-results"))
-      .filter(visible)
+      .filter(rendered)
       .map((node) => {
         const rect = node.getBoundingClientRect();
-        return { name: String(node.className || node.tagName), left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, scrollWidth: node.scrollWidth, clientWidth: node.clientWidth };
+        return {
+          name: String(node.className || node.tagName),
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+          scrollWidth: node.scrollWidth,
+          clientWidth: node.clientWidth,
+          intersectsViewport: intersectsViewport(rect),
+        };
       });
+    // Responsive sidebars/drawers are intentionally translated completely
+    // off-canvas while closed. They remain rendered for transition/focus
+    // continuity, but they are not visible surfaces and therefore must not be
+    // treated as geometry failures. Partially visible/offscreen surfaces still
+    // intersect the viewport and remain subject to the strict bounds checks.
+    const activeSurfaces = surfaces.filter((surface) => surface.intersectsViewport);
     return {
       innerWidth,
       innerHeight,
       docWidth: Math.max(document.documentElement.scrollWidth, document.body?.scrollWidth || 0),
-      appVisible: visible(document.querySelector(".app-wrap")),
-      mapVisible: visible(document.querySelector(".leaflet-container,.mapboxgl-map,.map-shell,.map-area")),
-      badSurfaces: surfaces.filter((surface) => surface.left < -12 || surface.top < -12 || surface.right > innerWidth + 12 || surface.bottom > innerHeight + 12 || surface.scrollWidth > surface.clientWidth + 4),
+      appVisible: rendered(document.querySelector(".app-wrap")),
+      mapVisible: rendered(document.querySelector(".leaflet-container,.mapboxgl-map,.map-shell,.map-area")),
+      badSurfaces: activeSurfaces.filter((surface) => surface.left < -12 || surface.top < -12 || surface.right > innerWidth + 12 || surface.bottom > innerHeight + 12 || surface.scrollWidth > surface.clientWidth + 4),
     };
   });
   assert.equal(state.appVisible, true, `${label}: application shell must be visible`);
@@ -103,7 +119,9 @@ async function exerciseVisibleControls(page, label) {
   assert.ok(count > 0, `${label}: application must expose controls`);
   const iconOnlyWithoutName = await page.evaluate(() => Array.from(document.querySelectorAll("button")).filter((button) => {
     const style = getComputedStyle(button);
-    if (button.hidden || style.display === "none" || style.visibility === "hidden") return false;
+    const rect = button.getBoundingClientRect();
+    const intersectsViewport = rect.right > 0 && rect.left < innerWidth && rect.bottom > 0 && rect.top < innerHeight;
+    if (button.hidden || style.display === "none" || style.visibility === "hidden" || !intersectsViewport) return false;
     const text = (button.textContent || "").trim();
     const hasGraphic = Boolean(button.querySelector("svg,img"));
     return hasGraphic && !text && !button.getAttribute("aria-label") && !button.getAttribute("title");

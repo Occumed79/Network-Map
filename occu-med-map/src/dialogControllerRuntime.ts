@@ -94,6 +94,24 @@ function prepareDialog(dialog: HTMLElement): void {
   }
 }
 
+function restoreFocus(opener: HTMLElement | null): void {
+  if (!opener?.isConnected) return;
+  try {
+    opener.focus({ preventScroll: true });
+  } catch {
+    opener.focus();
+  }
+}
+
+function restoreFocusAfterClose(dialog: HTMLElement, opener: HTMLElement | null, attempt = 0): void {
+  if (!dialog.isConnected || !isVisible(dialog)) {
+    restoreFocus(opener);
+    return;
+  }
+  if (attempt >= 6) return;
+  window.requestAnimationFrame(() => restoreFocusAfterClose(dialog, opener, attempt + 1));
+}
+
 function syncDialogs(): void {
   const current = visibleDialogs();
   current.forEach(prepareDialog);
@@ -109,7 +127,7 @@ function syncDialogs(): void {
 
   activeDialogs.forEach((state) => {
     if (current.includes(state.dialog)) return;
-    if (state.opener?.isConnected) state.opener.focus({ preventScroll: true });
+    restoreFocus(state.opener);
   });
 
   activeDialogs = next;
@@ -145,8 +163,10 @@ function handleKeydown(event: KeyboardEvent): void {
   if (event.key === "Escape") {
     const close = closeButtonFor(dialog);
     if (close && !close.disabled) {
+      const opener = activeDialogs.find((state) => state.dialog === dialog)?.opener || null;
       event.preventDefault();
       close.click();
+      restoreFocusAfterClose(dialog, opener);
       scheduleSync();
     }
     return;

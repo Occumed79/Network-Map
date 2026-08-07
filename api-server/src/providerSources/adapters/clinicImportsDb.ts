@@ -11,7 +11,10 @@ export async function searchClinicImports(_city: string, state: string): Promise
 
   return rows.map((r) => {
     const hasCoords = r.lat != null && r.lng != null;
-    const coordinateStatus: CoordinateStatus = hasCoords ? "imported" : "unverified";
+    // Legacy clinic-import rows do not carry enough provenance to claim an
+    // exact rooftop position. Preserve useful coordinates, but classify them
+    // conservatively as address-level until a stronger source verifies them.
+    const coordinateStatus: CoordinateStatus = hasCoords ? "verified_address" : "unverified";
     return {
       id: `db-import-${r.id}`,
       name: r.name,
@@ -26,6 +29,7 @@ export async function searchClinicImports(_city: string, state: string): Promise
       lat: hasCoords ? r.lat! : undefined,
       lng: hasCoords ? r.lng! : undefined,
       coordinateStatus,
+      coordinateSource: hasCoords ? "clinic-import" : undefined,
       source: r.sourceTag || "Manual Import",
       sourceDetail: `${r.sourceTag} — Database Import`,
       sourceUrl: "",

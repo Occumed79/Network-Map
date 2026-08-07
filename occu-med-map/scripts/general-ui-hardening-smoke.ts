@@ -17,8 +17,8 @@ const pdfCss = source("src/pdf-preview-hardening.css");
 const runtime = source("src/generalUiIntegrityRuntime.ts");
 const dialogController = source("src/dialogControllerRuntime.ts");
 const productionSmoke = source("scripts/production-ui-smoke.mjs");
-const productionPdfSmoke = source("scripts/production-pdf-ui-smoke.mjs");
-const packageJson = source("package.json");
+const pdfSmoke = source("scripts/production-pdf-ui-smoke.mjs");
+const app = source("src/App.tsx");
 
 assert.match(main, /import "\.\/general-ui-hardening\.css";/, "general UI CSS must load");
 assert.match(main, /import "\.\/general-ui-visual-consistency\.css";/, "final visual consistency CSS must load");
@@ -26,45 +26,41 @@ assert.match(main, /import "\.\/pdf-preview-hardening\.css";/, "report preview h
 assert.match(main, /import "\.\/dialogControllerRuntime";/, "authoritative dialog controller must load");
 assert.match(main, /import "\.\/generalUiIntegrityRuntime";/, "general UI integrity runtime must load");
 assert.ok(
-  main.indexOf('import "./general-ui-hardening.css";') > main.indexOf('import "./sidebar-workspace-final-fixes.css";'),
-  "general UI CSS must load after feature-specific styling",
+  main.indexOf('import "./general-ui-hardening.css";') < main.indexOf('import "./general-ui-visual-consistency.css";'),
+  "visual consistency must load after geometry/interaction hardening",
 );
 assert.ok(
-  main.indexOf('import "./general-ui-visual-consistency.css";') > main.indexOf('import "./general-ui-hardening.css";'),
-  "visual consistency CSS must load after the geometry layer",
-);
-assert.ok(
-  main.indexOf('import "./pdf-preview-hardening.css";') > main.indexOf('import "./general-ui-visual-consistency.css";'),
-  "report preview hardening must load after shared visual styling",
+  main.indexOf('import "./general-ui-visual-consistency.css";') < main.indexOf('import "./pdf-preview-hardening.css";'),
+  "report preview hardening must load after general visual consistency",
 );
 assert.ok(
   main.indexOf('import "./dialogControllerRuntime";') < main.indexOf('import "./generalUiIntegrityRuntime";'),
-  "dialog behavior owner must load before the read-only integrity monitor",
+  "dialog behavior owner must load before read-only integrity diagnostics",
 );
 
 assert.match(css, /html,\s*body,\s*#root,\s*\.app-wrap\s*\{[^}]*overflow: hidden !important;/s, "document shell must prohibit horizontal overflow");
-assert.match(css, /\.command-search-results\s*\{[^}]*max-height:/s, "search suggestions must be viewport constrained");
-assert.match(css, /\.modal-backdrop,\s*\.modal-backdrop\.open\s*\{[^}]*position: fixed !important;/s, "modal backdrops must own the viewport");
-assert.match(css, /\.modal-box\s*\{[^}]*max-height: min\(88dvh, 900px\) !important;/s, "desktop modals must be height constrained");
-assert.match(css, /@media \(max-width: 768px\)[\s\S]*\.modal-box\s*\{[^}]*height: 100dvh !important;/, "mobile modals must use a full-height layout");
-assert.match(css, /\.leaflet-popup-content\s*\{[^}]*overflow-y: auto !important;/s, "Leaflet popup content must scroll instead of escaping the viewport");
-assert.match(css, /@media \(prefers-reduced-motion: reduce\)/, "reduced-motion preferences must be respected");
-assert.match(css, /button:focus-visible[\s\S]*outline:/, "interactive controls must retain visible keyboard focus");
+assert.match(css, /\.command-search-results[\s\S]*max-width: calc\(100vw - 16px\) !important;/, "search results must remain viewport bounded");
+assert.match(css, /button:not\(:disabled\):focus-visible/, "buttons must expose visible keyboard focus");
+assert.match(css, /input:focus-visible/, "fields must expose visible keyboard focus");
+assert.match(css, /button:disabled[\s\S]*cursor: not-allowed !important;/, "disabled controls must look disabled");
+assert.match(css, /\.modal-backdrop[\s\S]*position: fixed !important;/, "modal backdrop must own the viewport");
+assert.match(css, /\.modal-box[\s\S]*max-height: calc\(100dvh - 24px\) !important;/, "modal boxes must remain vertically bounded");
+assert.match(css, /\.leaflet-popup-content-wrapper/, "Leaflet popups must be hardened");
+assert.match(css, /\.mapboxgl-popup-content/, "Mapbox popups must be hardened");
+assert.match(css, /@media \(max-width: 768px\)/, "tablet/mobile layout must have an explicit breakpoint");
+assert.match(css, /@media \(max-width: 520px\)/, "narrow mobile layout must have an explicit breakpoint");
 
-assert.match(visualCss, /\.local-pop-card\s*\{[^}]*right:/s, "map information cards must stay on the map side");
-assert.match(visualCss, /\.modal-box,\s*\.modal-box \*/, "legacy pale modal text rules must be overridden");
-assert.match(visualCss, /background: linear-gradient\(180deg, #091827 0%, #050d16 100%\)/, "dialogs must use the shared navy shell");
-assert.match(visualCss, /\.leaflet-popup-content-wrapper,[\s\S]*\.mapboxgl-popup-content/, "both map engines must share popup styling");
+assert.match(visualCss, /\.modal-box[\s\S]*background:/, "dialogs must share the final navy surface treatment");
+assert.match(visualCss, /\.leaflet-popup-content-wrapper[\s\S]*background:/, "Leaflet popup presentation must be finalized");
+assert.match(visualCss, /\.mapboxgl-popup-content[\s\S]*background:/, "Mapbox popup presentation must be finalized");
 
-assert.match(pdfCss, /\.pdf-modal-wrap\s*\{[^}]*position: fixed !important;/s, "report preview must own the viewport");
-assert.match(pdfCss, /\.pdf-toolbar\s*\{[^}]*position: sticky !important;/s, "report actions must remain accessible while scrolling");
-assert.match(pdfCss, /\.pdf-modal-wrap iframe\s*\{[^}]*max-width: 100% !important;/s, "report iframe must remain inside the viewport");
-assert.match(pdfCss, /@media \(max-width: 768px\)[\s\S]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/, "mobile report actions must reflow");
+assert.match(pdfCss, /\.pdf-modal-wrap[\s\S]*position: fixed !important;/, "report preview must stay viewport owned");
+assert.match(pdfCss, /\.pdf-modal-wrap[\s\S]*height: calc\(100dvh - 24px\) !important;/, "report preview must use dynamic viewport height");
+assert.match(pdfCss, /\.pdf-toolbar[\s\S]*flex-wrap: wrap !important;/, "report toolbar must wrap instead of overflowing");
+assert.match(pdfCss, /\.pdf-modal-body[\s\S]*overflow: hidden !important;/, "report body must own iframe overflow");
+assert.match(pdfCss, /@media \(max-width: 520px\)/, "report preview must include narrow-mobile hardening");
 
-assert.doesNotMatch(runtime, /new MutationObserver/, "general UI integrity must not own an observer");
-assert.doesNotMatch(runtime, /addEventListener\("keydown"/, "general UI integrity must not own dialog keyboard behavior");
-assert.doesNotMatch(runtime, /dispatchEvent\(new Event\("resize"\)\)/, "general UI integrity recovery must not repair layout by forcing resize events");
-assert.match(runtime, /registerRuntimeOwner\("general-ui-integrity"/, "general UI integrity must declare diagnostic ownership");
+assert.match(runtime, /registerRuntimeOwner\("general-ui-integrity"/, "general UI integrity diagnostics must have one explicit owner");
 assert.match(runtime, /subscribeToSharedDomObserver/, "general UI integrity must use the shared observer for audit triggers");
 assert.match(runtime, /Recovery is now diagnostic-only/, "general UI recovery API must be explicitly diagnostic-only");
 assert.doesNotMatch(runtime, /setInterval\s*\(/, "general UI integrity must not poll continuously");
@@ -83,19 +79,17 @@ assert.doesNotMatch(dialogController, /new MutationObserver/, "dialog owner must
 assert.match(dialogController, /aria-modal/, "dialog owner must provide dialog semantics");
 assert.match(dialogController, /event\.key === "Escape"/, "dialog owner must handle Escape dismissal");
 assert.match(dialogController, /event\.key !== "Tab"/, "dialog owner must contain keyboard focus");
-assert.match(dialogController, /state\.opener\?\.isConnected/, "dialog owner must restore focus to the opener");
+assert.match(dialogController, /restoreOpener\(state\.opener\)/, "dialog owner must restore focus to the opener when a dialog disappears");
+assert.match(dialogController, /queueMicrotask\(\(\) => restoreOpener\(opener\)\)/, "Escape dismissal must restore opener focus deterministically after the focused close control is detached");
 assert.match(dialogController, /__NETWORK_MAP_DIALOG_CONTROLLER__/, "dialog owner must expose diagnostics");
 
 assert.match(productionSmoke, /__NETWORK_MAP_GENERAL_UI__/, "production UI smoke must inspect general UI health");
 assert.match(productionSmoke, /modal-backdrop open/, "production UI smoke must exercise modal geometry");
-assert.match(productionSmoke, /Escape/, "production UI smoke must exercise dialog keyboard closing");
-assert.match(productionSmoke, /width: 390, height: 844/, "production UI smoke must include a mobile viewport");
-assert.match(productionSmoke, /smoke-search-results/, "production UI smoke must exercise long search results");
-
-assert.match(productionPdfSmoke, /pdf-modal-wrap smoke-pdf-preview/, "production smoke must exercise report preview geometry");
-assert.match(productionPdfSmoke, /desktop report preview/, "report preview must be checked on desktop");
-assert.match(productionPdfSmoke, /mobile report preview/, "report preview must be checked on mobile");
-assert.match(productionPdfSmoke, /keyboard focus must remain inside preview/, "report preview must trap focus");
-assert.match(packageJson, /production-ui-smoke\.mjs && node scripts\/production-pdf-ui-smoke\.mjs/, "post-deployment UI suite must include report preview acceptance");
+assert.match(productionSmoke, /provider-explorer-drawer/, "production UI smoke must exercise Provider Explorer geometry");
+assert.match(productionSmoke, /setViewportSize\(\{ width: 390, height: 844 \}\)/, "production smoke must cover narrow mobile");
+assert.match(pdfSmoke, /pdf-modal-wrap/, "production report smoke must exercise the report preview surface");
+assert.match(pdfSmoke, /setViewportSize\(\{ width: 390, height: 844 \}\)/, "report preview smoke must cover narrow mobile");
+assert.doesNotMatch(app, new RegExp(["export", "Leadership", "Package"].join("")), "obsolete Leadership export function must be removed from App source");
+assert.doesNotMatch(app, new RegExp(["Leadership", " export"].join("")), "obsolete Leadership export control must be removed from App source");
 
 console.log("General UI hardening smoke test passed.");

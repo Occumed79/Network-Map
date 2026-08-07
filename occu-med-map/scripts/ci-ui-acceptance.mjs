@@ -4,7 +4,7 @@ import path from "node:path";
 import { chromium } from "playwright";
 
 const baseUrl = process.env.NETWORK_MAP_CI_UI_URL || "http://127.0.0.1:4173";
-const artifactDir = path.resolve(process.cwd(), "test-results", "ui-acceptance");
+const artifactDir = path.resolve(process.cwd(), "occu-med-map", "test-results", "ui-acceptance");
 fs.mkdirSync(artifactDir, { recursive: true });
 
 const viewports = [
@@ -125,7 +125,7 @@ async function assertGeometry(page, viewportName) {
   }
 }
 
-async function ensureWorkspaceNavigationVisible(page) {
+async function ensureWorkspaceNavigationVisible(page, viewportName) {
   const firstTab = page.locator(".occumed-sidebar-workspace-tab").first();
   await firstTab.waitFor({ state: "attached", timeout: 10_000 });
   const inViewport = await firstTab.evaluate((element) => {
@@ -137,18 +137,34 @@ async function ensureWorkspaceNavigationVisible(page) {
   const menu = page.locator(".mobile-menu-button:visible").first();
   if (await menu.count()) {
     await menu.click();
-    await page.waitForTimeout(160);
+    await page.waitForTimeout(220);
   }
 
-  const nowInViewport = await firstTab.evaluate((element) => {
+  const state = await firstTab.evaluate((element) => {
     const rect = element.getBoundingClientRect();
-    return rect.right > 0 && rect.left < innerWidth && rect.bottom > 0 && rect.top < innerHeight;
+    const sidebar = element.closest(".sidebar");
+    const sidebarRect = sidebar?.getBoundingClientRect();
+    const sidebarStyle = sidebar instanceof HTMLElement ? getComputedStyle(sidebar) : null;
+    return {
+      viewport: { width: innerWidth, height: innerHeight },
+      tabRect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height },
+      sidebarRect: sidebarRect ? { left: sidebarRect.left, top: sidebarRect.top, right: sidebarRect.right, bottom: sidebarRect.bottom, width: sidebarRect.width, height: sidebarRect.height } : null,
+      sidebarClass: sidebar?.className || "",
+      sidebarTransform: sidebarStyle?.transform || "",
+      sidebarPosition: sidebarStyle?.position || "",
+      sidebarVisibility: sidebarStyle?.visibility || "",
+      sidebarDisplay: sidebarStyle?.display || "",
+    };
   });
-  assert.equal(nowInViewport, true, "workspace navigation must be reachable in the current viewport");
+  const nowInViewport = state.tabRect.right > 0
+    && state.tabRect.left < state.viewport.width
+    && state.tabRect.bottom > 0
+    && state.tabRect.top < state.viewport.height;
+  assert.equal(nowInViewport, true, `${viewportName}: workspace navigation must be reachable; state=${JSON.stringify(state)}`);
 }
 
-async function workspaceButton(page, label) {
-  await ensureWorkspaceNavigationVisible(page);
+async function workspaceButton(page, label, viewportName) {
+  await ensureWorkspaceNavigationVisible(page, viewportName);
   const button = page.getByRole("tab", { name: new RegExp(label, "i") });
   await button.waitFor({ state: "visible", timeout: 10_000 });
   return button;
@@ -156,7 +172,7 @@ async function workspaceButton(page, label) {
 
 async function assertWorkspaceSwitching(page, viewportName) {
   for (const label of ["Map Tools", "Finder", "Explorer", "Providers", "Finder", "Providers"]) {
-    const button = await workspaceButton(page, label);
+    const button = await workspaceButton(page, label, viewportName);
     await button.click();
     await page.waitForTimeout(180);
     await assertGeometry(page, `${viewportName}/${label}`);
@@ -165,7 +181,7 @@ async function assertWorkspaceSwitching(page, viewportName) {
 }
 
 async function assertKeyboardTabs(page, viewportName) {
-  const providers = await workspaceButton(page, "Providers");
+  const providers = await workspaceButton(page, "Providers", viewportName);
   await providers.click();
   await providers.focus();
   await page.keyboard.press("ArrowRight");

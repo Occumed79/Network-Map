@@ -76,7 +76,7 @@ assert.match(migration, /lng BETWEEN -180 AND 180/, "database must validate long
 assert.match(migration, /NOT VALID/, "migration must not blindly validate legacy rows before audit");
 
 const geocode = fs.readFileSync(path.join(process.cwd(), "src/providerSources/geocode.ts"), "utf8");
-assert.doesNotMatch(geocode, /jitter/i, "geocoding must not fabricate coordinate jitter");
+assert.doesNotMatch(geocode, /Math\.random\s*\(|randomUUID\s*\(|centerLat\s*[+-]\s*Math\.|centerLng\s*[+-]\s*Math\./, "geocoding must not fabricate coordinate offsets");
 assert.match(geocode, /verified_address/, "address geocoder must label verified-address coordinates");
 const orchestrator = fs.readFileSync(path.join(process.cwd(), "src/providerSources/orchestrator.ts"), "utf8");
 assert.match(orchestrator, /applyProviderIntegrity/, "orchestrator must assess every normalized candidate");

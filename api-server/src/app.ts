@@ -7,6 +7,7 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 import { saveSearchSnapshot } from "./lib/networkMapPersistence";
 import { apiSecurity } from "./middleware/apiSecurity";
+import { recordError, recordUploadMetric, requestContextMiddleware } from "./lib/observability";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app: Express = express();
@@ -52,11 +53,12 @@ app.use((req, res, next) => {
   res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
   next();
 });
+app.use(requestContextMiddleware);
 app.use(
   pinoHttp({
     logger,
     serializers: {
-      req(req) { return { id: req.id, method: req.method, url: req.url?.split("?")[0] }; },
+      req(req) { return { id: req.id, requestId: req.headers?.["x-request-id"], method: req.method, url: req.url?.split("?")[0] }; },
       res(res) { return { statusCode: res.statusCode }; },
     },
     redact: {
@@ -82,6 +84,30 @@ app.use(requestDeadline);
 // by apiSecurity using Content-Length before expensive route work is performed.
 app.use(express.json({ limit: "16mb" }));
 app.use(express.urlencoded({ extended: true, limit: "16mb" }));
+
+// Upload observability is response-metadata only. It never captures raw rows or
+// provider payloads and therefore stays bounded even for 5,000-row chunks.
+app.use((req, res, next) => {
+  if (!req.path.startsWith("/api/provider-uploads")) return next();
+  const originalJson = res.json.bind(res);
+  res.json = ((body: unknown) => {
+    if (body && typeof body === "object") {
+      const value = body as Record<string, unknown>;
+      const summary = value.summary && typeof value.summary === "object" ? value.summary as Record<string, unknown> : null;
+      const byDisposition = summary?.byDisposition && typeof summary.byDisposition === "object" ? summary.byDisposition as Record<string, unknown> : null;
+      recordUploadMetric({
+        uploadId: typeof value.uploadId === "string" ? value.uploadId : undefined,
+        status: typeof value.status === "string" ? value.status : res.statusCode >= 400 ? "error" : "response",
+        accepted: Number(value.accepted ?? byDisposition?.accepted ?? 0) || undefined,
+        quarantined: Number(value.quarantined ?? byDisposition?.quarantined ?? 0) || undefined,
+        rejected: Number(value.rejected ?? byDisposition?.rejected ?? 0) || undefined,
+        duplicate: Number(value.duplicate ?? byDisposition?.duplicate ?? 0) || undefined,
+      });
+    }
+    return originalJson(body);
+  }) as typeof res.json;
+  next();
+});
 app.use(apiSecurity);
 
 app.get("/api/health", (_req, res) => {
@@ -113,6 +139,7 @@ app.use("/api", router);
 // Normalize errors without leaking stacks, tokens, raw connection strings, or
 // implementation details to clients. The structured logger retains the request ID.
 app.use((error: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  recordError(`${req.method} ${req.path}`, error, "internal_error");
   logger.error({ requestId: res.getHeader("X-Request-ID"), path: req.path, error: error instanceof Error ? error.message : String(error) }, "API request failed");
   if (res.headersSent) return;
   res.status(500).json({ error: "The request could not be completed.", code: "internal_error", requestId: res.getHeader("X-Request-ID") });

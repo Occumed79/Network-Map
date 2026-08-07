@@ -1,14 +1,12 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
 import healthsitesFlatGeobufRouter from "./healthsitesFlatGeobuf";
-import providerSearchRouter from "./providerSearch";
 import dentalProviderDiscoveryRouter from "./dentalProviderDiscovery";
 import liveFinderRouter from "./liveFinder";
 import priceFinderUnifiedRouter from "./priceFinderUnified";
 import priceFinderRouter from "./priceFinder";
 import searchHistoryRouter from "./searchHistory";
 import providerSourcesImportRouter from "./providerSourcesImport";
-// New unified architecture routes
 import universalDiscoveryRouter from "./universalDiscovery";
 import mapInventoryRouter from "./mapInventory";
 import indexingJobsRouter from "./indexingJobs";
@@ -35,7 +33,7 @@ router.use(healthRouter);
 router.use(healthsitesFlatGeobufRouter);
 router.use(scoringDatabaseRouter);
 
-// --- New unified architecture (takes precedence) ---
+// Authoritative provider architecture takes precedence.
 router.use(universalDiscoveryRouter);
 router.use(mapInventoryRouter);
 router.use(indexingJobsRouter);
@@ -55,8 +53,8 @@ router.use(myClinicsUploadRouter);
 router.use(googlePlacesRouter);
 router.use(enhancedSearchRouter);
 
-// --- Legacy routes (kept as compatibility wrappers until fully migrated) ---
-router.use(providerSearchRouter);
+// Domain-specific compatibility surfaces remain, but provider discovery inside
+// them delegates to the authoritative provider-sources pipeline.
 router.use(dentalProviderDiscoveryRouter);
 router.use(liveFinderRouter);
 router.use(priceFinderUnifiedRouter);

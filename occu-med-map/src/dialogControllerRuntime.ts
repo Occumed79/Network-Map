@@ -94,6 +94,11 @@ function prepareDialog(dialog: HTMLElement): void {
   }
 }
 
+function restoreOpener(opener: HTMLElement | null): void {
+  if (!opener?.isConnected) return;
+  opener.focus({ preventScroll: true });
+}
+
 function syncDialogs(): void {
   const current = visibleDialogs();
   current.forEach(prepareDialog);
@@ -109,7 +114,7 @@ function syncDialogs(): void {
 
   activeDialogs.forEach((state) => {
     if (current.includes(state.dialog)) return;
-    if (state.opener?.isConnected) state.opener.focus({ preventScroll: true });
+    restoreOpener(state.opener);
   });
 
   activeDialogs = next;
@@ -146,7 +151,14 @@ function handleKeydown(event: KeyboardEvent): void {
     const close = closeButtonFor(dialog);
     if (close && !close.disabled) {
       event.preventDefault();
+      // Capture the opener before the close control removes its own dialog.
+      // Browser focus falls back to <body> when the focused close button is
+      // detached, so restore in a microtask as well as through the normal
+      // observer reconciliation. This makes Escape restoration deterministic
+      // without introducing another controller or timer loop.
+      const opener = activeDialogs.find((state) => state.dialog === dialog)?.opener || null;
       close.click();
+      queueMicrotask(() => restoreOpener(opener));
       scheduleSync();
     }
     return;

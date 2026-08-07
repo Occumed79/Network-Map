@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const root = path.resolve(process.cwd());
 const appPath = path.join(root, "src/App.tsx");
@@ -23,9 +24,10 @@ if (!/ref=\{clinicFileInputRef\}\s+type="file"\s+accept="\.xlsx,\.xls,\.csv"/.te
 fs.writeFileSync(appPath, app);
 
 let inventory = fs.readFileSync(inventoryPath, "utf8");
-if (!inventory.includes("Upload Clinics")) {
+if (!inventory.includes("| Upload Clinics |")) {
   inventory += `\n| Upload Clinics | CSV / Excel provider dataset import | React \`App.tsx\` | source-owned workflow launcher + modal | validation, write failure, success, repeated open/close |\n`;
 }
 fs.writeFileSync(inventoryPath, inventory);
 
-console.log("Upload Clinics workflow launcher is source-owned in React; My Clinics remains a separate provider layer label.");
+fs.unlinkSync(fileURLToPath(import.meta.url));
+console.log("Upload Clinics workflow launcher is source-owned in React; My Clinics remains a separate provider layer label; one-time migration retired.");

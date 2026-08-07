@@ -30,6 +30,8 @@ assert.match(route, /status='rolled_back'/, "rollback must have a durable rolled
 assert.match(route, /provider_upload_changes/, "commit and rollback must snapshot changes");
 assert.match(route, /quarantined/, "preview must distinguish quarantined records");
 assert.match(route, /rejected/, "preview must distinguish rejected records");
+assert.match(route, /needs_geocode/, "unplaced upload rows must be quarantined for geocoding rather than treated as exact locations");
+assert.doesNotMatch(route, /coordinateStatus\s*:\s*["'](?:imported|geocoded)["']/, "upload lifecycle must not reintroduce retired coordinate-status labels");
 assert.match(route, /sourceLabel/, "user-selected source label must be preserved");
 assert.match(route, /mapping/, "explicit field mapping must be accepted and persisted");
 assert.match(route, /MAX_ROWS_PER_CHUNK = 5000/, "5,000-row request boundary must remain enforced");

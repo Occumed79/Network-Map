@@ -65,6 +65,7 @@ function normalizePlace(place: GoogleHealthcarePlace, lat: number, lng: number, 
 
 async function savePlaceToNeon(place: NormalizedResult, serviceType: string): Promise<void> {
   try {
+    const sourceUrl = place.placeId ? `https://www.google.com/maps/place/?q=place_id=${place.placeId}` : undefined;
     const candidate: ProviderCandidate = {
       id: place.placeId || place.id,
       name: place.name,
@@ -76,16 +77,24 @@ async function savePlaceToNeon(place: NormalizedResult, serviceType: string): Pr
       website: "",
       lat: place.lat,
       lng: place.lng,
-      coordinateStatus: "imported",
+      coordinateStatus: "verified_address",
+      coordinateSource: "google-places",
       taxonomy: place.cat,
       source: "Google Places",
       sourceDetail: "Google Places API",
-      sourceUrl: place.placeId ? `https://www.google.com/maps/place/?q=place_id=${place.placeId}` : undefined,
+      sourceUrl,
       confidence: "medium",
       trustTier: "directory" as TrustTier,
       score: 0,
       badges: [],
       evidence: [],
+      provenance: [{
+        source: "Google Places",
+        sourceRecordId: place.placeId || place.id,
+        sourceUrl,
+        observedAt: new Date().toISOString(),
+        coordinateSource: "google-places",
+      }],
     };
     await upsertProvider(candidate, serviceType);
   } catch (error) {

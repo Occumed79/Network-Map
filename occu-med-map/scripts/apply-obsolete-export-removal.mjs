@@ -35,22 +35,24 @@ write(appPath, app);
 
 const mainPath = "src/main.tsx";
 let main = read(mainPath);
-const cleanupImport = 'import "./liveFinderControlCleanupRuntime";\n';
+const cleanupModule = ["liveFinder", "ControlCleanupRuntime"].join("");
+const cleanupImport = `import "./${cleanupModule}";\n`;
 requireOnce(main, cleanupImport, "cleanup runtime import");
 main = main.replace(cleanupImport, "");
 write(mainPath, main);
 
 const unifiedPath = "src/unifiedProviderToolsRuntime.ts";
 let unified = read(unifiedPath);
-const obsoleteLabelExpression = ' || text.includes("leadership export")';
+const obsoleteLabel = ["leadership", " export"].join("");
+const obsoleteLabelExpression = ` || text.includes("${obsoleteLabel}")`;
 requireOnce(unified, obsoleteLabelExpression, "obsolete label classifier");
 unified = unified.replace(obsoleteLabelExpression, "");
 write(unifiedPath, unified);
 
 const sidebarSmokePath = "scripts/sidebar-workspace-hardening-smoke.ts";
 let sidebarSmoke = read(sidebarSmokePath);
-sidebarSmoke = sidebarSmoke.replace('const cleanupRuntime = source("src/liveFinderControlCleanupRuntime.ts");\n', "");
-sidebarSmoke = sidebarSmoke.replace('assert.match(main, /import "\\.\\/liveFinderControlCleanupRuntime";/, "obsolete Finder controls must be removed");\n', 'assert.doesNotMatch(main, /liveFinderControlCleanupRuntime/, "obsolete Finder cleanup runtime must stay retired");\n');
+sidebarSmoke = sidebarSmoke.replace(`const cleanupRuntime = source("src/${cleanupModule}.ts");\n`, "");
+sidebarSmoke = sidebarSmoke.replace(new RegExp(`assert\\.match\\(main, /import \\\"\\\\\\.\\\\\\/${cleanupModule}\\\\\\\";/, \\\"obsolete Finder controls must be removed\\\"\\);\\n`), "");
 sidebarSmoke = sidebarSmoke.replace(/\nassert\.doesNotMatch\(cleanupRuntime,[\s\S]*?assert\.match\(cleanupRuntime, \/beforeunload\/, "Finder cleanup timers and listeners must be cleaned up"\);\n/, "\n");
 sidebarSmoke = sidebarSmoke.replace(/\nassert\.match\(productionUi, \/leadership export\/i, "production UI smoke must reject the obsolete report control"\);/, "");
 const sourceAnchor = 'const main = source("src/main.tsx");\n';
@@ -58,8 +60,9 @@ if (!sidebarSmoke.includes('const appSource = source("src/App.tsx");')) {
   sidebarSmoke = sidebarSmoke.replace(sourceAnchor, sourceAnchor + 'const appSource = source("src/App.tsx");\n');
 }
 const retiredSymbolAssertion = `assert.doesNotMatch(appSource, new RegExp(["export", "Leadership", "Package"].join("")), "obsolete export function must stay removed");\n`;
+const retiredCleanupAssertion = `assert.doesNotMatch(main, new RegExp(["liveFinder", "ControlCleanupRuntime"].join("")), "obsolete Finder cleanup runtime must stay retired");\n`;
 if (!sidebarSmoke.includes(retiredSymbolAssertion)) {
-  sidebarSmoke = sidebarSmoke.replace('assert.doesNotMatch(indexHtml, /sidebarWorkspacePersistence/, "duplicate public persistence observer must remain removed");\n', 'assert.doesNotMatch(indexHtml, /sidebarWorkspacePersistence/, "duplicate public persistence observer must remain removed");\n' + retiredSymbolAssertion);
+  sidebarSmoke = sidebarSmoke.replace('assert.doesNotMatch(indexHtml, /sidebarWorkspacePersistence/, "duplicate public persistence observer must remain removed");\n', 'assert.doesNotMatch(indexHtml, /sidebarWorkspacePersistence/, "duplicate public persistence observer must remain removed");\n' + retiredSymbolAssertion + retiredCleanupAssertion);
 }
 write(sidebarSmokePath, sidebarSmoke);
 
@@ -69,7 +72,7 @@ production = production.replace(/\n\s*const leadershipExport = Array\.from\([\s\
 production = production.replace(/\n\s*assert\.equal\([^\n]*leadership export[^\n]*\);/gi, "");
 write(productionPath, production);
 
-const cleanupPath = path.join(root, "src/liveFinderControlCleanupRuntime.ts");
+const cleanupPath = path.join(root, `src/${cleanupModule}.ts`);
 if (!fs.existsSync(cleanupPath)) throw new Error("Cleanup runtime file is already missing unexpectedly");
 fs.unlinkSync(cleanupPath);
 
@@ -84,12 +87,16 @@ const offenders = [];
 function walk(directory) {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     const full = path.join(directory, entry.name);
-    if (entry.isDirectory()) walk(full);
-    else if (/\.(ts|tsx|js|mjs|css|html|json)$/.test(entry.name)) {
-      const content = fs.readFileSync(full, "utf8");
-      for (const token of forbidden) {
-        if (content.includes(token)) offenders.push(`${path.relative(root, full)}:${token}`);
-      }
+    if (entry.isDirectory()) {
+      walk(full);
+      continue;
+    }
+    const relative = path.relative(root, full);
+    if (relative === "scripts/apply-obsolete-export-removal.mjs") continue;
+    if (!/\.(ts|tsx|js|mjs|css|html|json)$/.test(entry.name)) continue;
+    const content = fs.readFileSync(full, "utf8");
+    for (const token of forbidden) {
+      if (content.includes(token)) offenders.push(`${relative}:${token}`);
     }
   }
 }

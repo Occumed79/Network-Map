@@ -1,0 +1,43 @@
+name: Observability Acceptance
+
+on:
+  pull_request:
+    paths:
+      - "api-server/**"
+      - "occu-med-map/src/technicalDiagnosticsExport.ts"
+      - "occu-med-map/src/mapPerformanceTelemetryRuntime.ts"
+      - "occu-med-map/src/main.tsx"
+      - ".github/workflows/observability-acceptance.yml"
+  push:
+    branches:
+      - hardening/observability-diagnostics
+
+permissions:
+  contents: read
+
+concurrency:
+  group: observability-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diagnostics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck API
+        run: pnpm --filter @workspace/api-server typecheck
+      - name: Typecheck frontend
+        run: pnpm --filter @workspace/occu-med-map typecheck
+      - name: Run observability diagnostics acceptance
+        working-directory: api-server
+        run: node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/observability-diagnostics-smoke.ts
+      - name: Build API
+        run: pnpm --filter @workspace/api-server build
+      - name: Build frontend
+        run: pnpm --filter @workspace/occu-med-map build

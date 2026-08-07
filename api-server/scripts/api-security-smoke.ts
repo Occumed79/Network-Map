@@ -22,6 +22,13 @@ assert.match(app, /app\.use\(apiSecurity\)/, "explicit API policy must guard the
 for (const capability of ["upload", "write", "destructive"] as const) {
   assert.ok(ROUTE_POLICIES.some((policy) => policy.capability === capability), `route policy must define ${capability} capability`);
 }
+const providerUploadPolicy = ROUTE_POLICIES.find((policy) => policy.prefix === "/api/provider-uploads" && policy.methods?.includes("POST"));
+assert.equal(providerUploadPolicy?.capability, "upload", "provider upload lifecycle must be protected by upload capability");
+assert.equal(providerUploadPolicy?.idempotent, true, "provider upload lifecycle writes must require idempotency protection");
+const clinicUploadPolicy = ROUTE_POLICIES.find((policy) => policy.prefix === "/api/my-clinics" && policy.methods?.includes("POST"));
+assert.equal(clinicUploadPolicy?.capability, "upload", "clinic dataset writes must remain under upload capability");
+assert.equal(clinicUploadPolicy?.idempotent, true, "clinic dataset writes must retain replay protection");
+
 assert.match(security, /route_policy_missing/, "unclassified production write routes must fail closed");
 assert.match(security, /api_rate_limit_buckets/, "rate limiting must use a shared database store");
 assert.match(security, /Idempotency-Key is required/, "bulk/write operations must require replay protection");

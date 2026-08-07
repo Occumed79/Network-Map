@@ -9,14 +9,19 @@ const inventoryPath = path.join(root, "UI_CONTROL_INVENTORY.md");
 let app = fs.readFileSync(appPath, "utf8");
 const oldLauncher = `<button className={activeTool==='myClinics'?'active':''} onClick={()=>toggleCommandTool('myClinics')}><Upload size={16}/><span>My Clinics</span></button>`;
 const previousMigratedLauncher = `<button className={activeTool==='myClinics'?'active':''} aria-label="Upload Clinics" onClick={()=>toggleCommandTool('myClinics')}><Upload size={16}/><span>Upload Clinics</span></button>`;
-const newLauncher = `<button className={activeTool==='myClinics'?'active':''} aria-label="Upload Clinics" onClick={toggleMyClinicsWorkflow}><Upload size={16}/><span>Upload Clinics</span></button>`;
+const helperBoundLauncher = `<button className={activeTool==='myClinics'?'active':''} aria-label="Upload Clinics" onClick={toggleMyClinicsWorkflow}><Upload size={16}/><span>Upload Clinics</span></button>`;
+const newLauncher = `<button className={activeTool==='myClinics'?'active':''} aria-label="Upload Clinics" onClick={()=>setActiveTool(activeTool==='myClinics'?null:'myClinics')}><Upload size={16}/><span>Upload Clinics</span></button>`;
 
-if (!app.includes(oldLauncher) && !app.includes(previousMigratedLauncher) && !app.includes(newLauncher)) {
+if (!app.includes(oldLauncher) && !app.includes(previousMigratedLauncher) && !app.includes(helperBoundLauncher) && !app.includes(newLauncher)) {
   throw new Error("Expected My Clinics / Upload Clinics workflow launcher was not found in App.tsx");
 }
-if (app.includes(oldLauncher)) app = app.replace(oldLauncher, newLauncher);
-if (app.includes(previousMigratedLauncher)) app = app.replace(previousMigratedLauncher, newLauncher);
+for (const candidate of [oldLauncher, previousMigratedLauncher, helperBoundLauncher]) {
+  if (app.includes(candidate)) app = app.replace(candidate, newLauncher);
+}
 
+if (!app.includes("{activeTool === 'myClinics' && (")) {
+  throw new Error("Upload Clinics modal is no longer owned by activeTool=myClinics in React source");
+}
 if (!app.includes('<span className="modal-title">Upload Clinics</span>')) {
   throw new Error("Upload Clinics modal title is missing from React source");
 }
@@ -27,9 +32,9 @@ fs.writeFileSync(appPath, app);
 
 let inventory = fs.readFileSync(inventoryPath, "utf8");
 if (!inventory.includes("| Upload Clinics |")) {
-  inventory += `\n| Upload Clinics | CSV / Excel provider dataset import | React \`App.tsx\` | source-owned workflow launcher + modal | validation, write failure, success, repeated open/close |\n`;
+  inventory += `\n| Upload Clinics | CSV / Excel provider dataset import | React \`App.tsx\` | source-owned workflow launcher + modal, both controlled by \`activeTool='myClinics'\` | validation, write failure, success, repeated open/close |\n`;
 }
 fs.writeFileSync(inventoryPath, inventory);
 
 fs.unlinkSync(fileURLToPath(import.meta.url));
-console.log("Upload Clinics workflow launcher is source-owned in React and wired to the real upload modal handler; My Clinics remains a separate provider layer label; one-time migration retired.");
+console.log("Upload Clinics workflow launcher is source-owned in React and directly controls the authoritative activeTool=myClinics modal state; My Clinics remains a separate provider layer label; one-time migration retired.");

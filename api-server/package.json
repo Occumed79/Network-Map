@@ -13,7 +13,8 @@
     "test:p1-data": "node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/p1-data-stabilization-smoke.ts",
     "test:p3-npi": "node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/p3-central-npi-smoke.ts",
     "test:provider-search-authority": "node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/provider-search-authority-smoke.ts",
-    "test:provider-integrity": "node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/provider-integrity-smoke.ts"
+    "test:provider-integrity": "node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/provider-integrity-smoke.ts",
+    "test:provider-upload-lifecycle": "node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/provider-upload-lifecycle-smoke.ts"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",

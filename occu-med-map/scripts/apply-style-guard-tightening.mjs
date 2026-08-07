@@ -4,30 +4,38 @@ import path from "node:path";
 const root = path.resolve(process.cwd());
 const smokePath = path.join(root, "scripts/ui-style-ownership-smoke.ts");
 let smoke = fs.readFileSync(smokePath, "utf8");
+
 smoke = smoke.replace(
-  'assert.ok(applicationCssImports.length <= 25, `application CSS import count must not grow above the consolidation baseline of 25; found ${applicationCssImports.length}`);',
-  'assert.ok(applicationCssImports.length <= 22, `application CSS import count must not grow above the consolidation baseline of 22; found ${applicationCssImports.length}`);',
+  /applicationCssImports\.length <= \d+/,
+  "applicationCssImports.length <= 22",
+).replace(
+  /application CSS import count must not grow above the consolidation baseline of \d+/,
+  "application CSS import count must not grow above the consolidation baseline of 22",
 );
-for (const file of ["professional-overrides.css", "professional-hardening.css", "luminous-shell-fixes.css"]) {
-  const retiredAnchor = '  "sidebar-control-fixes.css",\n';
-  if (!smoke.includes(`  "${file}",\n`)) {
-    smoke = smoke.replace(retiredAnchor, retiredAnchor + `  "${file}",\n`);
-  }
-  smoke = smoke.replace(`  "${file}",\n`, "", 1);
+
+const retiredFiles = [
+  "professional-overrides.css",
+  "professional-hardening.css",
+  "luminous-shell-fixes.css",
+];
+
+const retiredListStart = smoke.indexOf("for (const retired of [");
+const retiredListEnd = smoke.indexOf("]) {", retiredListStart);
+if (retiredListStart < 0 || retiredListEnd < 0) throw new Error("Retired stylesheet guard list not found");
+let retiredBlock = smoke.slice(retiredListStart, retiredListEnd);
+for (const file of retiredFiles) {
+  if (!retiredBlock.includes(`  \"${file}\",`)) retiredBlock += `  \"${file}\",\n`;
 }
-// The previous loop deliberately removes any allow-list occurrence first; now add all three to the retired-file list.
-const retiredListAnchor = '  "sidebar-control-fixes.css",\n';
-const retiredInsert = '  "professional-overrides.css",\n  "professional-hardening.css",\n  "luminous-shell-fixes.css",\n';
-if (!smoke.includes(retiredInsert)) smoke = smoke.replace(retiredListAnchor, retiredListAnchor + retiredInsert);
+smoke = smoke.slice(0, retiredListStart) + retiredBlock + smoke.slice(retiredListEnd);
 
 const transitionalBlockStart = smoke.indexOf("const transitionalBroadStyleFiles = new Set([");
 const transitionalBlockEnd = smoke.indexOf("]);", transitionalBlockStart);
 if (transitionalBlockStart < 0 || transitionalBlockEnd < 0) throw new Error("Transitional stylesheet allow-list not found");
-let block = smoke.slice(transitionalBlockStart, transitionalBlockEnd + 3);
-for (const file of ["professional-overrides.css", "professional-hardening.css", "luminous-shell-fixes.css"]) {
-  block = block.replace(`  "${file}",\n`, "");
+let transitionalBlock = smoke.slice(transitionalBlockStart, transitionalBlockEnd + 3);
+for (const file of retiredFiles) {
+  transitionalBlock = transitionalBlock.replace(new RegExp(`\\s*\"${file.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\",\\n?`), "\n");
 }
-smoke = smoke.slice(0, transitionalBlockStart) + block + smoke.slice(transitionalBlockEnd + 3);
+smoke = smoke.slice(0, transitionalBlockStart) + transitionalBlock + smoke.slice(transitionalBlockEnd + 3);
 fs.writeFileSync(smokePath, smoke);
 
 const ownershipDocPath = path.join(root, "RUNTIME_OWNERSHIP.md");
@@ -35,10 +43,17 @@ let ownership = fs.readFileSync(ownershipDocPath, "utf8");
 const styleHeading = "## Stylesheet direction\n";
 if (!ownership.includes(styleHeading)) throw new Error("Stylesheet direction section missing");
 if (!ownership.includes("Current consolidation progress:")) {
-  ownership = ownership.replace(
+  const progress = [
     styleHeading,
-    `${styleHeading}\nCurrent consolidation progress:\n\n- `ui-system.css` now owns shared design tokens, global geometry/interactions, dialog/popup presentation, and report-preview behavior.\n- Retired superseded layers: `general-ui-hardening.css`, `general-ui-visual-consistency.css`, `pdf-preview-hardening.css`, `modal-popup-fixes.css`, `modal-content-polish.css`, `ui-cascade-stabilization.css`, `sidebar-control-fixes.css`, `professional-overrides.css`, `professional-hardening.css`, and `luminous-shell-fixes.css`.\n- The application stylesheet-import ceiling is now 22; CI prevents that count from growing during the consolidation.\n\n`,
-  );
+    "",
+    "Current consolidation progress:",
+    "",
+    "- `ui-system.css` now owns shared design tokens, global geometry/interactions, dialog/popup presentation, and report-preview behavior.",
+    "- Retired superseded layers: `general-ui-hardening.css`, `general-ui-visual-consistency.css`, `pdf-preview-hardening.css`, `modal-popup-fixes.css`, `modal-content-polish.css`, `ui-cascade-stabilization.css`, `sidebar-control-fixes.css`, `professional-overrides.css`, `professional-hardening.css`, and `luminous-shell-fixes.css`.",
+    "- The application stylesheet-import ceiling is now 22; CI prevents that count from growing during the consolidation.",
+    "",
+  ].join("\n");
+  ownership = ownership.replace(styleHeading, progress);
 }
 fs.writeFileSync(ownershipDocPath, ownership);
 

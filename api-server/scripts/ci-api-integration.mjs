@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
-import pg from "pg";
 
-const { Pool } = pg;
 const baseUrl = process.env.CI_API_BASE_URL || "http://127.0.0.1:3000";
 const writeToken = process.env.WRITE_API_TOKEN || "ci-write-token";
 const expectedOrigin = process.env.CLIENT_ORIGIN || "http://127.0.0.1:4173";
 const apiCommand = process.env.CI_API_COMMAND || "pnpm --filter @workspace/api-server dev";
+const providerDbUrl = process.env.DATABASE_URL_POOLED || process.env.DATABASE_URL || "";
 
 function spawnApi() {
   const child = spawn("bash", ["-lc", apiCommand], {
@@ -19,8 +18,8 @@ function spawnApi() {
   return child;
 }
 
-async function request(path, init = {}) {
-  const response = await fetch(`${baseUrl}${path}`, init);
+async function request(pathname, init = {}) {
+  const response = await fetch(`${baseUrl}${pathname}`, init);
   const contentType = response.headers.get("content-type") || "";
   const body = contentType.includes("application/json") ? await response.json() : await response.text();
   return { response, body };
@@ -37,6 +36,23 @@ async function waitForApi() {
   throw new Error("API did not become live in time");
 }
 
+function sqlValue(sql) {
+  if (!providerDbUrl) throw new Error("DATABASE_URL or DATABASE_URL_POOLED is required for disposable API acceptance");
+  return execFileSync("psql", [providerDbUrl, "-At", "-v", "ON_ERROR_STOP=1", "-c", sql], {
+    encoding: "utf8",
+    env: process.env,
+  }).trim();
+}
+
+async function waitForAuditRows(minimum) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const count = Number(sqlValue("SELECT count(*) FROM public.api_write_audit WHERE path LIKE '/api/provider-uploads%';"));
+    if (count >= minimum) return count;
+    await delay(100);
+  }
+  return Number(sqlValue("SELECT count(*) FROM public.api_write_audit WHERE path LIKE '/api/provider-uploads%';"));
+}
+
 const child = spawnApi();
 try {
   await waitForApi();
@@ -44,10 +60,11 @@ try {
   const live = await request("/api/live");
   assert.equal(live.response.status, 200);
   assert.deepEqual(live.body, { ok: true });
+  assert.ok(live.response.headers.get("x-request-id"), "liveness must carry a request correlation ID");
 
   const revision = await request("/api/revision");
   assert.equal(revision.response.status, 200);
-  assert.ok(Object.hasOwn(revision.body, "revision"), "public revision endpoint must expose only deployment identity");
+  assert.deepEqual(Object.keys(revision.body).sort(), ["revision"], "public revision endpoint must expose deployment identity only");
 
   const ready = await request("/api/ready");
   assert.equal(ready.response.status, 200, `readiness failed: ${JSON.stringify(ready.body)}`);
@@ -86,6 +103,7 @@ try {
       sourceLabel: "CI Acceptance",
       logicalUploadKey,
       contentHash,
+      filename: "ci-acceptance.csv",
       chunkIndex: 0,
       chunkCount: 1,
       rows: [{
@@ -96,49 +114,47 @@ try {
         country_code: "US",
         lat: 36.7378,
         lng: -119.7871,
-        coordinate_status: "verified_address",
         phone: "5595550100",
         provider_type: "clinic",
       }],
     }),
   });
-  assert.equal(preview.response.status, 200, JSON.stringify(preview.body));
+  assert.equal(preview.response.status, 201, `preview failed: ${JSON.stringify(preview.body)}`);
   assert.equal(preview.body.commitReady, true);
+  assert.equal(preview.body.summary?.byDisposition?.accepted, 1, "valid exact-address row must be accepted for commit");
   const uploadId = preview.body.uploadId;
-  assert.ok(uploadId);
+  assert.ok(uploadId, "preview must return immutable upload ID");
 
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL_POOLED || process.env.DATABASE_URL });
-  try {
-    const beforeCommit = await pool.query("SELECT count(*)::int AS count FROM public.provider_master WHERE display_name='CI Acceptance Clinic'");
-    assert.equal(beforeCommit.rows[0].count, 0, "preview must not write provider master rows");
+  const beforeCommit = Number(sqlValue("SELECT count(*) FROM public.provider_master WHERE name='CI Acceptance Clinic';"));
+  assert.equal(beforeCommit, 0, "preview must not write provider master rows");
 
-    const commit = await request(`/api/provider-uploads/${encodeURIComponent(uploadId)}/commit`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${writeToken}`, "idempotency-key": "ci-commit-001" },
-    });
-    assert.equal(commit.response.status, 200, JSON.stringify(commit.body));
-    assert.equal(commit.body.status, "committed");
+  const commit = await request(`/api/provider-uploads/${encodeURIComponent(uploadId)}/commit`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${writeToken}`, "idempotency-key": "ci-commit-001" },
+    body: "{}",
+  });
+  assert.equal(commit.response.status, 200, `commit failed: ${JSON.stringify(commit.body)}`);
+  assert.equal(commit.body.status, "committed");
+  assert.equal(commit.body.inserted, 1);
 
-    const afterCommit = await pool.query("SELECT count(*)::int AS count FROM public.provider_master WHERE display_name='CI Acceptance Clinic'");
-    assert.equal(afterCommit.rows[0].count, 1, "commit must write provider master row transactionally");
+  const afterCommit = Number(sqlValue("SELECT count(*) FROM public.provider_master WHERE name='CI Acceptance Clinic';"));
+  assert.equal(afterCommit, 1, "commit must write provider master row transactionally");
 
-    const rollback = await request(`/api/provider-uploads/${encodeURIComponent(uploadId)}/rollback`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${writeToken}`, "idempotency-key": "ci-rollback-001" },
-    });
-    assert.equal(rollback.response.status, 200, JSON.stringify(rollback.body));
-    assert.equal(rollback.body.status, "rolled_back");
+  const rollback = await request(`/api/provider-uploads/${encodeURIComponent(uploadId)}/rollback`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${writeToken}`, "idempotency-key": "ci-rollback-001" },
+    body: "{}",
+  });
+  assert.equal(rollback.response.status, 200, `rollback failed: ${JSON.stringify(rollback.body)}`);
+  assert.equal(rollback.body.status, "rolled_back");
 
-    const afterRollback = await pool.query("SELECT count(*)::int AS count FROM public.provider_master WHERE display_name='CI Acceptance Clinic'");
-    assert.equal(afterRollback.rows[0].count, 0, "rollback must remove the upload's new provider master row");
+  const afterRollback = Number(sqlValue("SELECT count(*) FROM public.provider_master WHERE name='CI Acceptance Clinic';"));
+  assert.equal(afterRollback, 0, "rollback must restore pre-upload provider master state");
 
-    const audit = await pool.query("SELECT method,path,status_code FROM public.api_write_audit WHERE path LIKE '/api/provider-uploads%' ORDER BY id");
-    assert.ok(audit.rows.length >= 3, "preview/commit/rollback writes must be durably audited");
-  } finally {
-    await pool.end();
-  }
+  const auditCount = await waitForAuditRows(3);
+  assert.ok(auditCount >= 3, `preview/commit/rollback writes must be durably audited; found ${auditCount}`);
 
-  console.log("Disposable database/API/write/rollback acceptance passed.");
+  console.log("Disposable PostgreSQL API/auth/idempotency/preview/commit/rollback/audit acceptance passed.");
 } finally {
   child.kill("SIGTERM");
   await Promise.race([

@@ -11,6 +11,13 @@ function updateFile(relative, mutate) {
   fs.writeFileSync(absolute, after);
 }
 
+function normalizeTextFile(relative) {
+  const absolute = path.join(root, relative);
+  const before = fs.readFileSync(absolute, "utf8");
+  const after = `${before.replace(/[ \t]+$/gm, "").replace(/\n+$/g, "")}\n`;
+  fs.writeFileSync(absolute, after);
+}
+
 updateFile("scripts/ui-style-ownership-smoke.ts", (source) => {
   let next = source.replace(
     "application CSS import count must not grow above the consolidation baseline of 22",
@@ -93,5 +100,11 @@ for (const relative of ["src/App.tsx", "src/main.tsx", "scripts/runtime-ownershi
     if (content.includes(token)) throw new Error(`Retired symbol ${token} reappeared in ${relative}`);
   }
 }
+
+// Deterministic migrations may leave whitespace-only JSX lines or extra EOF
+// blank lines. Normalize only the generated final source files so git diff --check
+// is a real correctness gate rather than a formatting trap.
+normalizeTextFile("src/App.tsx");
+normalizeTextFile("src/ui-system.css");
 
 console.log(`UI ownership finalization applied. Application CSS imports: ${applicationCssImports.length}.`);

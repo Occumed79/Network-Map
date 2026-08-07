@@ -81,13 +81,37 @@ function visibleInViewport(element) {
   return !element.hidden && style.display !== "none" && style.visibility !== "hidden" && rect.width > 2 && rect.height > 2 && rect.right > 0 && rect.bottom > 0 && rect.left < innerWidth && rect.top < innerHeight;
 }
 
+async function activateVisibleControl(locator, label) {
+  await locator.waitFor({ state: "visible", timeout: 10_000 });
+  const actionability = await locator.evaluate((element) => {
+    if (!(element instanceof HTMLElement)) return { visible: false, enabled: false, hit: false };
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    const x = Math.min(innerWidth - 1, Math.max(0, rect.left + rect.width / 2));
+    const y = Math.min(innerHeight - 1, Math.max(0, rect.top + rect.height / 2));
+    const top = document.elementFromPoint(x, y);
+    return {
+      visible: !element.hidden && style.display !== "none" && style.visibility !== "hidden" && rect.width > 2 && rect.height > 2,
+      enabled: !(element instanceof HTMLButtonElement) || !element.disabled,
+      hit: top === element || Boolean(top && element.contains(top)),
+    };
+  });
+  assert.equal(actionability.visible, true, `${label}: control must be visible before activation`);
+  assert.equal(actionability.enabled, true, `${label}: control must be enabled before activation`);
+  assert.equal(actionability.hit, true, `${label}: control must be the actual hit target before activation`);
+  await locator.evaluate((element) => {
+    if (!(element instanceof HTMLElement)) throw new Error("Control is not an HTMLElement");
+    element.click();
+  });
+}
+
 async function ensureWorkspaceVisible(page) {
   const tab = page.locator(".occumed-sidebar-workspace-tab").first();
   await tab.waitFor({ state: "attached", timeout: 15_000 });
   if (await tab.evaluate(visibleInViewport)) return;
   const menu = page.locator(".mobile-menu-button:visible").first();
   if (await menu.count()) {
-    await menu.click({ timeout: 10_000 });
+    await activateVisibleControl(menu, "mobile sidebar menu");
     await page.waitForTimeout(220);
   }
   assert.equal(await tab.evaluate(visibleInViewport), true, "workspace tabs must become reachable from the mobile menu");
@@ -129,8 +153,11 @@ async function assertWorkspace(page, label) {
   await ensureWorkspaceVisible(page);
   const tab = await workspaceTab(page, label);
   await tab.waitFor({ state: "visible", timeout: 10_000 });
-  await tab.click({ timeout: 10_000 });
-  await page.waitForTimeout(180);
+  if (await tab.getAttribute("aria-selected") !== "true") {
+    await activateVisibleControl(tab, `${label} workspace tab`);
+    await page.waitForFunction((workspaceLabel) => Array.from(document.querySelectorAll(".occumed-sidebar-workspace-tab"))
+      .some((candidate) => candidate.textContent?.includes(workspaceLabel) && candidate.getAttribute("aria-selected") === "true"), label, { timeout: 10_000 });
+  }
   assert.equal(await tab.getAttribute("aria-selected"), "true", `${label} tab must become active`);
 }
 

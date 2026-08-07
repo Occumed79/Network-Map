@@ -44,57 +44,19 @@ import "./ui-system.css";
 import "./dialogControllerRuntime";
 import "./generalUiIntegrityRuntime";
 
-declare global {
-  interface Window {
-    __NETWORK_MAP_BOOT_TRACE__?: string[];
-  }
-}
-
-const urlParams = new URLSearchParams(window.location.search);
-const bootTraceEnabled = urlParams.get("ci-boot-trace") === "1";
-let bootHeartbeat = 0;
-let bootHeartbeatTimer: number | null = null;
-
-function traceBoot(stage: string): void {
-  if (!bootTraceEnabled) return;
-  const entry = `${new Date().toISOString()} ${stage}`;
-  const trace = window.__NETWORK_MAP_BOOT_TRACE__ || (window.__NETWORK_MAP_BOOT_TRACE__ = []);
-  trace.push(entry);
-  if (trace.length > 200) trace.splice(0, trace.length - 200);
-  console.info(`[network-map-boot] ${stage}`);
-}
-
-if (bootTraceEnabled) {
-  window.__NETWORK_MAP_BOOT_TRACE__ = [];
-  traceBoot("module-evaluated");
-  bootHeartbeatTimer = window.setInterval(() => {
-    bootHeartbeat += 1;
-    traceBoot(`heartbeat:${bootHeartbeat}`);
-    if (bootHeartbeat >= 120 && bootHeartbeatTimer !== null) {
-      window.clearInterval(bootHeartbeatTimer);
-      bootHeartbeatTimer = null;
-    }
-  }, 500);
-}
-
 async function safeLoad(name: string, loader: () => Promise<unknown>): Promise<void> {
-  traceBoot(`optional-start:${name}`);
   try {
     await loader();
-    traceBoot(`optional-complete:${name}`);
   } catch (error) {
-    traceBoot(`optional-error:${name}:${error instanceof Error ? error.message : String(error)}`);
     console.error(`Network Map optional runtime failed: ${name}`, error);
   }
 }
 
 async function loadOptionalRuntimes(): Promise<void> {
-  traceBoot("optional-sequence-start");
   await safeLoad("Mapbox load hardening", () => import("./mapboxGlobeLoadHardeningRuntime"));
   await safeLoad("transition sound and cleanup", () => import("./mapEngineFinalFixRuntime"));
   await safeLoad("map transition", () => import("./dualMapTransitionRuntime"));
 
-  traceBoot("optional-parallel-start");
   await Promise.allSettled([
     safeLoad("provider source selection persistence", () => import("./providerSourceSelectionPersistenceRuntime")),
     safeLoad("provider layer telemetry", () => import("./providerLayerTelemetryRuntime")),
@@ -103,48 +65,33 @@ async function loadOptionalRuntimes(): Promise<void> {
     safeLoad("U.S. diagnostics", () => import("./usDiagnosticsGate")),
     safeLoad("drive time", () => import("./features/driveTime/nativeDriveTimeRuntime")),
   ]);
-  traceBoot("optional-sequence-complete");
 }
 
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("Network Map root element is missing");
 const root = createRoot(rootElement);
-const phaseTwoPreview = urlParams.get("p2-preview") === "1";
+const phaseTwoPreview = new URLSearchParams(window.location.search).get("p2-preview") === "1";
 
 async function boot(): Promise<void> {
-  traceBoot(`boot-start:${phaseTwoPreview ? "p2" : "standard"}`);
   if (!phaseTwoPreview) {
-    traceBoot("render-start:standard");
     root.render(<App />);
-    traceBoot("render-returned:standard");
-    window.setTimeout(() => {
-      traceBoot("optional-timeout-fired");
-      void loadOptionalRuntimes();
-    }, 0);
+    window.setTimeout(() => { void loadOptionalRuntimes(); }, 0);
     return;
   }
 
   try {
-    traceBoot("p2-import-start");
     await Promise.all([
       import("./phaseTwoMapBridge"),
       import("./phase-two-shell.css"),
       import("./phase-two-controls.css"),
     ]);
     const { default: PhaseTwoShell } = await import("./PhaseTwoShell");
-    traceBoot("render-start:p2");
     root.render(<PhaseTwoShell><App /></PhaseTwoShell>);
-    traceBoot("render-returned:p2");
   } catch (error) {
-    traceBoot(`p2-import-error:${error instanceof Error ? error.message : String(error)}`);
     console.error("Phase Two preview failed; loading standard map", error);
     root.render(<App />);
-    traceBoot("render-returned:p2-fallback");
   }
-  window.setTimeout(() => {
-    traceBoot("optional-timeout-fired");
-    void loadOptionalRuntimes();
-  }, 0);
+  window.setTimeout(() => { void loadOptionalRuntimes(); }, 0);
 }
 
 void boot();

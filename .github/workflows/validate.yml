@@ -36,6 +36,8 @@ jobs:
         run: pnpm --filter @workspace/api-server test:database-lifecycle
       - name: External-source resilience
         run: pnpm --filter @workspace/api-server test:external-source-resilience
+      - name: Observability/request correlation
+        run: pnpm --filter @workspace/api-server test:observability
       - name: Provider Explorer API
         run: pnpm --filter @workspace/api-server test:provider-explorer
       - name: Provider Explorer UI

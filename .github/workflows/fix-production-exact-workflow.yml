@@ -1,0 +1,138 @@
+name: Fix production exact revision workflow
+
+on:
+  push:
+    branches:
+      - hardening/real-acceptance-deployment-gates
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fix-production-exact-workflow
+  cancel-in-progress: true
+
+jobs:
+  fix:
+    if: ${{ !contains(github.event.head_commit.message || '', '[production-workflow-fixed]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hardening/real-acceptance-deployment-gates
+          fetch-depth: 2
+      - name: Write corrected exact-revision production workflow
+        shell: bash
+        run: |
+          cat > .github/workflows/production-exact-revision.yml <<'YAML'
+          name: Production Exact Revision Acceptance
+
+          on:
+            workflow_run:
+              workflows: ["Validate", "Hardening Acceptance"]
+              types: [completed]
+            workflow_dispatch:
+              inputs:
+                revision:
+                  description: Git revision expected on Render
+                  required: false
+
+          permissions:
+            contents: read
+
+          concurrency:
+            group: production-exact-revision
+            cancel-in-progress: true
+
+          jobs:
+            production-safe-smoke:
+              if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
+              runs-on: ubuntu-latest
+              timeout-minutes: 30
+              steps:
+                - name: Resolve validated revision
+                  id: revision
+                  shell: bash
+                  run: |
+                    if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && -n "${{ inputs.revision }}" ]]; then
+                      REV="${{ inputs.revision }}"
+                    elif [[ "${GITHUB_EVENT_NAME}" == "workflow_run" ]]; then
+                      REV="${{ github.event.workflow_run.head_sha }}"
+                    else
+                      REV="${GITHUB_SHA}"
+                    fi
+                    echo "sha=$REV" >> "$GITHUB_OUTPUT"
+
+                - uses: actions/checkout@v4
+                  with:
+                    ref: ${{ steps.revision.outputs.sha }}
+                    fetch-depth: 2
+
+                - uses: actions/setup-node@v4
+                  with:
+                    node-version: 22
+                - run: corepack enable
+                - run: pnpm install --frozen-lockfile
+
+                - name: Record manual rollback target
+                  shell: bash
+                  run: |
+                    PREVIOUS="$(git rev-parse HEAD^ 2>/dev/null || true)"
+                    {
+                      echo "Expected deployment: ${{ steps.revision.outputs.sha }}"
+                      echo "Manual rollback target: ${PREVIOUS:-unavailable}"
+                      echo "Rollback criterion: readiness failure, exact-revision mismatch after wait window, or production browser acceptance failure."
+                    } > rollback-target.txt
+
+                - name: Wait for Render to serve exact validated revision
+                  shell: bash
+                  env:
+                    EXPECTED_REVISION: ${{ steps.revision.outputs.sha }}
+                    PRODUCTION_URL: https://network-map-tool-mqib.onrender.com
+                  run: |
+                    set -euo pipefail
+                    deployed=""
+                    for attempt in {1..60}; do
+                      body="$(curl --silent --show-error --max-time 15 "$PRODUCTION_URL/api/diagnostics/export" || true)"
+                      deployed="$(node -e 'try{const x=JSON.parse(process.argv[1]);process.stdout.write(String(x?.application?.revision||""))}catch{}' "$body")"
+                      echo "Attempt $attempt: deployed=${deployed:-unknown} expected=$EXPECTED_REVISION"
+                      if [[ -n "$deployed" && ( "$deployed" == "$EXPECTED_REVISION" || "$EXPECTED_REVISION" == "$deployed"* || "$deployed" == "$EXPECTED_REVISION"* ) ]]; then
+                        exit 0
+                      fi
+                      sleep 15
+                    done
+                    echo "Render did not reach exact validated revision $EXPECTED_REVISION; last deployed revision=${deployed:-unknown}" >&2
+                    exit 1
+
+                - name: Install Chromium
+                  run: pnpm --filter @workspace/occu-med-map exec playwright install --with-deps chromium
+
+                - name: Run production-safe acceptance
+                  working-directory: occu-med-map
+                  env:
+                    EXPECTED_REVISION: ${{ steps.revision.outputs.sha }}
+                    PRODUCTION_URL: https://network-map-tool-mqib.onrender.com
+                  run: node scripts/production-exact-revision-acceptance.mjs
+
+                - name: Upload production acceptance evidence
+                  if: always()
+                  uses: actions/upload-artifact@v4
+                  with:
+                    name: production-exact-revision-evidence
+                    path: |
+                      occu-med-map/test-results/production-exact-revision
+                      rollback-target.txt
+                    if-no-files-found: ignore
+                    retention-days: 14
+          YAML
+
+      - name: Commit workflow correction
+        shell: bash
+        run: |
+          rm -f .github/workflows/fix-production-exact-workflow.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Fix exact-revision production gate [production-workflow-fixed]"
+          git push origin HEAD:hardening/real-acceptance-deployment-gates

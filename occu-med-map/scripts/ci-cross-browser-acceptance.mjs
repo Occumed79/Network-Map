@@ -199,6 +199,33 @@ async function waitForVisibleMapSurface(page, label) {
   }
 }
 
+async function teardownTrackedMapboxMaps(page, label) {
+  if (page.isClosed()) return;
+  const result = await page.evaluate(() => {
+    const lifecycle = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__;
+    const maps = lifecycle?.getMaps?.() || [];
+    const errors = [];
+    let removed = 0;
+    for (const map of [...maps]) {
+      try {
+        map.remove();
+        removed += 1;
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+    return {
+      removed,
+      errors,
+      remaining: lifecycle?.getDiagnostics?.().mapCount ?? 0,
+    };
+  }).catch((error) => ({ removed: 0, errors: [error instanceof Error ? error.message : String(error)], remaining: -1 }));
+  if (result.errors.length || result.remaining > 0) {
+    console.warn(`${label}: Mapbox teardown diagnostics ${JSON.stringify(result)}`);
+  }
+  await page.waitForTimeout(60).catch(() => undefined);
+}
+
 function isExpectedSupersessionAbort(request) {
   if (request.method() !== "GET") return false;
   const errorText = request.failure()?.errorText || "";
@@ -252,6 +279,7 @@ async function runCase(browser, viewport, routeVariant) {
   await mockMapbox(page);
   await mockApi(page);
   const label = `${browserName}/${routeVariant.name}/${viewport.name}`;
+  console.log(`START ${label}`);
   try {
     await page.goto(`${baseUrl}/${routeVariant.suffix}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
     await page.locator("#root").waitFor({ state: "attached", timeout: 20_000 });
@@ -286,12 +314,14 @@ async function runCase(browser, viewport, routeVariant) {
     if (expectedAborts.length) {
       fs.writeFileSync(path.join(artifactDir, `${routeVariant.name}-${viewport.name}-expected-aborts.txt`), expectedAborts.join("\n"));
     }
+    console.log(`PASS ${label}`);
   } catch (error) {
     const base = path.join(artifactDir, `${routeVariant.name}-${viewport.name}`);
-    await page.screenshot({ path: `${base}-failure.png`, fullPage: true }).catch(() => undefined);
+    await page.screenshot({ path: `${base}-failure.png`, fullPage: true, timeout: 5_000 }).catch(() => undefined);
     fs.writeFileSync(`${base}-error.txt`, `${error instanceof Error ? error.stack || error.message : String(error)}\n\nPage errors:\n${pageErrors.join("\n")}\n\nConsole errors:\n${consoleErrors.join("\n")}\n\nRequest failures:\n${requestFailures.join("\n")}\n\nExpected supersession aborts:\n${expectedAborts.join("\n")}`);
     throw error;
   } finally {
+    await teardownTrackedMapboxMaps(page, label);
     await context.close();
   }
 }

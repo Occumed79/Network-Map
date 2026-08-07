@@ -1,9 +1,24 @@
 import { CATS } from '../networkMap/networkMapConstants';
 import { fmtDist } from '../networkMap/networkMapUtils';
 import { escapeHtml, htmlAttr, safeTel, safeUrl } from '../../lib/htmlSafety';
-import type { LiveFinderResult } from './liveFinderSearch';
 
-export function buildLiveFinderPopupHtml(result: LiveFinderResult, showGoogleMaps = true): string {
+/**
+ * Minimal popup-facing contract. Live Finder search ownership moved to the
+ * backend provider-search authority, so this renderer must not depend on the
+ * retired browser liveFinderSearch module just to obtain a display type.
+ */
+export type LiveFinderPopupResult = {
+  name: string;
+  cat: string;
+  dist: number;
+  addr?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  hours?: string | null;
+  source?: string | null;
+};
+
+export function buildLiveFinderPopupHtml(result: LiveFinderPopupResult, showGoogleMaps = true): string {
   const category = CATS[result.cat] || CATS.clinic;
   const googleMapsUrl = safeUrl(
     `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${result.name || ''} ${result.addr || ''}`.trim())}`,

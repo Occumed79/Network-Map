@@ -50,6 +50,9 @@ jobs:
       - name: Run provider search architecture tests
         run: pnpm --filter @workspace/api-server test:provider-search-authority
 
+      - name: Run provider coordinate and data-integrity tests
+        run: pnpm --filter @workspace/api-server test:provider-integrity
+
       - name: Run Provider Explorer smoke tests
         run: pnpm --filter @workspace/api-server test:provider-explorer
 

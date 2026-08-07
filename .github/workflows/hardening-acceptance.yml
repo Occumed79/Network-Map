@@ -33,25 +33,14 @@ jobs:
         shell: bash
         run: |
           pnpm dlx \
-            --package=eslint@8.57.1 \
-            --package=@typescript-eslint/parser@8.46.2 \
+            --package=eslint@9.39.1 \
+            --package=typescript-eslint@8.46.2 \
             --package=eslint-plugin-react-hooks@7.0.1 \
             --package=typescript@5.9.3 \
             bash -c '
               set -euo pipefail
               export NODE_PATH="$(dirname "$(dirname "$(command -v eslint)")")"
-              PARSER="$(node -e "process.stdout.write(require.resolve(\"@typescript-eslint/parser\"))")"
-              eslint \
-                --no-eslintrc \
-                --parser "$PARSER" \
-                --plugin react-hooks \
-                --ext .ts,.tsx \
-                --rule "no-debugger:error" \
-                --rule "no-duplicate-imports:[\"error\",{\"allowSeparateTypeImports\":true}]" \
-                --rule "no-unreachable:error" \
-                --rule "no-self-assign:error" \
-                --rule "no-constant-binary-expression:error" \
-                occu-med-map/src api-server/src
+              eslint "api-server/src/**/*.{ts,tsx}" "occu-med-map/src/**/*.{ts,tsx}"
             '
       - name: Circular dependency and dead-source gate
         run: node scripts/architecture-quality-gates.mjs

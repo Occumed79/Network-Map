@@ -21,6 +21,27 @@
   height: 100% !important;
 }
 
+/* A Mapbox/WebGL initialization failure is a degraded-map condition, not a
+   blank-map condition. The canonical Leaflet controller remains synchronized
+   underneath Mapbox, so expose it as the live fallback whenever Mapbox renders
+   its explicit load-error surface. :has() is supported by the browser matrix
+   and keeps fallback ownership tied to the existing engine error state without
+   introducing another DOM observer/controller. */
+.dual-engine-map-shell:has(.mapbox-2d-host .mapbox-load-error) .canonical-leaflet-controller {
+  z-index: 1 !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+.dual-engine-map-shell:has(.mapbox-2d-host .mapbox-load-error) .mapbox-2d-host {
+  background: transparent !important;
+  pointer-events: none !important;
+}
+
+.dual-engine-map-shell:has(.mapbox-2d-host .mapbox-load-error) .mapbox-2d-host .mapbox-load-error {
+  pointer-events: auto !important;
+}
+
 /* Density aggregation is a deliberate Provider Explorer visualization. It is
    not a base layer and must never appear automatically on the Mapbox globe. */
 .mapbox-globe-host .provider-density-field,

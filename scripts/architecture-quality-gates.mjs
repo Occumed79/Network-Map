@@ -30,6 +30,15 @@ const fileSet = new Set(files);
 const graph = new Map();
 const importPattern = /(?:import\s+(?:[^"'`]*?\s+from\s+)?|export\s+[^"'`]*?\s+from\s+|import\()\s*["'`]([^"'`]+)["'`]/g;
 
+function runtimeRelevantSource(source) {
+  // Type-only imports/exports are erased by TypeScript and therefore cannot
+  // create runtime module cycles. Keep the architecture gate focused on
+  // executable dependency edges rather than compile-time type relationships.
+  return source
+    .replace(/\bimport\s+type\b[\s\S]*?\bfrom\s+["'][^"']+["']\s*;?/g, "")
+    .replace(/\bexport\s+type\b[\s\S]*?\bfrom\s+["'][^"']+["']\s*;?/g, "");
+}
+
 function resolveImport(fromFile, specifier) {
   if (!specifier.startsWith(".")) return null;
   const raw = path.resolve(path.dirname(fromFile), specifier);
@@ -42,7 +51,7 @@ function resolveImport(fromFile, specifier) {
 }
 
 for (const file of files) {
-  const source = fs.readFileSync(file, "utf8");
+  const source = runtimeRelevantSource(fs.readFileSync(file, "utf8"));
   const dependencies = [];
   for (const match of source.matchAll(importPattern)) {
     const resolved = resolveImport(file, match[1]);

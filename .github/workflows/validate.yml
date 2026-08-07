@@ -52,6 +52,8 @@ jobs:
         run: pnpm --filter @workspace/occu-med-map test:mapbox-lifecycle-hardening
       - name: Mapbox source pipeline
         run: pnpm --filter @workspace/occu-med-map test:mapbox-source-pipeline-hardening
+      - name: Large-map rendering/memory
+        run: pnpm --filter @workspace/occu-med-map test:large-map-performance
       - name: P1 data stabilization
         run: pnpm --filter @workspace/api-server test:p1-data
       - name: P2 map

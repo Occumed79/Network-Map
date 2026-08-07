@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const projectRoot = path.resolve(process.cwd());
+const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(scriptDirectory, "..");
 const srcRoot = path.join(projectRoot, "src");
 const main = fs.readFileSync(path.join(srcRoot, "main.tsx"), "utf8");
 const uiSystem = fs.readFileSync(path.join(srcRoot, "ui-system.css"), "utf8");

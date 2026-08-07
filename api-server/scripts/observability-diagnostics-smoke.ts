@@ -35,6 +35,7 @@ assert.equal(redactText("postgresql://u:p@h/db"), "[REDACTED_DATABASE_URL]");
 assert.match(redactText("https://example.test/?api_key=secret"), /api_key=\[REDACTED\]/);
 
 const app = fs.readFileSync(path.join(root, "src/app.ts"), "utf8");
+const observability = fs.readFileSync(path.join(root, "src/lib/observability.ts"), "utf8");
 const routes = fs.readFileSync(path.join(root, "src/routes/index.ts"), "utf8");
 const diagnosticsRoute = fs.readFileSync(path.join(root, "src/routes/diagnostics.ts"), "utf8");
 const health = fs.readFileSync(path.join(root, "src/routes/health.ts"), "utf8");
@@ -45,7 +46,7 @@ const performanceTelemetry = fs.readFileSync(path.join(repoRoot, "occu-med-map/s
 const sourceHealth = fs.readFileSync(path.join(root, "src/providerSources/externalSourceRuntime.ts"), "utf8");
 
 assert.match(app, /requestContextMiddleware/, "request IDs must enter async request context before routing");
-assert.match(app, /req\.headers\["x-request-id"\]/, "request context must stamp the shared request ID for downstream security/logging");
+assert.match(observability, /req\.headers\["x-request-id"\]/, "request context must stamp the shared request ID for downstream security/logging");
 assert.match(app, /recordUploadMetric/, "upload responses must emit bounded count/status telemetry");
 assert.match(app, /recordError/, "unhandled API failures must be captured with correlation context");
 assert.match(queryTiming, /recordTiming\('database'/, "database operations must emit timing telemetry");

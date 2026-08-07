@@ -6,7 +6,11 @@
  * though it were the full source inventory.
  */
 
-import { registerRuntimeOwner, subscribeToSharedDomObserver } from "./runtimeControllerRegistry";
+import {
+  registerRuntimeOwner,
+  runWithoutSharedDomObservation,
+  subscribeToSharedDomObserver,
+} from "./runtimeControllerRegistry";
 
 type ProviderLayerStatusDetail = {
   source?: string;
@@ -106,6 +110,10 @@ function setText(element: Element | null, value: string): void {
   if (element && element.textContent !== value) element.textContent = value;
 }
 
+function setAttributeIfChanged(element: Element, name: string, value: string): void {
+  if (element.getAttribute(name) !== value) element.setAttribute(name, value);
+}
+
 function scheduleUpdate(): void {
   if (updateTimer !== null) window.clearTimeout(updateTimer);
   updateTimer = window.setTimeout(() => {
@@ -188,8 +196,9 @@ function updateSourceButtons(enabled: Set<SourceKey>): void {
     const status = sourceStatusText(key, input, metric);
     setText(count, status);
     button.title = status;
-    button.classList.toggle("active", enabled.has(key));
-    button.setAttribute("aria-pressed", String(enabled.has(key)));
+    const isEnabled = enabled.has(key);
+    button.classList.toggle("active", isEnabled);
+    setAttributeIfChanged(button, "aria-pressed", String(isEnabled));
   });
 }
 
@@ -221,32 +230,34 @@ function updateUi(): void {
   const renderedRecords = successfullyLoaded.reduce((sum, metric) => sum + metric.rendered, 0);
   const selectedSourceRecords = [...enabled].reduce((sum, key) => sum + (inventoryTotal(key) || 0), 0);
 
-  const header = document.querySelector<HTMLElement>(".provider-source-health");
-  if (header) {
-    setText(header.querySelector("strong"), `${enabled.size} selected`);
-    const spans = header.querySelectorAll("span");
-    setText(spans.length ? spans[spans.length - 1] : null, `${successfullyLoaded.length} loaded`);
-    header.title = [
-      `${enabled.size} provider sources selected`,
-      `${successfullyLoaded.length} successfully loaded`,
-      `${formatNumber(selectedSourceRecords)} records across selected source inventories`,
-      `${formatNumber(renderedRecords)} rendered in the current viewport`,
-    ].join(" · ");
-  }
+  runWithoutSharedDomObservation(() => {
+    const header = document.querySelector<HTMLElement>(".provider-source-health");
+    if (header) {
+      setText(header.querySelector("strong"), `${enabled.size} selected`);
+      const spans = header.querySelectorAll("span");
+      setText(spans.length ? spans[spans.length - 1] : null, `${successfullyLoaded.length} loaded`);
+      header.title = [
+        `${enabled.size} provider sources selected`,
+        `${successfullyLoaded.length} successfully loaded`,
+        `${formatNumber(selectedSourceRecords)} records across selected source inventories`,
+        `${formatNumber(renderedRecords)} rendered in the current viewport`,
+      ].join(" · ");
+    }
 
-  const heroSummary = document.querySelector<HTMLElement>(".hero-source-summary");
-  if (heroSummary) {
-    const sourceRecordLabel = sourceTotals.size
-      ? `${formatNumber(selectedSourceRecords)} selected-source records`
-      : `${formatNumber(loadedRecords)} records loaded for this view`;
-    setText(heroSummary.querySelector("span"), sourceRecordLabel);
-    setText(heroSummary.querySelector("strong"), `${formatNumber(renderedRecords)} rendered in viewport`);
-    heroSummary.title = "Database source totals and current viewport rendering are intentionally shown as separate numbers.";
-  }
+    const heroSummary = document.querySelector<HTMLElement>(".hero-source-summary");
+    if (heroSummary) {
+      const sourceRecordLabel = sourceTotals.size
+        ? `${formatNumber(selectedSourceRecords)} selected-source records`
+        : `${formatNumber(loadedRecords)} records loaded for this view`;
+      setText(heroSummary.querySelector("span"), sourceRecordLabel);
+      setText(heroSummary.querySelector("strong"), `${formatNumber(renderedRecords)} rendered in viewport`);
+      heroSummary.title = "Database source totals and current viewport rendering are intentionally shown as separate numbers.";
+    }
 
-  removeLegacyCounterGrid();
-  updateSourceButtons(enabled);
-  updateLegacySourceRows(enabled);
+    removeLegacyCounterGrid();
+    updateSourceButtons(enabled);
+    updateLegacySourceRows(enabled);
+  });
 
   window.__networkMapProviderMetrics = {
     sources: Object.fromEntries(sourceMetrics.entries()),

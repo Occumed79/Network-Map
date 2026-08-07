@@ -3,6 +3,13 @@ import type { SearchMode, SearchCoordinatorAudit } from "./searchCoordinator";
 export type CoordinateStatus = "imported" | "geocoded" | "unverified";
 export type TrustTier = "verified" | "registry" | "directory" | "lead";
 
+export interface ProviderProvenance {
+  source: string;
+  sourceRecordId?: string;
+  sourceUrl?: string;
+  observedAt?: string;
+}
+
 export interface ProviderCandidate {
   id: string;
   name: string;
@@ -10,12 +17,15 @@ export interface ProviderCandidate {
   city: string;
   state: string;
   postalCode: string;
+  country?: string;
   phone: string;
   fax?: string;
   website: string;
   lat?: number;
   lng?: number;
   coordinateStatus: CoordinateStatus;
+  providerCategory?: string;
+  services?: string[];
   taxonomy?: string;
   taxonomyCode?: string;
   npi?: string;
@@ -27,6 +37,9 @@ export interface ProviderCandidate {
   score: number;
   badges: string[];
   evidence: ProviderEvidence[];
+  provenance?: ProviderProvenance[];
+  lastSeenAt?: string;
+  matchReason?: string;
   internalStatus?: string;
   distanceMiles?: number;
   _rawSources?: string[];
@@ -49,6 +62,7 @@ export interface SearchParams {
   centerLat: number;
   centerLng: number;
   mode?: SearchMode;
+  sourceIds?: string[];
 }
 
 export interface SourceResult {
@@ -57,6 +71,8 @@ export interface SourceResult {
   ok: boolean;
   count: number;
   error?: string;
+  durationMs?: number;
+  timedOut?: boolean;
 }
 
 export interface SearchAudit {
@@ -81,4 +97,6 @@ export interface UnifiedSearchResponse {
   results: ProviderCandidate[];
   sourceResults: SourceResult[];
   audit: SearchAudit;
+  incomplete?: boolean;
+  degradedSources?: string[];
 }

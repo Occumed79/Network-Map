@@ -19,6 +19,13 @@ const DEFAULT_WRITE_MAX_BYTES = 2 * 1024 * 1024;
 const UPLOAD_MAX_BYTES = 16 * 1024 * 1024;
 
 export const ROUTE_POLICIES: RoutePolicy[] = [
+  { prefix: "/api/provider-sources/search", methods: ["POST"], capability: "read", maxBytes: 512 * 1024, rateLimit: { windowSeconds: 600, max: 80 } },
+  { prefix: "/api/provider-sources/npi-custom", methods: ["POST"], capability: "read", maxBytes: 512 * 1024, rateLimit: { windowSeconds: 600, max: 60 } },
+  { prefix: "/api/live-finder", methods: ["POST"], capability: "read", maxBytes: 512 * 1024, rateLimit: { windowSeconds: 600, max: 120 } },
+  { prefix: "/api/enhanced-search", methods: ["POST"], capability: "read", maxBytes: 512 * 1024, rateLimit: { windowSeconds: 600, max: 80 } },
+  { prefix: "/api/diagnostics/export", methods: ["GET"], capability: "admin", rateLimit: { windowSeconds: 600, max: 60 } },
+  { prefix: "/api/admin", methods: ["GET", "POST", "PUT", "PATCH", "DELETE"], capability: "admin", rateLimit: { windowSeconds: 600, max: 60 }, idempotent: false },
+  { prefix: "/api/provider-uploads", methods: ["GET"], capability: "admin", rateLimit: { windowSeconds: 600, max: 60 } },
   { prefix: "/api/provider-uploads", methods: ["POST"], capability: "upload", maxBytes: UPLOAD_MAX_BYTES, rateLimit: { windowSeconds: 600, max: 60 }, idempotent: true },
   { prefix: "/api/my-clinics", methods: ["POST", "PUT", "PATCH"], capability: "upload", maxBytes: UPLOAD_MAX_BYTES, rateLimit: { windowSeconds: 600, max: 80 }, idempotent: true },
   { prefix: "/api/provider-sources/import", methods: ["POST"], capability: "upload", maxBytes: UPLOAD_MAX_BYTES, rateLimit: { windowSeconds: 600, max: 30 }, idempotent: true },
@@ -190,15 +197,15 @@ export const apiSecurity: RequestHandler = async (req, res, next) => {
 
   try {
     const policy = policyFor(req);
-    const readLimit = SAFE_METHODS.has(req.method.toUpperCase()) ? readLimitFor(req) : null;
+    const safeMethod = SAFE_METHODS.has(req.method.toUpperCase());
+    const readLimit = safeMethod && !policy ? readLimitFor(req) : null;
     if (readLimit && !(await distributedRateLimit(req, res, readLimit, `read:${readLimit.prefix}`))) return;
 
-    if (SAFE_METHODS.has(req.method.toUpperCase())) {
-      next();
-      return;
-    }
-
     if (!policy) {
+      if (safeMethod) {
+        next();
+        return;
+      }
       if (process.env.NODE_ENV === "production") {
         res.status(403).json({ error: "This write route has no explicit authorization policy.", code: "route_policy_missing" });
         return;
@@ -211,6 +218,12 @@ export const apiSecurity: RequestHandler = async (req, res, next) => {
     const contentLength = Number(req.get("content-length") || 0);
     if (contentLength > maxBytes) {
       res.status(413).json({ error: "Request body is too large for this endpoint.", code: "request_too_large", maxBytes });
+      return;
+    }
+
+    if (policy.rateLimit && !(await distributedRateLimit(req, res, policy.rateLimit, `${policy.capability}:${policy.prefix}`))) return;
+    if (policy.capability === "read") {
+      next();
       return;
     }
 

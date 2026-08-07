@@ -1,7 +1,3 @@
-/**
- * Core provider record — one row per unique provider entity.
- * Dedupe keys: NPI (if available), normalized name+address, phone+address.
- */
 export declare const providersTable: import("drizzle-orm/pg-core").PgTableWithColumns<{
     name: "providers";
     schema: undefined;
@@ -91,6 +87,50 @@ export declare const providersTable: import("drizzle-orm/pg-core").PgTableWithCo
             identity: undefined;
             generated: undefined;
         }, {}, {}>;
+        quarantineStatus: import("drizzle-orm/pg-core").PgColumn<{
+            name: "quarantine_status";
+            tableName: "providers";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        integrityFindings: import("drizzle-orm/pg-core").PgColumn<{
+            name: "integrity_findings";
+            tableName: "providers";
+            dataType: "json";
+            columnType: "PgJsonb";
+            data: {
+                code: string;
+                severity: string;
+                message: string;
+            }[];
+            driverParam: unknown;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            $type: {
+                code: string;
+                severity: string;
+                message: string;
+            }[];
+        }>;
         createdAt: import("drizzle-orm/pg-core").PgColumn<{
             name: "created_at";
             tableName: "providers";
@@ -128,9 +168,6 @@ export declare const providersTable: import("drizzle-orm/pg-core").PgTableWithCo
     };
     dialect: "pg";
 }>;
-/**
- * Provider locations — a provider may have multiple addresses.
- */
 export declare const providerLocationsTable: import("drizzle-orm/pg-core").PgTableWithColumns<{
     name: "provider_locations";
     schema: undefined;
@@ -220,8 +257,25 @@ export declare const providerLocationsTable: import("drizzle-orm/pg-core").PgTab
             identity: undefined;
             generated: undefined;
         }, {}, {
-            length: 2;
+            length: 64;
         }>;
+        country: import("drizzle-orm/pg-core").PgColumn<{
+            name: "country";
+            tableName: "provider_locations";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
         postalCode: import("drizzle-orm/pg-core").PgColumn<{
             name: "postal_code";
             tableName: "provider_locations";
@@ -290,6 +344,23 @@ export declare const providerLocationsTable: import("drizzle-orm/pg-core").PgTab
             identity: undefined;
             generated: undefined;
         }, {}, {}>;
+        coordinateSource: import("drizzle-orm/pg-core").PgColumn<{
+            name: "coordinate_source";
+            tableName: "provider_locations";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
         isPrimary: import("drizzle-orm/pg-core").PgColumn<{
             name: "is_primary";
             tableName: "provider_locations";
@@ -344,9 +415,6 @@ export declare const providerLocationsTable: import("drizzle-orm/pg-core").PgTab
     };
     dialect: "pg";
 }>;
-/**
- * Provider contacts — phone, fax, website, email.
- */
 export declare const providerContactsTable: import("drizzle-orm/pg-core").PgTableWithColumns<{
     name: "provider_contacts";
     schema: undefined;
@@ -490,9 +558,6 @@ export declare const providerContactsTable: import("drizzle-orm/pg-core").PgTabl
     };
     dialect: "pg";
 }>;
-/**
- * Provider services/specialties/taxonomies.
- */
 export declare const providerServicesTable: import("drizzle-orm/pg-core").PgTableWithColumns<{
     name: "provider_services";
     schema: undefined;
@@ -619,9 +684,6 @@ export declare const providerServicesTable: import("drizzle-orm/pg-core").PgTabl
     };
     dialect: "pg";
 }>;
-/**
- * Provider sources — tracks which external sources contributed data for a provider.
- */
 export declare const providerSourcesTable: import("drizzle-orm/pg-core").PgTableWithColumns<{
     name: "provider_sources";
     schema: undefined;
@@ -799,9 +861,6 @@ export declare const providerSourcesTable: import("drizzle-orm/pg-core").PgTable
     };
     dialect: "pg";
 }>;
-/**
- * Provider evidence — specific proof/signals about a provider's services.
- */
 export declare const providerEvidenceTable: import("drizzle-orm/pg-core").PgTableWithColumns<{
     name: "provider_evidence";
     schema: undefined;
@@ -945,9 +1004,6 @@ export declare const providerEvidenceTable: import("drizzle-orm/pg-core").PgTabl
     };
     dialect: "pg";
 }>;
-/**
- * Geocode cache — avoid re-geocoding the same address.
- */
 export declare const geocodeCacheTable: import("drizzle-orm/pg-core").PgTableWithColumns<{
     name: "geocode_cache";
     schema: undefined;

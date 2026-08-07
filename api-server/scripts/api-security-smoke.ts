@@ -30,6 +30,9 @@ assert.equal(clinicUploadPolicy?.capability, "upload", "clinic dataset writes mu
 assert.equal(clinicUploadPolicy?.idempotent, true, "clinic dataset writes must retain replay protection");
 
 assert.match(security, /route_policy_missing/, "unclassified production write routes must fail closed");
+assert.match(security, /provider-sources\/search/, "read-like POST provider search must have an explicit read policy");
+assert.match(security, /policy.capability === "read"/, "read policies must bypass write-token authentication after rate/size enforcement");
+assert.match(security, /prefix: "\/api\/admin"/, "administrative GET/write routes must have an explicit admin policy");
 assert.match(security, /api_rate_limit_buckets/, "rate limiting must use a shared database store");
 assert.match(security, /Idempotency-Key is required/, "bulk/write operations must require replay protection");
 assert.match(security, /api_idempotency_keys/, "idempotency must be persisted across instances/restarts");

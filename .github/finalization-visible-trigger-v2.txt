@@ -1,1 +1,2 @@
 Run the isolated UI source finalization transaction through the visible PR runner.
+Capture post-migration browser diagnostics on failure.

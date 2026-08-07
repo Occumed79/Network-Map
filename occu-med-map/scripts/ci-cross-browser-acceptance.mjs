@@ -5,6 +5,8 @@ import { chromium, firefox, webkit } from "playwright";
 
 const baseUrl = process.env.NETWORK_MAP_CI_UI_URL || "http://127.0.0.1:4173";
 const browserName = process.env.NETWORK_MAP_BROWSER || "chromium";
+const requestedRoute = (process.env.NETWORK_MAP_ROUTE || "").trim();
+const requestedViewport = (process.env.NETWORK_MAP_VIEWPORT || "").trim();
 const artifactDir = path.resolve(process.cwd(), "test-results", "hardening-browser", browserName);
 fs.mkdirSync(artifactDir, { recursive: true });
 
@@ -23,6 +25,11 @@ const routes = [
   { name: "standard", suffix: "" },
   { name: "p2", suffix: "?p2-preview=1" },
 ];
+
+const selectedRoutes = requestedRoute ? routes.filter((route) => route.name === requestedRoute) : routes;
+const selectedViewports = requestedViewport ? viewports.filter((viewport) => viewport.name === requestedViewport) : viewports;
+if (!selectedRoutes.length) throw new Error(`Unsupported route case ${requestedRoute}`);
+if (!selectedViewports.length) throw new Error(`Unsupported viewport case ${requestedViewport}`);
 
 function json(route, payload, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(payload) });
@@ -328,11 +335,11 @@ async function runCase(browser, viewport, routeVariant) {
 
 const browser = await browserType.launch({ headless: true });
 try {
-  for (const routeVariant of routes) {
-    for (const viewport of viewports) await runCase(browser, viewport, routeVariant);
+  for (const routeVariant of selectedRoutes) {
+    for (const viewport of selectedViewports) await runCase(browser, viewport, routeVariant);
   }
 } finally {
   await browser.close();
 }
 
-console.log(`Cross-browser acceptance passed for ${browserName}.`);
+console.log(`Cross-browser acceptance passed for ${browserName}: routes=${selectedRoutes.map((route) => route.name).join(",")}; viewports=${selectedViewports.map((viewport) => viewport.name).join(",")}.`);

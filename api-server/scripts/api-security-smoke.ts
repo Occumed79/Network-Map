@@ -48,6 +48,9 @@ assert.match(security, /api_rate_limit_buckets/, "rate limiting must use a share
 assert.match(security, /Idempotency-Key is required/, "bulk/write operations must require replay protection");
 assert.match(security, /api_idempotency_keys/, "idempotency must be persisted across instances/restarts");
 assert.match(security, /api_write_audit/, "writes must produce a durable audit record");
+assert.match(security, /captureProtectedJsonResponse/, "protected response completion must own audit persistence");
+assert.match(security, /await auditWrite\(/, "write audit must complete before protected JSON response finalization");
+assert.doesNotMatch(security, /res\.on\("finish"[\s\S]*auditWrite/, "write audit must not regress to a fire-and-forget post-response finish listener");
 assert.match(security, /request_too_large/, "endpoint-specific request size limits must be enforced");
 assert.match(security, /security_control_unavailable/, "security store failures must fail closed");
 
@@ -62,4 +65,4 @@ const hashC = apiSecurityInternals.bodyHash({ a: 2 });
 assert.equal(hashA, hashB, "same request body must hash deterministically");
 assert.notEqual(hashA, hashC, "different request body must not reuse request hash");
 
-console.log("API authorization, read/write separation, CORS, rate-limit, idempotency and audit hardening smoke passed.");
+console.log("API authorization, read/write separation, CORS, rate-limit, idempotency and durable audit hardening smoke passed.");

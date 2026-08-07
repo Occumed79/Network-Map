@@ -1,0 +1,26 @@
+name: Sync frontend manifest
+on:
+  push:
+    branches: [hardening/upload-preview-rollback]
+permissions:
+  contents: write
+jobs:
+  sync:
+    if: ${{ !contains(github.event.head_commit.message || '', '[manifest-synced]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hardening/upload-preview-rollback
+          fetch-depth: 0
+      - run: |
+          git fetch origin hardening/provider-search-authority
+          git show FETCH_HEAD:occu-med-map/package.json > occu-med-map/package.json
+      - run: |
+          rm -f .github/workflows/sync-frontend-manifest.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Sync frontend manifest to frozen lockfile [manifest-synced]"
+          git push origin HEAD:hardening/upload-preview-rollback

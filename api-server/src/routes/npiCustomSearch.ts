@@ -57,8 +57,12 @@ router.post("/provider-sources/npi-custom", async (req: Request, res: Response) 
     }
 
     const results = await geocodeProviders(output.candidates, centerLat, centerLng);
-    const geocodedCount = results.filter((candidate) => candidate.coordinateStatus === "geocoded").length;
-    const finalMarkerCount = results.filter((candidate) => candidate.coordinateStatus !== "unverified").length;
+    const geocodedCount = results.filter((candidate) => candidate.coordinateStatus === "verified_address").length;
+    const finalMarkerCount = results.filter((candidate) =>
+      candidate.coordinateStatus === "verified_exact"
+      || candidate.coordinateStatus === "verified_address"
+      || candidate.coordinateStatus === "city_centroid",
+    ).length;
 
     res.setHeader("X-Network-Map-NPI-Pipeline", "central-adapter");
     res.json({

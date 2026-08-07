@@ -51,6 +51,7 @@ import "./sidebarWorkspacePanelGuardRuntime";
 import "./general-ui-hardening.css";
 import "./general-ui-visual-consistency.css";
 import "./pdf-preview-hardening.css";
+import "./mobile-sidebar-backdrop-fix.css";
 import "./dialogControllerRuntime";
 import "./generalUiIntegrityRuntime";
 

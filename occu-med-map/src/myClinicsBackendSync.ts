@@ -12,18 +12,9 @@ function readSyncedIds(): Set<string> {
     return new Set();
   }
 }
-
-function writeSyncedIds(ids: Set<string>) {
-  try { window.localStorage.setItem(SYNCED_GROUPS_KEY, JSON.stringify(Array.from(ids))); } catch {}
-}
-
-function groupId(group: ClinicGroup, index: number) {
-  return String(group.id || `${group.groupName || "My Clinics"}-${index}`);
-}
-
-function clinicRows(group: ClinicGroup): UploadedClinic[] {
-  return Array.isArray(group.clinics) ? group.clinics : [];
-}
+function writeSyncedIds(ids: Set<string>) { try { window.localStorage.setItem(SYNCED_GROUPS_KEY, JSON.stringify(Array.from(ids))); } catch {} }
+function groupId(group: ClinicGroup, index: number) { return String(group.id || `${group.groupName || "My Clinics"}-${index}`); }
+function clinicRows(group: ClinicGroup): UploadedClinic[] { return Array.isArray(group.clinics) ? group.clinics : []; }
 
 async function sha256(value: string): Promise<string> {
   const bytes = new TextEncoder().encode(value);
@@ -31,34 +22,19 @@ async function sha256(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function postPreviewChunk(args: {
-  group: ClinicGroup;
-  rows: UploadedClinic[];
-  chunkIndex: number;
-  totalChunks: number;
-  logicalUploadKey: string;
-  contentHash: string;
-  uploadId?: string;
-}) {
+async function postPreviewChunk(args: { group: ClinicGroup; rows: UploadedClinic[]; chunkIndex: number; totalChunks: number; logicalUploadKey: string; contentHash: string; uploadId?: string }) {
   const { group, rows, chunkIndex, totalChunks, logicalUploadKey, contentHash, uploadId } = args;
   const sourceLabel = group.groupName || "My Clinics Upload";
   const response = await fetch("/api/provider-uploads/preview", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": `preview:${logicalUploadKey.slice(0, 48)}:${chunkIndex}`,
+    },
     body: JSON.stringify({
-      uploadId,
-      logicalUploadKey,
-      contentHash,
-      sourceLabel,
-      filename: `${sourceLabel}-frontend-group.json`,
-      chunkIndex,
-      chunkCount: totalChunks,
-      rowOffset: chunkIndex * CHUNK_SIZE,
-      rows: rows.map((row) => ({
-        ...row,
-        sourceGroupName: sourceLabel,
-        sourceGroupColor: group.color || null,
-      })),
+      uploadId, logicalUploadKey, contentHash, sourceLabel,
+      filename: `${sourceLabel}-frontend-group.json`, chunkIndex, chunkCount: totalChunks, rowOffset: chunkIndex * CHUNK_SIZE,
+      rows: rows.map((row) => ({ ...row, sourceGroupName: sourceLabel, sourceGroupColor: group.color || null })),
     }),
   });
   const data = await response.json().catch(() => ({}));
@@ -69,7 +45,7 @@ async function postPreviewChunk(args: {
 async function commitPreview(uploadId: string) {
   const response = await fetch(`/api/provider-uploads/${encodeURIComponent(uploadId)}/commit`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "idempotency-key": `commit:${uploadId}` },
     body: "{}",
   });
   const data = await response.json().catch(() => ({}));
@@ -85,20 +61,10 @@ async function syncGroup(group: ClinicGroup, stableGroupId: string) {
   const logicalUploadKey = await sha256(`clinic-group:${stableGroupId}:${sourceLabel}`);
   const totalChunks = Math.ceil(rows.length / CHUNK_SIZE);
   let uploadId: string | undefined;
-
   for (let start = 0, chunkIndex = 0; start < rows.length; start += CHUNK_SIZE, chunkIndex += 1) {
-    const preview = await postPreviewChunk({
-      group,
-      rows: rows.slice(start, start + CHUNK_SIZE),
-      chunkIndex,
-      totalChunks,
-      logicalUploadKey,
-      contentHash,
-      uploadId,
-    });
+    const preview = await postPreviewChunk({ group, rows: rows.slice(start, start + CHUNK_SIZE), chunkIndex, totalChunks, logicalUploadKey, contentHash, uploadId });
     uploadId = preview.uploadId;
   }
-
   if (!uploadId) throw new Error("Provider upload preview did not return an upload ID");
   const committed = await commitPreview(uploadId);
   console.info(`[My Clinics] committed ${rows.length} rows through previewed upload ${uploadId}`, sourceLabel, committed);
@@ -107,12 +73,8 @@ async function syncGroup(group: ClinicGroup, stableGroupId: string) {
 function syncClinicGroupsJson(value: string | null) {
   if (!value) return;
   let groups: ClinicGroup[] = [];
-  try {
-    const parsed = JSON.parse(value);
-    if (Array.isArray(parsed)) groups = parsed;
-  } catch { return; }
+  try { const parsed = JSON.parse(value); if (Array.isArray(parsed)) groups = parsed; } catch { return; }
   if (!groups.length) return;
-
   const synced = readSyncedIds();
   groups.forEach((group, index) => {
     const id = groupId(group, index);
@@ -121,9 +83,7 @@ function syncClinicGroupsJson(value: string | null) {
     writeSyncedIds(synced);
     void syncGroup(group, id).catch((error) => {
       console.error("[My Clinics] preview/commit backend sync failed", error);
-      const latest = readSyncedIds();
-      latest.delete(id);
-      writeSyncedIds(latest);
+      const latest = readSyncedIds(); latest.delete(id); writeSyncedIds(latest);
     });
   });
 }

@@ -1,0 +1,43 @@
+name: UI Stack Integration Audit
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ui-stack-integration-audit.yml'
+      - 'occu-med-map/**'
+      - 'api-server/**'
+      - 'lib/**'
+      - 'scripts/**'
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+
+jobs:
+  conflict-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out platform hardening head
+        uses: actions/checkout@v4
+        with:
+          ref: hardening/real-acceptance-deployment-gates
+          fetch-depth: 0
+
+      - name: Audit merge with UI ownership branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin hardening/ui-ownership-consolidation-v2:refs/remotes/origin/ui-ownership
+          git config user.name "integration-audit"
+          git config user.email "integration-audit@users.noreply.github.com"
+          if git merge --no-commit --no-ff refs/remotes/origin/ui-ownership; then
+            echo "UI ownership branch merges cleanly into platform hardening head."
+            git merge --abort || true
+            exit 0
+          fi
+          echo "::error::UI/platform integration has merge conflicts in:"
+          git diff --name-only --diff-filter=U
+          echo "--- conflict markers ---"
+          git diff --cc --stat
+          exit 1

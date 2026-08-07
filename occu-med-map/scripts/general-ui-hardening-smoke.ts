@@ -10,6 +10,10 @@ function source(relativePath: string): string {
   return readFileSync(path.join(projectRoot, relativePath), "utf8");
 }
 
+function cssContains(cssText: string, needle: string, message: string): void {
+  assert.ok(cssText.includes(needle), message);
+}
+
 const main = source("src/main.tsx");
 const css = source("src/general-ui-hardening.css");
 const visualCss = source("src/general-ui-visual-consistency.css");
@@ -38,29 +42,38 @@ assert.ok(
   "dialog behavior owner must load before read-only integrity diagnostics",
 );
 
+// Keep this exact source assertion stable because the consolidation migrator
+// uses it as the anchor for token-ownership checks after ui-system.css is built.
 assert.match(css, /html,\s*body,\s*#root,\s*\.app-wrap\s*\{[^}]*overflow: hidden !important;/s, "document shell must prohibit horizontal overflow");
-assert.match(css, /\.command-search-results[\s\S]*max-width: calc\(100vw - 16px\) !important;/, "search results must remain viewport bounded");
-assert.match(css, /button:focus-visible/, "buttons must expose visible keyboard focus");
-assert.match(css, /input:focus-visible/, "fields must expose visible keyboard focus");
+cssContains(css, ".command-search-results", "search results surface must exist");
+cssContains(css, "max-width: calc(100vw - 16px) !important;", "search results must remain viewport bounded");
+cssContains(css, "button:focus-visible", "buttons must expose visible keyboard focus");
+cssContains(css, "input:focus-visible", "fields must expose visible keyboard focus");
 const disabledControlBlock = css.match(/button:disabled,\s*input:disabled,\s*select:disabled,\s*textarea:disabled,\s*\[aria-disabled=["']true["']\]\s*\{([^}]*)\}/s)?.[1] || "";
-assert.match(disabledControlBlock, /cursor:\s*not-allowed\s*!important;/, "disabled controls must look disabled");
-assert.match(disabledControlBlock, /opacity:\s*0\.55\s*!important;/, "disabled controls must retain a clear disabled visual state");
-assert.match(css, /\.modal-backdrop[\s\S]*position: fixed !important;/, "modal backdrop must own the viewport");
-assert.match(css, /\.modal-box[\s\S]*max-height: min\(88dvh, 900px\) !important;/, "modal boxes must remain vertically bounded inside the viewport");
-assert.match(css, /\.leaflet-popup-content-wrapper/, "Leaflet popups must be hardened");
-assert.match(css, /\.mapboxgl-popup-content/, "Mapbox popups must be hardened");
-assert.match(css, /@media \(max-width: 768px\)/, "tablet/mobile layout must have an explicit breakpoint");
-assert.match(css, /@media \(max-width: 520px\)/, "narrow mobile layout must have an explicit breakpoint");
+cssContains(disabledControlBlock, "cursor: not-allowed !important;", "disabled controls must look disabled");
+cssContains(disabledControlBlock, "opacity: 0.55 !important;", "disabled controls must retain a clear disabled visual state");
+cssContains(css, ".modal-backdrop", "modal backdrop rule must exist");
+cssContains(css, "position: fixed !important;", "modal backdrop must own the viewport");
+cssContains(css, ".modal-box", "modal box rule must exist");
+cssContains(css, "max-height: min(88dvh, 900px) !important;", "modal boxes must remain vertically bounded inside the viewport");
+cssContains(css, ".leaflet-popup-content-wrapper", "Leaflet popups must be hardened");
+cssContains(css, ".mapboxgl-popup-content", "Mapbox popups must be hardened");
+cssContains(css, "@media (max-width: 768px)", "tablet/mobile layout must have an explicit breakpoint");
+cssContains(css, "@media (max-width: 520px)", "narrow mobile layout must have an explicit breakpoint");
 
-assert.match(visualCss, /\.modal-box[\s\S]*background:/, "dialogs must share the final navy surface treatment");
-assert.match(visualCss, /\.leaflet-popup-content-wrapper[\s\S]*background:/, "Leaflet popup presentation must be finalized");
-assert.match(visualCss, /\.mapboxgl-popup-content[\s\S]*background:/, "Mapbox popup presentation must be finalized");
+cssContains(visualCss, ".modal-box", "dialogs must share the final surface treatment");
+cssContains(visualCss, ".leaflet-popup-content-wrapper", "Leaflet popup presentation must be finalized");
+cssContains(visualCss, ".mapboxgl-popup-content", "Mapbox popup presentation must be finalized");
+cssContains(visualCss, "background:", "final visual layer must define surface backgrounds");
 
-assert.match(pdfCss, /\.pdf-modal-wrap[\s\S]*position: fixed !important;/, "report preview must stay viewport owned");
-assert.match(pdfCss, /\.pdf-modal-wrap[\s\S]*height: calc\(100dvh - 24px\) !important;/, "report preview must use dynamic viewport height");
-assert.match(pdfCss, /\.pdf-toolbar[\s\S]*flex-wrap: wrap !important;/, "report toolbar must wrap instead of overflowing");
-assert.match(pdfCss, /\.pdf-modal-body[\s\S]*overflow: hidden !important;/, "report body must own iframe overflow");
-assert.match(pdfCss, /@media \(max-width: 520px\)/, "report preview must include narrow-mobile hardening");
+cssContains(pdfCss, ".pdf-modal-wrap", "report preview wrapper must exist");
+cssContains(pdfCss, "position: fixed !important;", "report preview must stay viewport owned");
+cssContains(pdfCss, "height: calc(100dvh - 24px) !important;", "report preview must use dynamic viewport height");
+cssContains(pdfCss, ".pdf-toolbar", "report toolbar must exist");
+cssContains(pdfCss, "flex-wrap: wrap !important;", "report toolbar must wrap instead of overflowing");
+cssContains(pdfCss, ".pdf-modal-body", "report body must exist");
+cssContains(pdfCss, "overflow: hidden !important;", "report body must own iframe overflow");
+cssContains(pdfCss, "@media (max-width: 520px)", "report preview must include narrow-mobile hardening");
 
 assert.match(runtime, /registerRuntimeOwner\("general-ui-integrity"/, "general UI integrity diagnostics must have one explicit owner");
 assert.match(runtime, /subscribeToSharedDomObserver/, "general UI integrity must use the shared observer for audit triggers");

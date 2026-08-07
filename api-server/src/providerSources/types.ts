@@ -1,6 +1,7 @@
 import type { SearchMode, SearchCoordinatorAudit } from "./searchCoordinator";
+import type { ProviderIntegrityFinding, CoordinateAccuracyPolicy } from "./integrity";
 
-export type CoordinateStatus = "imported" | "geocoded" | "unverified";
+export type CoordinateStatus = "verified_exact" | "verified_address" | "city_centroid" | "unverified" | "invalid";
 export type TrustTier = "verified" | "registry" | "directory" | "lead";
 
 export interface ProviderProvenance {
@@ -8,6 +9,7 @@ export interface ProviderProvenance {
   sourceRecordId?: string;
   sourceUrl?: string;
   observedAt?: string;
+  coordinateSource?: string;
 }
 
 export interface ProviderCandidate {
@@ -24,6 +26,7 @@ export interface ProviderCandidate {
   lat?: number;
   lng?: number;
   coordinateStatus: CoordinateStatus;
+  coordinateSource?: string;
   providerCategory?: string;
   services?: string[];
   taxonomy?: string;
@@ -42,6 +45,8 @@ export interface ProviderCandidate {
   matchReason?: string;
   internalStatus?: string;
   distanceMiles?: number;
+  integrityFindings?: ProviderIntegrityFinding[];
+  quarantineStatus?: "accepted" | "quarantined";
   _rawSources?: string[];
 }
 
@@ -63,6 +68,8 @@ export interface SearchParams {
   centerLng: number;
   mode?: SearchMode;
   sourceIds?: string[];
+  coordinatePolicy?: CoordinateAccuracyPolicy;
+  includeQuarantined?: boolean;
 }
 
 export interface SourceResult {
@@ -84,6 +91,8 @@ export interface SearchAudit {
   dedupedCount: number;
   geocodedCount: number;
   finalMarkerCount: number;
+  quarantinedCount?: number;
+  invalidCoordinateCount?: number;
   errorsBySource: Record<string, string>;
   durationMs: number;
   configuredApiSources: string[];
@@ -95,6 +104,7 @@ export interface SearchAudit {
 export interface UnifiedSearchResponse {
   params: SearchParams;
   results: ProviderCandidate[];
+  quarantinedResults?: ProviderCandidate[];
   sourceResults: SourceResult[];
   audit: SearchAudit;
   incomplete?: boolean;

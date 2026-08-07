@@ -48,6 +48,46 @@ jobs:
           node scripts/apply-directories-source-retirement.mjs
           node scripts/apply-provider-source-control-migration.mjs
           node scripts/apply-mode-launcher-source-migration.mjs
+
+          # The NPI controls are conditionally rendered inside a JSX expression,
+          # not a direct lp-controls element. Adapt the one-time migration to wrap
+          # that conditional block with a display:contents ownership boundary.
+          node <<'NODE'
+          const fs = require('node:fs');
+          const file = 'scripts/apply-provider-mode-source-state.mjs';
+          let source = fs.readFileSync(file, 'utf8');
+          const before = `const controlChildren = liveControls.children.filter(ts.isJsxElement);
+          const liveStart = controlChildren.findIndex((child) => /LIVE SOURCE FILTERS/.test(child.getText(sourceFile)));
+          const npiStart = controlChildren.findIndex((child) => /U\\.S\\. NPI FILTERS/.test(child.getText(sourceFile)));
+          if (liveStart < 0 || npiStart < 0 || npiStart <= liveStart) {
+            throw new Error(\`Finder control section markers missing: live=\${liveStart}, npi=\${npiStart}\`);
+          }
+          for (let index = liveStart; index < npiStart; index += 1) appendClass(controlChildren[index], "provider-tool-live-only");
+          for (let index = npiStart; index < controlChildren.length; index += 1) appendClass(controlChildren[index], "provider-tool-npi-only");`;
+          const after = `const controlChildren = liveControls.children.filter((child) => child.getText(sourceFile).trim());
+          const liveStart = controlChildren.findIndex((child) => /LIVE SOURCE FILTERS/.test(child.getText(sourceFile)));
+          const npiStart = controlChildren.findIndex((child) => /U\\.S\\. NPI FILTERS/.test(child.getText(sourceFile)));
+          if (liveStart < 0 || npiStart < 0 || npiStart <= liveStart) {
+            throw new Error(\`Finder control section markers missing: live=\${liveStart}, npi=\${npiStart}\`);
+          }
+          for (let index = liveStart; index < npiStart; index += 1) {
+            if (ts.isJsxElement(controlChildren[index])) appendClass(controlChildren[index], "provider-tool-live-only");
+          }
+          const npiBoundary = controlChildren[npiStart];
+          if (!ts.isJsxExpression(npiBoundary)) throw new Error("NPI control boundary must remain a JSX expression");
+          edits.push([
+            npiBoundary.getStart(sourceFile),
+            npiBoundary.getEnd(),
+            \`<div className="provider-tool-npi-only" style={{display:'contents'}}>\${npiBoundary.getText(sourceFile)}</div>\`,
+          ]);
+          for (let index = npiStart + 1; index < controlChildren.length; index += 1) {
+            if (ts.isJsxElement(controlChildren[index])) appendClass(controlChildren[index], "provider-tool-npi-only");
+          }`;
+          if (!source.includes(before)) throw new Error('Expected provider-mode marker block was not found');
+          source = source.replace(before, after);
+          fs.writeFileSync(file, source);
+          NODE
+
           node scripts/apply-provider-mode-source-state.mjs
           node scripts/apply-ui-system-consolidation.mjs
           node scripts/apply-redundant-theme-css-retirement.mjs

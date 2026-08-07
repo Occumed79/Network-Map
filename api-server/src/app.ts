@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { saveSearchSnapshot } from "./lib/networkMapPersistence";
+import { requestContextMiddleware } from "./lib/observability";
 import { apiSecurity } from "./middleware/apiSecurity";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -45,6 +46,10 @@ const requestDeadline: RequestHandler = (req, res, next) => {
 };
 
 app.disable("x-powered-by");
+// Establish the correlation ID/AsyncLocalStorage context before logging,
+// security, body parsing, or any route work. Everything downstream can now
+// report one request ID without maintaining a second request-context owner.
+app.use(requestContextMiddleware);
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "same-origin");

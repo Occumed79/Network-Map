@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -108,7 +108,7 @@ const read = (path: string) => readFileSync(resolve(root, path), "utf8");
 
 const centralAdapter = read("api-server/src/providerSources/adapters/npi.ts");
 const customRoute = read("api-server/src/routes/npiCustomSearch.ts");
-const legacyRoute = read("api-server/src/routes/providerSearch.ts");
+const routesIndex = read("api-server/src/routes/index.ts");
 const dentalRoute = read("api-server/src/routes/dentalProviderDiscovery.ts");
 const priceFinder = read("api-server/src/routes/priceFinder.ts");
 const priceFinderUnified = read("api-server/src/routes/priceFinderUnified.ts");
@@ -117,11 +117,16 @@ const app = read("occu-med-map/src/App.tsx");
 assert.match(centralAdapter, /https:\/\/npiregistry\.cms\.hhs\.gov\/api\//);
 assert.match(customRoute, /searchNpiCustom/);
 assert.doesNotMatch(customRoute, /npiregistry\.cms\.hhs\.gov\/api/);
-assert.doesNotMatch(legacyRoute, /npiregistry\.cms\.hhs\.gov\/api/);
-assert.doesNotMatch(legacyRoute, /SERVICE_TAXONOMIES/);
-assert.match(legacyRoute, /radiusMiles:\s*0[\s\S]*centerLat:\s*0[\s\S]*centerLng:\s*0/);
+assert.equal(
+  existsSync(resolve(root, "api-server/src/routes/providerSearch.ts")),
+  false,
+  "obsolete providerSearch route must remain deleted after provider-search consolidation",
+);
+assert.doesNotMatch(routesIndex, /providerSearchRouter|\.\/providerSearch/, "obsolete providerSearch route must not be mounted");
 assert.match(priceFinderUnified, /radiusMiles:\s*0[\s\S]*centerLat:\s*0[\s\S]*centerLng:\s*0/);
-assert.match(dentalRoute, /from "\.\.\/providerSources\/adapters\/npi"/);
+assert.match(dentalRoute, /runUnifiedSearch/, "dental discovery must delegate to the authoritative provider-search orchestrator");
+assert.doesNotMatch(dentalRoute, /from "\.\.\/providerSources\/adapters\/npi"/, "dental discovery must not bypass the orchestrator with a direct NPI adapter import");
+assert.doesNotMatch(dentalRoute, /searchNpi\(/, "dental discovery must not bypass the orchestrator with a direct NPI search");
 assert.match(priceFinder, /searchNpi as searchNpiCentral/);
 assert.doesNotMatch(app, /npiregistry\.cms\.hhs\.gov\/api/);
 assert.match(app, /fetch\('\/api\/provider-sources\/npi-custom'/);

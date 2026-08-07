@@ -15,6 +15,7 @@ import npiCustomSearchRouter from "./npiCustomSearch";
 import sourceStatusRouter from "./sourceStatus";
 import browserExtractionRouter from "./browserExtraction";
 import vectorIndexRouter from "./vectorIndex";
+import providerUploadLifecycleRouter from "./providerUploadLifecycle";
 import providerDatasetUploadsRouter from "./providerDatasetUploads";
 import providerLayersRouter from "./providerLayers";
 import googlePlacesRouter from "./googlePlaces";
@@ -47,6 +48,10 @@ router.use(providerExplorerRouter);
 router.use(nacchoRecoveryStatusRouter);
 router.use(nacchoLhdRouter);
 router.use(stabilizeProviderLayerRequests);
+
+// Safe provider uploads require explicit preview -> commit -> rollback lifecycle.
+// The legacy dataset route remains behind it temporarily for compatibility.
+router.use(providerUploadLifecycleRouter);
 router.use(providerDatasetUploadsRouter);
 router.use(providerLayersRouter);
 router.use(myClinicsUploadRouter);

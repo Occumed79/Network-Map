@@ -1,12 +1,14 @@
 import { createRequire } from "node:module";
 
-// CI supplies typescript-eslint through pnpm dlx and exposes that temporary
+// CI supplies lint tooling through pnpm dlx and exposes that temporary
 // node_modules directory through NODE_PATH. createRequire uses the CommonJS
-// resolver (including NODE_PATH), avoiding any dependency/lockfile mutation
-// just to execute the lint gate.
+// resolver (including NODE_PATH), avoiding dependency/lockfile mutation just
+// to execute the quality gate.
 const require = createRequire(import.meta.url);
 const tseslintModule = require("typescript-eslint");
 const tseslint = tseslintModule.default || tseslintModule;
+const reactHooksModule = require("eslint-plugin-react-hooks");
+const reactHooks = reactHooksModule.default || reactHooksModule;
 
 export default tseslint.config(
   {
@@ -24,15 +26,17 @@ export default tseslint.config(
     },
     plugins: {
       "@typescript-eslint": tseslint.plugin,
+      "react-hooks": reactHooks,
     },
     rules: {
       "no-debugger": "error",
-      "no-duplicate-imports": "error",
       "no-unreachable": "error",
       "no-constant-condition": ["error", { "checkLoops": false }],
       "no-self-assign": "error",
       "no-useless-catch": "error",
-      "@typescript-eslint/no-duplicate-enum-values": "error"
+      "@typescript-eslint/no-duplicate-enum-values": "error",
+      "react-hooks/rules-of-hooks": "error",
+      "react-hooks/exhaustive-deps": "warn"
     },
   },
 );

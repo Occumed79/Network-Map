@@ -90,6 +90,11 @@ function requestId(req: Request): string {
   return incoming && /^[A-Za-z0-9._:-]{8,128}$/.test(incoming) ? incoming : randomUUID();
 }
 
+function canonicalRequestPath(req: Request): string {
+  const original = String(req.originalUrl || req.url || req.path || "");
+  return original.split("?", 1)[0] || req.path || "/";
+}
+
 function bodyHash(body: unknown): string {
   return createHash("sha256").update(JSON.stringify(body ?? null)).digest("hex");
 }
@@ -133,7 +138,7 @@ async function auditWrite(req: Request, res: Response, capability: ApiCapability
       `INSERT INTO public.api_write_audit (request_id,method,path,capability,actor,idempotency_key,status_code,duration_ms,body_hash,metadata)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,
       [
-        String(res.getHeader("X-Request-ID") || "unknown"), req.method, req.path, capability,
+        String(res.getHeader("X-Request-ID") || "unknown"), req.method, canonicalRequestPath(req), capability,
         req.get("x-actor-id")?.slice(0, 128) || null, req.get("idempotency-key")?.slice(0, 200) || null,
         statusCode, Date.now() - startedAt, bodyHash(req.body), JSON.stringify({ ipPresent: Boolean(req.ip) }),
       ],

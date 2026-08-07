@@ -34,7 +34,8 @@ jobs:
         run: |
           pnpm dlx \
             --package=eslint@8.57.1 \
-            --package=@typescript-eslint/parser@7.18.0 \
+            --package=@typescript-eslint/parser@8.46.2 \
+            --package=typescript@5.9.3 \
             bash -c '
               set -euo pipefail
               export NODE_PATH="$(dirname "$(dirname "$(command -v eslint)")")"

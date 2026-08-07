@@ -1,7 +1,6 @@
-import { LOCS, EXTRA_COORDS } from '../../lib/data';
+import { LOCS, EXTRA_COORDS, getVal } from '../../lib/data';
 import { STATE_POP } from '../../lib/populationData';
 import { NAME2CODE, CATS, MLBL, DCOL, DLBL } from './networkMapConstants';
-import { getVal } from '../../lib/data';
 
 export function haversine(lat1:number,lng1:number,lat2:number,lng2:number):number {
   const R=6371000,dL=(lat2-lat1)*Math.PI/180,dN=(lng2-lng1)*Math.PI/180;

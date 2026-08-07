@@ -69,6 +69,25 @@ async function loadOptionalRuntimes(): Promise<void> {
   ]);
 }
 
+function scheduleOptionalRuntimes(): void {
+  const idleWindow = window as typeof window & {
+    requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+  };
+  const start = () => { void loadOptionalRuntimes(); };
+
+  // Do not let optional compatibility/telemetry runtimes race React's initial
+  // commit. The first usable application frame owns startup; optional work is
+  // admitted only after the browser has had a paint opportunity and an idle
+  // slice, with a bounded fallback for browsers without requestIdleCallback.
+  window.requestAnimationFrame(() => {
+    if (idleWindow.requestIdleCallback) {
+      idleWindow.requestIdleCallback(start, { timeout: 1600 });
+      return;
+    }
+    window.setTimeout(start, 180);
+  });
+}
+
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("Network Map root element is missing");
 const root = createRoot(rootElement);
@@ -77,7 +96,7 @@ const phaseTwoPreview = new URLSearchParams(window.location.search).get("p2-prev
 async function boot(): Promise<void> {
   if (!phaseTwoPreview) {
     root.render(<App />);
-    window.setTimeout(() => { void loadOptionalRuntimes(); }, 0);
+    scheduleOptionalRuntimes();
     return;
   }
 
@@ -93,7 +112,7 @@ async function boot(): Promise<void> {
     console.error("Phase Two preview failed; loading standard map", error);
     root.render(<App />);
   }
-  window.setTimeout(() => { void loadOptionalRuntimes(); }, 0);
+  scheduleOptionalRuntimes();
 }
 
 void boot();

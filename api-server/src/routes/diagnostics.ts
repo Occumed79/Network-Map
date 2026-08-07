@@ -6,6 +6,14 @@ import { isPersistenceConfigured } from "../lib/networkMapPersistence";
 
 const router: IRouter = Router();
 
+type UploadSummary = {
+  runs: number;
+  accepted: number;
+  quarantined: number;
+  rejected: number;
+  duplicate: number;
+};
+
 async function schemaVersions(): Promise<string[]> {
   if (!isPersistenceConfigured()) return [];
   try {
@@ -27,7 +35,7 @@ router.get("/diagnostics/export", async (_req, res) => {
     externalSources: getExternalSourceHealth(),
   });
   const recentUploads = Array.isArray(snapshot.recentUploads) ? snapshot.recentUploads as Array<Record<string, unknown>> : [];
-  const recentUploadSummary = recentUploads.reduce((summary, upload) => {
+  const recentUploadSummary = recentUploads.reduce<UploadSummary>((summary, upload) => {
     summary.runs += 1;
     summary.accepted += Number(upload.accepted || 0);
     summary.quarantined += Number(upload.quarantined || 0);

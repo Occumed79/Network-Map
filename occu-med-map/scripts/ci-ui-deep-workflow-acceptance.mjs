@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 const baseUrl = process.env.NETWORK_MAP_CI_UI_URL || "http://127.0.0.1:4173";
-const artifactDir = path.resolve(process.cwd(), "test-results", "ui-deep-acceptance");
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const artifactDir = path.resolve(scriptDir, "../test-results/ui-deep-workflow");
 fs.mkdirSync(artifactDir, { recursive: true });
 
 function json(route, payload, status = 200) {

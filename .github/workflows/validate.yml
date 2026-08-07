@@ -47,6 +47,9 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
+      - name: Run provider search architecture tests
+        run: pnpm --filter @workspace/api-server test:provider-search-authority
+
       - name: Run Provider Explorer smoke tests
         run: pnpm --filter @workspace/api-server test:provider-explorer
 

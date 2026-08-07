@@ -1,4 +1,9 @@
 import "./unified-provider-tools.css";
+import {
+  registerRuntimeOwner,
+  runWithoutSharedDomObservation,
+  subscribeToSharedDomObserver,
+} from "./runtimeControllerRegistry";
 
 type ProviderToolMode = "live" | "npi" | "explorer" | "";
 type SourceKey = "bluehive" | "indexed" | "dentists" | "my-clinics";
@@ -18,13 +23,6 @@ const DEFAULT_SOURCE_SELECTION: Record<SourceKey, boolean> = {
   indexed: false,
   dentists: false,
   "my-clinics": false,
-};
-
-const OBSERVER_OPTIONS: MutationObserverInit = {
-  childList: true,
-  subtree: true,
-  attributes: true,
-  attributeFilter: ["class", "hidden"],
 };
 
 const SOURCE_CONFIGS: SourceConfig[] = [
@@ -58,8 +56,7 @@ let installed = false;
 let scanQueued = false;
 let sourceSelectionInitialized = false;
 let applyingStoredSelection = false;
-let observer: MutationObserver | null = null;
-let observerConnected = false;
+let unsubscribeDomObserver: (() => void) | null = null;
 
 function normalizedText(node: Element | null): string {
   return (node?.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -448,50 +445,56 @@ function scan(): void {
   syncActiveButtons();
 }
 
-function connectObserver(): void {
-  if (!observer || observerConnected || !document.body) return;
-  observer.observe(document.body, OBSERVER_OPTIONS);
-  observerConnected = true;
-}
-
-function scanWithoutObservingOwnChanges(): void {
-  const reconnect = observerConnected;
-  if (reconnect) {
-    observer?.disconnect();
-    observerConnected = false;
-  }
-
-  try {
-    scan();
-  } finally {
-    if (reconnect) connectObserver();
-  }
-}
-
 function scheduleScan(): void {
   if (scanQueued) return;
   scanQueued = true;
   window.setTimeout(() => {
     scanQueued = false;
-    scanWithoutObservingOwnChanges();
+    runWithoutSharedDomObservation(scan);
   }, 40);
+}
+
+function mutationTouchesProviderTools(mutations: MutationRecord[]): boolean {
+  return mutations.some((mutation) => {
+    const target = mutation.target instanceof Element ? mutation.target : null;
+    if (target?.closest(".command-tool-grid, .workflow-layer, .live-panel, .provider-explorer-drawer, .command-header")) return true;
+    return Array.from(mutation.addedNodes).some((node) =>
+      node instanceof Element
+      && Boolean(node.matches(".command-tool-grid, .workflow-layer, .live-panel, .provider-explorer-drawer")
+        || node.querySelector(".command-tool-grid, .workflow-layer, .live-panel, .provider-explorer-drawer")),
+    );
+  });
+}
+
+function handleSourceSelectionChange(event: Event): void {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  const label = (target.getAttribute("aria-label") || "").trim().toLowerCase();
+  if (!SOURCE_CONFIGS.some(({ inputLabel }) => inputLabel.toLowerCase() === label)) return;
+  persistSelection();
+  scheduleScan();
+}
+
+function cleanupUnifiedProviderTools(): void {
+  unsubscribeDomObserver?.();
+  unsubscribeDomObserver = null;
+  document.removeEventListener("change", handleSourceSelectionChange);
 }
 
 export function installUnifiedProviderTools(): void {
   if (installed) return;
+  if (!registerRuntimeOwner(
+    "unified-provider-tools",
+    "Legacy provider-tool compatibility layer while controls migrate to React source ownership",
+  )) return;
   installed = true;
 
-  document.addEventListener("change", (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLInputElement)) return;
-    if (!SOURCE_CONFIGS.some(({ inputLabel }) => inputLabel.toLowerCase() === (target.getAttribute("aria-label") || "").trim().toLowerCase())) return;
-    persistSelection();
-    scheduleScan();
+  document.addEventListener("change", handleSourceSelectionChange);
+  unsubscribeDomObserver = subscribeToSharedDomObserver("unified-provider-tools", (mutations) => {
+    if (mutationTouchesProviderTools(mutations)) scheduleScan();
   });
-
-  observer = new MutationObserver(scheduleScan);
-  connectObserver();
   window.addEventListener("load", scheduleScan, { once: true });
+  window.addEventListener("beforeunload", cleanupUnifiedProviderTools, { once: true });
   scheduleScan();
 }
 

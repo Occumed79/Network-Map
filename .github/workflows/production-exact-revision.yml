@@ -1,0 +1,67 @@
+name: Production Exact Revision Acceptance
+
+on:
+  workflow_run:
+    workflows: ["Validate"]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact Git revision expected on production
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  NETWORK_MAP_PRODUCTION_URL: ${{ vars.NETWORK_MAP_PRODUCTION_URL || 'https://network-map-tool-mqib.onrender.com' }}
+
+jobs:
+  production-acceptance:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Resolve exact validated revision
+        id: revision
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "sha=${{ inputs.expected_sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.revision.outputs.sha }}
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Resolve previous revision for rollback evidence
+        id: previous
+        shell: bash
+        run: |
+          PREVIOUS=$(git rev-parse HEAD^ 2>/dev/null || true)
+          echo "sha=$PREVIOUS" >> "$GITHUB_OUTPUT"
+      - name: Install Chromium
+        run: pnpm --filter @workspace/occu-med-map exec playwright install --with-deps chromium
+      - name: Verify exact deployed revision and read-only browser behavior
+        env:
+          EXPECTED_GIT_SHA: ${{ steps.revision.outputs.sha }}
+          PREVIOUS_GIT_SHA: ${{ steps.previous.outputs.sha }}
+        run: pnpm --filter @workspace/occu-med-map exec node scripts/production-exact-revision-acceptance.mjs
+      - name: Upload production evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-exact-revision-${{ steps.revision.outputs.sha }}
+          path: occu-med-map/test-results/production-acceptance
+          if-no-files-found: ignore
+          retention-days: 14

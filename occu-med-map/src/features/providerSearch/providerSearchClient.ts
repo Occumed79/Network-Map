@@ -2,6 +2,13 @@ export type ProviderSource = 'NPI' | 'OpenStreetMap' | 'WebHint' | 'FMCSA' | 'Ma
 export type CoordinateStatus = 'imported' | 'geocoded' | 'unverified';
 export type TrustTier = 'verified' | 'registry' | 'directory' | 'lead';
 
+export type ProviderProvenance = {
+  source: string;
+  sourceRecordId?: string;
+  sourceUrl?: string;
+  observedAt?: string;
+};
+
 export type ProviderCandidate = {
   id: string;
   name: string;
@@ -9,12 +16,15 @@ export type ProviderCandidate = {
   city: string;
   state: string;
   postalCode: string;
+  country?: string;
   phone: string;
   fax?: string;
   website: string;
   lat?: number;
   lng?: number;
   coordinateStatus: CoordinateStatus;
+  providerCategory?: string;
+  services?: string[];
   taxonomy?: string;
   taxonomyCode?: string;
   npi?: string;
@@ -32,6 +42,9 @@ export type ProviderCandidate = {
     confidence: number;
     source: string;
   }>;
+  provenance?: ProviderProvenance[];
+  lastSeenAt?: string;
+  matchReason?: string;
   distanceMiles?: number;
 };
 
@@ -41,6 +54,8 @@ export type ProviderStatus = {
   ok: boolean;
   count: number;
   error?: string;
+  durationMs?: number;
+  timedOut?: boolean;
 };
 
 export type SearchAudit = {
@@ -63,10 +78,13 @@ export type UnifiedSearchResponse = {
     radiusMiles: number;
     centerLat: number;
     centerLng: number;
+    sourceIds?: string[];
   };
   results: ProviderCandidate[];
   sourceResults: ProviderStatus[];
   audit: SearchAudit;
+  incomplete?: boolean;
+  degradedSources?: string[];
   persistence?: {
     searchRunId: number | null;
     resultsInserted: number;
@@ -75,21 +93,7 @@ export type UnifiedSearchResponse = {
   };
 };
 
-// Legacy response type for backward compatibility
-export type ProviderSearchResponse = {
-  location: string;
-  serviceType: string;
-  radiusMiles: number;
-  count: number;
-  results: ProviderCandidate[];
-  providers: ProviderStatus[];
-  note?: string;
-};
-
-/**
- * Universal provider discovery — calls POST /api/provider-sources/search.
- * This is the primary search method.
- */
+/** Universal provider discovery. All provider search consumers should use this backend contract. */
 export async function discoverProviders(params: {
   city: string;
   state: string;
@@ -120,10 +124,7 @@ export async function discoverProviders(params: {
   return data as UnifiedSearchResponse;
 }
 
-/**
- * Map inventory — fetch indexed providers by viewport bounds.
- * Calls GET /api/map-inventory
- */
+/** Map inventory — viewport-bounded stored-provider loading. */
 export async function fetchMapInventory(bounds: {
   north: number;
   south: number;
@@ -176,29 +177,3 @@ export type MapInventoryProvider = {
   trustTier: string;
   sources: Array<{ sourceId: string; sourceLabel: string; trustTier: string }>;
 };
-
-/**
- * Legacy provider search — calls GET /api/providers/search (compatibility).
- * @deprecated Use discoverProviders() instead.
- */
-export async function searchProviders(params: {
-  city: string;
-  state: string;
-  serviceType: string;
-  radiusMiles?: number;
-}): Promise<ProviderSearchResponse> {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === null || value === '') continue;
-    query.set(key, String(value));
-  }
-  const response = await fetch(`/api/providers/search?${query.toString()}`);
-  const data = await response.json().catch(() => null);
-  if (!response.ok) {
-    const message = data && typeof data === 'object' && 'error' in data
-      ? String((data as { error?: unknown }).error)
-      : `Provider search failed with status ${response.status}`;
-    throw new Error(message);
-  }
-  return data as ProviderSearchResponse;
-}

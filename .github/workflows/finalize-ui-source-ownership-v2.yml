@@ -1,4 +1,5 @@
 name: Finalize UI source ownership v2
+# Existing workflow; this push starts the isolated serial finalization transaction.
 
 on:
   push:

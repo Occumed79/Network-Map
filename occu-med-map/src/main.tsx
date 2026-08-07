@@ -71,6 +71,7 @@ async function loadOptionalRuntimes(): Promise<void> {
     safeLoad("provider tools", () => import("./unifiedProviderToolsRuntime")),
     safeLoad("provider layer telemetry", () => import("./providerLayerTelemetryRuntime")),
     safeLoad("map performance telemetry", () => import("./mapPerformanceTelemetryRuntime")),
+    safeLoad("technical diagnostics export", () => import("./technicalDiagnosticsExport")),
     safeLoad("right panel", () => import("./rightPanelCompactor")),
     safeLoad("live finder tools", () => import("./liveFinderDriveTools")),
     safeLoad("U.S. diagnostics", () => import("./usDiagnosticsGate")),

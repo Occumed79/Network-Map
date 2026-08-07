@@ -90,7 +90,8 @@ jobs:
           NETWORK_MAP_ROUTE: ${{ matrix.route }}
           NETWORK_MAP_VIEWPORT: ${{ matrix.viewport }}
           NETWORK_MAP_CI_UI_URL: http://127.0.0.1:4173
-        run: pnpm --filter @workspace/occu-med-map exec node scripts/ci-cross-browser-acceptance.mjs
+        shell: bash
+        run: timeout --signal=TERM --kill-after=10s 90s pnpm --filter @workspace/occu-med-map exec node scripts/ci-cross-browser-acceptance.mjs
       - name: Upload browser failure evidence
         if: failure()
         uses: actions/upload-artifact@v4

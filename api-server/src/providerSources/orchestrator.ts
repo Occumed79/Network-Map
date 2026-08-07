@@ -8,6 +8,7 @@ import { searchWebEvidence, type WebEvidenceOptions } from "./adapters/webEviden
 import { dedupeCandidates } from "./dedupe";
 import { geocodeProviders } from "./geocode";
 import { haversineMiles, isValidCoordinate } from "./distance";
+import { applyProviderIntegrity, coordinateAllowed } from "./integrity";
 import { getBaselineProviderSources, type ProviderSourceId } from "./serviceRouting";
 import { scoreProvider, assignTrustTier } from "./scoring";
 import { searchProviders as searchRapidApiProviders } from "../services/rapidApi/adapters/providerSearchAdapter.js";
@@ -55,11 +56,13 @@ async function searchRapidApiFromOrchestrator(params: SearchParams): Promise<Pro
     city: provider.city || city,
     state: provider.adminArea || state,
     postalCode: provider.postalCode || "",
+    country: "US",
     phone: provider.phone || "",
     website: provider.website || "",
     lat: provider.lat ?? undefined,
     lng: provider.lng ?? undefined,
-    coordinateStatus: provider.lat != null && provider.lng != null ? "geocoded" as const : "unverified" as const,
+    coordinateStatus: provider.lat != null && provider.lng != null ? "verified_address" as const : "unverified" as const,
+    coordinateSource: provider.lat != null && provider.lng != null ? "RapidAPI upstream" : undefined,
     providerCategory: serviceType,
     services: [serviceType],
     source: "rapidapi",
@@ -76,7 +79,7 @@ async function searchRapidApiFromOrchestrator(params: SearchParams): Promise<Pro
       confidence: provider.confidence,
       source: "rapidapi",
     })),
-    provenance: [{ source: "RapidAPI", sourceRecordId: provider.id || undefined, sourceUrl: provider.sourceUrl ?? undefined, observedAt }],
+    provenance: [{ source: "RapidAPI", sourceRecordId: provider.id || undefined, sourceUrl: provider.sourceUrl ?? undefined, observedAt, coordinateSource: provider.lat != null && provider.lng != null ? "RapidAPI upstream" : undefined }],
     lastSeenAt: observedAt,
     matchReason: `RapidAPI service match: ${serviceType}`,
     distanceMiles: provider.distanceMiles ?? undefined,
@@ -84,10 +87,7 @@ async function searchRapidApiFromOrchestrator(params: SearchParams): Promise<Pro
   }));
 }
 
-async function runSource(
-  id: ProviderSourceId,
-  params: SearchParams,
-): Promise<{ candidates: ProviderCandidate[]; statuses: SourceResult[] }> {
+async function runSource(id: ProviderSourceId, params: SearchParams): Promise<{ candidates: ProviderCandidate[]; statuses: SourceResult[] }> {
   if (id === "osm") {
     const output = await searchOpenStreetMap(params);
     return {
@@ -119,6 +119,7 @@ export { haversineMiles } from "./distance";
 export async function runUnifiedSearch(params: SearchParams): Promise<UnifiedSearchResponse> {
   const startMs = performance.now();
   const { radiusMiles, serviceType, centerLat, centerLng } = params;
+  const coordinatePolicy = params.coordinatePolicy || "include_unverified";
   const mode: SearchMode = params.mode || (process.env.SEARCH_DEFAULT_MODE as SearchMode) || "balanced";
   const sourceStatus = getSourceStatusReport();
   const configuredApiSources = sourceStatus.filter((source) => source.configured).map((source) => source.sourceName);
@@ -144,29 +145,18 @@ export async function runUnifiedSearch(params: SearchParams): Promise<UnifiedSea
   });
 
   const baselineDeduped = dedupeCandidates(allCandidates);
-  const baselineScored = baselineDeduped.map((candidate) => ({
-    ...candidate,
-    score: scoreProvider(candidate),
-    trustTier: assignTrustTier(candidate) as TrustTier,
-  }));
+  const baselineScored = baselineDeduped.map((candidate) => ({ ...candidate, score: scoreProvider(candidate), trustTier: assignTrustTier(candidate) as TrustTier }));
   const baselineQuality = calculateSearchQuality(baselineScored);
   const plan = buildSearchPlan({ mode, serviceType, baselineQuality, configuredSources: sourceStatus });
 
-  // Explicit source lists (used by Live Finder and deterministic consumers) are
-  // authoritative and never trigger unrelated fallback/enrichment sources.
   if (!params.sourceIds?.length) {
     const externalIds: ProviderSourceId[] = [];
     if (plan.sourceDecisions.find((decision) => decision.sourceId === "webevidence")?.run) externalIds.push("webevidence");
     if (plan.sourceDecisions.find((decision) => decision.sourceId === "rapidapi")?.run) externalIds.push("rapidapi");
-
     for (const id of externalIds) {
       if (id === "webevidence") {
         const decision = plan.sourceDecisions.find((item) => item.sourceId === "ai_enrichment");
-        const options: WebEvidenceOptions = {
-          maxSources: plan.budget.maxWebEvidenceSources,
-          maxAiEnrichments: plan.budget.maxAiEnrichments,
-          allowAiEnrichment: decision?.run === true,
-        };
+        const options: WebEvidenceOptions = { maxSources: plan.budget.maxWebEvidenceSources, maxAiEnrichments: plan.budget.maxAiEnrichments, allowAiEnrichment: decision?.run === true };
         const startedAt = Date.now();
         try {
           const candidates = await searchWebEvidence(params.city, params.state, serviceType, params, options);
@@ -200,24 +190,29 @@ export async function runUnifiedSearch(params: SearchParams): Promise<UnifiedSea
   });
 
   const geocoded = await geocodeProviders(scored, centerLat, centerLng);
-  const geocodedCount = geocoded.filter((candidate) => candidate.coordinateStatus !== "unverified").length;
+  const integrityChecked = geocoded.map(applyProviderIntegrity);
+  const quarantined = integrityChecked.filter((candidate) => candidate.quarantineStatus === "quarantined");
+  const accepted = integrityChecked.filter((candidate) => candidate.quarantineStatus !== "quarantined");
+  const geocodedCount = accepted.filter((candidate) => coordinateAllowed(candidate.coordinateStatus, "include_city_centroid")).length;
   const validCenter = isValidCoordinate(centerLat, centerLng);
-  const withDistance = geocoded.map((candidate) => {
+  const withDistance = accepted.map((candidate) => {
     if (!validCenter || candidate.lat === undefined || candidate.lng === undefined) return candidate;
     return { ...candidate, distanceMiles: haversineMiles(centerLat, centerLng, candidate.lat, candidate.lng) };
   });
-  const filtered = radiusMiles > 0 && validCenter
+  const radiusFiltered = radiusMiles > 0 && validCenter
     ? withDistance.filter((candidate) => candidate.coordinateStatus === "unverified" || (candidate.distanceMiles !== undefined && candidate.distanceMiles <= radiusMiles))
     : withDistance;
-  const sorted = filtered.sort((a, b) => {
-    const aPlaced = a.coordinateStatus !== "unverified" ? 0 : 1;
-    const bPlaced = b.coordinateStatus !== "unverified" ? 0 : 1;
+  const coordinateFiltered = radiusFiltered.filter((candidate) => coordinateAllowed(candidate.coordinateStatus, coordinatePolicy));
+  const normalResults = params.includeQuarantined ? [...coordinateFiltered, ...quarantined] : coordinateFiltered;
+  const sorted = normalResults.sort((a, b) => {
+    const aPlaced = a.coordinateStatus !== "unverified" && a.coordinateStatus !== "invalid" ? 0 : 1;
+    const bPlaced = b.coordinateStatus !== "unverified" && b.coordinateStatus !== "invalid" ? 0 : 1;
     if (aPlaced !== bPlaced) return aPlaced - bPlaced;
     if (b.score !== a.score) return b.score - a.score;
     return (a.distanceMiles ?? 999) - (b.distanceMiles ?? 999);
   });
 
-  const finalMarkerCount = sorted.filter((candidate) => candidate.coordinateStatus !== "unverified").length;
+  const finalMarkerCount = sorted.filter((candidate) => candidate.lat !== undefined && candidate.lng !== undefined && coordinateAllowed(candidate.coordinateStatus, coordinatePolicy)).length;
   const durationMs = Math.round(performance.now() - startMs);
   const finalQuality = calculateSearchQuality(scored);
   const coordinatorAudit: SearchCoordinatorAudit = {
@@ -233,8 +228,9 @@ export async function runUnifiedSearch(params: SearchParams): Promise<UnifiedSea
   const degradedSources = sourceResults.filter((source) => !source.ok).map((source) => source.sourceLabel);
 
   return {
-    params,
+    params: { ...params, coordinatePolicy },
     results: sorted,
+    quarantinedResults: quarantined,
     sourceResults,
     incomplete: degradedSources.length > 0,
     degradedSources,
@@ -247,6 +243,8 @@ export async function runUnifiedSearch(params: SearchParams): Promise<UnifiedSea
       dedupedCount,
       geocodedCount,
       finalMarkerCount,
+      quarantinedCount: quarantined.length,
+      invalidCoordinateCount: integrityChecked.filter((candidate) => candidate.coordinateStatus === "invalid").length,
       errorsBySource,
       durationMs,
       configuredApiSources,

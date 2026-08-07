@@ -25,6 +25,7 @@ function resolveLocalSource(fromFile, specifier) {
   if (!specifier.startsWith(".")) return null;
   const base = path.posix.normalize(path.posix.join(path.posix.dirname(fromFile), specifier));
   const explicitExtension = path.posix.extname(base);
+  const hasKnownSourceExtension = sourceExtensions.includes(explicitExtension);
   const candidates = [base];
 
   if (explicitExtension === ".js" || explicitExtension === ".jsx" || explicitExtension === ".mjs" || explicitExtension === ".cjs") {
@@ -33,7 +34,10 @@ function resolveLocalSource(fromFile, specifier) {
     candidates.push(...sourceExtensions.map((extension) => path.posix.join(withoutRuntimeExtension, `index${extension}`)));
   }
 
-  if (!explicitExtension) {
+  // A dot in a module basename (for example api.schemas) is not necessarily a
+  // file extension. If the suffix is not a known source extension, still try
+  // the normal TypeScript/JavaScript extensions.
+  if (!explicitExtension || !hasKnownSourceExtension) {
     candidates.push(...sourceExtensions.map((extension) => `${base}${extension}`));
     candidates.push(...sourceExtensions.map((extension) => path.posix.join(base, `index${extension}`)));
   }
@@ -56,6 +60,12 @@ const importPatterns = [
 
 function runtimeRelevantSource(source) {
   return source
+    // Remove comments before import scanning so commented examples never become
+    // fake dependency edges.
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1")
+    // Type-only imports/exports are erased by TypeScript and cannot create
+    // executable runtime cycles.
     .replace(/\bimport\s+type\b[\s\S]*?\bfrom\s+["'][^"']+["']\s*;?/g, "")
     .replace(/\bexport\s+type\b[\s\S]*?\bfrom\s+["'][^"']+["']\s*;?/g, "");
 }

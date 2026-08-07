@@ -72,7 +72,7 @@ export async function geocodeAddress(query: string): Promise<GeocodePoint | null
   return point;
 }
 
-/** Preserve verified source coordinates; address-geocode only unplaced records; never jitter. */
+/** Preserve verified source coordinates; address-geocode only unplaced records; never fabricate coordinate offsets. */
 export async function geocodeProviders(candidates: ProviderCandidate[], _centerLat: number, _centerLng: number): Promise<ProviderCandidate[]> {
   const results: ProviderCandidate[] = [];
   const hasGeocodio = configuredGeocodioKeys().length > 0;

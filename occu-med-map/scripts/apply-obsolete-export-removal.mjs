@@ -12,14 +12,6 @@ function requireOnce(content, needle, label) {
   return first;
 }
 
-function removeRequiredBlock(content, startNeedle, endNeedle, label) {
-  const anchor = requireOnce(content, startNeedle, `${label} anchor`);
-  const start = content.lastIndexOf("\n", anchor);
-  const endStart = content.indexOf(endNeedle, anchor);
-  if (endStart < 0) throw new Error(`Missing ${label} end`);
-  return content.slice(0, start < 0 ? 0 : start) + content.slice(endStart + endNeedle.length);
-}
-
 const appPath = "src/App.tsx";
 let app = read(appPath);
 const symbol = ["export", "Leadership", "Package"].join("");
@@ -41,9 +33,11 @@ if (wrapperEndStart < 0) throw new Error("Could not locate obsolete export butto
 app = app.slice(0, wrapperStart) + app.slice(wrapperEndStart + wrapperEndNeedle.length);
 write(appPath, app);
 
+const cleanupModule = ["liveFinder", "ControlCleanupRuntime"].join("");
+const obsoleteLabel = ["leadership", " export"].join("");
+
 const mainPath = "src/main.tsx";
 let main = read(mainPath);
-const cleanupModule = ["liveFinder", "ControlCleanupRuntime"].join("");
 const cleanupImport = `import "./${cleanupModule}";\n`;
 requireOnce(main, cleanupImport, "cleanup runtime import");
 main = main.replace(cleanupImport, "");
@@ -51,7 +45,6 @@ write(mainPath, main);
 
 const unifiedPath = "src/unifiedProviderToolsRuntime.ts";
 let unified = read(unifiedPath);
-const obsoleteLabel = ["leadership", " export"].join("");
 const obsoleteLabelExpression = ` || text.includes("${obsoleteLabel}")`;
 requireOnce(unified, obsoleteLabelExpression, "obsolete label classifier");
 unified = unified.replace(obsoleteLabelExpression, "");
@@ -59,21 +52,20 @@ write(unifiedPath, unified);
 
 const sidebarSmokePath = "scripts/sidebar-workspace-hardening-smoke.ts";
 let sidebarSmoke = read(sidebarSmokePath);
-const cleanupSourceLine = `const cleanupRuntime = source("src/${cleanupModule}.ts");\n`;
-requireOnce(sidebarSmoke, cleanupSourceLine, "cleanup smoke source line");
-sidebarSmoke = sidebarSmoke.replace(cleanupSourceLine, "");
-const cleanupImportAssertion = String.raw`assert.match(main, /import "\.\/${cleanupModule}";/, "obsolete Finder controls must be removed");` + "\n";
-requireOnce(sidebarSmoke, cleanupImportAssertion, "cleanup import smoke assertion");
-sidebarSmoke = sidebarSmoke.replace(cleanupImportAssertion, "");
+const sidebarBeforeCleanupLines = sidebarSmoke;
+sidebarSmoke = sidebarSmoke
+  .split("\n")
+  .filter((line) => !line.includes(cleanupModule) && !line.toLowerCase().includes(obsoleteLabel))
+  .join("\n");
+if (sidebarSmoke === sidebarBeforeCleanupLines) throw new Error("Expected obsolete sidebar smoke references were not found");
 const cleanupAssertionStart = "\nassert.doesNotMatch(cleanupRuntime,";
-const cleanupAssertionEnd = 'assert.match(cleanupRuntime, /beforeunload/, "Finder cleanup timers and listeners must be cleaned up");\n';
-const cleanupAssertionIndex = requireOnce(sidebarSmoke, cleanupAssertionStart, "cleanup smoke assertion block");
-const cleanupAssertionEndIndex = sidebarSmoke.indexOf(cleanupAssertionEnd, cleanupAssertionIndex);
-if (cleanupAssertionEndIndex < 0) throw new Error("Missing cleanup smoke assertion block end");
-sidebarSmoke = sidebarSmoke.slice(0, cleanupAssertionIndex) + "\n" + sidebarSmoke.slice(cleanupAssertionEndIndex + cleanupAssertionEnd.length);
-const productionObsoleteAssertion = String.raw`assert.match(productionUi, /leadership export/i, "production UI smoke must reject the obsolete report control");` + "\n";
-requireOnce(sidebarSmoke, productionObsoleteAssertion, "obsolete production smoke assertion");
-sidebarSmoke = sidebarSmoke.replace(productionObsoleteAssertion, "");
+const cleanupAssertionEnd = 'assert.match(cleanupRuntime, /beforeunload/, "Finder cleanup timers and listeners must be cleaned up");';
+const cleanupAssertionIndex = sidebarSmoke.indexOf(cleanupAssertionStart);
+if (cleanupAssertionIndex >= 0) {
+  const cleanupAssertionEndIndex = sidebarSmoke.indexOf(cleanupAssertionEnd, cleanupAssertionIndex);
+  if (cleanupAssertionEndIndex < 0) throw new Error("Missing cleanup smoke assertion block end");
+  sidebarSmoke = sidebarSmoke.slice(0, cleanupAssertionIndex) + "\n" + sidebarSmoke.slice(cleanupAssertionEndIndex + cleanupAssertionEnd.length);
+}
 const sourceAnchor = 'const main = source("src/main.tsx");\n';
 if (!sidebarSmoke.includes('const appSource = source("src/App.tsx");')) {
   sidebarSmoke = sidebarSmoke.replace(sourceAnchor, sourceAnchor + 'const appSource = source("src/App.tsx");\n');

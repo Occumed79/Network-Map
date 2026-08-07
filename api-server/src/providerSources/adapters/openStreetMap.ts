@@ -1,8 +1,8 @@
 import type { ProviderCandidate, SearchParams } from "../types";
 import { haversineMiles, isValidCoordinate } from "../distance";
 import { classifyHealthcareTags } from "../serviceRouting";
+import { ExternalSourceError, fetchExternalJson } from "../externalSourceRuntime";
 
-const SOURCE_TIMEOUT_MS = 9000;
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
@@ -20,26 +20,20 @@ export type OpenStreetMapSourceStatus = {
   error?: string;
 };
 
-export type OpenStreetMapSearchOutput = {
-  candidates: ProviderCandidate[];
-  sources: OpenStreetMapSourceStatus[];
-};
+export type OpenStreetMapSearchOutput = { candidates: ProviderCandidate[]; sources: OpenStreetMapSourceStatus[] };
+type OverpassPayload = { elements?: any[] };
+
+function isOverpassPayload(value: unknown): value is OverpassPayload {
+  return Boolean(value && typeof value === "object" && Array.isArray((value as OverpassPayload).elements));
+}
 
 function buildOverpassQuery(lat: number, lng: number, radiusMiles: number): string {
   const clampedMiles = Math.min(Math.max(radiusMiles, 0.1), 75);
   const radiusMeters = clampedMiles * 1609.34;
-  return `[out:json][timeout:8];(
-nwr["amenity"~"hospital|clinic|doctors|pharmacy|dentist|urgent_care|nursing_home|laboratory"](around:${radiusMeters},${lat},${lng});
-nwr["healthcare"~"hospital|clinic|doctor|doctors|pharmacy|dentist|laboratory|sample_collection|rehabilitation|physiotherapist|optometrist|blood_bank"](around:${radiusMeters},${lat},${lng});
-nwr["office"~"physician|medical|therapist"](around:${radiusMeters},${lat},${lng});
-nwr["shop"~"chemist|optician|medical_supply|hearing_aids"](around:${radiusMeters},${lat},${lng});
-);
-out center tags qt;`;
+  return `[out:json][timeout:8];(\nnwr["amenity"~"hospital|clinic|doctors|pharmacy|dentist|urgent_care|nursing_home|laboratory"](around:${radiusMeters},${lat},${lng});\nnwr["healthcare"~"hospital|clinic|doctor|doctors|pharmacy|dentist|laboratory|sample_collection|rehabilitation|physiotherapist|optometrist|blood_bank"](around:${radiusMeters},${lat},${lng});\nnwr["office"~"physician|medical|therapist"](around:${radiusMeters},${lat},${lng});\nnwr["shop"~"chemist|optician|medical_supply|hearing_aids"](around:${radiusMeters},${lat},${lng});\n);\nout center tags qt;`;
 }
 
-function clean(value: unknown): string {
-  return String(value ?? "").trim();
-}
+function clean(value: unknown): string { return String(value ?? "").trim(); }
 
 function normalizeElement(element: any, centerLat: number, centerLng: number, endpoint: string): ProviderCandidate | null {
   const hasNativePoint = Number.isFinite(Number(element?.lat)) && Number.isFinite(Number(element?.lon));
@@ -53,9 +47,7 @@ function normalizeElement(element: any, centerLat: number, centerLng: number, en
   const state = clean(tags["addr:state"]);
   const postalCode = clean(tags["addr:postcode"]);
   const country = clean(tags["addr:country"]);
-  const address = [
-    tags["addr:housenumber"], tags["addr:street"], tags["addr:suburb"], city, state, postalCode, country,
-  ].map(clean).filter(Boolean).join(", ");
+  const address = [tags["addr:housenumber"], tags["addr:street"], tags["addr:suburb"], city, state, postalCode, country].map(clean).filter(Boolean).join(", ");
   const website = clean(tags.website || tags["contact:website"]);
   const phone = clean(tags.phone || tags["contact:phone"]);
   const id = `osm-${clean(element?.type || "element")}-${clean(element?.id)}`;
@@ -63,41 +55,16 @@ function normalizeElement(element: any, centerLat: number, centerLng: number, en
   const distanceMiles = haversineMiles(centerLat, centerLng, lat, lng);
 
   return {
-    id,
-    name,
-    address,
-    city,
-    state,
-    postalCode,
-    country: country || undefined,
-    phone,
-    website,
-    lat,
-    lng,
+    id, name, address, city, state, postalCode, country: country || undefined, phone, website, lat, lng,
     coordinateStatus: hasNativePoint ? "verified_exact" : "verified_address",
     coordinateSource: hasNativePoint ? "openstreetmap-native-point" : "openstreetmap-feature-center",
-    providerCategory: category,
-    services: [category],
-    taxonomy: category,
-    source: "OpenStreetMap",
-    sourceDetail: endpoint,
-    sourceUrl,
-    confidence: "medium",
-    trustTier: "directory",
-    score: 45,
-    badges: ["OpenStreetMap"],
-    evidence: [{
-      serviceDetected: category,
-      evidenceUrl: sourceUrl || endpoint,
-      evidenceTextSnippet: `OpenStreetMap healthcare listing · ${category}`,
-      confidence: 65,
-      source: "OpenStreetMap",
-    }],
+    providerCategory: category, services: [category], taxonomy: category,
+    source: "OpenStreetMap", sourceDetail: endpoint, sourceUrl,
+    confidence: "medium", trustTier: "directory", score: 45, badges: ["OpenStreetMap"],
+    evidence: [{ serviceDetected: category, evidenceUrl: sourceUrl || endpoint, evidenceTextSnippet: `OpenStreetMap healthcare listing · ${category}`, confidence: 65, source: "OpenStreetMap" }],
     distanceMiles,
-    provenance: [{ source: "OpenStreetMap", sourceRecordId: clean(element?.id), sourceUrl, observedAt: new Date().toISOString() }],
-    lastSeenAt: new Date().toISOString(),
-    matchReason: `OSM healthcare category: ${category}`,
-    _rawSources: ["OpenStreetMap"],
+    provenance: [{ source: "OpenStreetMap", sourceRecordId: clean(element?.id), sourceUrl, observedAt: new Date().toISOString(), coordinateSource: hasNativePoint ? "openstreetmap-native-point" : "openstreetmap-feature-center" }],
+    lastSeenAt: new Date().toISOString(), matchReason: `OSM healthcare category: ${category}`, _rawSources: ["OpenStreetMap"],
   };
 }
 
@@ -113,37 +80,29 @@ function dedupeBySourceIdentity(candidates: ProviderCandidate[]): ProviderCandid
 
 async function queryEndpoint(endpoint: string, query: string, params: SearchParams, index: number): Promise<{ candidates: ProviderCandidate[]; status: OpenStreetMapSourceStatus }> {
   const startedAt = Date.now();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(new Error("source timeout")), SOURCE_TIMEOUT_MS);
   try {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      body: `data=${encodeURIComponent(query)}`,
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "User-Agent": "OccuMedNetworkMap/1.0",
+    const payload = await fetchExternalJson<OverpassPayload>(
+      "overpass",
+      endpoint,
+      {
+        method: "POST",
+        body: `data=${encodeURIComponent(query)}`,
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          "User-Agent": "OccuMedNetworkMap/1.0",
+        },
       },
-      signal: controller.signal,
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const payload = await response.json() as { elements?: any[] };
-    if (!Array.isArray(payload.elements)) throw new Error("Malformed Overpass response");
-    const candidates = dedupeBySourceIdentity(payload.elements
+      { cache: true, validate: isOverpassPayload },
+    );
+    const candidates = dedupeBySourceIdentity((payload.elements || [])
       .map((element) => normalizeElement(element, params.centerLat, params.centerLng, endpoint))
       .filter((candidate): candidate is ProviderCandidate => Boolean(candidate)));
     return {
       candidates,
-      status: {
-        sourceId: `osm-${index + 1}`,
-        sourceLabel: `OpenStreetMap mirror ${index + 1}`,
-        endpoint,
-        ok: true,
-        count: candidates.length,
-        durationMs: Date.now() - startedAt,
-        timedOut: false,
-      },
+      status: { sourceId: `osm-${index + 1}`, sourceLabel: `OpenStreetMap mirror ${index + 1}`, endpoint, ok: true, count: candidates.length, durationMs: Date.now() - startedAt, timedOut: false },
     };
   } catch (error) {
+    const external = error instanceof ExternalSourceError ? error : null;
     return {
       candidates: [],
       status: {
@@ -153,12 +112,10 @@ async function queryEndpoint(endpoint: string, query: string, params: SearchPara
         ok: false,
         count: 0,
         durationMs: Date.now() - startedAt,
-        timedOut: controller.signal.aborted,
-        error: controller.signal.aborted ? `Timed out after ${SOURCE_TIMEOUT_MS}ms` : error instanceof Error ? error.message : String(error),
+        timedOut: external?.code === "timeout",
+        error: error instanceof Error ? error.message : String(error),
       },
     };
-  } finally {
-    clearTimeout(timeout);
   }
 }
 

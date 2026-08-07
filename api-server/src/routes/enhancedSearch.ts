@@ -73,7 +73,8 @@ function normalizeGooglePlace(place: GoogleHealthcarePlace, lat: number, lng: nu
     website: "",
     lat: placeLat,
     lng: placeLng,
-    coordinateStatus: "geocoded",
+    coordinateStatus: "verified_address",
+    coordinateSource: "google-places",
     source: "Google Places",
     sourceDetail: `Google Places healthcare (${category})`,
     sourceUrl: `https://www.google.com/maps/place/?q=place_id=${place.id}`,
@@ -88,6 +89,7 @@ function normalizeGooglePlace(place: GoogleHealthcarePlace, lat: number, lng: nu
       confidence: 70,
       source: "Google Places",
     }],
+    provenance: [{ source: "Google Places", sourceRecordId: place.id, sourceUrl: `https://www.google.com/maps/place/?q=place_id=${place.id}`, observedAt: new Date().toISOString(), coordinateSource: "google-places" }],
     distanceMiles: haversineMiles(lat, lng, placeLat, placeLng),
     _rawSources: ["google_places"],
   };

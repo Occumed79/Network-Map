@@ -70,6 +70,7 @@ async function loadOptionalRuntimes(): Promise<void> {
   await Promise.allSettled([
     safeLoad("provider tools", () => import("./unifiedProviderToolsRuntime")),
     safeLoad("provider layer telemetry", () => import("./providerLayerTelemetryRuntime")),
+    safeLoad("map performance telemetry", () => import("./mapPerformanceTelemetryRuntime")),
     safeLoad("right panel", () => import("./rightPanelCompactor")),
     safeLoad("live finder tools", () => import("./liveFinderDriveTools")),
     safeLoad("U.S. diagnostics", () => import("./usDiagnosticsGate")),

@@ -32,7 +32,10 @@ jobs:
       - name: Real ESLint pass for TypeScript application sources
         shell: bash
         run: |
-          pnpm dlx --package=@typescript-eslint/parser@7.18.0 eslint@8.57.1 \
+          pnpm dlx \
+            --package=eslint@8.57.1 \
+            --package=@typescript-eslint/parser@7.18.0 \
+            eslint \
             --no-eslintrc \
             --parser @typescript-eslint/parser \
             --ext .ts,.tsx \

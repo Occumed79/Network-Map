@@ -154,4 +154,4 @@ jobs:
       - name: Build frontend for API static serving
         run: pnpm --filter @workspace/occu-med-map build
       - name: Run disposable API/write/rollback acceptance
-        run: pnpm --filter @workspace/api-server test:ci-api-integration
+        run: node api-server/scripts/ci-api-integration.mjs

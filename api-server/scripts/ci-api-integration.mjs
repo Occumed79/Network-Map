@@ -5,11 +5,17 @@ import { setTimeout as delay } from "node:timers/promises";
 const baseUrl = process.env.CI_API_BASE_URL || "http://127.0.0.1:3000";
 const writeToken = process.env.WRITE_API_TOKEN || "ci-write-token";
 const expectedOrigin = process.env.CLIENT_ORIGIN || "http://127.0.0.1:4173";
-const apiCommand = process.env.CI_API_COMMAND || "pnpm --filter @workspace/api-server build && pnpm --filter @workspace/api-server start";
 const providerDbUrl = process.env.DATABASE_URL_POOLED || process.env.DATABASE_URL || "";
 
+function buildApi() {
+  execFileSync("pnpm", ["--filter", "@workspace/api-server", "build"], {
+    env: process.env,
+    stdio: "inherit",
+  });
+}
+
 function spawnApi() {
-  const child = spawn("bash", ["-lc", apiCommand], {
+  const child = spawn(process.execPath, ["--enable-source-maps", "api-server/dist/index.mjs"], {
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -53,6 +59,7 @@ async function waitForAuditRows(minimum) {
   return Number(sqlValue("SELECT count(*) FROM public.api_write_audit WHERE path LIKE '/api/provider-uploads%';"));
 }
 
+buildApi();
 const child = spawnApi();
 try {
   await waitForApi();
@@ -159,6 +166,6 @@ try {
   child.kill("SIGTERM");
   await Promise.race([
     new Promise((resolve) => child.once("exit", resolve)),
-    delay(5_000).then(() => { child.kill("SIGKILL"); }),
+    delay(5_000).then(() => child.kill("SIGKILL")),
   ]);
 }

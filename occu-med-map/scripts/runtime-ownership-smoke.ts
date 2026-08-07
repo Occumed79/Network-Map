@@ -23,6 +23,7 @@ function assert(condition: unknown, message: string): asserts condition {
 const registrySource = source(SHARED_OBSERVER_OWNER);
 assert(registrySource.includes("registerRuntimeOwner"), "runtime owner registry is missing registerRuntimeOwner");
 assert(registrySource.includes("subscribeToSharedDomObserver"), "runtime owner registry is missing the shared DOM observer");
+assert(registrySource.includes("runWithoutSharedDomObservation"), "runtime owner registry must support safe legacy reconciliation without observer feedback");
 assert(registrySource.includes("duplicateAttempts"), "runtime owner registry must record blocked duplicate registrations");
 assert((registrySource.match(/new MutationObserver/g) || []).length === 1, "runtime owner registry must own exactly one shared MutationObserver");
 
@@ -47,7 +48,9 @@ const requiredOwners: Record<string, string> = {
   "mapboxGlobeLoadHardeningRuntime.ts": "mapbox-globe-load-hardening",
   "dialogControllerRuntime.ts": "dialog-controller",
   "generalUiIntegrityRuntime.ts": "general-ui-integrity",
+  "sidebarWorkspaceControllerRuntime.ts": "sidebar-workspace-controller",
   "sidebarWorkspacePanelGuardRuntime.ts": "sidebar-workspace-integrity",
+  "unifiedProviderToolsRuntime.ts": "unified-provider-tools",
 };
 
 for (const [file, id] of Object.entries(requiredOwners)) {
@@ -68,12 +71,19 @@ const sharedObserverConsumers = [
   "mapboxGlobeLoadHardeningRuntime.ts",
   "dialogControllerRuntime.ts",
   "generalUiIntegrityRuntime.ts",
+  "sidebarWorkspaceControllerRuntime.ts",
+  "unifiedProviderToolsRuntime.ts",
 ];
 
 for (const file of sharedObserverConsumers) {
   const text = source(file);
   assert(!text.includes("new MutationObserver"), `${file} still owns an independent MutationObserver`);
   assert(text.includes("subscribeToSharedDomObserver"), `${file} is not using the shared DOM observer`);
+}
+
+for (const file of ["sidebarWorkspaceControllerRuntime.ts", "unifiedProviderToolsRuntime.ts"]) {
+  const text = source(file);
+  assert(text.includes("runWithoutSharedDomObservation"), `${file} must prevent its own compatibility writes from feeding back into the shared observer`);
 }
 
 for (const file of ["routePlannerControlsRuntime.ts", "healthsitesFlatDotsRuntime.ts", "providerLocationFinderRuntime.ts"]) {
@@ -112,6 +122,7 @@ for (const runtime of [
   "./leafletMapLifecycleRuntime",
   "./mapboxMapLifecycleRuntime",
   "./networkRequestPipelineRuntime",
+  "./sidebarWorkspaceControllerRuntime",
   "./dialogControllerRuntime",
   "./generalUiIntegrityRuntime",
 ]) {
@@ -126,12 +137,10 @@ const directObserverFiles = filesUnder(root)
   .filter((file) => file !== SHARED_OBSERVER_OWNER)
   .sort();
 
-const allowedDirectObservers = new Set([
-  "sidebarWorkspaceControllerRuntime.ts",
-  "unifiedProviderToolsRuntime.ts",
-]);
+assert.deepEqual(
+  directObserverFiles,
+  [],
+  `runtimeControllerRegistry.ts must be the only application-level MutationObserver owner; found: ${directObserverFiles.join(", ")}`,
+);
 
-const unexpectedObservers = directObserverFiles.filter((file) => !allowedDirectObservers.has(file));
-assert(!unexpectedObservers.length, `Unexpected independent MutationObserver owners: ${unexpectedObservers.join(", ")}`);
-
-console.log(`Runtime ownership smoke passed: ${ownerIds.size} registered owners; one shared observer owner; ${directObserverFiles.length} legacy direct observers remain on the explicit migration allowlist.`);
+console.log(`Runtime ownership smoke passed: ${ownerIds.size} registered owners; runtimeControllerRegistry.ts is the sole application-level MutationObserver owner.`);

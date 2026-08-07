@@ -8,8 +8,11 @@ const artifactDir = path.resolve(process.cwd(), "test-results", "ui-acceptance")
 fs.mkdirSync(artifactDir, { recursive: true });
 
 const viewports = [
+  { name: "wide-desktop", width: 1920, height: 1080 },
   { name: "desktop", width: 1440, height: 900 },
-  { name: "laptop", width: 1024, height: 768 },
+  { name: "small-laptop", width: 1366, height: 768 },
+  { name: "compact-laptop", width: 1024, height: 768 },
+  { name: "tablet", width: 768, height: 1024 },
   { name: "mobile", width: 390, height: 844 },
 ];
 
@@ -122,7 +125,30 @@ async function assertGeometry(page, viewportName) {
   }
 }
 
+async function ensureWorkspaceNavigationVisible(page) {
+  const firstTab = page.locator(".occumed-sidebar-workspace-tab").first();
+  await firstTab.waitFor({ state: "attached", timeout: 10_000 });
+  const inViewport = await firstTab.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.right > 0 && rect.left < innerWidth && rect.bottom > 0 && rect.top < innerHeight;
+  });
+  if (inViewport) return;
+
+  const menu = page.locator(".mobile-menu-button:visible").first();
+  if (await menu.count()) {
+    await menu.click();
+    await page.waitForTimeout(160);
+  }
+
+  const nowInViewport = await firstTab.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.right > 0 && rect.left < innerWidth && rect.bottom > 0 && rect.top < innerHeight;
+  });
+  assert.equal(nowInViewport, true, "workspace navigation must be reachable in the current viewport");
+}
+
 async function workspaceButton(page, label) {
+  await ensureWorkspaceNavigationVisible(page);
   const button = page.getByRole("tab", { name: new RegExp(label, "i") });
   await button.waitFor({ state: "visible", timeout: 10_000 });
   return button;

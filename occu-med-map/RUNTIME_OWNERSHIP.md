@@ -68,6 +68,15 @@ Map/provider integrations must register with the lifecycle/request owners rather
 
 ## Stylesheet direction
 
+
+Current consolidation progress:
+
+- `ui-system.css` now owns shared design tokens, global geometry/interactions, dialog/popup presentation, and report-preview behavior.
+- Retired superseded layers: `general-ui-hardening.css`, `general-ui-visual-consistency.css`, `pdf-preview-hardening.css`, `modal-popup-fixes.css`, `modal-content-polish.css`, `ui-cascade-stabilization.css`, `sidebar-control-fixes.css`, `professional-overrides.css`, `professional-hardening.css`, `luminous-shell-fixes.css`, and `modal-command-polish.css`.
+- Renamed retained feature styles from `core-app-p2-fixes.css` to `core-app-p2.css` and from `phase-two-control-fix.css` to `phase-two-controls.css` without changing their rules.
+- The application stylesheet-import ceiling is now 21; CI prevents that count from growing during the consolidation.
+
+
 The current stylesheet stack still contains legacy and overlapping files. Until the component/design-token consolidation is finished, stylesheet order is treated as compatibility-sensitive and must not be casually reordered. The target state is:
 
 1. third-party Leaflet/Mapbox CSS

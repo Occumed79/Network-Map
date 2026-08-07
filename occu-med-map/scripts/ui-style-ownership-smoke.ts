@@ -11,7 +11,7 @@ const uiSystem = fs.readFileSync(path.join(srcRoot, "ui-system.css"), "utf8");
 
 const cssImports = [...main.matchAll(/import\s+["']([^"']+\.css)["'];/g)].map((match) => match[1]);
 const applicationCssImports = cssImports.filter((value) => value.startsWith("./"));
-assert.ok(applicationCssImports.length <= 25, `application CSS import count must not grow above the consolidation baseline of 25; found ${applicationCssImports.length}`);
+assert.ok(applicationCssImports.length <= 21, `application CSS import count must not grow above the consolidation baseline of 21; found ${applicationCssImports.length}`);
 assert.equal(applicationCssImports.filter((value) => value === "./ui-system.css").length, 1, "authoritative ui-system.css must be imported exactly once");
 
 for (const retired of [
@@ -22,17 +22,18 @@ for (const retired of [
   "modal-content-polish.css",
   "ui-cascade-stabilization.css",
   "sidebar-control-fixes.css",
+  "professional-overrides.css",
+  "professional-hardening.css",
+  "luminous-shell-fixes.css",
+  "core-app-p2-fixes.css",
+  "phase-two-control-fix.css",
 ]) {
   assert.equal(fs.existsSync(path.join(srcRoot, retired)), false, `retired stylesheet must stay deleted: ${retired}`);
   assert.equal(main.includes(retired), false, `retired stylesheet must not be re-imported: ${retired}`);
 }
 
 const transitionalBroadStyleFiles = new Set([
-  "professional-overrides.css",
-  "professional-hardening.css",
-  "luminous-shell-fixes.css",
   "map-engine-final-fixes.css",
-  "modal-command-polish.css",
   "sidebar-workspace-final-fixes.css",
 ]);
 const broadNamePattern = /(override|fix|hardening|polish|stabilization)/i;

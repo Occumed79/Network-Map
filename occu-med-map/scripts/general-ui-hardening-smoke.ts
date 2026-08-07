@@ -11,37 +11,31 @@ function source(relativePath: string): string {
 }
 
 const main = source("src/main.tsx");
-const css = source("src/general-ui-hardening.css");
-const visualCss = source("src/general-ui-visual-consistency.css");
-const pdfCss = source("src/pdf-preview-hardening.css");
+const uiSystem = source("src/ui-system.css");
+const css = uiSystem;
+const visualCss = uiSystem;
+const pdfCss = uiSystem;
 const runtime = source("src/generalUiIntegrityRuntime.ts");
 const dialogController = source("src/dialogControllerRuntime.ts");
 const productionSmoke = source("scripts/production-ui-smoke.mjs");
 const productionPdfSmoke = source("scripts/production-pdf-ui-smoke.mjs");
 const packageJson = source("package.json");
 
-assert.match(main, /import "\.\/general-ui-hardening\.css";/, "general UI CSS must load");
-assert.match(main, /import "\.\/general-ui-visual-consistency\.css";/, "final visual consistency CSS must load");
-assert.match(main, /import "\.\/pdf-preview-hardening\.css";/, "report preview hardening must load");
+assert.match(main, /import "\.\/ui-system\.css";/, "authoritative UI system CSS must load");
+assert.doesNotMatch(main, /general-ui-hardening\.css|general-ui-visual-consistency\.css|pdf-preview-hardening\.css/, "retired final override layers must not be imported");
 assert.match(main, /import "\.\/dialogControllerRuntime";/, "authoritative dialog controller must load");
 assert.match(main, /import "\.\/generalUiIntegrityRuntime";/, "general UI integrity runtime must load");
 assert.ok(
-  main.indexOf('import "./general-ui-hardening.css";') > main.indexOf('import "./sidebar-workspace-final-fixes.css";'),
-  "general UI CSS must load after feature-specific styling",
-);
-assert.ok(
-  main.indexOf('import "./general-ui-visual-consistency.css";') > main.indexOf('import "./general-ui-hardening.css";'),
-  "visual consistency CSS must load after the geometry layer",
-);
-assert.ok(
-  main.indexOf('import "./pdf-preview-hardening.css";') > main.indexOf('import "./general-ui-visual-consistency.css";'),
-  "report preview hardening must load after shared visual styling",
+  main.indexOf('import "./ui-system.css";') > main.indexOf('import "./sidebar-workspace-final-fixes.css";'),
+  "authoritative UI system must load after feature-specific compatibility styling",
 );
 assert.ok(
   main.indexOf('import "./dialogControllerRuntime";') < main.indexOf('import "./generalUiIntegrityRuntime";'),
   "dialog behavior owner must load before the read-only integrity monitor",
 );
 
+assert.match(uiSystem, /--ui-bg-panel:/, "authoritative UI system must define shared design tokens");
+assert.match(uiSystem, /--ui-focus-ring:/, "authoritative UI system must define focus tokens");
 assert.match(css, /html,\s*body,\s*#root,\s*\.app-wrap\s*\{[^}]*overflow: hidden !important;/s, "document shell must prohibit horizontal overflow");
 assert.match(css, /\.command-search-results\s*\{[^}]*max-height:/s, "search suggestions must be viewport constrained");
 assert.match(css, /\.modal-backdrop,\s*\.modal-backdrop\.open\s*\{[^}]*position: fixed !important;/s, "modal backdrops must own the viewport");

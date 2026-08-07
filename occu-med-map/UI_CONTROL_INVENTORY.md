@@ -22,10 +22,10 @@ Status legend:
 
 | Surface | Visible controls / states | Behavior owner | Current status | Required acceptance |
 | --- | --- | --- | --- | --- |
-| Provider source controls | BlueHive, Indexed Providers, Dental Examiners, My Clinics | React checkboxes in `App.tsx`; compatibility buttons in `unifiedProviderToolsRuntime.ts` | **pending source migration**; opt-in defaults enforced | off by default; loading, loaded, failed, cached; repeated toggle stability |
+| Provider source controls | BlueHive, Indexed Providers, Dental Examiners, My Clinics | React checkboxes in `App.tsx`; runtime only persists opt-in selection | source-owned controls; opt-in defaults enforced | off by default; loading, loaded, failed, cached; repeated toggle stability |
 | Provider source telemetry | database totals vs viewport rendered count | `providerLayerTelemetryRuntime.ts` | source-owned runtime, shared observer | totals must not be presented as viewport counts; failure/cached states |
 | Service / overlay controls | service presence, NACCHO/other existing provider overlays | React `App.tsx` | source-owned | disabled preconditions; loading/error/empty; clear actions |
-| Manage Clinics | clinic list / saved providers workflow | React action plus compatibility label/state adapter | pending source migration | open/close, empty/results, action feedback |
+| Manage Clinics | clinic list / saved providers workflow | React `App.tsx` | source-owned | open/close, empty/results, action feedback |
 | Provider cards | name, source/type, contact/actions, save/route actions | React / feature runtimes | mixed source-owned | accurate labels; disabled/loading/saved/error; no dead buttons |
 
 ## Map Tools workspace
@@ -47,8 +47,8 @@ Status legend:
 
 | Surface | Visible controls / states | Behavior owner | Current status | Required acceptance |
 | --- | --- | --- | --- | --- |
-| Finder launcher / mode | Live Places | React launcher adapted by `unifiedProviderToolsRuntime.ts` | **pending source migration** | open/close; correct selected workspace; no hidden duplicate launcher dependency |
-| NPI launcher / mode | NPI Registry | dynamically added by `unifiedProviderToolsRuntime.ts` | **pending source migration** | source-owned button required before #168 complete |
+| Finder launcher / mode | Live Finder / Live Places | React `App.tsx` | source-owned launcher and presentation mode | open/close; correct selected workspace; no hidden duplicate launcher dependency |
+| NPI launcher / mode | NPI Registry | React `App.tsx` | source-owned launcher | open Finder in NPI mode; selected state; NPI initial/error/results states |
 | Live source filters | clinical, occ-med, hospital, clinic, doctor, urgent, lab, pharmacy, dental, eye, DOT, FAA, all | React `App.tsx` | source-owned | initial/selected/loading/empty/error/results |
 | Radius control | live search radius | React `App.tsx` | source-owned | updates results without stale-request replacement |
 | Text / region filters | text, U.S./international and related filters | React `App.tsx` | source-owned | deterministic filtering; empty result state |
@@ -60,7 +60,7 @@ Status legend:
 
 | Surface | Visible controls / states | Behavior owner | Current status | Required acceptance |
 | --- | --- | --- | --- | --- |
-| Provider Explorer launcher | visible sidebar Explorer control + underlying React drawer state | compatibility layer still depends on underlying launcher | **pending source migration** | visible control must directly own action; no hidden launcher dependency |
+| Provider Explorer launcher | React `App.tsx` source button + sidebar workspace controller | source-owned React action; sidebar reuses the visible source launcher | repeated open/close; no hidden header launcher dependency |
 | Visualization modes | pins, density, hex/dot-density and compare/live modes | React `App.tsx` + stability runtime | mixed source-owned | request cancellation, stable replacement, no flicker/blank state |
 | Database scope / filters | current bounds/radius, country/city/type/source filters | React `App.tsx` | source-owned | missing precondition messaging; deterministic refresh/clear |
 | Dataset Browser | records/pagination/filter actions | React `App.tsx` | source-owned | loading/empty/error/results; long rows contained |
@@ -102,6 +102,6 @@ Status legend:
 
 ## Remaining #168 source-ownership blockers
 
-The runtime-observer consolidation is complete only when CI confirms the registry is the sole MutationObserver owner. The major remaining source-ownership blocker is `unifiedProviderToolsRuntime.ts`: it still creates/hides/renames provider controls after React render. Those controls must move into React/source markup and state before this inventory can mark Finder/NPI/Explorer/provider-source controls as source-owned.
+Runtime-observer consolidation is complete: the registry is the sole application MutationObserver owner. `unifiedProviderToolsRuntime.ts` no longer creates replacement provider-source buttons, hides source rows, or relabels Manage Clinics. Finder, NPI Registry, Provider Explorer launchers, Finder/NPI section visibility, titles, and mode prompt are now owned directly by React source. `unifiedProviderToolsRuntime.ts` is retired. The only remaining provider-tool helper is source-selection persistence, which does not create, hide, rename, or restyle controls.
 
-The second major blocker is stylesheet ownership. `main.tsx` still imports a large compatibility cascade. The CSS consolidation must establish tokens/primitives, move required rules into authoritative component/feature files, delete superseded override files, and reduce `!important` rather than adding another final override layer.
+Stylesheet ownership is now materially consolidated: `ui-system.css` owns shared design tokens/global UI/dialog/popup/report behavior, ten superseded override layers have been deleted, retained P2 feature rules live in `core-app-p2.css` and `phase-two-controls.css`, and the app stylesheet-import ceiling is 21; the superseded modal-command polish layer is also retired. Remaining work is limited to explicitly documented map/sidebar compatibility layers while rendered behavior is preserved.

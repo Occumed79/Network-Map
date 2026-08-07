@@ -50,7 +50,7 @@ const requiredOwners: Record<string, string> = {
   "generalUiIntegrityRuntime.ts": "general-ui-integrity",
   "sidebarWorkspaceControllerRuntime.ts": "sidebar-workspace-controller",
   "sidebarWorkspacePanelGuardRuntime.ts": "sidebar-workspace-integrity",
-  "unifiedProviderToolsRuntime.ts": "unified-provider-tools",
+  "providerSourceSelectionPersistenceRuntime.ts": "provider-source-selection-persistence",
 };
 
 for (const [file, id] of Object.entries(requiredOwners)) {
@@ -73,7 +73,6 @@ const sharedObserverConsumers = [
   "dialogControllerRuntime.ts",
   "generalUiIntegrityRuntime.ts",
   "sidebarWorkspaceControllerRuntime.ts",
-  "unifiedProviderToolsRuntime.ts",
 ];
 
 for (const file of sharedObserverConsumers) {
@@ -82,7 +81,7 @@ for (const file of sharedObserverConsumers) {
   assert(text.includes("subscribeToSharedDomObserver"), `${file} is not using the shared DOM observer`);
 }
 
-for (const file of ["sidebarWorkspaceControllerRuntime.ts", "unifiedProviderToolsRuntime.ts"]) {
+for (const file of ["sidebarWorkspaceControllerRuntime.ts"]) {
   const text = source(file);
   assert(text.includes("runWithoutSharedDomObservation"), `${file} must prevent its own compatibility writes from feeding back into the shared observer`);
 }

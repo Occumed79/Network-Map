@@ -143,6 +143,24 @@ async function waitForRuntimeOwners(page, label) {
   }
 }
 
+async function waitForWorkspaceReady(page, label) {
+  try {
+    await page.waitForFunction(() => document.documentElement.dataset.occumedWorkspaceReady === "true"
+      && document.querySelectorAll(".occumed-sidebar-workspace-tab[aria-selected='true']").length === 1, null, { timeout: 20_000 });
+  } catch (error) {
+    const workspaceSnapshot = await page.evaluate(() => ({
+      ready: document.documentElement.dataset.occumedWorkspaceReady || null,
+      active: document.documentElement.dataset.occumedworkspace || null,
+      tabs: Array.from(document.querySelectorAll(".occumed-sidebar-workspace-tab")).map((tab) => ({
+        text: tab.textContent?.trim() || "",
+        selected: tab.getAttribute("aria-selected"),
+      })),
+      owner: Boolean(window.__NETWORK_MAP_SIDEBAR_WORKSPACES__),
+    }));
+    throw new Error(`${label}: sidebar workspace controller did not become ready: ${JSON.stringify(workspaceSnapshot)}\n${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 function isExpectedSupersessionAbort(request) {
   if (request.method() !== "GET") return false;
   const errorText = request.failure()?.errorText || "";
@@ -201,6 +219,7 @@ async function runCase(browser, viewport, routeVariant) {
     await page.locator("#root").waitFor({ state: "attached", timeout: 20_000 });
     await page.locator(".app-wrap").waitFor({ state: "visible", timeout: 20_000 });
     await waitForRuntimeOwners(page, label);
+    await waitForWorkspaceReady(page, label);
     await page.locator(".mapboxgl-map,.leaflet-container,.map-shell,.map-area").first().waitFor({ state: "visible", timeout: 20_000 });
     await page.waitForTimeout(700);
 

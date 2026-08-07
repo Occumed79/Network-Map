@@ -26,12 +26,6 @@ function json(route, payload, status = 200) {
   });
 }
 
-function tracedUrl() {
-  const url = new URL(baseUrl);
-  url.searchParams.set("ci-boot-trace", "1");
-  return url.toString();
-}
-
 async function mockApi(page) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -73,7 +67,7 @@ async function mockApi(page) {
 }
 
 async function waitForApplication(page) {
-  await page.goto(tracedUrl(), { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
   await page.locator("#root").waitFor({ state: "attached", timeout: 20_000 });
   await page.locator(".app-wrap").waitFor({ state: "visible", timeout: 20_000 });
   await page.waitForFunction(() => Boolean(window.__NETWORK_MAP_RUNTIME_OWNERSHIP__), null, { timeout: 20_000 });
@@ -172,6 +166,8 @@ async function ensureWorkspaceNavigationVisible(page, target, label) {
         { timeout: 5_000 },
       );
     }
+    // A workspace action can close the sidebar with a 200ms transform. Wait for
+    // the explicit reopened state to settle instead of trusting a mid-transition rect.
     await page.waitForTimeout(240);
     open = await sidebar.evaluate((element) => element.classList.contains("mobile-open"));
     assert.equal(open, true, `${label}: mobile workspace navigation must remain open before interaction`);
@@ -256,16 +252,7 @@ async function runViewport(browser, viewport) {
   const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height } });
   const page = await context.newPage();
   const pageErrors = [];
-  const bootTrace = [];
-  const requestFailures = [];
-  let pageClosed = false;
   page.on("pageerror", (error) => pageErrors.push(error.message));
-  page.on("console", (message) => {
-    const text = message.text();
-    if (text.includes("[network-map-boot]")) bootTrace.push(text);
-  });
-  page.on("requestfailed", (request) => requestFailures.push(`${request.method()} ${request.url()} :: ${request.failure()?.errorText || "failed"}`));
-  page.on("close", () => { pageClosed = true; });
   await mockApi(page);
 
   try {
@@ -278,14 +265,10 @@ async function runViewport(browser, viewport) {
     await assertGeometry(page, `${viewport.name}/final`);
     assert.deepEqual(pageErrors, [], `${viewport.name}: uncaught page errors: ${pageErrors.join("; ")}`);
   } catch (error) {
-    await page.screenshot({
-      path: path.join(artifactDir, `${viewport.name}-failure.png`),
-      fullPage: true,
-      timeout: 5_000,
-    }).catch(() => undefined);
+    await page.screenshot({ path: path.join(artifactDir, `${viewport.name}-failure.png`), fullPage: true }).catch(() => undefined);
     fs.writeFileSync(
       path.join(artifactDir, `${viewport.name}-error.txt`),
-      `${error instanceof Error ? error.stack || error.message : String(error)}\n\nPage closed: ${pageClosed}\n\nPage errors:\n${pageErrors.join("\n")}\n\nBoot trace:\n${bootTrace.join("\n")}\n\nRequest failures:\n${requestFailures.join("\n")}`,
+      `${error instanceof Error ? error.stack || error.message : String(error)}\n\nPage errors:\n${pageErrors.join("\n")}`,
     );
     throw error;
   } finally {

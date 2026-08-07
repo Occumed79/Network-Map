@@ -32,6 +32,8 @@ jobs:
         run: pnpm --filter @workspace/api-server test:provider-upload-lifecycle
       - name: API security
         run: pnpm --filter @workspace/api-server test:api-security
+      - name: Database lifecycle/schema drift
+        run: pnpm --filter @workspace/api-server test:database-lifecycle
       - name: Provider Explorer API
         run: pnpm --filter @workspace/api-server test:provider-explorer
       - name: Provider Explorer UI

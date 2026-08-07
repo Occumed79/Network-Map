@@ -30,16 +30,30 @@ const candidate = (overrides: Partial<ProviderCandidate> = {}): ProviderCandidat
   ...overrides,
 });
 
-assert.equal(coordinateStatusFromLegacy("imported", true), "verified_exact");
+// Legacy labels must be normalized conservatively. An imported/geocoded point
+// is useful, but it is not evidence of an exact rooftop coordinate.
+assert.equal(coordinateStatusFromLegacy("imported", true), "verified_address");
 assert.equal(coordinateStatusFromLegacy("geocoded", true), "verified_address");
+assert.equal(coordinateStatusFromLegacy("address", true), "verified_address");
+assert.equal(coordinateStatusFromLegacy("verified", true), "verified_exact");
+assert.equal(coordinateStatusFromLegacy("exact", true), "verified_exact");
 assert.equal(coordinateStatusFromLegacy("city_centroid", true), "city_centroid");
+assert.equal(coordinateStatusFromLegacy("imported", false), "invalid");
+assert.equal(coordinateStatusFromLegacy("verified_exact", false), "invalid");
+assert.equal(coordinateStatusFromLegacy("unverified", false), "unverified");
 assert.equal(coordinateAllowed("city_centroid", "address_or_better"), false);
 assert.equal(coordinateAllowed("verified_address", "address_or_better"), true);
+assert.equal(coordinateAllowed("verified_exact", "exact_only"), true);
+assert.equal(coordinateAllowed("verified_address", "exact_only"), false);
 assert.equal(coordinateAllowed("invalid", "include_unverified"), false);
 
 assert.equal(assessProviderIntegrity(candidate({ lat: 91, lng: -119, coordinateStatus: "verified_exact" })).coordinateStatus, "invalid");
 assert.equal(assessProviderIntegrity(candidate({ lat: 36.7, lng: undefined, coordinateStatus: "verified_exact" })).quarantined, true);
 assert.equal(assessProviderIntegrity(candidate({ country: "US", state: "ZZ" })).quarantined, true);
+assert.equal(
+  assessProviderIntegrity(candidate({ lat: 36.7378, lng: -119.7871, coordinateStatus: "verified_address" })).coordinateStatus,
+  "verified_address",
+);
 
 // CMS example NPI with a valid checksum.
 assert.equal(isValidNpi("1234567893"), true);

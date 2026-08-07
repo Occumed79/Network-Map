@@ -126,7 +126,7 @@ async function distributedRateLimit(req: Request, res: Response, policy: { windo
   return false;
 }
 
-async function auditWrite(req: Request, res: Response, capability: ApiCapability, startedAt: number): Promise<void> {
+async function auditWrite(req: Request, res: Response, capability: ApiCapability, startedAt: number, statusCode: number): Promise<void> {
   if (!isPersistenceConfigured()) return;
   try {
     await getPool().query(
@@ -135,7 +135,7 @@ async function auditWrite(req: Request, res: Response, capability: ApiCapability
       [
         String(res.getHeader("X-Request-ID") || "unknown"), req.method, req.path, capability,
         req.get("x-actor-id")?.slice(0, 128) || null, req.get("idempotency-key")?.slice(0, 200) || null,
-        res.statusCode, Date.now() - startedAt, bodyHash(req.body), JSON.stringify({ ipPresent: Boolean(req.ip) }),
+        statusCode, Date.now() - startedAt, bodyHash(req.body), JSON.stringify({ ipPresent: Boolean(req.ip) }),
       ],
     );
   } catch (error) {
@@ -176,16 +176,44 @@ async function reserveIdempotency(req: Request, res: Response): Promise<boolean>
   return false;
 }
 
-function captureIdempotentResponse(req: Request, res: Response): void {
+async function persistIdempotentResponse(req: Request, statusCode: number, body: unknown): Promise<void> {
   const key = req.get("idempotency-key")?.trim();
   if (!key || !isPersistenceConfigured()) return;
-  const originalJson = res.json.bind(res);
-  res.json = ((body: unknown) => {
-    void getPool().query(
+  try {
+    await getPool().query(
       `UPDATE public.api_idempotency_keys SET state=$2,response_status=$3,response_body=$4::jsonb,completed_at=now() WHERE idempotency_key=$1`,
-      [key, res.statusCode < 500 ? "completed" : "failed", res.statusCode, JSON.stringify(body ?? null)],
-    ).catch(() => undefined);
-    return originalJson(body);
+      [key, statusCode < 500 ? "completed" : "failed", statusCode, JSON.stringify(body ?? null)],
+    );
+  } catch (error) {
+    console.warn("api idempotency response persistence failed", error instanceof Error ? error.message : String(error));
+  }
+}
+
+/**
+ * Protected responses persist idempotency completion and the write-audit row
+ * before the JSON response is finalized. This removes the old fire-and-forget
+ * `finish` listener race where the mutation could succeed but its audit record
+ * never become durable.
+ */
+function captureProtectedJsonResponse(
+  req: Request,
+  res: Response,
+  capability: ApiCapability,
+  startedAt: number,
+  idempotent: boolean,
+): void {
+  const originalJson = res.json.bind(res);
+  let captured = false;
+  res.json = ((body: unknown) => {
+    if (captured) return res;
+    captured = true;
+    const statusCode = res.statusCode;
+    void (async () => {
+      if (idempotent) await persistIdempotentResponse(req, statusCode, body);
+      await auditWrite(req, res, capability, startedAt, statusCode);
+      originalJson(body);
+    })();
+    return res;
   }) as typeof res.json;
 }
 
@@ -244,9 +272,8 @@ export const apiSecurity: RequestHandler = async (req, res, next) => {
     if (policy.idempotent) {
       const reserved = await reserveIdempotency(req, res);
       if (!reserved) return;
-      captureIdempotentResponse(req, res);
     }
-    res.on("finish", () => { void auditWrite(req, res, policy.capability, startedAt); });
+    captureProtectedJsonResponse(req, res, policy.capability, startedAt, Boolean(policy.idempotent));
     next();
   } catch (error) {
     console.error("api security middleware failure", error instanceof Error ? error.message : String(error));

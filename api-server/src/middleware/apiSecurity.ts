@@ -1,5 +1,5 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
-import type { NextFunction, Request, RequestHandler, Response } from "express";
+import type { Request, RequestHandler, Response } from "express";
 import { getPool } from "@workspace/db";
 import { isPersistenceConfigured } from "../lib/networkMapPersistence";
 
@@ -21,8 +21,6 @@ const UPLOAD_MAX_BYTES = 16 * 1024 * 1024;
 export const ROUTE_POLICIES: RoutePolicy[] = [
   { prefix: "/api/provider-sources/search", methods: ["POST"], capability: "read", maxBytes: 512 * 1024, rateLimit: { windowSeconds: 600, max: 80 } },
   { prefix: "/api/provider-sources/npi-custom", methods: ["POST"], capability: "read", maxBytes: 512 * 1024, rateLimit: { windowSeconds: 600, max: 60 } },
-  { prefix: "/api/live-finder", methods: ["POST"], capability: "read", maxBytes: 512 * 1024, rateLimit: { windowSeconds: 600, max: 120 } },
-  { prefix: "/api/enhanced-search", methods: ["POST"], capability: "read", maxBytes: 512 * 1024, rateLimit: { windowSeconds: 600, max: 80 } },
   { prefix: "/api/diagnostics/export", methods: ["GET"], capability: "admin", rateLimit: { windowSeconds: 600, max: 60 } },
   { prefix: "/api/admin", methods: ["GET", "POST", "PUT", "PATCH", "DELETE"], capability: "admin", rateLimit: { windowSeconds: 600, max: 60 }, idempotent: false },
   { prefix: "/api/provider-uploads", methods: ["GET"], capability: "admin", rateLimit: { windowSeconds: 600, max: 60 } },
@@ -34,6 +32,7 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   { prefix: "/api/vector-index", methods: ["POST", "PUT", "PATCH"], capability: "write", rateLimit: { windowSeconds: 600, max: 30 }, idempotent: true },
   { prefix: "/api/browser-extraction", methods: ["POST", "PUT", "PATCH"], capability: "write", rateLimit: { windowSeconds: 600, max: 30 }, idempotent: true },
   { prefix: "/api/google-places", methods: ["POST", "PUT", "PATCH"], capability: "write", rateLimit: { windowSeconds: 600, max: 60 }, idempotent: true },
+  { prefix: "/api/price-discovery", methods: ["POST", "PUT", "PATCH"], capability: "write", rateLimit: { windowSeconds: 600, max: 30 }, idempotent: true },
   { prefix: "/api/provider-uploads", methods: ["DELETE"], capability: "destructive", rateLimit: { windowSeconds: 600, max: 20 }, idempotent: true },
   { prefix: "/api", methods: ["DELETE"], capability: "destructive", rateLimit: { windowSeconds: 600, max: 20 }, idempotent: true },
 ];
@@ -242,7 +241,6 @@ export const apiSecurity: RequestHandler = async (req, res, next) => {
       return;
     }
 
-    if (policy.rateLimit && !(await distributedRateLimit(req, res, policy.rateLimit, `write:${policy.capability}:${policy.prefix}`))) return;
     if (policy.idempotent) {
       const reserved = await reserveIdempotency(req, res);
       if (!reserved) return;

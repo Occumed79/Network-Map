@@ -1,0 +1,67 @@
+name: Apply final observer consolidation
+
+on:
+  push:
+    branches:
+      - hardening/ui-ownership-consolidation-v2
+
+permissions:
+  contents: write
+
+concurrency:
+  group: final-observer-consolidation
+  cancel-in-progress: true
+
+jobs:
+  migrate-and-validate:
+    if: ${{ !contains(github.event.head_commit.message || '', '[observers-consolidated]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out consolidation branch
+        uses: actions/checkout@v4
+        with:
+          ref: hardening/ui-ownership-consolidation-v2
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Apply observer consolidation
+        working-directory: occu-med-map
+        run: node scripts/apply-final-observer-consolidation.mjs
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck frontend
+        run: pnpm --filter @workspace/occu-med-map typecheck
+
+      - name: Run sidebar workspace smoke
+        run: pnpm --filter @workspace/occu-med-map test:sidebar-workspace-hardening
+
+      - name: Run runtime ownership smoke
+        run: pnpm --filter @workspace/occu-med-map test:runtime-ownership
+
+      - name: Run general UI smoke
+        run: pnpm --filter @workspace/occu-med-map test:general-ui-hardening
+
+      - name: Build frontend
+        run: pnpm --filter @workspace/occu-med-map build
+
+      - name: Commit validated observer consolidation
+        shell: bash
+        run: |
+          rm -f occu-med-map/scripts/apply-final-observer-consolidation.mjs
+          rm -f .github/workflows/apply-final-observer-consolidation.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Consolidate final UI observers [observers-consolidated]"
+          git push origin HEAD:hardening/ui-ownership-consolidation-v2

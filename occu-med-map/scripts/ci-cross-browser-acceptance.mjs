@@ -46,6 +46,27 @@ async function mockApi(page) {
   });
 }
 
+async function mockMapbox(page) {
+  const emptyStyle = {
+    version: 8,
+    name: "Network Map deterministic CI style",
+    sources: {},
+    layers: [
+      {
+        id: "ci-background",
+        type: "background",
+        paint: { "background-color": "#e7edf3" },
+      },
+    ],
+  };
+  await page.route("https://api.mapbox.com/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname.includes("/styles/v1/")) return json(route, emptyStyle);
+    return route.fulfill({ status: 204, body: "" });
+  });
+  await page.route("https://events.mapbox.com/**", (route) => route.fulfill({ status: 204, body: "" }));
+}
+
 function visibleInViewport(element) {
   const rect = element.getBoundingClientRect();
   const style = getComputedStyle(element);
@@ -101,6 +122,23 @@ async function assertWorkspace(page, label) {
   assert.equal(await tab.getAttribute("aria-selected"), "true", `${label} tab must become active`);
 }
 
+async function waitForRuntimeOwners(page, label) {
+  try {
+    await page.waitForFunction(() => Boolean(window.__NETWORK_MAP_LEAFLET_LIFECYCLE__)
+      && Boolean(window.__NETWORK_MAP_MAPBOX_LIFECYCLE__)
+      && Boolean(window.__NETWORK_MAP_REQUEST_PIPELINE__), null, { timeout: 20_000 });
+  } catch (error) {
+    const runtimeSnapshot = await page.evaluate(() => ({
+      leaflet: Boolean(window.__NETWORK_MAP_LEAFLET_LIFECYCLE__),
+      mapbox: Boolean(window.__NETWORK_MAP_MAPBOX_LIFECYCLE__),
+      requests: Boolean(window.__NETWORK_MAP_REQUEST_PIPELINE__),
+      mapboxSurface: Boolean(document.querySelector(".mapboxgl-map")),
+      leafletSurface: Boolean(document.querySelector(".leaflet-container")),
+    }));
+    throw new Error(`${label}: runtime owners did not initialize: ${JSON.stringify(runtimeSnapshot)}\n${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 async function runCase(browser, viewport, routeVariant) {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
@@ -120,13 +158,15 @@ async function runCase(browser, viewport, routeVariant) {
   page.on("requestfailed", (request) => {
     if (request.url().includes("/api/") || request.url().includes("localhost") || request.url().includes("127.0.0.1")) requestFailures.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || "failed"}`);
   });
+  await mockMapbox(page);
   await mockApi(page);
   const label = `${browserName}/${routeVariant.name}/${viewport.name}`;
   try {
     await page.goto(`${baseUrl}/${routeVariant.suffix}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
     await page.locator("#root").waitFor({ state: "attached", timeout: 20_000 });
     await page.locator(".app-wrap").waitFor({ state: "visible", timeout: 20_000 });
-    await page.waitForFunction(() => Boolean(window.__NETWORK_MAP_LEAFLET_LIFECYCLE__) && Boolean(window.__NETWORK_MAP_MAPBOX_LIFECYCLE__) && Boolean(window.__NETWORK_MAP_NETWORK_PIPELINE__), null, { timeout: 20_000 });
+    await waitForRuntimeOwners(page, label);
+    await page.locator(".mapboxgl-map,.leaflet-container,.map-shell,.map-area").first().waitFor({ state: "visible", timeout: 20_000 });
     await page.waitForTimeout(700);
 
     await assertNoGeometryFailure(page, `${label}/initial`);

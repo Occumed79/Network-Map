@@ -1,0 +1,145 @@
+name: Hardening Acceptance
+
+on:
+  pull_request:
+  push:
+    branches:
+      - hardening/real-acceptance-deployment-gates
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hardening-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api-database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: network_map_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d network_map_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/network_map_test
+      DATABASE_URL_2: postgresql://postgres:postgres@127.0.0.1:5432/scoring_test
+      WRITE_API_TOKEN: ci-write-token
+      ADMIN_API_TOKEN: ci-admin-token
+      NODE_ENV: production
+      CLIENT_ORIGIN: http://127.0.0.1:4173
+      API_REQUEST_DEADLINE_MS: "10000"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Create disposable scoring database
+        env:
+          PGPASSWORD: postgres
+        run: createdb -h 127.0.0.1 -U postgres scoring_test
+      - name: Apply disposable base schema and hardening migrations
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -euo pipefail
+          psql -h 127.0.0.1 -U postgres -d network_map_test -v ON_ERROR_STOP=1 -f api-server/scripts/ci-temp-db-bootstrap.sql
+          for migration in \
+            api-server/src/db/migrations/20260806_provider_coordinate_integrity.sql \
+            api-server/src/db/migrations/20260806_provider_upload_lifecycle.sql \
+            api-server/src/db/migrations/20260806_api_security.sql \
+            api-server/src/db/migrations/20260806_database_lifecycle.sql; do
+            echo "Applying $migration"
+            psql -h 127.0.0.1 -U postgres -d network_map_test -v ON_ERROR_STOP=1 -f "$migration"
+          done
+      - name: Verify migration version and zero unexpected orphans
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -U postgres -d network_map_test -v ON_ERROR_STOP=1 -c "SELECT version FROM schema_migration_versions ORDER BY version;"
+          test "$(psql -h 127.0.0.1 -U postgres -d network_map_test -Atc 'SELECT count(*) FROM provider_orphan_audit')" = "0"
+      - name: Typecheck API and DB package
+        run: pnpm --filter @workspace/api-server typecheck
+      - name: Run disposable-database API integration
+        working-directory: api-server
+        run: node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/ci-api-integration.mjs
+
+  browser-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck frontend
+        run: pnpm --filter @workspace/occu-med-map typecheck
+      - name: Install Playwright browser
+        run: pnpm --filter @workspace/occu-med-map exec playwright install --with-deps ${{ matrix.browser }}
+      - name: Start Vite and run ${{ matrix.browser }} acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --filter @workspace/occu-med-map exec vite --config vite.config.ts --host 127.0.0.1 --port 4173 > /tmp/network-map-vite.log 2>&1 &
+          VITE_PID=$!
+          cleanup() { kill "$VITE_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+          for attempt in {1..50}; do
+            if curl --fail --silent --max-time 5 http://127.0.0.1:4173/ >/dev/null; then break; fi
+            if ! kill -0 "$VITE_PID" 2>/dev/null; then cat /tmp/network-map-vite.log; exit 1; fi
+            if [[ "$attempt" == "50" ]]; then cat /tmp/network-map-vite.log; exit 1; fi
+            sleep 1
+          done
+          cd occu-med-map
+          BROWSER=${{ matrix.browser }} NETWORK_MAP_CI_UI_URL=http://127.0.0.1:4173 node scripts/ci-cross-browser-acceptance.mjs
+      - name: Upload browser failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cross-browser-${{ matrix.browser }}-artifacts
+          path: |
+            occu-med-map/test-results/cross-browser-${{ matrix.browser }}
+            /tmp/network-map-vite.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  supply-chain-and-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Dependency vulnerability gate
+        run: pnpm audit --audit-level high
+      - name: Real ESLint gate
+        run: pnpm dlx --package=eslint@9.39.1 --package=typescript-eslint@8.46.2 eslint -c eslint.config.mjs "api-server/src/**/*.{ts,tsx}" "occu-med-map/src/**/*.{ts,tsx}"
+      - name: Dead-code and circular-dependency gate
+        run: node scripts/architecture-quality-gates.mjs
+      - name: Build production bundles
+        run: |
+          pnpm --filter @workspace/occu-med-map build
+          pnpm --filter @workspace/api-server build
+      - name: Bundle-size budget
+        run: node scripts/bundle-size-budget.mjs

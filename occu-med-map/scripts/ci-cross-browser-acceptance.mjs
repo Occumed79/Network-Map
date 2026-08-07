@@ -26,6 +26,19 @@ function json(route, payload, status = 200) {
 }
 
 async function installMocks(page) {
+  // CI must never depend on a real Mapbox key or external network. Mapbox GL
+  // receives a valid empty style so the map lifecycle can initialize and the
+  // browser tests exercise our UI/engine integration deterministically.
+  await page.route("https://api.mapbox.com/styles/v1/**", async (route) => {
+    await json(route, { version: 8, name: "CI empty map style", sources: {}, layers: [] });
+  });
+  await page.route("https://api.mapbox.com/**", async (route) => {
+    await route.fulfill({ status: 204, body: "" });
+  });
+  await page.route("https://events.mapbox.com/**", async (route) => {
+    await route.fulfill({ status: 204, body: "" });
+  });
+
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const pathname = new URL(request.url()).pathname;

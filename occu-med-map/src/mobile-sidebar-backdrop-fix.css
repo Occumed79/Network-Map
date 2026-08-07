@@ -1,0 +1,15 @@
+@media (max-width: 768px) {
+  .sidebar.mobile-open {
+    z-index: 2200 !important;
+    pointer-events: auto !important;
+  }
+
+  .mobile-sidebar-backdrop {
+    z-index: 2100 !important;
+    top: var(--command-header-height) !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: min(326px, 88vw) !important;
+    pointer-events: auto !important;
+  }
+}

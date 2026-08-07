@@ -139,7 +139,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pnpm dlx --package=eslint@9.39.1 --package=typescript-eslint@8.46.2 sh -c '
+          pnpm dlx --package=eslint@9.39.1 --package=typescript-eslint@8.46.2 --package=eslint-plugin-react-hooks@7.0.1 sh -c '
             export NODE_PATH="$(dirname "$(dirname "$(command -v eslint)")")"
             eslint -c eslint.config.mjs "api-server/src/**/*.{ts,tsx}" "occu-med-map/src/**/*.{ts,tsx}"
           '

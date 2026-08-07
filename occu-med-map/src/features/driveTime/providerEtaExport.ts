@@ -1,3 +1,4 @@
+import { csvCell } from "../../lib/spreadsheetSafety";
 import type { EtaProviderRanking, EtaRankingResult } from "./providerEtaTypes";
 
 export function providerEtaRowToCsv(row: EtaProviderRanking): string[] {
@@ -47,9 +48,4 @@ export function downloadEtaCsv(result: EtaRankingResult, filename = "provider-et
   anchor.download = filename;
   anchor.click();
   URL.revokeObjectURL(url);
-}
-
-function csvCell(value: string): string {
-  const safe = value.replace(/"/g, '""');
-  return /[",\n]/.test(safe) ? `"${safe}"` : safe;
 }

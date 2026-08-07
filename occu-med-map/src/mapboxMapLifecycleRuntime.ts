@@ -1,4 +1,5 @@
 import mapboxgl from "mapbox-gl";
+import { registerRuntimeOwner } from "./runtimeControllerRegistry";
 
 export type MapboxMapMode = "2d" | "3d" | "unknown";
 
@@ -184,16 +185,18 @@ export function getTrackedMapboxMaps(): mapboxgl.Map[] {
   return [...maps.keys()];
 }
 
-window.__NETWORK_MAP_MAPBOX_LIFECYCLE__ = {
-  getMaps: getTrackedMapboxMaps,
-  getDiagnostics: () => ({
-    mapCount: maps.size,
-    initializerCount: initializers.size,
-    initializers: orderedInitializers().map(({ id, priority }) => ({ id, priority })),
-    maps: [...maps.entries()].map(([map, tracked]) => ({
-      mode: tracked.context.mode,
-      loaded: map.loaded(),
-    })),
-    initializationErrors,
-  }),
-};
+if (registerRuntimeOwner("mapbox-map-lifecycle", "Authoritative Mapbox map lifecycle and initializer registry")) {
+  window.__NETWORK_MAP_MAPBOX_LIFECYCLE__ = {
+    getMaps: getTrackedMapboxMaps,
+    getDiagnostics: () => ({
+      mapCount: maps.size,
+      initializerCount: initializers.size,
+      initializers: orderedInitializers().map(({ id, priority }) => ({ id, priority })),
+      maps: [...maps.entries()].map(([map, tracked]) => ({
+        mode: tracked.context.mode,
+        loaded: map.loaded(),
+      })),
+      initializationErrors,
+    }),
+  };
+}

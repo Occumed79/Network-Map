@@ -1,6 +1,8 @@
 import L from "leaflet";
 import { registerLeafletMapInitializer } from "./leafletMapLifecycleRuntime";
 import { hasMapboxToken, mapboxDirections, mapboxGeocode, mapboxIsochrone, mapboxReverseGeocode } from "./mapboxServices";
+import { registerMapToolsPanel } from "./mapToolsPanelRegistry";
+import { registerRuntimeOwner } from "./runtimeControllerRegistry";
 
 type Point = { lat: number; lng: number; label?: string };
 type RankedPin = Point & { name: string; driveMiles: number; driveMinutes: number; coordinates: Array<[number, number]> };
@@ -166,20 +168,20 @@ function renderRankings(map: L.Map, rows: RankedPin[]): void {
   if (!etaResultsNode) return;
   etaResultsNode.innerHTML = "";
   rows.forEach((row, index) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "occumed-eta-row";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "occumed-eta-row";
     const name = document.createElement("span");
     name.textContent = `${index + 1}. ${row.name}`;
     const mins = document.createElement("strong");
     mins.textContent = `${Math.round(row.driveMinutes)} min`;
     const miles = document.createElement("em");
     miles.textContent = `${row.driveMiles.toFixed(1)} mi`;
-    button.appendChild(name);
-    button.appendChild(mins);
-    button.appendChild(miles);
-    button.addEventListener("click", () => drawRoute(map, row));
-    etaResultsNode?.appendChild(button);
+    btn.appendChild(name);
+    btn.appendChild(mins);
+    btn.appendChild(miles);
+    btn.addEventListener("click", () => drawRoute(map, row));
+    etaResultsNode?.appendChild(btn);
   });
 }
 
@@ -263,8 +265,10 @@ function section(label: string): HTMLDivElement {
   return node;
 }
 
-function addCommandPanel(map: L.Map): void {
+function addCommandPanel(map: L.Map): { control: L.Control; cleanup: () => void } {
   const control = new L.Control({ position: "bottomleft" });
+  let unregisterPanel: (() => void) | null = null;
+
   control.onAdd = () => {
     const box = L.DomUtil.create("div", "occumed-map-tools-panel");
     L.DomEvent.disableClickPropagation(box);
@@ -283,7 +287,7 @@ function addCommandPanel(map: L.Map): void {
     const searchActions = document.createElement("div");
     searchActions.className = "occumed-mapbox-actions";
     searchActions.appendChild(button("Search", () => searchPlace(map, input)));
-    input.addEventListener("keydown", (event) => { if (event.key === "Enter") searchPlace(map, input); });
+    input.addEventListener("keydown", (event) => { if (event.key === "Enter") void searchPlace(map, input); });
     search.appendChild(input);
     search.appendChild(searchActions);
     box.appendChild(search);
@@ -291,7 +295,7 @@ function addCommandPanel(map: L.Map): void {
     const route = section("Routes and Zones");
     const routeActions = document.createElement("div");
     routeActions.className = "occumed-mapbox-actions";
-    routeActions.appendChild(button("Service Zones", () => drawZones(map)));
+    routeActions.appendChild(button("Service Zones", () => { void drawZones(map); }));
     routeActions.appendChild(button("Clear", () => clearRoutes(map)));
     route.appendChild(routeActions);
     box.appendChild(route);
@@ -299,9 +303,9 @@ function addCommandPanel(map: L.Map): void {
     const eta = section("ETA Ranking");
     const etaActions = document.createElement("div");
     etaActions.className = "occumed-mapbox-actions";
-    etaActions.appendChild(button("Rank Visible", () => rankVisiblePins(map)));
+    etaActions.appendChild(button("Rank Visible", () => { void rankVisiblePins(map); }));
     etaActions.appendChild(button("Apply to Results", () => emitEtaRankings()));
-    etaActions.appendChild(button("Copy ETA", () => copyEta()));
+    etaActions.appendChild(button("Copy ETA", () => { void copyEta(); }));
     etaResultsNode = document.createElement("div");
     etaResultsNode.className = "occumed-eta-results";
     eta.appendChild(etaActions);
@@ -311,7 +315,13 @@ function addCommandPanel(map: L.Map): void {
     const density = section("Density and Basemap");
     const densityActions = document.createElement("div");
     densityActions.className = "occumed-mapbox-actions";
-    const densityButton = button("Density", () => { densityEnabled = !densityEnabled; densityButton.classList.toggle("active", densityEnabled); drawDensity(map); });
+    const densityButton = button("Density", () => {
+      densityEnabled = !densityEnabled;
+      densityButton.classList.toggle("active", densityEnabled);
+      densityButton.setAttribute("aria-pressed", String(densityEnabled));
+      drawDensity(map);
+    });
+    densityButton.setAttribute("aria-pressed", "false");
     densityActions.appendChild(densityButton);
     basemaps.forEach((item) => densityActions.appendChild(button(item.label, () => updateBasemap(map, item.style))));
     density.appendChild(densityActions);
@@ -319,16 +329,35 @@ function addCommandPanel(map: L.Map): void {
 
     statusNode = document.createElement("div");
     statusNode.className = "occumed-mapbox-status";
+    statusNode.setAttribute("role", "status");
+    statusNode.setAttribute("aria-live", "polite");
     statusNode.textContent = "Click map to set origin. Alt-click routes from origin.";
     box.appendChild(statusNode);
+
+    unregisterPanel?.();
+    unregisterPanel = registerMapToolsPanel(box, map);
     return box;
   };
+
+  control.onRemove = () => {
+    unregisterPanel?.();
+    unregisterPanel = null;
+  };
   control.addTo(map);
+  return {
+    control,
+    cleanup: () => {
+      unregisterPanel?.();
+      unregisterPanel = null;
+      try { control.remove(); } catch {}
+    },
+  };
 }
 
-function installOnMap(map: L.Map): void {
-  addCommandPanel(map);
-  map.on("click", async (event: L.LeafletMouseEvent) => {
+function installOnMap(map: L.Map): () => void {
+  const panel = addCommandPanel(map);
+
+  const onMapClick = async (event: L.LeafletMouseEvent) => {
     const point = { lat: event.latlng.lat, lng: event.latlng.lng };
     if (event.originalEvent?.altKey) {
       await drawRoute(map, point);
@@ -340,21 +369,42 @@ function installOnMap(map: L.Map): void {
     } catch {
       setOrigin(map, point);
     }
-  });
-  map.on("moveend zoomend", () => { if (densityEnabled) drawDensity(map); });
-  window.addEventListener("occumed:route-to-point", ((event: Event) => {
-    const detail = (event as CustomEvent<Point>).detail;
-    if (detail && Number.isFinite(detail.lat) && Number.isFinite(detail.lng)) drawRoute(map, detail);
-  }) as EventListener);
+  };
+  const onViewportChange = () => { if (densityEnabled) drawDensity(map); };
+
+  map.on("click", onMapClick);
+  map.on("moveend zoomend", onViewportChange);
+
+  return () => {
+    map.off("click", onMapClick);
+    map.off("moveend zoomend", onViewportChange);
+    if (searchMarker && map.hasLayer(searchMarker)) map.removeLayer(searchMarker);
+    if (routeLayer && map.hasLayer(routeLayer)) map.removeLayer(routeLayer);
+    if (zoneLayer && map.hasLayer(zoneLayer)) map.removeLayer(zoneLayer);
+    if (densityLayer && map.hasLayer(densityLayer)) map.removeLayer(densityLayer);
+    searchMarker = null;
+    routeLayer = null;
+    zoneLayer = null;
+    densityLayer = null;
+    panel.cleanup();
+  };
 }
 
 export function installMapToolsCommandPanel(): void {
   if (installed || !hasMapboxToken()) return;
+  if (!registerRuntimeOwner("map-tools-command-panel", "Authoritative Map Tools panel and core actions")) return;
   installed = true;
   registerLeafletMapInitializer({
     id: "map-tools-command-panel",
     priority: 40,
-    initialize: (map) => { window.setTimeout(() => installOnMap(map), 0); },
+    initialize: (map) => {
+      let cleanup: (() => void) | null = null;
+      const timer = window.setTimeout(() => { cleanup = installOnMap(map); }, 0);
+      return () => {
+        window.clearTimeout(timer);
+        cleanup?.();
+      };
+    },
   });
 }
 

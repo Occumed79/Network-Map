@@ -1,4 +1,4 @@
-import { runWithoutObserverFeedback } from "./settledMutationObserver";
+import { registerRuntimeOwner, subscribeToSharedDomObserver } from "./runtimeControllerRegistry";
 
 function removeCompletedLoadingPanels(): void {
   document.querySelectorAll<HTMLElement>(".mapbox-2d-host, .mapbox-globe-host").forEach((host) => {
@@ -18,18 +18,15 @@ function removeCompletedLoadingPanels(): void {
 }
 
 function initialize(): void {
+  if (!registerRuntimeOwner("map-engine-loading-cleanup", "Map engine loading-state cleanup")) return;
   removeCompletedLoadingPanels();
-
-  const options: MutationObserverInit = {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ["class", "data-state"],
-  };
-  const observer = new MutationObserver(() => {
-    runWithoutObserverFeedback(observer, document.documentElement, options, removeCompletedLoadingPanels);
+  subscribeToSharedDomObserver("map-engine-loading-cleanup", (mutations) => {
+    if (!mutations.some((mutation) => {
+      const target = mutation.target instanceof Element ? mutation.target : null;
+      return Boolean(target?.closest(".dual-engine-map-shell, .mapbox-2d-host, .mapbox-globe-host, .map-dimension-status"));
+    })) return;
+    removeCompletedLoadingPanels();
   });
-  observer.observe(document.documentElement, options);
 }
 
 if (document.readyState === "loading") {

@@ -1,3 +1,5 @@
+import { registerRuntimeOwner } from "./runtimeControllerRegistry";
+
 export type NetworkRequestContext = {
   input: RequestInfo | URL;
   init?: RequestInit;
@@ -36,7 +38,6 @@ declare global {
   }
 }
 
-const INSTALL_FLAG = "__occumedNetworkRequestPipelineInstalled";
 const registrations: MiddlewareRegistration[] = [];
 const nativeFetch = window.fetch.bind(window);
 let requestCount = 0;
@@ -89,21 +90,22 @@ export function registerNetworkRequestMiddleware(
   middleware: NetworkRequestMiddleware,
   priority = 0,
 ): () => void {
-  const existingIndex = registrations.findIndex((item) => item.id === id);
-  if (existingIndex >= 0) registrations.splice(existingIndex, 1);
-  registrations.push({ id, priority, middleware });
+  const normalizedId = id.trim();
+  if (!normalizedId) throw new Error("Network request middleware requires a stable id");
+  if (registrations.some((item) => item.id === normalizedId)) {
+    throw new Error(`Network request middleware is already registered: ${normalizedId}`);
+  }
+  registrations.push({ id: normalizedId, priority, middleware });
   registrations.sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id));
 
   return () => {
-    const index = registrations.findIndex((item) => item.id === id && item.middleware === middleware);
+    const index = registrations.findIndex((item) => item.id === normalizedId && item.middleware === middleware);
     if (index >= 0) registrations.splice(index, 1);
   };
 }
 
 function installPipeline(): void {
-  const target = window as any;
-  if (target[INSTALL_FLAG]) return;
-  target[INSTALL_FLAG] = true;
+  if (!registerRuntimeOwner("network-request-pipeline", "Authoritative browser network request middleware pipeline")) return;
 
   window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     requestCount += 1;
@@ -117,18 +119,18 @@ function installPipeline(): void {
       activeCount = Math.max(0, activeCount - 1);
     }
   }) as typeof window.fetch;
+
+  window.__NETWORK_MAP_REQUEST_PIPELINE__ = {
+    register: registerNetworkRequestMiddleware,
+    getStats: () => ({
+      requests: requestCount,
+      failures: failureCount,
+      active: activeCount,
+      middleware: registrations.map(({ id, priority }) => ({ id, priority })),
+    }),
+  };
 }
 
 installPipeline();
-
-window.__NETWORK_MAP_REQUEST_PIPELINE__ = {
-  register: registerNetworkRequestMiddleware,
-  getStats: () => ({
-    requests: requestCount,
-    failures: failureCount,
-    active: activeCount,
-    middleware: registrations.map(({ id, priority }) => ({ id, priority })),
-  }),
-};
 
 export {};

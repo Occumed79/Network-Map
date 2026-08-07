@@ -121,7 +121,7 @@ assert.doesNotMatch(main, /window\.fetch\s*=/); // must not monkey-patch fetch
 assert.match(main, /import\("\.\/providerLayerTelemetryRuntime"\)/);
 assert.doesNotMatch(main, /phaseTwoPreviewIsolation/);
 assert.match(main, /import\("\.\/phaseTwoMapBridge"\)/);
-assert.match(main, /import\("\.\/phase-two-control-fix\.css"\)/);
+assert.match(main, /import\("\.\/phase-two-controls\.css"\)/);
 assert.match(main, /import\("\.\/PhaseTwoShell"\)/);
 assert.doesNotMatch(main, /phaseTwoLegacyLayerBridge/);
 assert.match(main, /root\.render\(<App \/>\)/);

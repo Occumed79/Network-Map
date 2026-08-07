@@ -338,7 +338,7 @@ body {
 
 .live-panel .lp-empty strong {
   color: #1f3a50;
-  font-size: 11px;
+  font-size: 11px !important;
 }
 
 .live-panel .lp-empty span {
@@ -376,5 +376,14 @@ body {
   .lp-controls {
     max-height: 43%;
     min-height: 150px;
+  }
+}
+
+/* Desktop and laptop workspace ownership is persistent: the sidebar is a real
+   grid column, not an off-canvas drawer. Legacy mobile transform rules must not
+   be allowed to translate it outside the viewport at desktop widths. */
+@media (min-width: 769px) {
+  .sidebar {
+    transform: none !important;
   }
 }

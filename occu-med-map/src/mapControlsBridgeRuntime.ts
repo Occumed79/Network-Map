@@ -1,5 +1,6 @@
 import mapboxgl from "mapbox-gl";
 import { registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
+import { registerRuntimeOwner, subscribeToSharedDomObserver } from "./runtimeControllerRegistry";
 
 type BasemapStyle = "streets-v12" | "light-v11" | "outdoors-v12" | "satellite-streets-v12";
 
@@ -19,7 +20,6 @@ const LABEL_BY_STYLE: Record<BasemapStyle, string> = {
 
 const trackedMaps = new Set<mapboxgl.Map>();
 let selectedStyle: BasemapStyle = "streets-v12";
-let observer: MutationObserver | null = null;
 let scanTimer: number | null = null;
 
 function registerMap(instance: mapboxgl.Map): () => void {
@@ -218,26 +218,31 @@ function scheduleScan(delay = 0): void {
   }, delay);
 }
 
-function startObserver(): void {
-  if (observer || !document.body) return;
-  observer = new MutationObserver(() => scheduleScan(20));
-  observer.observe(document.body, { childList: true, subtree: true });
+function installMapControlsBridge(): void {
+  if (!registerRuntimeOwner("map-controls-bridge", "Mapbox basemap controls and Map Tools bridge")) return;
+
+  registerMapboxMapInitializer({
+    id: "map-controls-bridge",
+    priority: 10,
+    initialize: registerMap,
+  });
+  document.addEventListener("click", handleBasemapClick, true);
+  subscribeToSharedDomObserver("map-controls-bridge", (mutations) => {
+    if (!mutations.some((mutation) => {
+      const target = mutation.target instanceof Element ? mutation.target : null;
+      return Boolean(target?.closest(".occumed-map-tools-panel, .dual-engine-map-shell, .sidebar, .occumed-sidebar-workspace-host"));
+    })) return;
+    scheduleScan(20);
+  });
   scheduleScan();
   window.setTimeout(() => scheduleScan(), 250);
   window.setTimeout(() => scheduleScan(), 1_000);
 }
 
-registerMapboxMapInitializer({
-  id: "map-controls-bridge",
-  priority: 10,
-  initialize: registerMap,
-});
-document.addEventListener("click", handleBasemapClick, true);
-
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", startObserver, { once: true });
+  document.addEventListener("DOMContentLoaded", installMapControlsBridge, { once: true });
 } else {
-  startObserver();
+  installMapControlsBridge();
 }
 
 export {};

@@ -6,6 +6,8 @@
  * though it were the full source inventory.
  */
 
+import { registerRuntimeOwner, subscribeToSharedDomObserver } from "./runtimeControllerRegistry";
+
 type ProviderLayerStatusDetail = {
   source?: string;
   loaded?: number;
@@ -62,7 +64,6 @@ const SOURCE_QUERY: Record<SourceKey, string> = {
 const sourceMetrics = new Map<string, SourceMetric>();
 const sourceTotals = new Map<SourceKey, number>();
 let updateTimer: number | null = null;
-let headerObserver: MutationObserver | null = null;
 let inventoryRequest: Promise<void> | null = null;
 
 function normalizeSourceKey(value: string): SourceKey | null {
@@ -258,77 +259,66 @@ function updateUi(): void {
   };
 }
 
-window.addEventListener("network-map:provider-layer-status", (event) => {
-  const detail = (event as CustomEvent<ProviderLayerStatusDetail>).detail || {};
-  const source = normalizeSourceKey(String(detail.source || ""));
-  if (!source) return;
-  sourceMetrics.set(source, {
-    source,
-    loaded: safeNumber(detail.loaded),
-    viewportTotal: safeNumber(detail.total),
-    rendered: safeNumber(detail.rendered),
-    successfullyLoaded: detail.successfullyLoaded === true,
-    transientFailure: detail.transientFailure === true,
-    fromCache: detail.fromCache === true,
-    stale: detail.stale === true,
-    warning: String(detail.warning || ""),
-    pagesLoaded: Math.max(0, Math.trunc(safeNumber(detail.pagesLoaded))),
-    updatedAt: safeNumber(detail.timestamp) || Date.now(),
-  });
-  scheduleUpdate();
-});
+function installProviderLayerTelemetry(): void {
+  if (!registerRuntimeOwner("provider-layer-telemetry", "Provider source inventory and viewport telemetry")) return;
 
-document.addEventListener("change", (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLInputElement)) return;
-  const sourceKey = sourceKeyFromInput(target);
-  if (sourceKey) scheduleUpdate();
-  const label = (target.getAttribute("aria-label") || "").toLowerCase();
-  if (label.includes("service presence") && !target.checked) clearOverlay("Service Presence");
-  if (label.includes("naccho") && !target.checked) clearOverlay("NACCHO LHD");
-});
-
-document.addEventListener("click", (event) => {
-  const target = event.target;
-  if (!(target instanceof Element)) return;
-  const button = target.closest("button");
-  const text = (button?.textContent || "").trim().toLowerCase();
-  if (!text) return;
-  if (text.includes("clear") && (text.includes("provider") || text.includes("map"))) clearOverlay("Provider Explorer");
-  if (text.includes("clear") && (text.includes("live") || text.includes("result"))) clearOverlay("Live Places");
-});
-
-function start(): void {
-  scheduleUpdate();
-  void refreshInventoryTotals();
-
-  const connectHeader = () => {
-    const header = document.querySelector(".provider-source-health");
-    if (!header) return;
-    headerObserver?.disconnect();
-    headerObserver = new MutationObserver(() => scheduleUpdate());
-    headerObserver.observe(header, { childList: true, subtree: true });
-  };
-
-  if (!document.body) {
-    window.addEventListener("DOMContentLoaded", () => {
-      connectHeader();
-      scheduleUpdate();
-      void refreshInventoryTotals();
-    }, { once: true });
-    return;
-  }
-
-  connectHeader();
-  const mountObserver = new MutationObserver(() => {
-    if (!document.querySelector(".provider-source-health")) return;
-    mountObserver.disconnect();
-    connectHeader();
+  window.addEventListener("network-map:provider-layer-status", (event) => {
+    const detail = (event as CustomEvent<ProviderLayerStatusDetail>).detail || {};
+    const source = normalizeSourceKey(String(detail.source || ""));
+    if (!source) return;
+    sourceMetrics.set(source, {
+      source,
+      loaded: safeNumber(detail.loaded),
+      viewportTotal: safeNumber(detail.total),
+      rendered: safeNumber(detail.rendered),
+      successfullyLoaded: detail.successfullyLoaded === true,
+      transientFailure: detail.transientFailure === true,
+      fromCache: detail.fromCache === true,
+      stale: detail.stale === true,
+      warning: String(detail.warning || ""),
+      pagesLoaded: Math.max(0, Math.trunc(safeNumber(detail.pagesLoaded))),
+      updatedAt: safeNumber(detail.timestamp) || Date.now(),
+    });
     scheduleUpdate();
   });
-  mountObserver.observe(document.body, { childList: true, subtree: false });
+
+  document.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    const sourceKey = sourceKeyFromInput(target);
+    if (sourceKey) scheduleUpdate();
+    const label = (target.getAttribute("aria-label") || "").toLowerCase();
+    if (label.includes("service presence") && !target.checked) clearOverlay("Service Presence");
+    if (label.includes("naccho") && !target.checked) clearOverlay("NACCHO LHD");
+  });
+
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const button = target.closest("button");
+    const text = (button?.textContent || "").trim().toLowerCase();
+    if (!text) return;
+    if (text.includes("clear") && (text.includes("provider") || text.includes("map"))) clearOverlay("Provider Explorer");
+    if (text.includes("clear") && (text.includes("live") || text.includes("result"))) clearOverlay("Live Places");
+  });
+
+  subscribeToSharedDomObserver("provider-layer-telemetry", (mutations) => {
+    if (!mutations.some((mutation) => {
+      const target = mutation.target instanceof Element ? mutation.target : null;
+      if (target?.closest(".provider-source-health, .hero-source-summary, .workflow-layer, .unified-source-tool")) return true;
+      return Array.from(mutation.addedNodes).some((node) => node instanceof Element && Boolean(node.matches(".provider-source-health, .hero-source-summary, .workflow-layer, .unified-source-tool") || node.querySelector(".provider-source-health, .hero-source-summary, .workflow-layer, .unified-source-tool")));
+    })) return;
+    scheduleUpdate();
+  });
+
+  scheduleUpdate();
+  void refreshInventoryTotals();
 }
 
-start();
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", installProviderLayerTelemetry, { once: true });
+} else {
+  installProviderLayerTelemetry();
+}
 
 export {};

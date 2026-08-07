@@ -32,20 +32,21 @@ for (const tab of ["providers", "mapTools", "liveFinder", "explorer"]) {
   assert.match(controller, new RegExp(`id: "${tab}"`), `workspace tab ${tab} must remain registered`);
 }
 
+assert.match(controller, /registerRuntimeOwner\([\s\S]*"sidebar-workspace-controller"/, "sidebar workspace behavior must have one explicit owner");
+assert.match(controller, /subscribeToSharedDomObserver\("sidebar-workspace-controller"/, "sidebar must use the shared DOM observer");
+assert.match(controller, /runWithoutSharedDomObservation/, "sidebar compatibility reconciliation must not feed its own writes back into observation");
+assert.doesNotMatch(controller, /new MutationObserver/, "sidebar must not create a private MutationObserver");
 assert.match(controller, /occumed-sidebar-workspace-host/, "Map Tools must use a dedicated sidebar host");
 assert.match(controller, /host\.appendChild\(panel\)/, "Map Tools must be physically docked into the sidebar");
-assert.match(controller, /> \.occumed-map-tools-panel \{\s*position: static !important;/s, "docked Map Tools must never float over the map");
-assert.match(controller, /font-size: 11px !important;/, "workspace tab labels must retain readable text");
-assert.match(controller, /font-size: 11\.5px !important;/, "workspace controls must retain readable text");
-assert.match(controller, /new MutationObserver/, "one DOM lifecycle observer must keep late panels synchronized until sidebar source ownership migration completes");
-assert.equal((controller.match(/new MutationObserver/g) || []).length, 1, "sidebar controller must have exactly one temporary MutationObserver owner");
 assert.match(controller, /new ResizeObserver/, "sidebar dimensions must update without polling");
 assert.doesNotMatch(controller, /setInterval\s*\(/, "sidebar synchronization must not poll continuously");
-assert.match(controller, /\.unified-live-tool/, "Finder must prefer a stable launcher selector");
-assert.match(controller, /\.unified-explorer-tool/, "Explorer must prefer a stable launcher selector");
+assert.match(controller, /\.unified-live-tool/, "Finder must prefer a stable launcher selector during the remaining source-control migration");
+assert.match(controller, /\.unified-explorer-tool/, "Explorer must prefer a stable launcher selector during the remaining source-control migration");
 assert.match(controller, /ArrowLeft.*ArrowRight.*Home.*End/s, "workspace tabs must support keyboard navigation");
 assert.match(controller, /__NETWORK_MAP_SIDEBAR_WORKSPACES__/, "sidebar controller must expose diagnostics and explicit control");
-assert.match(controller, /beforeunload.*cleanup/s, "sidebar observers must be cleaned up");
+assert.match(controller, /removeEventListener\("resize", handleViewportChange\)/, "sidebar resize listener must be cleaned up");
+assert.match(controller, /beforeunload.*cleanup/s, "sidebar runtime resources must be cleaned up");
+assert.doesNotMatch(controller, /createElement\("style"\)|style\.textContent/, "sidebar behavior controller must not own global runtime CSS");
 
 assert.match(panelGuard, /registerRuntimeOwner\("sidebar-workspace-integrity"/, "sidebar integrity diagnostics must have an explicit owner");
 assert.doesNotMatch(panelGuard, /new MutationObserver/, "sidebar integrity diagnostics must not add a competing DOM observer");
@@ -58,8 +59,8 @@ assert.match(panelGuard, /map-tools-horizontal-overflow/, "runtime audit must de
 assert.match(panelGuard, /__NETWORK_MAP_UI_INTEGRITY__/, "runtime UI audit must be externally inspectable");
 assert.match(panelGuard, /removeEventListener/, "UI integrity listeners must be cleaned up");
 
-
-
+assert.match(finalFixes, /\.occumed-sidebar-workspace-host > \.occumed-map-tools-panel\s*\{[\s\S]*position: static !important;/, "docked Map Tools must never float over the map");
+assert.match(finalFixes, /\.occumed-sidebar-workspace-tab\s*\{[\s\S]*font-size: 11px !important;/, "workspace tab labels must retain readable text");
 assert.match(finalFixes, /grid-template-columns: var\(--command-sidebar-width\) minmax\(0, 1fr\) !important;/, "desktop layout must have only sidebar and map columns");
 assert.doesNotMatch(finalFixes, /minmax\(0, 1fr\) 0 !important/, "a zero-width legacy third column must not remain");
 assert.match(finalFixes, /phantom|legacy right drawer/i, "final layout must document right-drawer ownership");

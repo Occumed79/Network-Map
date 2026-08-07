@@ -42,7 +42,9 @@ assert.match(css, /html,\s*body,\s*#root,\s*\.app-wrap\s*\{[^}]*overflow: hidden
 assert.match(css, /\.command-search-results[\s\S]*max-width: calc\(100vw - 16px\) !important;/, "search results must remain viewport bounded");
 assert.match(css, /button:focus-visible/, "buttons must expose visible keyboard focus");
 assert.match(css, /input:focus-visible/, "fields must expose visible keyboard focus");
-assert.match(css, /button:disabled[\s\S]*cursor: not-allowed !important;/, "disabled controls must look disabled");
+const disabledControlBlock = css.match(/button:disabled,\s*input:disabled,\s*select:disabled,\s*textarea:disabled,\s*\[aria-disabled=["']true["']\]\s*\{([^}]*)\}/s)?.[1] || "";
+assert.match(disabledControlBlock, /cursor:\s*not-allowed\s*!important;/, "disabled controls must look disabled");
+assert.match(disabledControlBlock, /opacity:\s*0\.55\s*!important;/, "disabled controls must retain a clear disabled visual state");
 assert.match(css, /\.modal-backdrop[\s\S]*position: fixed !important;/, "modal backdrop must own the viewport");
 assert.match(css, /\.modal-box[\s\S]*max-height: min\(88dvh, 900px\) !important;/, "modal boxes must remain vertically bounded inside the viewport");
 assert.match(css, /\.leaflet-popup-content-wrapper/, "Leaflet popups must be hardened");

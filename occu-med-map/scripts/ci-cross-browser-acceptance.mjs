@@ -161,6 +161,44 @@ async function waitForWorkspaceReady(page, label) {
   }
 }
 
+async function waitForVisibleMapSurface(page, label) {
+  const selector = ".mapboxgl-map,.leaflet-container,.map-shell,.map-area";
+  try {
+    await page.waitForFunction((surfaceSelector) => {
+      const visible = (element) => {
+        if (!(element instanceof HTMLElement)) return false;
+        const style = getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return !element.hidden
+          && style.display !== "none"
+          && style.visibility !== "hidden"
+          && Number(style.opacity || "1") > 0
+          && rect.width > 2
+          && rect.height > 2
+          && rect.right > 0
+          && rect.bottom > 0
+          && rect.left < innerWidth
+          && rect.top < innerHeight;
+      };
+      return Array.from(document.querySelectorAll(surfaceSelector)).some(visible);
+    }, selector, { timeout: 20_000 });
+  } catch (error) {
+    const surfaceSnapshot = await page.evaluate((surfaceSelector) => Array.from(document.querySelectorAll(surfaceSelector)).map((element) => {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return {
+        className: String(element.className || element.tagName),
+        hidden: element instanceof HTMLElement ? element.hidden : null,
+        display: style.display,
+        visibility: style.visibility,
+        opacity: style.opacity,
+        rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height },
+      };
+    }), selector);
+    throw new Error(`${label}: no usable map surface became visible: ${JSON.stringify(surfaceSnapshot)}\n${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 function isExpectedSupersessionAbort(request) {
   if (request.method() !== "GET") return false;
   const errorText = request.failure()?.errorText || "";
@@ -220,7 +258,7 @@ async function runCase(browser, viewport, routeVariant) {
     await page.locator(".app-wrap").waitFor({ state: "visible", timeout: 20_000 });
     await waitForRuntimeOwners(page, label);
     await waitForWorkspaceReady(page, label);
-    await page.locator(".mapboxgl-map,.leaflet-container,.map-shell,.map-area").first().waitFor({ state: "visible", timeout: 20_000 });
+    await waitForVisibleMapSurface(page, label);
     await page.waitForTimeout(700);
 
     await assertNoGeometryFailure(page, `${label}/initial`);

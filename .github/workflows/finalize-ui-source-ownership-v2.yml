@@ -1,0 +1,168 @@
+name: Finalize UI source ownership v2
+
+on:
+  push:
+    branches:
+      - hardening/ui-ownership-finalized-v2
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize-ui-source-ownership-v2
+  cancel-in-progress: true
+
+jobs:
+  consolidate-validate-and-clean:
+    if: ${{ !contains(github.event.head_commit.message || '', '[ui-source-finalized-v2]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Check out isolated finalization branch
+        uses: actions/checkout@v4
+        with:
+          ref: hardening/ui-ownership-finalized-v2
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply deterministic source-ownership migrations
+        working-directory: occu-med-map
+        shell: bash
+        run: |
+          set -euo pipefail
+          # sidebar-control-fixes.css was already retired by the validated
+          # [sidebar-css-retired] migration on the source branch.
+          node scripts/apply-obsolete-css-retirement.mjs
+          node scripts/apply-directories-source-retirement.mjs
+          node scripts/apply-provider-source-control-migration.mjs
+          node scripts/apply-mode-launcher-source-migration.mjs
+
+          # The NPI controls are conditionally rendered inside a JSX expression,
+          # not a direct lp-controls element. Adapt the one-time migration to wrap
+          # that conditional block with a display:contents ownership boundary.
+          node <<'NODE'
+          const fs = require('node:fs');
+          const file = 'scripts/apply-provider-mode-source-state.mjs';
+          let source = fs.readFileSync(file, 'utf8');
+          const before = `const controlChildren = liveControls.children.filter(ts.isJsxElement);
+          const liveStart = controlChildren.findIndex((child) => /LIVE SOURCE FILTERS/.test(child.getText(sourceFile)));
+          const npiStart = controlChildren.findIndex((child) => /U\\.S\\. NPI FILTERS/.test(child.getText(sourceFile)));
+          if (liveStart < 0 || npiStart < 0 || npiStart <= liveStart) {
+            throw new Error(\`Finder control section markers missing: live=\${liveStart}, npi=\${npiStart}\`);
+          }
+          for (let index = liveStart; index < npiStart; index += 1) appendClass(controlChildren[index], "provider-tool-live-only");
+          for (let index = npiStart; index < controlChildren.length; index += 1) appendClass(controlChildren[index], "provider-tool-npi-only");`;
+          const after = `const controlChildren = liveControls.children.filter((child) => child.getText(sourceFile).trim());
+          const liveStart = controlChildren.findIndex((child) => /LIVE SOURCE FILTERS/.test(child.getText(sourceFile)));
+          const npiStart = controlChildren.findIndex((child) => /U\\.S\\. NPI FILTERS/.test(child.getText(sourceFile)));
+          if (liveStart < 0 || npiStart < 0 || npiStart <= liveStart) {
+            throw new Error(\`Finder control section markers missing: live=\${liveStart}, npi=\${npiStart}\`);
+          }
+          for (let index = liveStart; index < npiStart; index += 1) {
+            if (ts.isJsxElement(controlChildren[index])) appendClass(controlChildren[index], "provider-tool-live-only");
+          }
+          const npiBoundary = controlChildren[npiStart];
+          if (!ts.isJsxExpression(npiBoundary)) throw new Error("NPI control boundary must remain a JSX expression");
+          edits.push([
+            npiBoundary.getStart(sourceFile),
+            npiBoundary.getEnd(),
+            \`<div className="provider-tool-npi-only" style={{display:'contents'}}>\${npiBoundary.getText(sourceFile)}</div>\`,
+          ]);
+          for (let index = npiStart + 1; index < controlChildren.length; index += 1) {
+            if (ts.isJsxElement(controlChildren[index])) appendClass(controlChildren[index], "provider-tool-npi-only");
+          }`;
+          if (!source.includes(before)) throw new Error('Expected provider-mode marker block was not found');
+          source = source.replace(before, after);
+          fs.writeFileSync(file, source);
+          NODE
+
+          node scripts/apply-provider-mode-source-state.mjs
+          node scripts/apply-ui-system-consolidation.mjs
+          node scripts/apply-redundant-theme-css-retirement.mjs
+          node scripts/apply-modal-command-polish-retirement.mjs
+          node scripts/apply-style-guard-tightening.mjs
+          node scripts/finalize-ui-ownership-pass.mjs
+
+      - name: Run source ownership and UI guards
+        run: |
+          node occu-med-map/scripts/ui-style-ownership-smoke.ts
+          pnpm --filter @workspace/occu-med-map typecheck
+          pnpm --filter @workspace/occu-med-map test:runtime-ownership
+          pnpm --filter @workspace/occu-med-map test:sidebar-workspace-hardening
+          pnpm --filter @workspace/occu-med-map test:general-ui-hardening
+          pnpm --filter @workspace/occu-med-map test:map-synchronization-hardening
+          pnpm --filter @workspace/occu-med-map test:network-request-hardening
+          pnpm --filter @workspace/occu-med-map test:leaflet-map-lifecycle-hardening
+          pnpm --filter @workspace/occu-med-map test:mapbox-lifecycle-hardening
+          pnpm --filter @workspace/occu-med-map test:mapbox-source-pipeline-hardening
+
+      - name: Build frontend
+        run: pnpm --filter @workspace/occu-med-map build
+
+      - name: Install Chromium
+        run: pnpm --filter @workspace/occu-med-map exec playwright install --with-deps chromium
+
+      - name: Run rendered six-viewport and deep workflow acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --filter @workspace/occu-med-map exec vite --config vite.config.ts --host 127.0.0.1 --port 4173 > /tmp/network-map-vite.log 2>&1 &
+          VITE_PID=$!
+          cleanup() { kill "$VITE_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+          for attempt in {1..50}; do
+            if curl --fail --silent --max-time 5 http://127.0.0.1:4173/ >/dev/null; then break; fi
+            if ! kill -0 "$VITE_PID" 2>/dev/null; then cat /tmp/network-map-vite.log; exit 1; fi
+            if [[ "$attempt" == "50" ]]; then cat /tmp/network-map-vite.log; exit 1; fi
+            sleep 1
+          done
+          NETWORK_MAP_CI_UI_URL=http://127.0.0.1:4173 node occu-med-map/scripts/ci-ui-acceptance.mjs
+          NETWORK_MAP_CI_UI_URL=http://127.0.0.1:4173 node occu-med-map/scripts/ci-ui-deep-workflow-acceptance.mjs
+
+      - name: Remove one-time migration scaffolding
+        shell: bash
+        run: |
+          rm -f \
+            .github/workflows/apply-directories-source-retirement.yml \
+            .github/workflows/apply-modal-command-polish-retirement.yml \
+            .github/workflows/apply-mode-launcher-source-migration.yml \
+            .github/workflows/apply-obsolete-css-retirement.yml \
+            .github/workflows/apply-provider-mode-source-state.yml \
+            .github/workflows/apply-provider-source-control-migration.yml \
+            .github/workflows/apply-sidebar-css-retirement.yml \
+            .github/workflows/apply-style-guard-tightening.yml \
+            .github/workflows/apply-ui-system-consolidation.yml \
+            .github/workflows/finalize-ui-ownership-pass.yml \
+            .github/workflows/finalize-ui-source-ownership-v2.yml \
+            occu-med-map/scripts/apply-directories-source-retirement.mjs \
+            occu-med-map/scripts/apply-modal-command-polish-retirement.mjs \
+            occu-med-map/scripts/apply-mode-launcher-source-migration.mjs \
+            occu-med-map/scripts/apply-obsolete-css-retirement.mjs \
+            occu-med-map/scripts/apply-provider-mode-source-state.mjs \
+            occu-med-map/scripts/apply-provider-source-control-migration.mjs \
+            occu-med-map/scripts/apply-redundant-theme-css-retirement.mjs \
+            occu-med-map/scripts/apply-sidebar-css-retirement.mjs \
+            occu-med-map/scripts/apply-style-guard-tightening.mjs \
+            occu-med-map/scripts/apply-ui-system-consolidation.mjs \
+            occu-med-map/scripts/finalize-ui-ownership-pass.mjs
+
+      - name: Commit only the validated finalized source state
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Finalize UI source ownership and remove migration scaffolding [ui-source-finalized-v2]"
+          git push origin HEAD:hardening/ui-ownership-finalized-v2

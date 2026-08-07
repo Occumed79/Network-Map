@@ -120,8 +120,32 @@ jobs:
             if [[ "$attempt" == "50" ]]; then cat /tmp/network-map-vite.log; exit 1; fi
             sleep 1
           done
-          NETWORK_MAP_CI_UI_URL=http://127.0.0.1:4173 node occu-med-map/scripts/ci-ui-acceptance.mjs
-          NETWORK_MAP_CI_UI_URL=http://127.0.0.1:4173 node occu-med-map/scripts/ci-ui-deep-workflow-acceptance.mjs
+          if ! NETWORK_MAP_CI_UI_URL=http://127.0.0.1:4173 node occu-med-map/scripts/ci-ui-acceptance.mjs; then
+            echo "--- UI acceptance error files ---"
+            find occu-med-map/test-results/ui-acceptance -maxdepth 1 -type f -name '*-error.txt' -print -exec cat {} \; 2>/dev/null || true
+            echo "--- Vite log ---"
+            cat /tmp/network-map-vite.log || true
+            exit 1
+          fi
+          if ! NETWORK_MAP_CI_UI_URL=http://127.0.0.1:4173 node occu-med-map/scripts/ci-ui-deep-workflow-acceptance.mjs; then
+            echo "--- Deep workflow failure diagnostics ---"
+            find occu-med-map/test-results -maxdepth 3 -type f -print 2>/dev/null || true
+            echo "--- Vite log ---"
+            cat /tmp/network-map-vite.log || true
+            exit 1
+          fi
+
+      - name: Upload finalization browser diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-finalization-browser-diagnostics
+          path: |
+            occu-med-map/test-results/ui-acceptance
+            occu-med-map/test-results/ui-deep-workflow
+            /tmp/network-map-vite.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Remove migration scaffolding and commit finalized source
         shell: bash

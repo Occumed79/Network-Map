@@ -1,0 +1,79 @@
+name: UI Acceptance
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - hardening/ui-ownership-consolidation-v2
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-acceptance-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  chromium-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck frontend
+        run: pnpm --filter @workspace/occu-med-map typecheck
+
+      - name: Install Chromium
+        run: pnpm --filter @workspace/occu-med-map exec playwright install --with-deps chromium
+
+      - name: Run rendered UI acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --filter @workspace/occu-med-map exec vite --config vite.config.ts --host 127.0.0.1 --port 4173 > /tmp/network-map-vite.log 2>&1 &
+          VITE_PID=$!
+          cleanup() {
+            kill "$VITE_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for attempt in {1..40}; do
+            if curl --fail --silent --show-error --max-time 5 http://127.0.0.1:4173/ > /dev/null; then
+              break
+            fi
+            if ! kill -0 "$VITE_PID" 2>/dev/null; then
+              cat /tmp/network-map-vite.log
+              exit 1
+            fi
+            if [[ "$attempt" == "40" ]]; then
+              cat /tmp/network-map-vite.log
+              exit 1
+            fi
+            sleep 1
+          done
+
+          NETWORK_MAP_CI_UI_URL=http://127.0.0.1:4173 node occu-med-map/scripts/ci-ui-acceptance.mjs
+
+      - name: Upload UI acceptance artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-acceptance-artifacts
+          path: |
+            occu-med-map/test-results/ui-acceptance
+            /tmp/network-map-vite.log
+          if-no-files-found: ignore
+          retention-days: 7

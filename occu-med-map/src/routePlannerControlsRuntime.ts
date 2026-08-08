@@ -1,27 +1,27 @@
 import L from "leaflet";
-import { registerLeafletMapInitializer } from "./leafletMapLifecycleRuntime";
 import { mapboxDirections, mapboxGeocode } from "./mapboxServices";
+import { registerMapToolsSection } from "./mapToolsPanelRegistry";
+import { registerRuntimeOwner } from "./runtimeControllerRegistry";
 
 type Point = { lat: number; lng: number; label?: string };
 
-const ROUTE_PANEL_FLAG = "routePlannerReady";
-let canonicalMap: L.Map | null = null;
+let activeMap: L.Map | null = null;
+let activePanel: HTMLElement | null = null;
 let fromPoint: Point | null = null;
 let toPoint: Point | null = null;
 let fromMarker: L.Marker | null = null;
 let toMarker: L.Marker | null = null;
 let routeLayer: L.LayerGroup | null = null;
-let observer: MutationObserver | null = null;
-let scanTimer: number | null = null;
 
 function status(text: string): void {
-  document.querySelectorAll<HTMLElement>(".occumed-map-tools-panel .occumed-mapbox-status").forEach((node) => {
+  const scope = activePanel || document;
+  scope.querySelectorAll<HTMLElement>(".occumed-mapbox-status").forEach((node) => {
     node.textContent = text;
   });
 }
 
 function inputFor(target: "from" | "to"): HTMLInputElement | null {
-  return document.querySelector<HTMLInputElement>(`.occumed-route-${target}`);
+  return (activePanel || document).querySelector<HTMLInputElement>(`.occumed-route-${target}`);
 }
 
 function markerIcon(kind: "from" | "to"): L.DivIcon {
@@ -34,18 +34,22 @@ function markerIcon(kind: "from" | "to"): L.DivIcon {
   });
 }
 
+function removeLayerIfPresent(map: L.Map, layer: L.Layer | null): void {
+  if (layer && map.hasLayer(layer)) map.removeLayer(layer);
+}
+
 function setPoint(map: L.Map, target: "from" | "to", point: Point): void {
   const input = inputFor(target);
   if (input) input.value = point.label || `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`;
 
   if (target === "from") {
     fromPoint = point;
-    if (fromMarker) map.removeLayer(fromMarker);
+    removeLayerIfPresent(map, fromMarker);
     fromMarker = L.marker([point.lat, point.lng], { icon: markerIcon("from"), zIndexOffset: 7200 }).addTo(map);
     window.dispatchEvent(new CustomEvent("occumed:map-origin-changed", { detail: point }));
   } else {
     toPoint = point;
-    if (toMarker) map.removeLayer(toMarker);
+    removeLayerIfPresent(map, toMarker);
     toMarker = L.marker([point.lat, point.lng], { icon: markerIcon("to"), zIndexOffset: 7100 }).addTo(map);
   }
 }
@@ -73,10 +77,8 @@ async function geocodeInput(map: L.Map, target: "from" | "to"): Promise<Point | 
 }
 
 function clearRouteOnly(map: L.Map): void {
-  if (routeLayer) {
-    map.removeLayer(routeLayer);
-    routeLayer = null;
-  }
+  removeLayerIfPresent(map, routeLayer);
+  routeLayer = null;
 }
 
 async function drawRoute(map: L.Map, start: Point, end: Point): Promise<void> {
@@ -108,8 +110,8 @@ async function routeFromInputs(map: L.Map): Promise<void> {
 
 function clearPlanner(map: L.Map): void {
   clearRouteOnly(map);
-  if (fromMarker) map.removeLayer(fromMarker);
-  if (toMarker) map.removeLayer(toMarker);
+  removeLayerIfPresent(map, fromMarker);
+  removeLayerIfPresent(map, toMarker);
   fromMarker = null;
   toMarker = null;
   fromPoint = null;
@@ -127,8 +129,8 @@ function swapPlanner(map: L.Map): void {
   const fromText = inputFor("from")?.value || "";
   const toText = inputFor("to")?.value || "";
 
-  if (fromMarker) map.removeLayer(fromMarker);
-  if (toMarker) map.removeLayer(toMarker);
+  removeLayerIfPresent(map, fromMarker);
+  removeLayerIfPresent(map, toMarker);
   fromMarker = null;
   toMarker = null;
   fromPoint = null;
@@ -168,14 +170,13 @@ function actionButton(label: string, className: string, onClick: () => void): HT
   return button;
 }
 
-function installPanel(panel: HTMLElement): void {
-  if (panel.dataset[ROUTE_PANEL_FLAG] === "true") return;
-  const map = canonicalMap;
-  if (!map) return;
+function mountRoutePlanner(panel: HTMLElement, map: L.Map): () => void {
+  activeMap = map;
+  activePanel = panel;
 
-  const firstSection = panel.querySelector<HTMLElement>(".occumed-map-tools-section");
   const planner = document.createElement("div");
   planner.className = "occumed-map-tools-section occumed-route-planner";
+  planner.dataset.mapToolsSection = "route-planner-controls";
 
   const title = document.createElement("div");
   title.className = "occumed-map-tools-section-title";
@@ -207,54 +208,39 @@ function installPanel(panel: HTMLElement): void {
   });
 
   planner.append(fromInput, toInput, actions);
-  if (firstSection) panel.insertBefore(planner, firstSection);
+  const firstCoreSection = panel.querySelector<HTMLElement>(".occumed-map-tools-section");
+  if (firstCoreSection) panel.insertBefore(planner, firstCoreSection);
   else panel.appendChild(planner);
-  panel.dataset[ROUTE_PANEL_FLAG] = "true";
   status("Enter a starting location and destination.");
+
+  return () => {
+    if (activeMap === map) clearPlanner(map);
+    planner.remove();
+    if (activePanel === panel) activePanel = null;
+    if (activeMap === map) activeMap = null;
+  };
 }
 
-function scanForPanel(): void {
-  document.querySelectorAll<HTMLElement>(".occumed-map-tools-panel").forEach(installPanel);
-}
+function installRoutePlannerControls(): void {
+  if (!registerRuntimeOwner("route-planner-controls", "Map Tools From/To route planner")) return;
 
-function scheduleScan(delay = 0): void {
-  if (scanTimer !== null) window.clearTimeout(scanTimer);
-  scanTimer = window.setTimeout(() => {
-    scanTimer = null;
-    scanForPanel();
-  }, delay);
-}
-
-function bindMap(map: L.Map): void {
-  canonicalMap = map;
-  map.once("unload", () => {
-    if (canonicalMap === map) canonicalMap = null;
+  registerMapToolsSection({
+    id: "route-planner-controls",
+    priority: 10,
+    mount: mountRoutePlanner,
   });
-  scheduleScan(0);
+
+  window.addEventListener("occumed:route-to-point", ((event: Event) => {
+    const detail = (event as CustomEvent<Point>).detail;
+    const map = activeMap;
+    if (!map || !detail || !Number.isFinite(detail.lat) || !Number.isFinite(detail.lng)) return;
+    const point = { lat: detail.lat, lng: detail.lng, label: detail.label || "Selected provider" };
+    setPoint(map, "to", point);
+    if (fromPoint) void drawRoute(map, fromPoint, point);
+    else status("Destination selected. Enter the starting location, then press Route.");
+  }) as EventListener);
 }
 
-function startObserver(): void {
-  if (observer || !document.body) return;
-  observer = new MutationObserver(() => scheduleScan(30));
-  observer.observe(document.body, { childList: true, subtree: true });
-  scheduleScan();
-}
-
-window.addEventListener("occumed:route-to-point", ((event: Event) => {
-  const detail = (event as CustomEvent<Point>).detail;
-  if (!canonicalMap || !detail || !Number.isFinite(detail.lat) || !Number.isFinite(detail.lng)) return;
-  const point = { lat: detail.lat, lng: detail.lng, label: detail.label || "Selected provider" };
-  setPoint(canonicalMap, "to", point);
-  if (fromPoint) void drawRoute(canonicalMap, fromPoint, point);
-  else status("Destination selected. Enter the starting location, then press Route.");
-}) as EventListener);
-
-registerLeafletMapInitializer({
-  id: "route-planner-controls",
-  priority: 50,
-  initialize: bindMap,
-});
-if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", startObserver, { once: true });
-else startObserver();
+installRoutePlannerControls();
 
 export {};

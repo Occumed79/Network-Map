@@ -1194,6 +1194,7 @@ export default function App() {
   const [apProcedure, setApProcedure] = useState('urgentCareL3');
   const [view, setView] = useState<'world'|'us'|'east'|'central'|'west'>('world');
   const [activeTool, setActiveTool] = useState<ActiveTool>(null);
+  const [providerToolMode,setProviderToolMode] = useState<'live'|'npi'>('live');
   // U.S.-only coverage diagnostics (population density, state fill, difficulty
   // legend/filter/distribution, 70mi ring). Off by default so the global map
   // stays a clean world viewer. Only shown when explicitly enabled.
@@ -1242,7 +1243,7 @@ export default function App() {
   const [npiSearchMeta, setNpiSearchMeta] = useState<SearchAudit | null>(null);
   const [npiUnifiedResponse, setNpiUnifiedResponse] = useState<UnifiedSearchResponse | null>(null);
   const [showAuditView, setShowAuditView] = useState(false);
-  
+
   // Custom NPI search state
   const [showCustomSearch, setShowCustomSearch] = useState(false);
   const [customOrgName, setCustomOrgName] = useState('');
@@ -2174,7 +2175,7 @@ export default function App() {
 
   const activeToolRef = React.useRef(activeTool);
   React.useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
-  
+
   const showStateColorsRef = useRef(showStateColors);
   useEffect(()=>{ showStateColorsRef.current = showStateColors; },[showStateColors]);
   useEffect(()=>{
@@ -2315,31 +2316,6 @@ export default function App() {
     liveResults.forEach((r:any)=>{ counts[r.cat] = (counts[r.cat] || 0) + 1; });
     const missing = REQUIRED_NETWORK_CATS.filter(c => (counts[c] || 0) === 0);
     return { counts, missing, covered: REQUIRED_NETWORK_CATS.length - missing.length, total: REQUIRED_NETWORK_CATS.length };
-  }
-
-  function exportLeadershipPackage() {
-    const summary = territoryGapSummary();
-    const payload = {
-      generatedAt: new Date().toISOString(),
-      location: liveLocation || null,
-      totalFacilities: liveResults.length,
-      requiredCategories: REQUIRED_NETWORK_CATS,
-      missingCategories: summary.missing,
-      coverageRatio: `${summary.covered}/${summary.total}`,
-      outreachStatus,
-      outreachNotes,
-      topFacilities: liveResults.slice(0, 30).map((r:any)=>({
-        id: r.id, name: r.name, category: r.cat, distanceKm: Number(r.dist.toFixed(2)),
-        phone: r.phone || '', website: r.website || '', address: r.addr || '',
-      })),
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `leadership_package_${new Date().toISOString().slice(0,10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
   }
 
   async function runAutomatedPriceHunt() {
@@ -3417,19 +3393,19 @@ export default function App() {
       setNpiError('Could not resolve a U.S. city/state for this location. Try clicking nearer a city.');
       return;
     }
-    
+
     // Validate at least one search parameter is provided
     if(!customOrgName && !customFirstName && !customLastName && !customTaxonomyDesc && !customTaxonomyCode){
       setNpiError('Please enter at least one search parameter (organization name, provider name, or taxonomy).');
       return;
     }
-    
+
     setNpiLoading(true);
     setNpiError('');
     setNpiResults([]);
     setNpiSearchMeta(null);
     setNpiCategory('custom');
-    
+
     const params: NpiCustomSearchParams = {
       city: loc.city,
       state: loc.state,
@@ -3437,20 +3413,20 @@ export default function App() {
       centerLng,
       limit: 200,
     };
-    
+
     if(customOrgName) params.organization_name = customOrgName;
     if(customFirstName) params.first_name = customFirstName;
     if(customLastName) params.last_name = customLastName;
     if(customTaxonomyDesc) params.taxonomy_description = customTaxonomyDesc;
     if(customTaxonomyCode) params.taxonomy_code = customTaxonomyCode;
     if(customEnumType) params.enumeration_type = customEnumType;
-    
+
     try{
       const response = await searchNpiCustom(params);
       if(response.error){
         setNpiError(response.error);
       }
-      
+
       // Results are already in ProviderCandidate format from the backend
       setNpiResults(response.results);
       setNpiSearchMeta({
@@ -3742,9 +3718,7 @@ export default function App() {
             <strong>{activeProviderSourceCount}/4</strong>
             <span>sources active</span>
           </div>
-          <button className={`command-action${showProviderExplorerDrawer?' active':''}`} aria-expanded={showProviderExplorerDrawer} onClick={()=>{setShowProviderExplorerDrawer(value=>!value);if(activeTool==='liveFinder')setActiveTool(null);}}>
-            <SlidersHorizontal size={16}/><span>Provider Explorer</span>
-          </button>
+
           <button className={`command-action${activeTool==='liveFinder'?' active':''}`} aria-expanded={activeTool==='liveFinder'} onClick={()=>{setShowProviderExplorerDrawer(false);setActiveTool(activeTool==='liveFinder'?null:'liveFinder');}}>
             <PanelRightOpen size={16}/><span>Analysis</span>
           </button>
@@ -3764,11 +3738,17 @@ export default function App() {
           <section className="sb-section command-section">
             <div className="command-section-title"><Radar size={15}/><span>Workflows</span></div>
             <div className="command-tool-grid">
-              <button className={activeTool==='liveFinder'?'active':''} onClick={()=>{setShowProviderExplorerDrawer(false);toggleCommandTool('liveFinder');}}><Radar size={16}/><span>Live Finder</span></button>
+              <button className={String((activeTool==='liveFinder'?'active':'') || '').concat(' unified-live-tool').trim()} onClick={()=>{setProviderToolMode('live');document.body.dataset.providerTool='live';(()=>{setShowProviderExplorerDrawer(false);toggleCommandTool('liveFinder');})();}}><Radar size={16}/><span>Live Finder</span></button>
+                <button type="button" className="unified-npi-tool" onClick={()=>{setProviderToolMode('npi');document.body.dataset.providerTool='npi';(()=>{setActiveTool('liveFinder');document.body.dataset.providerTool='npi';})();}} aria-pressed={providerToolMode==='npi'}>
+                  <span>NPI Registry</span>
+                </button>
+                <button type="button" className="unified-explorer-tool" onClick={()=>{setShowProviderExplorerDrawer(value=>!value);if(activeTool==='liveFinder')setActiveTool(null);}}>
+                  <span>Provider Explorer</span>
+                </button>
               <button className={activeTool==='radius'?'active':''} onClick={()=>toggleCommandTool('radius')}><Crosshair size={16}/><span>Radius Tool</span></button>
               <button className={activeTool==='coverage'?'active':''} onClick={()=>toggleCommandTool('coverage')}><Activity size={16}/><span>Coverage</span></button>
-              <button className={activeTool==='directories'?'active':''} onClick={()=>toggleCommandTool('directories')}><Database size={16}/><span>Directories</span></button>
-              <button className={activeTool==='myClinics'?'active':''} onClick={()=>toggleCommandTool('myClinics')}><Upload size={16}/><span>My Clinics</span></button>
+
+              <button className={activeTool==='myClinics'?'active':''} aria-label="Upload Clinics" onClick={()=>setActiveTool(activeTool==='myClinics'?null:'myClinics')}><Upload size={16}/><span>Upload Clinics</span></button>
               <button className={activeTool==='compare'?'active':''} onClick={()=>toggleCommandTool('compare')}><GitCompareArrows size={16}/><span>Compare</span></button>
             </div>
           </section>
@@ -3790,7 +3770,7 @@ export default function App() {
               <LayerToggle label="Upload Preview" checked={showUploadedClinics} onChange={setShowUploadedClinics} disabled={clinicGroups.length===0} status={clinicGroups.length ? `${uploadedClinics.length.toLocaleString()} uploaded rows` : 'Upload a clinic file to enable'}/>
               <LayerToggle label="Luminous Density" checked={showGlowPoints} onChange={setShowGlowPoints} status={showGlowPoints?'Density halos and point glow active':'Low-glow point styling'}/>
             </div>
-            <button className="provider-explorer-launch" onClick={()=>{setShowProviderExplorerDrawer(true);setMobileSidebarOpen(false);if(activeTool==='liveFinder')setActiveTool(null);}}><SlidersHorizontal size={16}/><span>Open Provider Explorer</span><ChevronRight size={16}/></button>
+
           </section>
 
           <section className="sb-section command-section">
@@ -3937,7 +3917,7 @@ export default function App() {
               <span><SlidersHorizontal size={18}/></span>
               <div><strong>Provider Explorer</strong><small>Map visualization and database scope</small></div>
             </div>
-            <button aria-label="Close Provider Explorer" onClick={()=>setShowProviderExplorerDrawer(false)}><X size={18}/></button>
+
           </div>
           <div className="provider-drawer-body">
             <section className="provider-drawer-section">
@@ -4090,7 +4070,7 @@ export default function App() {
           )}
         </div>
 
-        
+
 
         {/* ── LIVE PANEL ── */}
         <div className={`live-panel${activeTool === 'liveFinder' ? ' open' : ''}${sheetState !== 'default' ? ` sheet-${sheetState}` : ''}`}>
@@ -4125,10 +4105,10 @@ export default function App() {
                 }}
               >
                 <div className="sheet-handle-bar" />
-                <div className="sheet-handle-label">Analysis Inspector</div>
+                <div className="sheet-handle-label">{providerToolMode==='npi'?'NPI Registry':'Live Places'}</div>
               </div>
               <div className="lp-panel-header" style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                <div className="analysis-panel-title" style={{display: sheetState === 'collapsed' ? 'none' : undefined}}><span className="lp-title">Analysis Inspector</span><small>Live provider finder</small></div>
+                <div className="analysis-panel-title" style={{display: sheetState === 'collapsed' ? 'none' : undefined}}><span className="lp-title">{providerToolMode==='npi'?'NPI Registry':'Live Places'}</span><small>{providerToolMode==='npi'?'U.S. provider registry search':'OpenStreetMap + Google Places'}</small></div>
                 <div style={{display:'flex',gap:6,alignItems:'center'}}>
                   <button
                     onClick={exportOutreachCsv}
@@ -4140,14 +4120,6 @@ export default function App() {
                 </div>
               </div>
               <div className="lp-controls">
-              <div style={{display:'flex',gap:6}}>
-                <button
-                  onClick={exportLeadershipPackage}
-                  style={{fontSize:8,padding:'4px 7px',borderRadius:4,border:'1px solid rgba(56,189,248,0.28)',background:'rgba(56,189,248,0.1)',color:'#38bdf8',fontFamily:"'IBM Plex Mono',monospace",cursor:'pointer'}}
-                >
-                  <Download size={13}/> Leadership export
-                </button>
-              </div>
               <div style={{fontSize:10,color:'#3d5478',lineHeight:1.5}}>
                 {liveLocation?`Center · ${liveLocation}`:'Coordinate-first live search · double-click the map or search an address.'}
                 {liveMirror&&<div style={{fontSize:9,color:'#2d4060',marginTop:3}}>{liveMirror}</div>}
@@ -4194,10 +4166,10 @@ export default function App() {
                 <span style={{fontSize:9.5,color:'#9cc7eb'}}>Double-click the map to run a live search</span>
                 <span style={{fontSize:9,color:'#285b78',fontFamily:"'IBM Plex Mono',monospace"}}>{liveSearched?'Search active':'Choose a location'}</span>
               </div>
-              <div style={{fontSize:8.5,color:'#64748b',fontFamily:"'IBM Plex Mono',monospace",letterSpacing:'0.08em',marginBottom:4}}>
+              <div style={{fontSize:8.5,color:'#64748b',fontFamily:"'IBM Plex Mono',monospace",letterSpacing:'0.08em',marginBottom:4}} className="provider-tool-live-only">
                 LIVE SOURCE FILTERS
               </div>
-              <div style={{display:'flex',flexWrap:'wrap',gap:3,marginBottom:6}}>
+              <div style={{display:'flex',flexWrap:'wrap',gap:3,marginBottom:6}} className="provider-tool-live-only">
                 {([
                   {key:'clinical',label:'Clinical',count:livePriorityCounts?.clinical},
                   {key:'occMed',label:'Occ-Med',count:livePriorityCounts?.occMed},
@@ -4238,7 +4210,7 @@ export default function App() {
                 value={liveTextFilter}
                 onChange={e=>setLiveTextFilter(e.target.value)}
               />
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}}>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}} className="provider-tool-live-only">
                 <select className="rp-select" value={liveRegionFilter} onChange={e=>setLiveRegionFilter(e.target.value as any)}>
                   <option value="all">All Regions</option>
                   <option value="us">US Only</option>
@@ -4250,7 +4222,7 @@ export default function App() {
                 </select>
               </div>
               {/* Filter chips — now wired to NPI Registry category search */}
-              {lastRadiusRef.current && isUsPoint(lastRadiusRef.current.lat, lastRadiusRef.current.lng) && (
+              <div className="provider-tool-npi-only" style={{display:'contents'}}>{lastRadiusRef.current && isUsPoint(lastRadiusRef.current.lat, lastRadiusRef.current.lng) && (
               <>
               <div style={{fontSize:8.5,color:'#64748b',fontFamily:"'IBM Plex Mono',monospace",letterSpacing:'0.08em'}}>
                 U.S. NPI FILTERS
@@ -4265,7 +4237,7 @@ export default function App() {
                 })}
                 <button className={`lp-chip${npiCategory==='custom'?' on':''}`} onClick={()=>{setShowCustomSearch(!showCustomSearch);setNpiCategory(null);setNpiResults([]);setNpiError('');}}> Custom NPI</button>
               </div>
-              
+
               {/* Custom NPI Search Form */}
               {showCustomSearch && (
                 <div style={{padding:'10px',background:'rgba(7,20,42,0.6)',border:'1px solid rgba(103,232,249,0.2)',borderRadius:6,marginTop:8}}>
@@ -4273,8 +4245,8 @@ export default function App() {
                   <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:8}}>
                     <div>
                       <div style={{fontSize:8,color:'#3d5478',marginBottom:2}}>Organization Name</div>
-                      <input 
-                        className="rp-input" 
+                      <input
+                        className="rp-input"
                         style={{fontSize:9,padding:'4px 6px'}}
                         placeholder="e.g. Mayo Clinic"
                         value={customOrgName}
@@ -4283,8 +4255,8 @@ export default function App() {
                     </div>
                     <div>
                       <div style={{fontSize:8,color:'#3d5478',marginBottom:2}}>First Name</div>
-                      <input 
-                        className="rp-input" 
+                      <input
+                        className="rp-input"
                         style={{fontSize:9,padding:'4px 6px'}}
                         placeholder="e.g. John"
                         value={customFirstName}
@@ -4293,8 +4265,8 @@ export default function App() {
                     </div>
                     <div>
                       <div style={{fontSize:8,color:'#3d5478',marginBottom:2}}>Last Name</div>
-                      <input 
-                        className="rp-input" 
+                      <input
+                        className="rp-input"
                         style={{fontSize:9,padding:'4px 6px'}}
                         placeholder="e.g. Smith"
                         value={customLastName}
@@ -4303,8 +4275,8 @@ export default function App() {
                     </div>
                     <div>
                       <div style={{fontSize:8,color:'#3d5478',marginBottom:2}}>Taxonomy Description</div>
-                      <input 
-                        className="rp-input" 
+                      <input
+                        className="rp-input"
                         style={{fontSize:9,padding:'4px 6px'}}
                         placeholder="e.g. Cardiology"
                         value={customTaxonomyDesc}
@@ -4313,8 +4285,8 @@ export default function App() {
                     </div>
                     <div>
                       <div style={{fontSize:8,color:'#3d5478',marginBottom:2}}>Taxonomy Code</div>
-                      <input 
-                        className="rp-input" 
+                      <input
+                        className="rp-input"
                         style={{fontSize:9,padding:'4px 6px'}}
                         placeholder="e.g. 207RC0000X"
                         value={customTaxonomyCode}
@@ -4323,8 +4295,8 @@ export default function App() {
                     </div>
                     <div>
                       <div style={{fontSize:8,color:'#3d5478',marginBottom:2}}>Provider Type</div>
-                      <select 
-                        className="rp-select" 
+                      <select
+                        className="rp-select"
                         style={{fontSize:9,padding:'4px 6px'}}
                         value={customEnumType}
                         onChange={e=>setCustomEnumType(e.target.value as any)}
@@ -4335,8 +4307,8 @@ export default function App() {
                       </select>
                     </div>
                   </div>
-                  <button 
-                    className="rp-assess-btn" 
+                  <button
+                    className="rp-assess-btn"
                     style={{width:'100%',padding:'6px 12px',fontSize:9}}
                     onClick={doCustomNpiSearch}
                     disabled={npiLoading}
@@ -4374,9 +4346,10 @@ export default function App() {
                 </div>
               )}
               </>
-              )}
+              )}</div>
               </div>
               <div className="lp-results">
+                <div className="provider-tool-mode-prompt">{providerToolMode==='npi'?'Choose a U.S. location, then select an NPI category or open Custom NPI Search.':''}</div>
               <div style={{fontSize:9,color:'#8fb3d8'}}>
                 {npiCategory
                   ? `Showing ${npiResults.length} verified candidates`
@@ -4516,26 +4489,7 @@ export default function App() {
       </div>
 
       {/* ── DIRECTORIES MODAL ── */}
-      <div className={`modal-backdrop${activeTool==='directories'?' open':''}`} onClick={()=>setActiveTool(activeTool === 'directories' ? null : 'directories')}>
-        <div className="modal-box workflow-modal workflow-directory-modal" style={{width:640}} onClick={e=>e.stopPropagation()}>
-          <div className="modal-header">
-            <div><span className="modal-title">Provider Directories</span><div className="workflow-modal-description">Browse provider source categories and network directories.</div></div>
-            <button className="modal-close" onClick={()=>setActiveTool(activeTool === 'directories' ? null : 'directories')}>Close</button>
-          </div>
-          <div className="modal-body">
-            <div className="dir-section-lbl">OCCUPATIONAL HEALTH RESOURCES</div>
-            <div className="dir-grid">
-              {PROVIDER_DIRS.map((d,i)=>(
-                <a key={i} className="dir-app" href={d.url} target="_blank" rel="noopener noreferrer">
-                  <ExternalLink size={18} aria-hidden="true"/>
-                  <div className="dir-app-name">{d.name}</div>
-                  <div className="dir-app-tag">{d.tag}</div>
-                </a>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
+
 
       {/* ── MY CLINICS / UPLOAD MODAL ── */}
       {activeTool === 'myClinics' && (
@@ -4557,10 +4511,10 @@ export default function App() {
                 </p>
                 <div style={{display:'grid',gap:8,marginBottom:8}}>
                   <div>
-                    <div style={{fontSize:8,color:'#3d5478',marginBottom:3}}>GROUP NAME (e.g. "East Coast Partners")</div>
+                    <div style={{fontSize:8,color:'#3d5478',marginBottom:3}}>DATASET LABEL (shown on map and filters)</div>
                     <input
                       className="rp-input"
-                      placeholder="Leave blank for auto-name"
+                      placeholder="e.g. U.S. Embassy Medical Providers" aria-label="Dataset label shown on map and filters"
                       value={uploadGroupName}
                       onChange={e=>setUploadGroupName(e.target.value)}
                       style={{fontSize:11}}

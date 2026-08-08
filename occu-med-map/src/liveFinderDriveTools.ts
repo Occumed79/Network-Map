@@ -1,4 +1,5 @@
 import "./live-finder-drive-tools.css";
+import { registerRuntimeOwner, subscribeToSharedDomObserver } from "./runtimeControllerRegistry";
 
 let installed = false;
 let latestCount = 0;
@@ -79,10 +80,10 @@ function scanPanels(): void {
 
 export function installLiveFinderDriveTools(): void {
   if (installed || import.meta.env.VITE_NATIVE_DRIVE_TIME === "true") return;
+  if (!registerRuntimeOwner("live-finder-drive-tools", "Finder drive-time action strip")) return;
   installed = true;
   window.setTimeout(scanPanels, 250);
-  const observer = new MutationObserver(() => scheduleScan());
-  observer.observe(document.body, { childList: true, subtree: true });
+  subscribeToSharedDomObserver("live-finder-drive-tools", () => scheduleScan());
   window.addEventListener("occumed:provider-eta-rankings", ((event: Event) => {
     const rows = (event as CustomEvent<unknown[]>).detail;
     latestCount = Array.isArray(rows) ? rows.length : 0;

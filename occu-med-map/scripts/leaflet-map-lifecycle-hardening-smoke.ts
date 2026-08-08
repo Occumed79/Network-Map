@@ -58,7 +58,6 @@ const registeredInitializers = [
   ["src/diagnosticsReliabilityRuntime.ts", "diagnostics-reliability", 20],
   ["src/mapOverlaySynchronizationControllerRuntime.ts", "overlay-synchronization", 30],
   ["src/mapToolsCommandPanel.ts", "map-tools-command-panel", 40],
-  ["src/routePlannerControlsRuntime.ts", "route-planner-controls", 50],
   ["src/features/driveTime/nativeDriveTimeRuntime.ts", "native-drive-time", 60],
   ["src/providerDensityField.ts", "provider-density-field", 70],
   ["src/mapboxProviderRanking.ts", "mapbox-provider-ranking", 80],
@@ -71,5 +70,10 @@ for (const [file, id, priority] of registeredInitializers) {
   assert.match(content, new RegExp(`id: ["']${id}["']`), `${file} must retain a stable initializer id`);
   assert.match(content, new RegExp(`priority: ${priority}`), `${file} must retain deterministic priority ${priority}`);
 }
+
+const routePlanner = source("src/routePlannerControlsRuntime.ts");
+assert.doesNotMatch(routePlanner, /registerLeafletMapInitializer/, "route planner should consume the Map Tools-owned Leaflet map instead of registering a second lifecycle initializer");
+assert.match(routePlanner, /registerMapToolsSection/, "route planner must register with the authoritative Map Tools section owner");
+assert.match(routePlanner, /id: ["']route-planner-controls["']/, "route planner must retain a stable Map Tools section id");
 
 console.log("Leaflet map lifecycle hardening smoke test passed.");

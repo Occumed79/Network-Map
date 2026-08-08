@@ -1,4 +1,5 @@
 import L from "leaflet";
+import { registerRuntimeOwner } from "./runtimeControllerRegistry";
 
 export type LeafletMapInitializer = {
   id: string;
@@ -60,8 +61,6 @@ function initializeMapWith(map: L.Map, initializer: RegisteredInitializer): void
   }
   if (executed.has(initializer.id)) return;
 
-  // Mark before invoking so a re-entrant registration cannot run the same
-  // initializer twice on the same map.
   executed.set(initializer.id, null);
   try {
     const cleanup = initializer.initialize(map);
@@ -115,6 +114,7 @@ function installFactoryOwner(): void {
 export function registerLeafletMapInitializer(initializer: LeafletMapInitializer): () => void {
   const id = initializer.id.trim();
   if (!id) throw new Error("Leaflet map initializer requires a stable id");
+  if (initializers.has(id)) throw new Error("Leaflet map initializer is already registered: " + id);
 
   const registered: RegisteredInitializer = {
     id,
@@ -145,14 +145,16 @@ export function getTrackedLeafletMaps(): L.Map[] {
   return [...maps];
 }
 
-installFactoryOwner();
+if (registerRuntimeOwner("leaflet-map-lifecycle", "Authoritative Leaflet map lifecycle and initializer registry")) {
+  installFactoryOwner();
 
-window.__NETWORK_MAP_LEAFLET_LIFECYCLE__ = {
-  getMaps: getTrackedLeafletMaps,
-  getDiagnostics: () => ({
-    mapCount: maps.size,
-    initializerCount: initializers.size,
-    initializers: orderedInitializers().map(({ id, priority }) => ({ id, priority })),
-    initializationErrors,
-  }),
-};
+  window.__NETWORK_MAP_LEAFLET_LIFECYCLE__ = {
+    getMaps: getTrackedLeafletMaps,
+    getDiagnostics: () => ({
+      mapCount: maps.size,
+      initializerCount: initializers.size,
+      initializers: orderedInitializers().map(({ id, priority }) => ({ id, priority })),
+      initializationErrors,
+    }),
+  };
+}

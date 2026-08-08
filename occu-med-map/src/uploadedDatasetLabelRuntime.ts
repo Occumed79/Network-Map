@@ -3,6 +3,7 @@ import {
   type NetworkRequestContext,
   type NetworkRequestNext,
 } from "./networkRequestPipelineRuntime";
+import { registerRuntimeOwner, subscribeToSharedDomObserver } from "./runtimeControllerRegistry";
 
 type UploadedProvider = Record<string, unknown> & {
   name?: unknown;
@@ -108,22 +109,6 @@ function relabelVisiblePopups(root: ParentNode = document): void {
   for (const candidate of Array.from(candidates)) relabelFooter(candidate);
 }
 
-function relabelUploadControls(root: ParentNode = document): void {
-  for (const node of Array.from(root.querySelectorAll("div, label"))) {
-    const value = normalized(node.textContent);
-    if (value.startsWith("group name (e.g.")) {
-      node.textContent = "DATASET LABEL (shown on map and filters)";
-      node.setAttribute("data-provider-dataset-label-control", "true");
-    }
-  }
-  for (const input of Array.from(root.querySelectorAll("input"))) {
-    if (input.placeholder === "Leave blank for auto-name") {
-      input.placeholder = "e.g. U.S. Embassy Medical Providers";
-      input.setAttribute("aria-label", "Dataset label shown on map and filters");
-    }
-  }
-}
-
 async function captureUploadedDatasetLabels(
   context: NetworkRequestContext,
   next: NetworkRequestNext,
@@ -147,31 +132,30 @@ async function captureUploadedDatasetLabels(
   return response;
 }
 
-registerNetworkRequestMiddleware(
-  "uploaded-dataset-popup-labels",
-  captureUploadedDatasetLabels,
-  -50,
-);
+function installUploadedDatasetLabelRuntime(): void {
+  if (!registerRuntimeOwner("uploaded-dataset-labels", "Uploaded dataset labels in provider map popups")) return;
 
-const observer = new MutationObserver((mutations) => {
-  for (const mutation of mutations) {
-    for (const node of Array.from(mutation.addedNodes)) {
-      if (!(node instanceof Element)) continue;
-      relabelFooter(node);
-      relabelVisiblePopups(node);
-      relabelUploadControls(node);
+  registerNetworkRequestMiddleware(
+    "uploaded-dataset-popup-labels",
+    captureUploadedDatasetLabels,
+    -50,
+  );
+
+  subscribeToSharedDomObserver("uploaded-dataset-labels", (mutations) => {
+    for (const mutation of mutations) {
+      for (const node of Array.from(mutation.addedNodes)) {
+        if (!(node instanceof Element)) continue;
+        relabelFooter(node);
+        relabelVisiblePopups(node);
+      }
     }
-  }
-});
+  });
 
-function installPopupObserver(): void {
-  if (!document.body) {
-    window.addEventListener("DOMContentLoaded", installPopupObserver, { once: true });
-    return;
-  }
-  observer.observe(document.body, { childList: true, subtree: true });
   relabelVisiblePopups();
-  relabelUploadControls();
 }
 
-installPopupObserver();
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", installUploadedDatasetLabelRuntime, { once: true });
+} else {
+  installUploadedDatasetLabelRuntime();
+}

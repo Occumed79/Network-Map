@@ -40,8 +40,6 @@ const OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter";
 const OVERPASS_CACHE_MS = 5 * 60 * 1000;
 const liveCache = new Map<string, { expires: number; providers: ProviderFeature[]; warning?: string }>();
 
-let persistenceReady: Promise<{ spatialEngine: SpatialEngine; candidatePersistence: boolean; savedPersistence: boolean }> | null = null;
-
 function asString(value: unknown): string | undefined { return typeof value === "string" && value.trim() ? value.trim() : undefined; }
 function asBool(value: unknown, fallback: boolean): boolean { if (value === undefined) return fallback; return value === true || value === "true" || value === "1"; }
 function asNumber(value: unknown): number | undefined { return parseOptionalNumber(value) ?? undefined; }
@@ -79,76 +77,26 @@ function parseQuery(req: Request): QueryContext {
 }
 
 async function ensureProviderExplorerPersistence(pool: ReturnType<typeof getPool>) {
-  if (persistenceReady) return persistenceReady;
-  persistenceReady = (async () => {
-    let spatialEngine: SpatialEngine = "numeric-fallback";
-    try { await pool.query("CREATE EXTENSION IF NOT EXISTS pgcrypto"); } catch {}
-    try { await pool.query("CREATE EXTENSION IF NOT EXISTS postgis"); } catch {}
-    try {
-      const postgis = await pool.query("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname='postgis') AS ok");
-      spatialEngine = postgis.rows[0]?.ok ? "postgis" : "numeric-fallback";
-    } catch {}
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS provider_candidates (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        source_kind text NOT NULL DEFAULT 'candidate',
-        source_label text NOT NULL DEFAULT 'Live discovery',
-        name text NOT NULL,
-        normalized_name text,
-        clinic_type text DEFAULT 'unknown',
-        services text[] DEFAULT ARRAY[]::text[],
-        categories text[] DEFAULT ARRAY[]::text[],
-        address text,
-        city text,
-        admin_area text,
-        country text,
-        postal_code text,
-        lat double precision,
-        lng double precision,
-        phone text,
-        website text,
-        source_url text,
-        confidence_score numeric,
-        trust_tier text DEFAULT 'lead',
-        status text NOT NULL DEFAULT 'candidate',
-        notes text,
-        raw_source_data jsonb DEFAULT '{}'::jsonb,
-        created_at timestamptz NOT NULL DEFAULT now(),
-        updated_at timestamptz NOT NULL DEFAULT now(),
-        saved_at timestamptz,
-        dismissed_at timestamptz,
-        last_seen timestamptz
-      )`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_provider_candidates_status ON provider_candidates (status)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_provider_candidates_source_kind ON provider_candidates (source_kind)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_provider_candidates_country_admin_city ON provider_candidates (country, admin_area, city)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_provider_candidates_lat_lng ON provider_candidates (lat, lng)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_provider_candidates_normalized_name ON provider_candidates (normalized_name)`);
-    if (spatialEngine === "postgis") {
-      await pool.query(`ALTER TABLE provider_candidates ADD COLUMN IF NOT EXISTS geog geography(Point,4326)`);
-      await pool.query(`UPDATE provider_candidates SET geog = ST_SetSRID(ST_MakePoint(lng, lat),4326)::geography WHERE geog IS NULL AND lat IS NOT NULL AND lng IS NOT NULL`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_provider_candidates_geog ON provider_candidates USING GIST (geog)`);
-      try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_provider_locations_geog_expr ON provider_locations USING GIST ((ST_SetSRID(ST_MakePoint(lng, lat),4326)::geography)) WHERE lat IS NOT NULL AND lng IS NOT NULL`); } catch {}
-      try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_medical_providers_geog_expr ON medical_providers USING GIST ((ST_SetSRID(ST_MakePoint(lng, lat),4326)::geography)) WHERE lat IS NOT NULL AND lng IS NOT NULL`); } catch {}
-    }
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS provider_outreach_targets (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        provider_candidate_id uuid REFERENCES provider_candidates(id) ON DELETE SET NULL,
-        provider_source_id text,
-        source_kind text,
-        source_label text,
-        name text NOT NULL,
-        status text NOT NULL DEFAULT 'outreach_target',
-        notes text,
-        raw_source_data jsonb DEFAULT '{}'::jsonb,
-        created_at timestamptz NOT NULL DEFAULT now(),
-        updated_at timestamptz NOT NULL DEFAULT now()
-      )`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_provider_outreach_status ON provider_outreach_targets (status)`);
-    return { spatialEngine, candidatePersistence: true, savedPersistence: true };
-  })();
-  return persistenceReady;
+  try {
+    const result = await pool.query(`
+      SELECT
+        to_regclass('public.provider_candidates') IS NOT NULL AS candidates_ready,
+        to_regclass('public.provider_outreach_targets') IS NOT NULL AS outreach_ready
+    `);
+    const candidatesReady = Boolean(result.rows[0]?.candidates_ready);
+    const outreachReady = Boolean(result.rows[0]?.outreach_ready);
+    return {
+      spatialEngine: "numeric-fallback" as SpatialEngine,
+      candidatePersistence: candidatesReady,
+      savedPersistence: candidatesReady && outreachReady,
+    };
+  } catch {
+    return {
+      spatialEngine: "numeric-fallback" as SpatialEngine,
+      candidatePersistence: false,
+      savedPersistence: false,
+    };
+  }
 }
 
 function storedExpressions(schema: ProviderSchema) {
@@ -348,7 +296,11 @@ async function handleRecords(req: Request, res: Response, forcedMode?: Mode) {
     res.json({ mode, total, cells, count: cells.length, precision, status: { persistenceConfigured: true, schema, ...setup } }); return;
   }
   const page = Math.max(1, Number(req.query.page) || 1); const maxLimit = mode === "pins" ? MAX_PIN_LIMIT : MAX_RECORD_LIMIT; const limit = Math.min(Math.max(1, Number(req.query.limit) || (mode === "pins" ? 1000 : 25)), maxLimit);
-  const stored = await queryStored(pool, schema, ctx, mode, setup.spatialEngine, page, limit); const cand = await queryCandidates(pool, ctx, setup.spatialEngine, page, limit); const live = ctx.includeLive || ctx.source === "live" || ctx.sourceKind === "live" ? await fetchLiveProviders(ctx) : { providers: [] as ProviderFeature[], warning: undefined };
+  const stored = await queryStored(pool, schema, ctx, mode, setup.spatialEngine, page, limit);
+  const cand = setup.candidatePersistence
+    ? await queryCandidates(pool, ctx, setup.spatialEngine, page, limit)
+    : { providers: [] as ProviderFeature[], total: 0 };
+  const live = ctx.includeLive || ctx.source === "live" || ctx.sourceKind === "live" ? await fetchLiveProviders(ctx) : { providers: [] as ProviderFeature[], warning: undefined };
   const providers = [...stored.providers, ...cand.providers, ...live.providers].slice(0, limit); const total = stored.total + cand.total + live.providers.length;
   res.json({ mode, providers, records: providers, total, count: providers.length, page, limit, hasMore: page * limit < total, visibleCount: providers.length, warning: live.warning, status: { persistenceConfigured: true, schema, ...setup } });
 }
@@ -369,12 +321,14 @@ async function insertProviderCandidate(pool: ReturnType<typeof getPool>, setup: 
 async function saveCandidate(req: Request, res: Response) {
   if (!isPersistenceConfigured()) { res.status(503).json({ error: "Candidate persistence requires DATABASE_URL." }); return; }
   const pool = getPool(); const setup = await ensureProviderExplorerPersistence(pool); const payload = ((req.body?.provider || req.body) ?? {}) as CandidatePayload;
+  if (!setup.candidatePersistence) { res.status(503).json({ error: "Provider Explorer persistence migration is not applied." }); return; }
   const row = await insertProviderCandidate(pool, setup, payload, "candidate");
   res.status(201).json({ provider: normalizeRows([row])[0], candidate: row });
 }
 async function updateCandidateStatus(req: Request, res: Response, status: string) {
   if (!isPersistenceConfigured()) { res.status(503).json({ error: "Candidate persistence requires DATABASE_URL." }); return; }
   const pool = getPool(); const setup = await ensureProviderExplorerPersistence(pool); const id = asString(req.body?.id || req.body?.candidateId || req.query.id); const payload = ((req.body?.provider || req.body) ?? {}) as CandidatePayload;
+  if (!setup.candidatePersistence) { res.status(503).json({ error: "Provider Explorer persistence migration is not applied." }); return; }
   if (!id && status !== "saved") { res.status(400).json({ error: "id is required" }); return; }
   let row = null;
   if (isUuid(id)) row = (await pool.query(`UPDATE provider_candidates SET status=$2, source_kind=CASE WHEN $2='saved' THEN 'saved' ELSE 'candidate' END, source_label=CASE WHEN $2='saved' THEN 'My Clinics' ELSE source_label END, saved_at=CASE WHEN $2='saved' THEN now() ELSE saved_at END, dismissed_at=CASE WHEN $2='dismissed' THEN now() ELSE dismissed_at END, notes=COALESCE($3, notes), updated_at=now() WHERE id=$1 RETURNING *`, [id, status, req.body?.notes || null])).rows[0];
@@ -388,7 +342,8 @@ async function updateCandidateStatus(req: Request, res: Response, status: string
 }
 async function outreachTarget(req: Request, res: Response) {
   if (!isPersistenceConfigured()) { res.status(503).json({ error: "Outreach persistence requires DATABASE_URL." }); return; }
-  const pool = getPool(); await ensureProviderExplorerPersistence(pool); const payload = req.body?.provider || req.body || {}; const name = asString(payload.name); if (!name) { res.status(400).json({ error: "name is required" }); return; }
+  const pool = getPool(); const setup = await ensureProviderExplorerPersistence(pool); const payload = req.body?.provider || req.body || {}; const name = asString(payload.name); if (!name) { res.status(400).json({ error: "name is required" }); return; }
+  if (!setup.savedPersistence) { res.status(503).json({ error: "Provider Explorer outreach persistence migration is not applied." }); return; }
   const providerSourceId = asString(payload.id) || null; const sourceKind = asString(payload.source_kind) || null; const sourceLabel = asString(payload.source || payload.source_label) || null; const candidateId = isUuid(payload.candidateId) ? payload.candidateId : isUuid(payload.id) ? payload.id : null;
   const existing = (await pool.query(`SELECT * FROM provider_outreach_targets WHERE (provider_source_id IS NOT DISTINCT FROM $1 OR lower(name)=lower($2)) AND source_kind IS NOT DISTINCT FROM $3 AND source_label IS NOT DISTINCT FROM $4 ORDER BY updated_at DESC LIMIT 1`, [providerSourceId, name, sourceKind, sourceLabel])).rows[0];
   if (existing) { const row = (await pool.query(`UPDATE provider_outreach_targets SET status='outreach_target', notes=COALESCE($2, notes), raw_source_data=COALESCE($3, raw_source_data), updated_at=now() WHERE id=$1 RETURNING *`, [existing.id, req.body?.notes || payload.notes || null, JSON.stringify(payload.raw_source_data || payload)])).rows[0]; res.json({ outreach_target: row, deduped: true }); return; }

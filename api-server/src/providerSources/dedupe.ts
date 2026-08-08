@@ -1,52 +1,118 @@
-import type { ProviderCandidate } from "./types";
+import type { ProviderCandidate, ProviderProvenance } from "./types";
 
-function normalizeName(name: string) { return name.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\b(llc|inc|corp|ltd|pllc|pa|md|do|np|dds|od|dc|pt|phd|aprn)\b/g, "").replace(/\s+/g, " ").trim(); }
-function normalizeAddress(addr: string) { return addr.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\b(street|st|avenue|ave|road|rd|drive|dr|boulevard|blvd|suite|ste|unit|floor|fl)\b/g, "").replace(/\s+/g, " ").trim(); }
-function normalizePhone(phone: string) { return phone.replace(/\D/g, "").slice(-10); }
-function extractDomain(url: string) { try { return new URL(url).hostname.replace(/^www\./, "").toLowerCase(); } catch { return ""; } }
+function normalizeName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\b(llc|inc|corp|ltd|pllc|pa|md|do|np|dds|od|dc|pt|phd|aprn)\b/g, "").replace(/\s+/g, " ").trim();
+}
+function normalizeAddress(address: string): string {
+  return address.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\b(street|st|avenue|ave|road|rd|drive|dr|boulevard|blvd|suite|ste|unit|floor|fl)\b/g, "").replace(/\s+/g, " ").trim();
+}
+function normalizePhone(phone: string): string { return phone.replace(/\D/g, "").slice(-10); }
+function extractDomain(url: string): string { try { return new URL(url).hostname.replace(/^www\./, "").toLowerCase(); } catch { return ""; } }
 
-function makeKey(c: ProviderCandidate): string {
-  const parts: string[] = [];
-  if (c.npi) parts.push(`npi:${c.npi}`);
-  const nn = normalizeName(c.name); if (nn) parts.push(`name:${nn}`);
-  const na = normalizeAddress(c.address); if (na) parts.push(`addr:${na}`);
-  const np = normalizePhone(c.phone); if (np) parts.push(`phone:${np}`);
-  const nd = extractDomain(c.website); if (nd) parts.push(`domain:${nd}`);
-  return parts.join("|");
+function identityKeys(candidate: ProviderCandidate): string[] {
+  const keys: string[] = [];
+  if (candidate.npi) keys.push(`npi:${candidate.npi.replace(/\D/g, "")}`);
+  const name = normalizeName(candidate.name);
+  const address = normalizeAddress(candidate.address);
+  const phone = normalizePhone(candidate.phone);
+  const domain = extractDomain(candidate.website);
+  if (name && address) keys.push(`name-address:${name}|${address}`);
+  if (name && phone.length >= 7) keys.push(`name-phone:${name}|${phone}`);
+  if (name && domain) keys.push(`name-domain:${name}|${domain}`);
+  if (candidate.source && candidate.id) keys.push(`source-record:${candidate.source.toLowerCase()}|${candidate.id}`);
+  if (!keys.length && name) keys.push(`name-city:${name}|${candidate.city.toLowerCase()}|${candidate.state.toLowerCase()}`);
+  return keys;
 }
 
-export function dedupeCandidates(candidates: ProviderCandidate[]): ProviderCandidate[] {
-  const groups: ProviderCandidate[][] = [];
-  const seen = new Map<string, number>();
-  for (const c of candidates) {
-    const key = makeKey(c);
-    const idx = seen.get(key);
-    if (idx !== undefined) groups[idx].push(c);
-    else { seen.set(key, groups.length); groups.push([c]); }
-  }
-  return groups.map((g) => {
-    const base = g[0];
-    const allSources = new Set<string>();
-    const allBadges = new Set<string>();
-    const allEvidence = [...base.evidence];
-    for (const c of g) {
-      (c._rawSources || [c.source]).forEach((s) => allSources.add(s));
-      c.badges.forEach((b) => allBadges.add(b));
-      for (const ev of c.evidence) {
-        if (!allEvidence.some((e) => e.evidenceUrl === ev.evidenceUrl && e.serviceDetected === ev.serviceDetected)) allEvidence.push(ev);
+function uniqueProvenance(rows: ProviderProvenance[]): ProviderProvenance[] {
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const key = `${row.source}|${row.sourceRecordId || ""}|${row.sourceUrl || ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function mergeGroup(group: ProviderCandidate[]): ProviderCandidate {
+  const ranked = [...group].sort((a, b) => b.score - a.score);
+  const base = ranked[0];
+  const allSources = new Set<string>();
+  const allBadges = new Set<string>();
+  const allServices = new Set<string>();
+  const allEvidence = [] as ProviderCandidate["evidence"];
+  const provenance: ProviderProvenance[] = [];
+
+  for (const candidate of group) {
+    (candidate._rawSources || [candidate.source]).forEach((source) => allSources.add(source));
+    candidate.badges.forEach((badge) => allBadges.add(badge));
+    (candidate.services || []).forEach((service) => allServices.add(service));
+    provenance.push(...(candidate.provenance || [{
+      source: candidate.source,
+      sourceRecordId: candidate.id,
+      sourceUrl: candidate.sourceUrl,
+      observedAt: candidate.lastSeenAt,
+    }]));
+    for (const evidence of candidate.evidence) {
+      if (!allEvidence.some((existing) => existing.evidenceUrl === evidence.evidenceUrl && existing.serviceDetected === evidence.serviceDetected && existing.source === evidence.source)) {
+        allEvidence.push(evidence);
       }
     }
-    return {
-      ...base,
-      phone: g.find((c) => c.phone)?.phone || base.phone,
-      fax: g.find((c) => c.fax)?.fax || base.fax,
-      website: g.find((c) => c.website)?.website || base.website,
-      lat: g.find((c) => c.lat !== undefined)?.lat ?? base.lat,
-      lng: g.find((c) => c.lng !== undefined)?.lng ?? base.lng,
-      npi: g.find((c) => c.npi)?.npi || base.npi,
-      evidence: allEvidence,
-      badges: Array.from(allBadges),
-      _rawSources: Array.from(allSources),
-    };
-  });
+  }
+
+  const coordinateCandidate = ranked.find((candidate) => candidate.lat !== undefined && candidate.lng !== undefined);
+  return {
+    ...base,
+    address: ranked.find((candidate) => candidate.address)?.address || base.address,
+    city: ranked.find((candidate) => candidate.city)?.city || base.city,
+    state: ranked.find((candidate) => candidate.state)?.state || base.state,
+    postalCode: ranked.find((candidate) => candidate.postalCode)?.postalCode || base.postalCode,
+    country: ranked.find((candidate) => candidate.country)?.country || base.country,
+    phone: ranked.find((candidate) => candidate.phone)?.phone || base.phone,
+    fax: ranked.find((candidate) => candidate.fax)?.fax || base.fax,
+    website: ranked.find((candidate) => candidate.website)?.website || base.website,
+    lat: coordinateCandidate?.lat ?? base.lat,
+    lng: coordinateCandidate?.lng ?? base.lng,
+    coordinateStatus: coordinateCandidate?.coordinateStatus ?? base.coordinateStatus,
+    npi: ranked.find((candidate) => candidate.npi)?.npi || base.npi,
+    providerCategory: ranked.find((candidate) => candidate.providerCategory)?.providerCategory || base.providerCategory,
+    services: Array.from(allServices),
+    evidence: allEvidence,
+    badges: Array.from(allBadges),
+    provenance: uniqueProvenance(provenance),
+    _rawSources: Array.from(allSources),
+  };
+}
+
+/**
+ * One authoritative provider deduplication implementation. Candidates are
+ * unioned when any strong identity key overlaps (NPI, normalized name/address,
+ * normalized name/phone, name/domain, or source record identity).
+ */
+export function dedupeCandidates(candidates: ProviderCandidate[]): ProviderCandidate[] {
+  const groups: ProviderCandidate[][] = [];
+  const keyToGroup = new Map<string, number>();
+
+  for (const candidate of candidates) {
+    const keys = identityKeys(candidate);
+    const matchedGroupIds = Array.from(new Set(keys.map((key) => keyToGroup.get(key)).filter((value): value is number => value !== undefined)));
+    let groupId: number;
+
+    if (!matchedGroupIds.length) {
+      groupId = groups.length;
+      groups.push([candidate]);
+    } else {
+      groupId = Math.min(...matchedGroupIds);
+      groups[groupId].push(candidate);
+      for (const duplicateGroupId of matchedGroupIds.filter((id) => id !== groupId)) {
+        groups[groupId].push(...groups[duplicateGroupId]);
+        groups[duplicateGroupId] = [];
+        for (const [key, id] of keyToGroup.entries()) if (id === duplicateGroupId) keyToGroup.set(key, groupId);
+      }
+    }
+
+    for (const key of keys) keyToGroup.set(key, groupId);
+  }
+
+  return groups.filter((group) => group.length > 0).map(mergeGroup);
 }

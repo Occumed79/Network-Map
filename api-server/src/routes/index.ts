@@ -1,14 +1,13 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
+import diagnosticsRouter from "./diagnostics";
 import healthsitesFlatGeobufRouter from "./healthsitesFlatGeobuf";
-import providerSearchRouter from "./providerSearch";
 import dentalProviderDiscoveryRouter from "./dentalProviderDiscovery";
 import liveFinderRouter from "./liveFinder";
 import priceFinderUnifiedRouter from "./priceFinderUnified";
 import priceFinderRouter from "./priceFinder";
 import searchHistoryRouter from "./searchHistory";
 import providerSourcesImportRouter from "./providerSourcesImport";
-// New unified architecture routes
 import universalDiscoveryRouter from "./universalDiscovery";
 import mapInventoryRouter from "./mapInventory";
 import indexingJobsRouter from "./indexingJobs";
@@ -17,6 +16,7 @@ import npiCustomSearchRouter from "./npiCustomSearch";
 import sourceStatusRouter from "./sourceStatus";
 import browserExtractionRouter from "./browserExtraction";
 import vectorIndexRouter from "./vectorIndex";
+import providerUploadLifecycleRouter from "./providerUploadLifecycle";
 import providerDatasetUploadsRouter from "./providerDatasetUploads";
 import providerLayersRouter from "./providerLayers";
 import googlePlacesRouter from "./googlePlaces";
@@ -32,10 +32,11 @@ import { normalizeProviderTypeResponses } from "../middleware/normalizeProviderT
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use(diagnosticsRouter);
 router.use(healthsitesFlatGeobufRouter);
 router.use(scoringDatabaseRouter);
 
-// --- New unified architecture (takes precedence) ---
+// Authoritative provider architecture takes precedence.
 router.use(universalDiscoveryRouter);
 router.use(mapInventoryRouter);
 router.use(indexingJobsRouter);
@@ -49,14 +50,18 @@ router.use(providerExplorerRouter);
 router.use(nacchoRecoveryStatusRouter);
 router.use(nacchoLhdRouter);
 router.use(stabilizeProviderLayerRequests);
+
+// Safe provider uploads require explicit preview -> commit -> rollback lifecycle.
+// The legacy dataset route remains behind it temporarily for compatibility.
+router.use(providerUploadLifecycleRouter);
 router.use(providerDatasetUploadsRouter);
 router.use(providerLayersRouter);
 router.use(myClinicsUploadRouter);
 router.use(googlePlacesRouter);
 router.use(enhancedSearchRouter);
 
-// --- Legacy routes (kept as compatibility wrappers until fully migrated) ---
-router.use(providerSearchRouter);
+// Domain-specific compatibility surfaces remain, but provider discovery inside
+// them delegates to the authoritative provider-sources pipeline.
 router.use(dentalProviderDiscoveryRouter);
 router.use(liveFinderRouter);
 router.use(priceFinderUnifiedRouter);

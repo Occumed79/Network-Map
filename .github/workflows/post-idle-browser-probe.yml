@@ -1,0 +1,46 @@
+name: Post Idle Browser Probe
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: post-idle-browser-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: ${{ matrix.browser }} post-idle probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @workspace/occu-med-map build
+      - run: pnpm --filter @workspace/occu-med-map exec playwright install --with-deps ${{ matrix.browser }}
+      - name: Start deterministic frontend preview
+        shell: bash
+        run: |
+          pnpm --filter @workspace/occu-med-map exec vite preview --config vite.config.ts --host 127.0.0.1 --port 4173 > /tmp/network-map-preview.log 2>&1 &
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:4173/ >/dev/null; then exit 0; fi
+            sleep 0.5
+          done
+          cat /tmp/network-map-preview.log
+          exit 1
+      - name: Run post-idle probe
+        env:
+          NETWORK_MAP_BROWSER: ${{ matrix.browser }}
+          NETWORK_MAP_CI_UI_URL: http://127.0.0.1:4173
+        shell: bash
+        run: timeout --signal=TERM --kill-after=10s 90s pnpm --filter @workspace/occu-med-map exec node scripts/ci-post-idle-probe.mjs

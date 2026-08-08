@@ -1,5 +1,5 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
-import { searchNpi } from "../providerSources/adapters/npi";
+import { runUnifiedSearch } from "../providerSources/orchestrator";
 import type { ProviderCandidate } from "../providerSources/types";
 import { upsertProvider } from "../providerSources/persistence";
 import { isPersistenceConfigured } from "../lib/networkMapPersistence";
@@ -50,57 +50,52 @@ function candidateToDentalProvider(candidate: ProviderCandidate): DentalProvider
     npiUrl: candidate.sourceUrl || "https://npiregistry.cms.hhs.gov/",
     searchUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(searchQuery)}`,
     npiType: candidate.sourceDetail || "NPI",
-    source: "NPPES NPI Registry",
+    source: candidate.source,
     trustTier: candidate.trustTier,
     coordinateStatus: candidate.coordinateStatus,
   };
 }
 
 async function discoverDentalProviders(city: string, state: string): Promise<DentalProvider[]> {
-  const candidates = await searchNpi(city, state, "dental");
+  const unified = await runUnifiedSearch({
+    city,
+    state,
+    serviceType: "dental",
+    radiusMiles: 0,
+    centerLat: 0,
+    centerLng: 0,
+    sourceIds: ["npi"],
+    mode: "fast",
+  });
+  const candidates = unified.results;
 
   if (isPersistenceConfigured()) {
-    await Promise.allSettled(
-      candidates.map((candidate) => upsertProvider(candidate, "dental")),
-    );
+    await Promise.allSettled(candidates.map((candidate) => upsertProvider(candidate, "dental")));
   }
 
-  return candidates
-    .map(candidateToDentalProvider)
-    .sort((a, b) => {
-      const aOrganization = a.npiType.includes("NPI-2") ? 0 : 1;
-      const bOrganization = b.npiType.includes("NPI-2") ? 0 : 1;
-      return aOrganization - bOrganization || a.name.localeCompare(b.name);
-    });
+  return candidates.map(candidateToDentalProvider).sort((a, b) => {
+    const aOrganization = a.npiType.includes("NPI-2") ? 0 : 1;
+    const bOrganization = b.npiType.includes("NPI-2") ? 0 : 1;
+    return aOrganization - bOrganization || a.name.localeCompare(b.name);
+  });
 }
 
 function buildDentalPriceQueries(provider: DentalProvider, city: string, state: string): string[] {
   const base = `${provider.name} ${city} ${state}`.trim();
   return [
-    `${base} dental exam cash price`,
-    `${base} self pay dental fee schedule`,
-    `${base} dental cleaning price`,
-    `${base} uninsured dental cost`,
-    `${base} new patient dental exam price`,
+    `${base} dental exam cash price`, `${base} self pay dental fee schedule`, `${base} dental cleaning price`,
+    `${base} uninsured dental cost`, `${base} new patient dental exam price`,
   ];
 }
 
 router.get("/price-finder", async (req: Request, res: Response, next: NextFunction) => {
-  if (!isDentalRequest(req)) {
-    next();
-    return;
-  }
-
+  if (!isDentalRequest(req)) { next(); return; }
   const city = String(req.query.city || "").trim();
   const state = String(req.query.state || "").trim().toUpperCase();
-  if (!city) {
-    res.status(400).json({ error: "city is required" });
-    return;
-  }
-
+  if (!city) { res.status(400).json({ error: "city is required" }); return; }
   try {
     const clinics = await discoverDentalProviders(city, state);
-    res.setHeader("X-Network-Map-NPI-Pipeline", "central-adapter");
+    res.setHeader("X-Network-Map-Search-Pipeline", "provider-sources");
     res.json({
       location: `${city}${state ? `, ${state}` : ""}`,
       serviceType: "dental",
@@ -108,7 +103,7 @@ router.get("/price-finder", async (req: Request, res: Response, next: NextFuncti
       clinics: clinics.slice(0, 50),
       networks: DENTAL_NETWORKS,
       pricingResources: PRICING_RESOURCES,
-      discoveryNote: "Dental discovery uses the central backend NPI adapter and includes organization and individual registrations.",
+      discoveryNote: "Dental discovery is normalized through the authoritative backend provider-search pipeline.",
     });
   } catch (error) {
     console.error("dental price-finder error", error);
@@ -117,18 +112,10 @@ router.get("/price-finder", async (req: Request, res: Response, next: NextFuncti
 });
 
 router.get("/price-hunt", async (req: Request, res: Response, next: NextFunction) => {
-  if (!isDentalRequest(req)) {
-    next();
-    return;
-  }
-
+  if (!isDentalRequest(req)) { next(); return; }
   const city = String(req.query.city || "").trim();
   const state = String(req.query.state || "").trim().toUpperCase();
-  if (!city) {
-    res.status(400).json({ error: "city is required" });
-    return;
-  }
-
+  if (!city) { res.status(400).json({ error: "city is required" }); return; }
   try {
     const clinics = (await discoverDentalProviders(city, state)).slice(0, 15);
     const results = clinics.map((clinic) => ({
@@ -136,10 +123,9 @@ router.get("/price-hunt", async (req: Request, res: Response, next: NextFunction
       queries: buildDentalPriceQueries(clinic, city, state),
       matches: [],
       hitCount: 0,
-      discoveryNote: "Provider discovered through the central NPI adapter. Use the map link for manual verification when no posted price page is found.",
+      discoveryNote: "Provider discovered through the authoritative provider-search pipeline. Use the map link for manual verification when no posted price page is found.",
     }));
-
-    res.setHeader("X-Network-Map-NPI-Pipeline", "central-adapter");
+    res.setHeader("X-Network-Map-Search-Pipeline", "provider-sources");
     res.json({
       location: `${city}${state ? `, ${state}` : ""}`,
       serviceType: "dental",
@@ -147,7 +133,7 @@ router.get("/price-hunt", async (req: Request, res: Response, next: NextFunction
       results,
       extracted: 0,
       pricingResources: PRICING_RESOURCES,
-      discoveryNote: "Dental price hunt starts from the same central NPI adapter used by the rest of Network Map.",
+      discoveryNote: "Dental price hunt starts from the same provider-search pipeline used by the rest of Network Map.",
     });
   } catch (error) {
     console.error("dental price-hunt error", error);

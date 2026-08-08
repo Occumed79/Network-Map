@@ -1,0 +1,161 @@
+name: Hardening Acceptance
+
+on:
+  pull_request:
+  push:
+    branches:
+      - hardening/real-acceptance-deployment-gates
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hardening-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Quality / dependency / bundle gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Frontend typecheck
+        run: pnpm --filter @workspace/occu-med-map typecheck
+      - name: API typecheck
+        run: pnpm --filter @workspace/api-server typecheck
+      - name: Real ESLint pass for TypeScript application sources
+        shell: bash
+        run: |
+          pnpm dlx \
+            --package=eslint@9.39.1 \
+            --package=typescript-eslint@8.46.2 \
+            --package=eslint-plugin-react-hooks@7.0.1 \
+            --package=typescript@5.9.3 \
+            bash -c '
+              set -euo pipefail
+              export NODE_PATH="$(dirname "$(dirname "$(command -v eslint)")")"
+              eslint "api-server/src/**/*.{ts,tsx}" "occu-med-map/src/**/*.{ts,tsx}"
+            '
+      - name: Circular dependency and dead-source gate
+        run: node scripts/architecture-quality-gates.mjs
+      - name: Dependency vulnerability gate
+        run: node scripts/dependency-vulnerability-gate.mjs
+      - name: Build frontend
+        run: pnpm --filter @workspace/occu-med-map build
+      - name: Build API
+        run: pnpm --filter @workspace/api-server build
+      - name: Bundle budgets
+        run: node scripts/bundle-size-budget.mjs
+
+  browser:
+    name: ${{ matrix.browser }} / ${{ matrix.route }} / desktop browser acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+        route: [standard, p2]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Build frontend
+        run: pnpm --filter @workspace/occu-med-map build
+      - name: Install browser
+        run: pnpm --filter @workspace/occu-med-map exec playwright install --with-deps ${{ matrix.browser }}
+      - name: Start deterministic frontend preview
+        run: |
+          pnpm --filter @workspace/occu-med-map exec vite preview --config vite.config.ts --host 127.0.0.1 --port 4173 > /tmp/network-map-preview.log 2>&1 &
+          echo $! > /tmp/network-map-preview.pid
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:4173/ >/dev/null; then exit 0; fi
+            sleep 0.5
+          done
+          cat /tmp/network-map-preview.log
+          exit 1
+      - name: Run real browser acceptance
+        env:
+          NETWORK_MAP_BROWSER: ${{ matrix.browser }}
+          NETWORK_MAP_ROUTE: ${{ matrix.route }}
+          NETWORK_MAP_VIEWPORT: desktop
+          NETWORK_MAP_CI_UI_URL: http://127.0.0.1:4173
+        shell: bash
+        run: timeout --signal=TERM --kill-after=10s 90s pnpm --filter @workspace/occu-med-map exec node scripts/ci-cross-browser-acceptance.mjs
+      - name: Upload browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hardening-browser-${{ matrix.browser }}-${{ matrix.route }}-desktop
+          path: |
+            occu-med-map/test-results/hardening-browser
+            /tmp/network-map-preview.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  database-api:
+    name: Disposable PostgreSQL / migration / API acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: network_map_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d network_map_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/network_map_ci
+      DATABASE_URL_POOLED: postgresql://postgres:postgres@127.0.0.1:5432/network_map_ci
+      DATABASE_URL_2: postgresql://postgres:postgres@127.0.0.1:5432/network_map_scoring_ci
+      CLIENT_ORIGIN: http://127.0.0.1:4173
+      WRITE_API_TOKEN: ci-write-token
+      ADMIN_API_TOKEN: ci-admin-token
+      PORT: 3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Create scoring database
+        run: psql postgresql://postgres:postgres@127.0.0.1:5432/network_map_ci -v ON_ERROR_STOP=1 -c 'CREATE DATABASE network_map_scoring_ci'
+      - name: Bootstrap disposable provider schema
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f api-server/scripts/ci-temp-db-bootstrap.sql
+      - name: Apply hardening migrations
+        shell: bash
+        run: |
+          for migration in \
+            api-server/src/db/migrations/20260806_provider_coordinate_integrity.sql \
+            api-server/src/db/migrations/20260806_provider_upload_lifecycle.sql \
+            api-server/src/db/migrations/20260806_api_security.sql \
+            api-server/src/db/migrations/20260806_database_lifecycle.sql; do
+            echo "Applying $migration"
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
+          done
+      - name: Verify migration versions and orphan audit
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "SELECT version FROM public.schema_migration_versions ORDER BY version"
+          test "$(psql "$DATABASE_URL" -Atc 'SELECT count(*) FROM public.provider_orphan_audit')" = "0"
+      - name: Build frontend for API static serving
+        run: pnpm --filter @workspace/occu-med-map build
+      - name: Run disposable API/write/rollback acceptance
+        run: node api-server/scripts/ci-api-integration.mjs

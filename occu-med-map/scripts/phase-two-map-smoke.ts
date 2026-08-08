@@ -124,7 +124,10 @@ assert.match(main, /import\("\.\/phaseTwoMapBridge"\)/);
 assert.match(main, /import\("\.\/phase-two-controls\.css"\)/);
 assert.match(main, /import\("\.\/PhaseTwoShell"\)/);
 assert.doesNotMatch(main, /phaseTwoLegacyLayerBridge/);
-assert.match(main, /root\.render\(<App \/>\)/);
+assert.match(main, /function renderStandardApplication\(\): void/);
+assert.match(main, /<AppErrorBoundary>\s*<App \/>\s*<\/AppErrorBoundary>/);
+assert.match(main, /<AppErrorBoundary>\s*<PhaseTwoShell><App \/><\/PhaseTwoShell>\s*<\/AppErrorBoundary>/);
+assert.match(main, /catch \(error\) \{[\s\S]*recordBootFailure\("phase-two-preview"[\s\S]*renderStandardApplication\(\);/);
 
 const app = readFileSync(resolve(here, '../src/App.tsx'), 'utf8');
 assert.match(app, /from ['"]\.\/providerLayerRequestRuntime['"]/);
@@ -141,4 +144,4 @@ const diagnosticsGate = readFileSync(resolve(here, '../src/usDiagnosticsGate.ts'
 assert.match(diagnosticsGate, /scheduleDiagnosticsSync/);
 assert.match(diagnosticsGate, /clearTimeout\(syncTimer\)/);
 
-console.log('P2 preview uses the unified provider route, avoids global runtime patches, and keeps loading and pagination stable');
+console.log('P2 preview uses the unified provider route, avoids global runtime patches, preserves startup recovery, and keeps loading and pagination stable');

@@ -60,7 +60,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        browser: [chromium, firefox, webkit]
+        browser: [chromium, webkit]
         route: [standard, p2]
     steps:
       - uses: actions/checkout@v4

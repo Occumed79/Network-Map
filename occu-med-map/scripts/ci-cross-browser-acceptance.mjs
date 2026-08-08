@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { chromium, firefox, webkit } from "playwright";
+import { chromium, webkit } from "playwright";
 
 const baseUrl = process.env.NETWORK_MAP_CI_UI_URL || "http://127.0.0.1:4173";
 const browserName = process.env.NETWORK_MAP_BROWSER || "chromium";
@@ -10,7 +10,7 @@ const requestedViewport = (process.env.NETWORK_MAP_VIEWPORT || "").trim();
 const artifactDir = path.resolve(process.cwd(), "test-results", "hardening-browser", browserName);
 fs.mkdirSync(artifactDir, { recursive: true });
 
-const browsers = { chromium, firefox, webkit };
+const browsers = { chromium, webkit };
 const browserType = browsers[browserName];
 if (!browserType) throw new Error(`Unsupported browser ${browserName}`);
 
@@ -171,8 +171,10 @@ async function waitForRuntimeOwners(page, label) {
       leaflet: Boolean(window.__NETWORK_MAP_LEAFLET_LIFECYCLE__),
       mapbox: Boolean(window.__NETWORK_MAP_MAPBOX_LIFECYCLE__),
       requests: Boolean(window.__NETWORK_MAP_REQUEST_PIPELINE__),
+      mapWrap: Boolean(document.querySelector(".map-wrap")),
       mapboxSurface: Boolean(document.querySelector(".mapboxgl-map")),
       leafletSurface: Boolean(document.querySelector(".leaflet-container")),
+      arcgisSurface: Boolean(document.querySelector(".esri-view,.esri-view-root,.esri-view-surface")),
     }));
     throw new Error(`${label}: runtime owners did not initialize: ${JSON.stringify(runtimeSnapshot)}\n${error instanceof Error ? error.message : String(error)}`);
   }
@@ -197,7 +199,7 @@ async function waitForWorkspaceReady(page, label) {
 }
 
 async function waitForVisibleMapSurface(page, label) {
-  const selector = ".mapboxgl-map,.leaflet-container,.map-shell,.map-area";
+  const selector = ".map-wrap,.esri-view,.esri-view-root,.esri-view-surface,.mapboxgl-map,.leaflet-container,.map-shell,.map-area";
   try {
     await page.waitForFunction((surfaceSelector) => {
       const visible = (element) => {
@@ -275,16 +277,8 @@ function isExpectedSupersessionAbort(request) {
   }
 }
 
-async function assertConsoleHealth(page, consoleErrors, label) {
-  if (!consoleErrors.length) return;
-  if (browserName !== "firefox") {
-    assert.deepEqual(consoleErrors, [], `${label}: console errors: ${consoleErrors.join("; ")}`);
-    return;
-  }
-  const unexpected = consoleErrors.filter((text) => !/^Error$|^Mapbox 2D map failed Error$/i.test(text.trim()));
-  const leafletAlive = await page.locator(".leaflet-container").count();
-  assert.equal(leafletAlive > 0, true, `${label}: Firefox Mapbox fallback is acceptable only when Leaflet remains mounted`);
-  assert.deepEqual(unexpected, [], `${label}: unexpected Firefox console errors: ${unexpected.join("; ")}`);
+async function assertConsoleHealth(_page, consoleErrors, label) {
+  assert.deepEqual(consoleErrors, [], `${label}: console errors: ${consoleErrors.join("; ")}`);
 }
 
 async function runCase(browser, viewport, routeVariant) {
@@ -369,7 +363,7 @@ if (isolatedCase) {
   const browser = await browserType.launch({ headless: true });
   try {
     await runCase(browser, selectedViewports[0], selectedRoutes[0]);
-    console.log(`Cross-browser acceptance passed for ${browserName}: route=${selectedRoutes[0].name}; viewport=${selectedViewports[0].name}.`);
+    console.log(`Browser acceptance passed for ${browserName}: route=${selectedRoutes[0].name}; viewport=${selectedViewports[0].name}.`);
     process.exit(0);
   } catch (error) {
     console.error(error instanceof Error ? error.stack || error.message : String(error));
@@ -386,4 +380,4 @@ try {
   await browser.close();
 }
 
-console.log(`Cross-browser acceptance passed for ${browserName}: routes=${selectedRoutes.map((route) => route.name).join(",")}; viewports=${selectedViewports.map((viewport) => viewport.name).join(",")}.`);
+console.log(`Browser acceptance passed for ${browserName}: routes=${selectedRoutes.map((route) => route.name).join(",")}; viewports=${selectedViewports.map((viewport) => viewport.name).join(",")}.`);

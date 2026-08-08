@@ -4,8 +4,10 @@ import path from "node:path";
 import { chromium } from "playwright";
 
 const baseUrl = (process.env.NETWORK_MAP_PRODUCTION_URL || "").replace(/\/$/, "");
-const expectedSha = process.env.EXPECTED_GIT_SHA || "";
+const expectedSha = (process.env.EXPECTED_GIT_SHA || "").trim();
 const previousSha = process.env.PREVIOUS_GIT_SHA || "";
+const revisionAttempts = Math.max(1, Number.parseInt(process.env.PRODUCTION_REVISION_ATTEMPTS || "30", 10) || 30);
+const revisionDelayMs = Math.max(0, Number.parseInt(process.env.PRODUCTION_REVISION_DELAY_MS || "10000", 10) || 10_000);
 if (!baseUrl) throw new Error("NETWORK_MAP_PRODUCTION_URL is required");
 if (!expectedSha) throw new Error("EXPECTED_GIT_SHA is required");
 
@@ -17,29 +19,59 @@ fs.writeFileSync(path.join(artifactDir, "rollback-target.txt"), previousSha
 
 async function fetchJson(pathname) {
   const response = await fetch(`${baseUrl}${pathname}`, { headers: { Accept: "application/json" }, cache: "no-store" });
-  const body = await response.json().catch(() => ({}));
-  return { response, body };
+  const contentType = response.headers.get("content-type") || "";
+  const text = await response.text();
+  let body = null;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    body = null;
+  }
+  return {
+    response,
+    body,
+    contentType,
+    textPreview: text.slice(0, 240),
+  };
+}
+
+function revisionMatches(revision) {
+  const deployed = String(revision || "").trim();
+  if (deployed.length < 7) return false;
+  return deployed === expectedSha || deployed.startsWith(expectedSha) || expectedSha.startsWith(deployed);
+}
+
+function resultSummary(result) {
+  if (result?.error) return { error: String(result.error) };
+  return {
+    status: result?.response?.status ?? null,
+    contentType: result?.contentType ?? "",
+    body: result?.body ?? null,
+    textPreview: result?.textPreview ?? "",
+  };
 }
 
 async function waitForRevision() {
   let last = null;
-  for (let attempt = 0; attempt < 30; attempt += 1) {
+  for (let attempt = 0; attempt < revisionAttempts; attempt += 1) {
     const result = await fetchJson("/api/revision").catch((error) => ({ error }));
     last = result;
-    if (result?.response?.ok) {
-      const revision = String(result.body?.revision || "");
-      if (revision === expectedSha || revision.startsWith(expectedSha) || expectedSha.startsWith(revision)) return result;
+    if (result?.response?.ok && result.body && revisionMatches(result.body.revision)) return result;
+    if (attempt + 1 < revisionAttempts && revisionDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, revisionDelayMs));
     }
-    await new Promise((resolve) => setTimeout(resolve, 10_000));
   }
-  throw new Error(`Production never reported expected revision ${expectedSha}. Last result: ${JSON.stringify(last?.body || String(last?.error || "unknown"))}`);
+  fs.writeFileSync(path.join(artifactDir, "revision-last-response.json"), JSON.stringify(resultSummary(last), null, 2));
+  throw new Error(`Production never reported expected revision ${expectedSha}. Last result: ${JSON.stringify(resultSummary(last))}`);
 }
 
 const revision = await waitForRevision();
 fs.writeFileSync(path.join(artifactDir, "revision.json"), JSON.stringify(revision.body, null, 2));
 const ready = await fetchJson("/api/ready");
-assert.equal(ready.response.status, 200, `production readiness failed: ${JSON.stringify(ready.body)}`);
-assert.equal(ready.body.ok, true);
+fs.writeFileSync(path.join(artifactDir, "ready.json"), JSON.stringify(resultSummary(ready), null, 2));
+assert.match(ready.contentType, /application\/json/i, `production readiness did not return JSON: ${JSON.stringify(resultSummary(ready))}`);
+assert.equal(ready.response.status, 200, `production readiness failed: ${JSON.stringify(resultSummary(ready))}`);
+assert.equal(ready.body?.ok, true, `production readiness body was not ready: ${JSON.stringify(resultSummary(ready))}`);
 
 const browser = await chromium.launch({ headless: true });
 try {

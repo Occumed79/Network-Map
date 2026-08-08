@@ -18,6 +18,15 @@ import "./dualMapEngineRuntime";
 import "./providerExplorerStabilityRuntime";
 import "./mapOverlaySynchronizationControllerRuntime";
 import App from "./App";
+import AppErrorBoundary, { ApplicationFailureScreen } from "./AppErrorBoundary";
+import {
+  installGlobalBootDiagnostics,
+  loadOptionalRuntime,
+  markApplicationInteractive,
+  markOptionalRuntimesComplete,
+  recordBootFailure,
+  setBootPhase,
+} from "./startupDiagnostics";
 import "./dual-map-engines.css";
 import "./dual-map-transition-opaque.css";
 import "./map-engine-final-fixes.css";
@@ -41,18 +50,16 @@ import "./sidebarWorkspaceControllerRuntime";
 import "./sidebar-workspace-final-fixes.css";
 import "./sidebarWorkspacePanelGuardRuntime";
 import "./ui-system.css";
+import "./startup-hardening.css";
 import "./dialogControllerRuntime";
 import "./generalUiIntegrityRuntime";
 
 async function safeLoad(name: string, loader: () => Promise<unknown>): Promise<void> {
-  try {
-    await loader();
-  } catch (error) {
-    console.error(`Network Map optional runtime failed: ${name}`, error);
-  }
+  await loadOptionalRuntime(name, loader);
 }
 
 async function loadOptionalRuntimes(): Promise<void> {
+  setBootPhase("optional-runtimes");
   await safeLoad("Mapbox load hardening", () => import("./mapboxGlobeLoadHardeningRuntime"));
   await safeLoad("map engine cleanup", () => import("./mapEngineFinalFixRuntime"));
 
@@ -75,6 +82,7 @@ async function loadOptionalRuntimes(): Promise<void> {
     safeLoad("U.S. diagnostics", () => import("./usDiagnosticsGate")),
     safeLoad("drive time", () => import("./features/driveTime/nativeDriveTimeRuntime")),
   ]);
+  markOptionalRuntimesComplete();
 }
 
 function installDirectMapModeSwitching(): void {
@@ -127,16 +135,38 @@ function scheduleOptionalRuntimes(): void {
 }
 
 installDirectMapModeSwitching();
+installGlobalBootDiagnostics();
 
-const rootElement = document.getElementById("root");
-if (!rootElement) throw new Error("Network Map root element is missing");
+const rootHost = document.getElementById("root");
+if (!rootHost) {
+  recordBootFailure("application-root", new Error("Network Map root element is missing"), true);
+  throw new Error("Network Map root element is missing");
+}
+const rootElement: HTMLElement = rootHost;
+rootElement.setAttribute("aria-busy", "true");
 const root = createRoot(rootElement);
 const phaseTwoPreview = new URLSearchParams(window.location.search).get("p2-preview") === "1";
 
-async function boot(): Promise<void> {
-  if (!phaseTwoPreview) {
-    root.render(<App />);
+function renderStandardApplication(): void {
+  root.render(
+    <AppErrorBoundary>
+      <App />
+    </AppErrorBoundary>,
+  );
+}
+
+function markInitialRenderComplete(): void {
+  window.requestAnimationFrame(() => {
+    markApplicationInteractive(rootElement);
     scheduleOptionalRuntimes();
+  });
+}
+
+async function boot(): Promise<void> {
+  setBootPhase("rendering");
+  if (!phaseTwoPreview) {
+    renderStandardApplication();
+    markInitialRenderComplete();
     return;
   }
 
@@ -147,12 +177,27 @@ async function boot(): Promise<void> {
       import("./phase-two-controls.css"),
     ]);
     const { default: PhaseTwoShell } = await import("./PhaseTwoShell");
-    root.render(<PhaseTwoShell><App /></PhaseTwoShell>);
+    root.render(
+      <AppErrorBoundary>
+        <PhaseTwoShell><App /></PhaseTwoShell>
+      </AppErrorBoundary>,
+    );
   } catch (error) {
+    recordBootFailure("phase-two-preview", error, false);
     console.error("Phase Two preview failed; loading standard map", error);
-    root.render(<App />);
+    renderStandardApplication();
   }
-  scheduleOptionalRuntimes();
+  markInitialRenderComplete();
 }
 
-void boot();
+void boot().catch((error) => {
+  recordBootFailure("application-boot", error, true);
+  setBootPhase("failed");
+  rootElement.setAttribute("aria-busy", "false");
+  root.render(
+    <ApplicationFailureScreen
+      title="Network Map could not start"
+      message="The application stopped safely before entering a frozen state. Reload to retry the startup sequence."
+    />,
+  );
+});

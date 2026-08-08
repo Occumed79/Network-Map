@@ -48,6 +48,8 @@ jobs:
         run: pnpm --filter @workspace/occu-med-map test:sidebar-workspace-hardening
       - name: General UI
         run: pnpm --filter @workspace/occu-med-map test:general-ui-hardening
+      - name: Startup resilience
+        run: pnpm --filter @workspace/occu-med-map test:startup-hardening
       - name: Runtime ownership
         run: pnpm --filter @workspace/occu-med-map test:runtime-ownership
       - name: Request pipeline

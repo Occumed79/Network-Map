@@ -50,6 +50,8 @@ jobs:
         run: pnpm --filter @workspace/occu-med-map test:general-ui-hardening
       - name: Startup resilience
         run: pnpm --filter @workspace/occu-med-map test:startup-hardening
+      - name: Production verifier contract
+        run: pnpm --filter @workspace/occu-med-map exec tsx scripts/production-verifier-smoke.ts
       - name: Runtime ownership
         run: pnpm --filter @workspace/occu-med-map test:runtime-ownership
       - name: Request pipeline

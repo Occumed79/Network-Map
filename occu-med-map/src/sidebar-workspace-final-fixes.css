@@ -532,14 +532,33 @@ html[data-occumed-workspace-ready="true"] body :is(
     > .occumed-sidebar-workspace-tabs {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     min-height: 92px !important;
+    z-index: 5400 !important;
+    pointer-events: auto !important;
   }
 
+  html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+    > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab {
+    position: relative !important;
+    z-index: 5401 !important;
+    pointer-events: auto !important;
+  }
+
+  /* Finder/Explorer must never cover the mobile workspace navigation strip.
+     At <=768px the app can live inside the P2 transformed shell, where WebKit
+     resolves position:fixed against that containing block rather than the raw
+     viewport. The JS-measured viewport coordinate then becomes an invalid local
+     inset and places the panel over the tabs. Use the known two-row tab geometry
+     inside the same containing block instead. */
   html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body .live-panel.open,
   html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body .provider-explorer-drawer.open {
-    inset: var(--workspace-panel-top) 0 0 0 !important;
+    top: 112px !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
     width: auto !important;
     min-width: 0 !important;
     max-width: none !important;
     border-radius: 0 !important;
+    z-index: 5000 !important;
   }
 }

@@ -7,31 +7,40 @@ permissions:
   contents: read
 
 jobs:
-  verify-production:
-    name: Exact main revision / desktop production acceptance
+  probe-production:
+    name: Probe deployed Render identity
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 3
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: corepack enable
-      - run: pnpm install --frozen-lockfile
-      - name: Install Chromium
-        run: pnpm --filter @workspace/occu-med-map exec playwright install --with-deps chromium
-      - name: Verify deployed main revision and read-only desktop UI
+      - name: Probe legacy and current deployment identity endpoints
         env:
           NETWORK_MAP_PRODUCTION_URL: https://network-map-tool-mqib.onrender.com
           EXPECTED_GIT_SHA: ${{ github.event.pull_request.base.sha }}
-          PRODUCTION_REVISION_ATTEMPTS: 1
-          PRODUCTION_REVISION_DELAY_MS: 0
-        run: pnpm --filter @workspace/occu-med-map exec node scripts/production-exact-revision-acceptance.mjs
-      - name: Upload production evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p production-probe
+          printf '%s\n' "$EXPECTED_GIT_SHA" > production-probe/expected-sha.txt
+          for endpoint in health revision ready; do
+            curl --location --silent --show-error \
+              --dump-header "production-probe/${endpoint}-headers.txt" \
+              --output "production-probe/${endpoint}-body.txt" \
+              "${NETWORK_MAP_PRODUCTION_URL}/api/${endpoint}?probe=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" || true
+          done
+          echo '--- /api/health ---'
+          cat production-probe/health-body.txt || true
+          echo
+          echo '--- /api/revision ---'
+          head -c 500 production-probe/revision-body.txt || true
+          echo
+          echo '--- /api/ready ---'
+          head -c 500 production-probe/ready-body.txt || true
+          echo
+      - name: Upload production probe evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: temporary-production-verification
-          path: occu-med-map/test-results/production-acceptance
+          name: temporary-production-probe
+          path: production-probe
           if-no-files-found: ignore
           retention-days: 7

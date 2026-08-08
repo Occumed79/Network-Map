@@ -15,7 +15,7 @@ jobs:
       - name: Probe legacy and current deployment identity endpoints
         env:
           NETWORK_MAP_PRODUCTION_URL: https://network-map-tool-mqib.onrender.com
-          EXPECTED_GIT_SHA: ${{ github.event.pull_request.base.sha }}
+          EXPECTED_GIT_SHA: f1f13bb537e7b6075d4064bca8c356e8ea7649e4
         shell: bash
         run: |
           set -euo pipefail
@@ -27,6 +27,7 @@ jobs:
               --output "production-probe/${endpoint}-body.txt" \
               "${NETWORK_MAP_PRODUCTION_URL}/api/${endpoint}?probe=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" || true
           done
+          echo 'Expected main:' "$EXPECTED_GIT_SHA"
           echo '--- /api/health ---'
           cat production-probe/health-body.txt || true
           echo

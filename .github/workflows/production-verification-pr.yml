@@ -24,6 +24,8 @@ jobs:
         env:
           NETWORK_MAP_PRODUCTION_URL: https://network-map-tool-mqib.onrender.com
           EXPECTED_GIT_SHA: ${{ github.event.pull_request.base.sha }}
+          PRODUCTION_REVISION_ATTEMPTS: 1
+          PRODUCTION_REVISION_DELAY_MS: 0
         run: pnpm --filter @workspace/occu-med-map exec node scripts/production-exact-revision-acceptance.mjs
       - name: Upload production evidence
         if: always()

@@ -1,5 +1,5 @@
 import { registerMapboxSourceDataMiddleware } from "./mapboxSourcePipelineRuntime";
-import { registerRuntimeOwner, subscribeToSharedDomObserver } from "./runtimeControllerRegistry";
+import { registerRuntimeOwner } from "./runtimeControllerRegistry";
 
 function featureIsDensityBlob(feature: any): boolean {
   if (!feature || feature.geometry?.type !== "Point") return false;
@@ -57,6 +57,16 @@ function reconcileMapEngineUi(): void {
   cleanupFinishedTransition();
 }
 
+let reconcileFrame = 0;
+function scheduleReconcile(delay = 0): void {
+  const run = () => {
+    window.cancelAnimationFrame(reconcileFrame);
+    reconcileFrame = window.requestAnimationFrame(() => reconcileMapEngineUi());
+  };
+  if (delay > 0) window.setTimeout(run, delay);
+  else run();
+}
+
 function installMapEngineFinalFixes(): void {
   if (!registerRuntimeOwner("map-engine-final-fixes", "Map engine transition/loading cleanup and density source filtering")) return;
 
@@ -77,17 +87,22 @@ function installMapEngineFinalFixes(): void {
     if (!isAlreadyActive) {
       document.documentElement.dataset.mapTransitionTarget = requestedMode;
     }
+
+    // Reconcile only at bounded lifecycle checkpoints. The previous shared
+    // MutationObserver subscriber watched this same map subtree and then wrote
+    // classes/removals back into it, creating a browser-engine-specific
+    // observer/write feedback loop that could pin Chromium and WebKit's renderer.
+    scheduleReconcile();
+    scheduleReconcile(300);
+    scheduleReconcile(1500);
+    scheduleReconcile(5000);
   }, true);
 
-  subscribeToSharedDomObserver("map-engine-final-fixes", (mutations) => {
-    if (!mutations.some((mutation) => {
-      const target = mutation.target instanceof Element ? mutation.target : null;
-      return Boolean(target?.closest(".dual-engine-map-shell, .dual-engine-vortex, .mapbox-2d-host, .mapbox-globe-host, .map-dimension-status"));
-    })) return;
-    reconcileMapEngineUi();
-  });
-
-  reconcileMapEngineUi();
+  // Initial cleanup is sufficient for an already-ready 2D engine. The core map
+  // runtime owns subsequent readiness/loading state, so this compatibility layer
+  // does not need continuous DOM observation.
+  scheduleReconcile();
+  scheduleReconcile(1200);
 }
 
 if (document.readyState === "loading") {

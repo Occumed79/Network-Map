@@ -54,8 +54,16 @@ async function safeLoad(name: string, loader: () => Promise<unknown>): Promise<v
 
 async function loadOptionalRuntimes(): Promise<void> {
   await safeLoad("Mapbox load hardening", () => import("./mapboxGlobeLoadHardeningRuntime"));
-  await safeLoad("transition sound and cleanup", () => import("./mapEngineFinalFixRuntime"));
-  await safeLoad("map transition", () => import("./dualMapTransitionRuntime"));
+  await safeLoad("map engine cleanup", () => import("./mapEngineFinalFixRuntime"));
+
+  // Do not import dualMapTransitionRuntime during startup/idle. That module owns
+  // a large embedded audio payload and eagerly creates/loads an HTMLAudioElement
+  // at evaluation time. Chromium and WebKit can wedge their renderer while that
+  // payload initializes, even though the application has already painted and is
+  // otherwise healthy. Core 2D/3D switching is owned by dualMapEngineRuntime and
+  // remains available through the direct control handler below. The cinematic
+  // transition can be reintroduced only after its audio/animation setup is made
+  // interaction-lazy and proven non-blocking across engines.
 
   await Promise.allSettled([
     safeLoad("provider source selection persistence", () => import("./providerSourceSelectionPersistenceRuntime")),
@@ -67,6 +75,36 @@ async function loadOptionalRuntimes(): Promise<void> {
     safeLoad("U.S. diagnostics", () => import("./usDiagnosticsGate")),
     safeLoad("drive time", () => import("./features/driveTime/nativeDriveTimeRuntime")),
   ]);
+}
+
+function installDirectMapModeSwitching(): void {
+  document.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const button = target?.closest<HTMLButtonElement>(".map-dimension-toggle button[data-map-mode]");
+    if (!button || button.disabled) return;
+
+    const control = button.closest<HTMLElement>(".map-dimension-toggle");
+    const globe = window.__NETWORK_MAP_GLOBE__;
+    if (!control || !globe) return;
+
+    const mode = button.dataset.mapMode === "3d" ? "3d" : "2d";
+    if (globe.getMode() === mode) return;
+
+    event.preventDefault();
+    control.dataset.transitioning = "true";
+    control.querySelectorAll<HTMLButtonElement>("button[data-map-mode]").forEach((candidate) => {
+      candidate.disabled = true;
+    });
+
+    void globe.setMode(mode).catch((error) => {
+      console.error("Map engine switch failed", error);
+    }).finally(() => {
+      control.querySelectorAll<HTMLButtonElement>("button[data-map-mode]").forEach((candidate) => {
+        candidate.disabled = false;
+      });
+      control.dataset.transitioning = "false";
+    });
+  });
 }
 
 function scheduleOptionalRuntimes(): void {
@@ -87,6 +125,8 @@ function scheduleOptionalRuntimes(): void {
     window.setTimeout(start, 180);
   });
 }
+
+installDirectMapModeSwitching();
 
 const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("Network Map root element is missing");

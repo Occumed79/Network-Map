@@ -1,0 +1,35 @@
+name: Temporary Production Verification
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-production:
+    name: Exact main revision / desktop production acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Install Chromium
+        run: pnpm --filter @workspace/occu-med-map exec playwright install --with-deps chromium
+      - name: Verify deployed main revision and read-only desktop UI
+        env:
+          NETWORK_MAP_PRODUCTION_URL: https://network-map-tool-mqib.onrender.com
+          EXPECTED_GIT_SHA: ${{ github.event.pull_request.base.sha }}
+        run: pnpm --filter @workspace/occu-med-map exec node scripts/production-exact-revision-acceptance.mjs
+      - name: Upload production evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: temporary-production-verification
+          path: occu-med-map/test-results/production-acceptance
+          if-no-files-found: ignore
+          retention-days: 7

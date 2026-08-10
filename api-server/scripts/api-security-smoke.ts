@@ -11,6 +11,8 @@ const clinicSync = fs.readFileSync(path.join(root, "../occu-med-map/src/myClinic
 const providerSearchRoute = fs.readFileSync(path.join(root, "src/routes/universalDiscovery.ts"), "utf8");
 
 assert.match(app, /origin === sameOrigin \|\| CLIENT_ORIGINS\.includes\(origin\)/, "CORS must explicitly allow only same-origin or configured origins");
+assert.match(app, /app\.use\("\/api", \(req, res, next\) => \{[\s\S]*?return cors\(/, "CORS must only guard API routes so frontend assets remain directly servable");
+assert.doesNotMatch(app, /app\.use\(\(req, res, next\) => \{\s*const sameOrigin/, "CORS must not run as a site-wide middleware before static assets");
 assert.match(app, /process\.env\.NODE_ENV !== "production" && CLIENT_ORIGINS\.length === 0/, "open CORS fallback must be development-only");
 assert.doesNotMatch(app, /CLIENT_ORIGINS\.length === 0 \|\| CLIENT_ORIGINS\.includes/, "production must not allow every origin when allowlist is empty");
 assert.doesNotMatch(app, /rateLimitBuckets = new Map/, "process-local rate limiter must stay retired");

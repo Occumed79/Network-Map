@@ -67,7 +67,10 @@ app.use(
     },
   }),
 );
-app.use((req, res, next) => {
+// CORS is an API boundary, not a site-wide request filter. Applying it to the
+// frontend makes ordinary asset requests fail before express.static can serve
+// them when a browser or proxy supplies an Origin header.
+app.use("/api", (req, res, next) => {
   const sameOrigin = `${req.protocol}://${req.get("host")}`;
   return cors({
     origin(origin, callback) {

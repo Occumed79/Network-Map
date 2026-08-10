@@ -25,23 +25,20 @@ declare global {
 }
 
 let transitionRunning = false;
-const transitionAudio = new Audio(TRANSITION_SOUND_DATA_URI);
-transitionAudio.preload = "auto";
-transitionAudio.volume = 1;
-transitionAudio.load();
+let transitionAudio: HTMLAudioElement | null = null;
 
 let audioContext: AudioContext | null = null;
 let audioGain: GainNode | null = null;
 let audioGraphConnected = false;
 
-function ensureAudioGraph(): void {
+function ensureAudioGraph(audio: HTMLAudioElement): void {
   if (audioGraphConnected) return;
   const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
   if (!AudioContextConstructor) return;
 
   try {
     audioContext = audioContext || new AudioContextConstructor();
-    const source = audioContext.createMediaElementSource(transitionAudio);
+    const source = audioContext.createMediaElementSource(audio);
     audioGain = audioContext.createGain();
     audioGain.gain.value = 1.35;
     source.connect(audioGain);
@@ -55,14 +52,18 @@ function ensureAudioGraph(): void {
 }
 
 function playTransitionSound(): void {
-  transitionAudio.pause();
-  transitionAudio.currentTime = 0;
-  transitionAudio.muted = false;
-  transitionAudio.volume = 1;
-  ensureAudioGraph();
+  // Audio is created only inside the user's map-mode click. This avoids the
+  // former startup hang while retaining a valid browser playback gesture.
+  const audio = transitionAudio || new Audio(TRANSITION_SOUND_DATA_URI);
+  transitionAudio = audio;
+  audio.pause();
+  audio.currentTime = 0;
+  audio.muted = false;
+  audio.volume = 1;
+  ensureAudioGraph(audio);
 
   const startPlayback = () => {
-    void transitionAudio.play().catch((error) => {
+    void audio.play().catch((error) => {
       console.warn("Transition sound could not start", error);
     });
   };
@@ -526,7 +527,7 @@ function beginBlackHole(targetMode: MapMode): {
   return { complete, fail, stop };
 }
 
-async function switchMode(targetMode: MapMode, control: HTMLElement): Promise<void> {
+export async function switchMapModeWithTransition(targetMode: MapMode, control: HTMLElement): Promise<void> {
   const api = window.__NETWORK_MAP_GLOBE__;
   if (!api || transitionRunning) return;
 
@@ -575,19 +576,3 @@ async function switchMode(targetMode: MapMode, control: HTMLElement): Promise<vo
     transitionRunning = false;
   }
 }
-
-document.addEventListener("click", (event) => {
-  const target = event.target instanceof Element ? event.target : null;
-  const button = target?.closest<HTMLButtonElement>(".map-dimension-toggle button[data-map-mode]");
-  if (!button) return;
-
-  const control = button.closest<HTMLElement>(".map-dimension-toggle");
-  if (!control) return;
-
-  event.preventDefault();
-  event.stopImmediatePropagation();
-  const mode: MapMode = button.dataset.mapMode === "3d" ? "3d" : "2d";
-  void switchMode(mode, control);
-}, true);
-
-export {};

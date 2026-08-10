@@ -15,6 +15,7 @@ import "./healthsitesFlatDotsRuntime";
 import "./providerLocationFinderRuntime";
 import "./providerTypeNormalizationRuntime";
 import "./dualMapEngineRuntime";
+import { switchMapModeWithTransition } from "./dualMapTransitionRuntime";
 import "./providerExplorerStabilityRuntime";
 import "./mapOverlaySynchronizationControllerRuntime";
 import App from "./App";
@@ -46,9 +47,6 @@ import "./luxury-futuristic-shell.css";
 import "./map-tools-reliability.css";
 import "./provider-location-finder.css";
 import "./sidebar-button-theme.css";
-import "./sidebarWorkspaceControllerRuntime";
-import "./sidebar-workspace-final-fixes.css";
-import "./sidebarWorkspacePanelGuardRuntime";
 import "./ui-system.css";
 import "./startup-hardening.css";
 import "./dialogControllerRuntime";
@@ -63,15 +61,6 @@ async function loadOptionalRuntimes(): Promise<void> {
   await safeLoad("Mapbox load hardening", () => import("./mapboxGlobeLoadHardeningRuntime"));
   await safeLoad("map engine cleanup", () => import("./mapEngineFinalFixRuntime"));
 
-  // Do not import dualMapTransitionRuntime during startup/idle. That module owns
-  // a large embedded audio payload and eagerly creates/loads an HTMLAudioElement
-  // at evaluation time. Chromium and WebKit can wedge their renderer while that
-  // payload initializes, even though the application has already painted and is
-  // otherwise healthy. Core 2D/3D switching is owned by dualMapEngineRuntime and
-  // remains available through the direct control handler below. The cinematic
-  // transition can be reintroduced only after its audio/animation setup is made
-  // interaction-lazy and proven non-blocking across engines.
-
   await Promise.allSettled([
     safeLoad("provider source selection persistence", () => import("./providerSourceSelectionPersistenceRuntime")),
     safeLoad("provider layer telemetry", () => import("./providerLayerTelemetryRuntime")),
@@ -85,33 +74,20 @@ async function loadOptionalRuntimes(): Promise<void> {
   markOptionalRuntimesComplete();
 }
 
-function installDirectMapModeSwitching(): void {
+function installMapModeSwitching(): void {
   document.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target : null;
     const button = target?.closest<HTMLButtonElement>(".map-dimension-toggle button[data-map-mode]");
     if (!button || button.disabled) return;
 
     const control = button.closest<HTMLElement>(".map-dimension-toggle");
-    const globe = window.__NETWORK_MAP_GLOBE__;
-    if (!control || !globe) return;
+    if (!control || !window.__NETWORK_MAP_GLOBE__) return;
 
     const mode = button.dataset.mapMode === "3d" ? "3d" : "2d";
-    if (globe.getMode() === mode) return;
+    if (window.__NETWORK_MAP_GLOBE__.getMode() === mode) return;
 
     event.preventDefault();
-    control.dataset.transitioning = "true";
-    control.querySelectorAll<HTMLButtonElement>("button[data-map-mode]").forEach((candidate) => {
-      candidate.disabled = true;
-    });
-
-    void globe.setMode(mode).catch((error) => {
-      console.error("Map engine switch failed", error);
-    }).finally(() => {
-      control.querySelectorAll<HTMLButtonElement>("button[data-map-mode]").forEach((candidate) => {
-        candidate.disabled = false;
-      });
-      control.dataset.transitioning = "false";
-    });
+    void switchMapModeWithTransition(mode, control);
   });
 }
 
@@ -134,7 +110,7 @@ function scheduleOptionalRuntimes(): void {
   });
 }
 
-installDirectMapModeSwitching();
+installMapModeSwitching();
 installGlobalBootDiagnostics();
 
 const rootHost = document.getElementById("root");

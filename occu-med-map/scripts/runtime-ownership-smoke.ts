@@ -130,7 +130,6 @@ for (const runtime of [
   "./leafletMapLifecycleRuntime",
   "./mapboxMapLifecycleRuntime",
   "./networkRequestPipelineRuntime",
-  "./sidebarWorkspaceControllerRuntime",
   "./dialogControllerRuntime",
   "./generalUiIntegrityRuntime",
 ]) {

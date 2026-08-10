@@ -25,7 +25,11 @@ assert.match(main, /boot\(\)\.catch/, "asynchronous boot failures must be handle
 assert.match(main, /markApplicationInteractive/, "the first interactive frame must be recorded");
 assert.match(main, /markOptionalRuntimesComplete/, "optional runtime completion must be recorded");
 assert.match(main, /import "\.\/startup-hardening\.css";/, "recovery styles must load");
-assert.doesNotMatch(main, /import\("\.\/dualMapTransitionRuntime"\)/, "startup resilience must not restore the renderer-blocking transition runtime");
+assert.match(main, /import \{ switchMapModeWithTransition \} from "\.\/dualMapTransitionRuntime"/, "the cinematic map transition must remain wired");
+assert.match(main, /document\.addEventListener\("click"[\s\S]*switchMapModeWithTransition\(mode, control\)/, "map controls must invoke the cinematic transition from a user gesture");
+const transition = source("src/dualMapTransitionRuntime.ts");
+assert.match(transition, /transitionAudio \|\| new Audio\(TRANSITION_SOUND_DATA_URI\)/, "transition audio must be created lazily on the user's click");
+assert.doesNotMatch(transition, /const transitionAudio = new Audio/, "transition audio must not initialize during application startup");
 
 assert.match(diagnostics, /__NETWORK_MAP_BOOT__/, "boot diagnostics must be externally inspectable");
 assert.match(diagnostics, /runtimeRecords/, "optional runtime timing and state must be recorded");

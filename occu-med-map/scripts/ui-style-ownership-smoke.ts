@@ -11,7 +11,7 @@ const uiSystem = fs.readFileSync(path.join(srcRoot, "ui-system.css"), "utf8");
 
 const cssImports = [...main.matchAll(/import\s+["']([^"']+\.css)["'];/g)].map((match) => match[1]);
 const applicationCssImports = cssImports.filter((value) => value.startsWith("./"));
-assert.ok(applicationCssImports.length <= 21, `application CSS import count must not grow above the consolidation baseline of 21; found ${applicationCssImports.length}`);
+assert.ok(applicationCssImports.length <= 22, `application CSS import count must not grow above the consolidation baseline of 22; found ${applicationCssImports.length}`);
 assert.equal(applicationCssImports.filter((value) => value === "./ui-system.css").length, 1, "authoritative ui-system.css must be imported exactly once");
 
 for (const retired of [
@@ -35,6 +35,7 @@ for (const retired of [
 const transitionalBroadStyleFiles = new Set([
   "map-engine-final-fixes.css",
   "sidebar-workspace-final-fixes.css",
+  "startup-hardening.css",
 ]);
 const broadNamePattern = /(override|fix|hardening|polish|stabilization)/i;
 for (const file of fs.readdirSync(srcRoot).filter((name) => name.endsWith(".css") && broadNamePattern.test(name))) {

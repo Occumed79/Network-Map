@@ -83,6 +83,10 @@ try {
   const blockedCors = await fetch(`${baseUrl}/api/live`, { headers: { Origin: "https://evil.example" } });
   assert.equal(blockedCors.headers.get("access-control-allow-origin"), null, "unknown production origin must not receive CORS permission");
 
+  const staticAsset = await fetch(`${baseUrl}/favicon.svg`, { headers: { Origin: "https://evil.example" } });
+  assert.equal(staticAsset.status, 200, "CORS policy must not prevent the browser from loading frontend assets");
+  assert.match(staticAsset.headers.get("content-type") || "", /image\/svg\+xml/, "frontend asset must retain its static content type");
+
   const unauthenticated = await request("/api/provider-uploads/preview", {
     method: "POST",
     headers: { "content-type": "application/json", "idempotency-key": "ci-unauth-001" },

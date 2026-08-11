@@ -29,6 +29,8 @@ if [[ ! -s /tmp/frontend-manifests.txt ]]; then
   exit 0
 fi
 
+# Approved free/open visualization arsenal. Hosted BI/embed products and rejected
+# premium scheduler/grid products are intentionally excluded from this list.
 cat > /tmp/packages.txt <<'PKGS'
 maplibre-gl
 deck.gl
@@ -129,6 +131,23 @@ papaya-viewer
 itk-wasm
 PKGS
 
+# Guardrail: these products must not enter the account-wide preload stack.
+# Sigma.js is APPROVED; "Sigma Computing Embed" is a different commercial product.
+cat > /tmp/excluded-products.txt <<'EXCLUDED'
+Tableau Embedding API
+Power BI Embedded
+Looker Embed SDK
+ThoughtSpot Visual Embed SDK
+Sisense Compose SDK
+Sigma Computing Embed
+Qlik Embedded Analytics
+Preset embedded analytics
+Cube Cloud embedded dashboards
+FullCalendar Premium
+Syncfusion Scheduler
+Syncfusion Grid
+EXCLUDED
+
 mapfile -t packages < /tmp/packages.txt
 
 if [[ -f pnpm-lock.yaml || -f pnpm-workspace.yaml ]]; then
@@ -176,6 +195,13 @@ done < /tmp/frontend-manifests.txt
   echo
   echo '## Installed npm packages'
   sed 's/^/- `/' /tmp/packages.txt | sed 's/$/`/'
+  echo
+  echo '## Optional external integrations — not preloaded into every repo'
+  echo '- Grafana Cloud / API'
+  echo '- Metabase API / self-hosted Metabase'
+  echo
+  echo '## Explicitly excluded from the account-wide stack'
+  sed 's/^/- /' /tmp/excluded-products.txt
   echo
   echo '## Requested technologies that are built-in standards/formats, not packages'
   echo '- GeoJSON — data format'

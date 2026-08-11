@@ -3,10 +3,9 @@ name: Install Visual Arsenal
 on:
   push:
     branches:
-      - agent/install-visual-arsenal
-  pull_request:
-    branches:
       - main
+    paths:
+      - .github/workflows/install-visual-arsenal.yml
 
 permissions:
   contents: write
@@ -19,7 +18,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: agent/install-visual-arsenal
+          ref: main
           fetch-depth: 0
 
       - name: Setup Node
@@ -291,4 +290,4 @@ jobs:
             exit 0
           fi
           git commit -m 'Install visualization arsenal [skip ci]'
-          git push origin HEAD:agent/install-visual-arsenal
+          git push origin HEAD:main

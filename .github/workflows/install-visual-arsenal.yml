@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/install-visual-arsenal
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write

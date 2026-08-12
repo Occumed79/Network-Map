@@ -188,14 +188,94 @@ async function workspaceButton(page, label) {
   return button;
 }
 
+async function workspaceContentState(page, label) {
+  return page.evaluate((workspaceLabel) => {
+    const normalized = workspaceLabel.toLowerCase();
+    const panels = normalized === "providers"
+      ? Array.from(document.querySelectorAll(".sidebar > .occumed-sidebar-provider-content"))
+      : [document.querySelector(
+        normalized === "map tools"
+          ? ".occumed-sidebar-workspace-host > .occumed-map-tools-panel"
+          : normalized === "finder"
+            ? ".live-panel.open"
+            : ".provider-explorer-drawer.open",
+      )].filter(Boolean);
+    const text = panels.map((panel) => panel.textContent || "").join(" ").replace(/\s+/g, " ").trim();
+    const actionCount = panels.reduce((total, panel) => total + panel.querySelectorAll(
+      "button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)",
+    ).length, 0);
+    const visible = panels.some((panel) => {
+      if (!(panel instanceof HTMLElement)) return false;
+      const style = getComputedStyle(panel);
+      const rect = panel.getBoundingClientRect();
+      return style.display !== "none" && style.visibility !== "hidden" && rect.width > 40 && rect.height > 40;
+    });
+    return { panelCount: panels.length, textLength: text.length, actionCount, visible };
+  }, label);
+}
+
+async function assertWorkspaceReady(page, label, viewportName) {
+  await page.waitForFunction((workspaceLabel) => {
+    const normalized = workspaceLabel.toLowerCase();
+    const panels = normalized === "providers"
+      ? Array.from(document.querySelectorAll(".sidebar > .occumed-sidebar-provider-content"))
+      : [document.querySelector(
+        normalized === "map tools"
+          ? ".occumed-sidebar-workspace-host > .occumed-map-tools-panel"
+          : normalized === "finder"
+            ? ".live-panel.open"
+            : ".provider-explorer-drawer.open",
+      )].filter(Boolean);
+    const text = panels.map((panel) => panel.textContent || "").join(" ").replace(/\s+/g, " ").trim();
+    const actionCount = panels.reduce((total, panel) => total + panel.querySelectorAll(
+      "button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)",
+    ).length, 0);
+    return panels.length > 0 && text.length >= 24 && actionCount > 0;
+  }, label, { timeout: 4_000 });
+  const state = await workspaceContentState(page, label);
+  assert.ok(state.panelCount > 0, `${viewportName}: ${label} must mount a content panel`);
+  assert.ok(state.textLength >= 24, `${viewportName}: ${label} content must not be empty`);
+  assert.ok(state.actionCount > 0, `${viewportName}: ${label} must expose an enabled control`);
+  assert.equal(state.visible, true, `${viewportName}: ${label} content must be visible`);
+}
+
 async function assertWorkspaceSwitching(page, viewportName) {
   for (const label of ["Map Tools", "Finder", "Explorer", "Providers", "Finder", "Providers"]) {
     const button = await workspaceButton(page, label);
     await button.click();
-    await page.waitForTimeout(180);
+    await assertWorkspaceReady(page, label, viewportName);
     await assertGeometry(page, `${viewportName}/${label}`);
     assert.equal(await button.getAttribute("aria-selected"), "true", `${viewportName}: ${label} must become selected`);
   }
+}
+
+async function assertSidebarControlsInteractive(page, viewportName) {
+  const mapTools = await workspaceButton(page, "Map Tools");
+  await mapTools.click();
+  await assertWorkspaceReady(page, "Map Tools", viewportName);
+  const density = page.locator(".occumed-sidebar-workspace-host > .occumed-map-tools-panel").getByRole("button", { name: "Density", exact: true });
+  const densityBefore = await density.getAttribute("aria-pressed");
+  await density.click();
+  assert.notEqual(await density.getAttribute("aria-pressed"), densityBefore, `${viewportName}: Map Tools controls must react to clicks`);
+
+  const finder = await workspaceButton(page, "Finder");
+  await finder.click();
+  await assertWorkspaceReady(page, "Finder", viewportName);
+  await page.locator(".live-panel.open").getByRole("button", { name: "Close", exact: true }).click();
+  await page.locator(".live-panel.open").waitFor({ state: "hidden", timeout: 4_000 });
+  await finder.click();
+  await assertWorkspaceReady(page, "Finder", viewportName);
+
+  const explorer = await workspaceButton(page, "Explorer");
+  await explorer.click();
+  await assertWorkspaceReady(page, "Explorer", viewportName);
+  const points = page.locator(".provider-explorer-drawer.open").getByRole("button", { name: "8px points", exact: true });
+  await points.click();
+  assert.match(await points.getAttribute("class") || "", /active/, `${viewportName}: Explorer controls must update their selected state`);
+
+  const providers = await workspaceButton(page, "Providers");
+  await providers.click();
+  await assertWorkspaceReady(page, "Providers", viewportName);
 }
 
 async function assertKeyboardTabs(page, viewportName) {
@@ -260,6 +340,7 @@ async function runViewport(browser, viewport) {
     await assertRuntimeOwnership(page);
     await assertGeometry(page, viewport.name);
     await assertWorkspaceSwitching(page, viewport.name);
+    if (viewport.name === "desktop") await assertSidebarControlsInteractive(page, viewport.name);
     await assertKeyboardTabs(page, viewport.name);
     await assertDialogBehavior(page, viewport.name);
     await assertGeometry(page, `${viewport.name}/final`);

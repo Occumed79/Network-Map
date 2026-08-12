@@ -59,6 +59,10 @@ async function workspaceSnapshot(tab, panelSelector = "") {
       liveVisible: visible(document.querySelector(".live-panel")),
       explorerVisible: visible(document.querySelector(".provider-explorer-drawer")),
       panelScrollOverflow: panel instanceof HTMLElement ? panel.scrollWidth - panel.clientWidth : 0,
+      panelTextLength: panel instanceof HTMLElement ? (panel.textContent || "").replace(/\s+/g, " ").trim().length : 0,
+      panelActionCount: panel instanceof HTMLElement
+        ? panel.querySelectorAll("button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)").length
+        : 0,
       viewportWidth: window.innerWidth,
       runtimeAudit: window.__NETWORK_MAP_UI_INTEGRITY__?.audit?.() || null,
       generalAudit: window.__NETWORK_MAP_GENERAL_UI__?.audit?.() || null,
@@ -81,7 +85,12 @@ async function assertWorkspace(tab, panelSelector = "") {
       if (!(panel instanceof HTMLElement)) return false;
       const style = getComputedStyle(panel);
       const rect = panel.getBoundingClientRect();
-      return style.display !== "none" && style.visibility !== "hidden" && rect.width > 200 && rect.height > 40;
+      const textLength = (panel.textContent || "").replace(/\s+/g, " ").trim().length;
+      const actionCount = panel.querySelectorAll(
+        "button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)",
+      ).length;
+      return style.display !== "none" && style.visibility !== "hidden"
+        && rect.width > 200 && rect.height > 40 && textLength >= 24 && actionCount > 0;
     }, panelSelector, { timeout: 8_000 });
   }
 
@@ -113,6 +122,8 @@ async function assertWorkspace(tab, panelSelector = "") {
 
   if (panelSelector) {
     assert.equal(snapshot.panelVisible, true, `${tab} content panel must be visible`);
+    assert.ok(snapshot.panelTextLength >= 24, `${tab} content panel must not be empty`);
+    assert.ok(snapshot.panelActionCount > 0, `${tab} content panel must expose an enabled control`);
     if (tab === "mapTools") {
       assert.ok(snapshot.panel.left >= snapshot.sidebar.left - 2, "Map Tools must remain inside the sidebar left edge");
       assert.ok(snapshot.panel.right <= snapshot.sidebar.right + 2, "Map Tools must remain inside the sidebar right edge");

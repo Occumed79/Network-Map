@@ -19,6 +19,7 @@ const SIDEBAR_SCOPE_CLASS = "occumed-sidebar-workspace-scope";
 const DATA_ATTRIBUTE = "occumedworkspace";
 const SYNC_DELAY_MS = 28;
 const PANEL_ACTION_GRACE_MS = 900;
+const PANEL_RETRY_DELAYS_MS = [0, 80, 220, 500] as const;
 
 const TAB_DEFINITIONS: TabDefinition[] = [
   { id: "providers", label: "Providers", ariaLabel: "Providers workspace — provider layers and workflows" },
@@ -34,6 +35,7 @@ let syncTimer: number | null = null;
 let suppressPanelSyncUntil = 0;
 let observedSidebar: HTMLElement | null = null;
 let observedTabs: HTMLElement | null = null;
+let panelActionTimers: number[] = [];
 
 declare global {
   interface Window {
@@ -51,6 +53,16 @@ function normalizedText(node: Element | null): string {
 
 function panelIsOpen(selector: string): boolean {
   return document.querySelector<HTMLElement>(selector)?.classList.contains("open") ?? false;
+}
+
+function panelHasContent(selector: string): boolean {
+  const panel = document.querySelector<HTMLElement>(selector);
+  return Boolean(panel && (panel.children.length > 0 || normalizedText(panel).length > 24));
+}
+
+function clearPanelActionTimers(): void {
+  panelActionTimers.forEach((timer) => window.clearTimeout(timer));
+  panelActionTimers = [];
 }
 
 function createTabs(): HTMLElement {
@@ -120,7 +132,9 @@ function ensureSidebarStructure(): { sidebar: HTMLElement; tabs: HTMLElement; ho
 }
 
 function dockMapTools(host: HTMLElement): void {
-  const panel = document.querySelector<HTMLElement>(".occumed-map-tools-panel");
+  const panel = document.querySelector<HTMLElement>(
+    ".occumed-map-tools-panel[data-map-tools-registry-owned='true'], .occumed-map-tools-panel",
+  );
   if (!panel) return;
   if (panel.parentElement !== host) host.appendChild(panel);
   panel.dataset.sidebarDocked = "true";
@@ -179,7 +193,8 @@ function closeButtonFor(selector: string): HTMLButtonElement | null {
 }
 
 function ensureLivePanel(open: boolean): void {
-  if (panelIsOpen(".live-panel") === open) return;
+  const ready = panelIsOpen(".live-panel") && panelHasContent(".live-panel");
+  if ((open && ready) || (!open && !panelIsOpen(".live-panel"))) return;
   if (!open) {
     const close = closeButtonFor(".live-panel");
     if (close) {
@@ -191,7 +206,9 @@ function ensureLivePanel(open: boolean): void {
 }
 
 function ensureExplorerPanel(open: boolean): void {
-  if (panelIsOpen(".provider-explorer-drawer") === open) return;
+  const ready = panelIsOpen(".provider-explorer-drawer")
+    && panelHasContent(".provider-explorer-drawer");
+  if ((open && ready) || (!open && !panelIsOpen(".provider-explorer-drawer"))) return;
   if (!open) {
     const close = closeButtonFor(".provider-explorer-drawer");
     if (close) {
@@ -203,18 +220,25 @@ function ensureExplorerPanel(open: boolean): void {
 }
 
 function managePanelsForTab(tab: WorkspaceTab): void {
-  if (tab === "liveFinder") {
-    ensureExplorerPanel(false);
-    window.setTimeout(() => ensureLivePanel(true), 0);
-    return;
-  }
-  if (tab === "explorer") {
+  clearPanelActionTimers();
+  const reconcile = () => {
+    if (activeTab !== tab) return;
+    if (tab === "liveFinder") {
+      ensureExplorerPanel(false);
+      ensureLivePanel(true);
+      return;
+    }
+    if (tab === "explorer") {
+      ensureLivePanel(false);
+      ensureExplorerPanel(true);
+      return;
+    }
     ensureLivePanel(false);
-    window.setTimeout(() => ensureExplorerPanel(true), 0);
-    return;
-  }
-  ensureLivePanel(false);
-  ensureExplorerPanel(false);
+    ensureExplorerPanel(false);
+  };
+  PANEL_RETRY_DELAYS_MS.forEach((delay) => {
+    panelActionTimers.push(window.setTimeout(reconcile, delay));
+  });
 }
 
 function applyActiveTab(structure = ensureSidebarStructure()): void {
@@ -235,6 +259,13 @@ function applyActiveTab(structure = ensureSidebarStructure()): void {
 
 function setActiveTab(tab: WorkspaceTab, managePanels = true): void {
   activeTab = tab;
+  if (tab === "liveFinder") {
+    if (!["live", "npi"].includes(document.body.dataset.providerTool || "")) {
+      document.body.dataset.providerTool = "live";
+    }
+  } else {
+    delete document.body.dataset.providerTool;
+  }
   suppressPanelSyncUntil = performance.now() + PANEL_ACTION_GRACE_MS;
   runWithoutSharedDomObservation(() => applyActiveTab());
   if (managePanels) managePanelsForTab(tab);
@@ -297,6 +328,13 @@ function handleViewportChange(): void {
   scheduleSync(40);
 }
 
+function handleMapToolsPanelMounted(): void {
+  const structure = ensureSidebarStructure();
+  if (!structure) return;
+  runWithoutSharedDomObservation(() => dockMapTools(structure.host));
+  scheduleSync(0);
+}
+
 function install(): void {
   if (!registerRuntimeOwner(
     "sidebar-workspace-controller",
@@ -309,11 +347,13 @@ function install(): void {
   });
   window.addEventListener("resize", handleViewportChange, { passive: true });
   window.addEventListener("orientationchange", handleViewportChange, { passive: true });
+  window.addEventListener("network-map:map-tools-panel-mounted", handleMapToolsPanelMounted);
 }
 
 function cleanup(): void {
   if (syncTimer !== null) window.clearTimeout(syncTimer);
   syncTimer = null;
+  clearPanelActionTimers();
   unsubscribeDomObserver?.();
   unsubscribeDomObserver = null;
   resizeObserver?.disconnect();
@@ -322,6 +362,7 @@ function cleanup(): void {
   observedTabs = null;
   window.removeEventListener("resize", handleViewportChange);
   window.removeEventListener("orientationchange", handleViewportChange);
+  window.removeEventListener("network-map:map-tools-panel-mounted", handleMapToolsPanelMounted);
 }
 
 window.__NETWORK_MAP_SIDEBAR_WORKSPACES__ = {

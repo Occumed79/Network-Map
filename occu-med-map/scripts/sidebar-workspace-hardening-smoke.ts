@@ -38,6 +38,10 @@ assert.match(controller, /runWithoutSharedDomObservation/, "sidebar compatibilit
 assert.doesNotMatch(controller, /new MutationObserver/, "sidebar must not create a private MutationObserver");
 assert.match(controller, /occumed-sidebar-workspace-host/, "Map Tools must use a dedicated sidebar host");
 assert.match(controller, /host\.appendChild\(panel\)/, "Map Tools must be physically docked into the sidebar");
+assert.match(controller, /network-map:map-tools-panel-mounted/, "Map Tools must redock from its explicit late-mount event");
+assert.match(controller, /PANEL_RETRY_DELAYS_MS/, "Finder and Explorer must reconcile delayed React commits with bounded retries");
+assert.match(controller, /panelHasContent/, "workspace reconciliation must verify that an open panel has real content");
+assert.match(controller, /delete document\.body\.dataset\.providerTool/, "leaving Finder must clear stale provider tool state");
 assert.match(controller, /new ResizeObserver/, "sidebar dimensions must update without polling");
 assert.doesNotMatch(controller, /setInterval\s*\(/, "sidebar synchronization must not poll continuously");
 assert.match(controller, /\.unified-live-tool/, "Finder must prefer a stable launcher selector during the remaining source-control migration");
@@ -56,6 +60,7 @@ assert.match(panelGuard, /network-map:sidebar-workspace/, "sidebar integrity dia
 assert.match(panelGuard, /recover: scheduleAudit/, "legacy recovery API must now be diagnostic-only");
 assert.match(panelGuard, /phantom-right-column/, "runtime audit must detect the black right-side gutter");
 assert.match(panelGuard, /map-tools-horizontal-overflow/, "runtime audit must detect Map Tools overflow");
+assert.match(panelGuard, /workspace-empty/, "runtime audit must reject selected workspaces without usable controls");
 assert.match(panelGuard, /__NETWORK_MAP_UI_INTEGRITY__/, "runtime UI audit must be externally inspectable");
 assert.match(panelGuard, /removeEventListener/, "UI integrity listeners must be cleaned up");
 

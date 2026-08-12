@@ -56,8 +56,32 @@ function elementIsVisible(element: Element | null): element is HTMLElement {
 }
 
 function panelFor(tab: GuardedWorkspaceTab): HTMLElement | null {
+  if (tab === "providers") {
+    return document.querySelector<HTMLElement>(
+      ".sidebar.occumed-sidebar-workspace-scope > .occumed-sidebar-provider-content",
+    );
+  }
+  if (tab === "mapTools") {
+    return document.querySelector<HTMLElement>(
+      ".occumed-sidebar-workspace-host > .occumed-map-tools-panel",
+    );
+  }
   const selector = PANEL_SELECTORS[tab];
   return selector ? document.querySelector<HTMLElement>(selector) : null;
+}
+
+function panelHasUsableContent(tab: GuardedWorkspaceTab): boolean {
+  const panels = tab === "providers"
+    ? Array.from(document.querySelectorAll<HTMLElement>(
+      ".sidebar.occumed-sidebar-workspace-scope > .occumed-sidebar-provider-content",
+    ))
+    : [panelFor(tab)].filter((panel): panel is HTMLElement => panel instanceof HTMLElement);
+  if (!panels.length) return false;
+  const text = panels.map((panel) => panel.textContent || "").join(" ").replace(/\s+/g, " ").trim();
+  const actionCount = panels.reduce((total, panel) => total + panel.querySelectorAll(
+    "button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)",
+  ).length, 0);
+  return text.length >= 24 && actionCount > 0;
 }
 
 function closeEnough(a: number, b: number, tolerance = 5): boolean {
@@ -77,6 +101,7 @@ function auditLayout(): UiIntegrityResult {
   if (!tabs) failures.push("tabs-missing");
   if (!map) failures.push("map-missing");
   if (activeTabs.length !== 1) failures.push("active-tab-count");
+  if (!panelHasUsableContent(tab)) failures.push(`${tab}-workspace-empty`);
 
   if (desktop && sidebar && map && tabs) {
     const sidebarRect = sidebar.getBoundingClientRect();

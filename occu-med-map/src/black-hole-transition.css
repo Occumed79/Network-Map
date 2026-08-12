@@ -2,20 +2,18 @@
   position: fixed;
   inset: 0;
   z-index: 2147483000;
-  display: block;
   overflow: hidden;
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  background: #010005 !important;
-  transition: opacity 340ms ease, visibility 340ms ease;
+  background: #000;
+  transition: opacity 320ms ease, visibility 320ms ease;
 }
 
 .dual-engine-vortex.active {
   opacity: 1;
   visibility: visible;
   pointer-events: all;
-  background: #010005 !important;
 }
 
 .dual-engine-vortex-canvas {
@@ -27,42 +25,44 @@
   height: 100%;
 }
 
-.dual-engine-vortex::before,
-.dual-engine-vortex::after,
-.dual-engine-vortex-rings,
-.dual-engine-vortex-core,
-.dual-engine-vortex-bloom {
-  display: none !important;
-  content: none !important;
+.dual-engine-vortex::after {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  content: "";
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 49%, transparent 34%, rgba(0, 0, 0, 0.12) 62%, rgba(0, 0, 0, 0.72) 118%),
+    linear-gradient(180deg, rgba(5, 1, 12, 0.08), rgba(0, 0, 0, 0.18));
 }
 
 .dual-engine-vortex-copy {
   position: absolute;
   left: 50%;
-  bottom: 7%;
+  bottom: 6.5%;
   z-index: 3;
   display: grid;
   justify-items: center;
   gap: 5px;
   width: min(560px, calc(100% - 36px));
   transform: translateX(-50%);
-  color: rgba(255, 244, 225, 0.96) !important;
+  color: rgba(255, 245, 225, 0.94);
   text-align: center;
-  text-shadow:
-    0 0 12px rgba(255, 198, 75, 0.48),
-    0 0 30px rgba(255, 75, 143, 0.28) !important;
+  text-shadow: 0 0 18px rgba(255, 167, 69, 0.72), 0 0 42px rgba(255, 78, 190, 0.3);
   transition: opacity 220ms ease, transform 220ms ease;
 }
 
 .dual-engine-vortex-copy strong {
-  font-size: 15px;
-  font-weight: 750;
-  letter-spacing: 0.035em;
+  font-size: 14px;
+  font-weight: 760;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
 }
 
 .dual-engine-vortex-copy small {
   font-size: 10px;
-  opacity: 0.8;
+  letter-spacing: 0.035em;
+  opacity: 0.76;
 }
 
 .dual-engine-vortex.black-hole-final .dual-engine-vortex-copy {
@@ -70,24 +70,9 @@
   transform: translateX(-50%) translateY(10px);
 }
 
-.dual-engine-vortex.revealing {
-  opacity: 0 !important;
-}
-
-.dual-engine-vortex.failed .dual-engine-vortex-copy {
-  color: #ffd9d2 !important;
-}
-
-@media (max-width: 760px) {
-  .dual-engine-vortex-copy {
-    bottom: 6%;
-  }
-}
+.dual-engine-vortex.revealing { opacity: 0 !important; }
 
 @media (prefers-reduced-motion: reduce) {
   .dual-engine-vortex,
-  .dual-engine-vortex * {
-    animation: none !important;
-    transition-duration: 0.01ms !important;
-  }
+  .dual-engine-vortex * { transition-duration: 0.01ms !important; }
 }

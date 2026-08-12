@@ -17,6 +17,8 @@ const panelGuard = source("src/sidebarWorkspacePanelGuardRuntime.ts");
 const finalFixes = source("src/sidebar-workspace-final-fixes.css");
 const mapControls = source("src/mapControlsBridgeRuntime.ts");
 const productionUi = source("scripts/production-ui-smoke.mjs");
+const uiAcceptance = source("scripts/ci-ui-acceptance.mjs");
+const postIdleProbe = source("scripts/ci-post-idle-probe.mjs");
 const indexHtml = source("index.html");
 
 assert.match(main, /import "\.\/sidebarWorkspaceControllerRuntime";/, "unified sidebar controller must load");
@@ -26,6 +28,11 @@ assert.doesNotMatch(main, /sidebarWorkspaceTabsRuntime/, "legacy tab runtime mus
 assert.doesNotMatch(main, /sidebarWorkspaceConsistencyRuntime/, "legacy consistency runtime must remain retired");
 assert.doesNotMatch(indexHtml, /sidebarWorkspacePersistence/, "duplicate public persistence observer must remain removed");
 assert.doesNotMatch(appSource, new RegExp(["export", "Leadership", "Package"].join("")), "obsolete export function must stay removed");
+assert.match(
+  appSource,
+  /setMasterProviderTypeFilter\(''\);setProviderExplorerFilters\(INITIAL_PROVIDER_EXPLORER_FILTERS\)[\s\S]*Clear filters/,
+  "Explorer Clear filters must reset the visible provider type selection",
+);
 assert.doesNotMatch(main, new RegExp(["liveFinder", "ControlCleanupRuntime"].join("")), "obsolete Finder cleanup runtime must stay retired");
 
 for (const tab of ["providers", "mapTools", "liveFinder", "explorer"]) {
@@ -38,6 +45,13 @@ assert.match(controller, /runWithoutSharedDomObservation/, "sidebar compatibilit
 assert.doesNotMatch(controller, /new MutationObserver/, "sidebar must not create a private MutationObserver");
 assert.match(controller, /occumed-sidebar-workspace-host/, "Map Tools must use a dedicated sidebar host");
 assert.match(controller, /host\.appendChild\(panel\)/, "Map Tools must be physically docked into the sidebar");
+assert.match(controller, /network-map:map-tools-panel-mounted/, "Map Tools must redock from its explicit late-mount event");
+assert.match(controller, /PANEL_RETRY_DELAYS_MS/, "Finder and Explorer must reconcile delayed React commits with bounded retries");
+assert.match(controller, /panelHasContent/, "workspace reconciliation must verify that an open panel has real content");
+assert.match(controller, /delete document\.body\.dataset\.providerTool/, "leaving Finder must clear stale provider tool state");
+assert.match(controller, /handlePanelCloseClick/, "Finder and Explorer close actions must return workspace ownership safely");
+assert.match(controller, /document\.addEventListener\("click", handlePanelCloseClick, true\)/, "panel close handling must observe the real user action");
+assert.match(controller, /document\.removeEventListener\("click", handlePanelCloseClick, true\)/, "panel close handling must be cleaned up");
 assert.match(controller, /new ResizeObserver/, "sidebar dimensions must update without polling");
 assert.doesNotMatch(controller, /setInterval\s*\(/, "sidebar synchronization must not poll continuously");
 assert.match(controller, /\.unified-live-tool/, "Finder must prefer a stable launcher selector during the remaining source-control migration");
@@ -56,6 +70,7 @@ assert.match(panelGuard, /network-map:sidebar-workspace/, "sidebar integrity dia
 assert.match(panelGuard, /recover: scheduleAudit/, "legacy recovery API must now be diagnostic-only");
 assert.match(panelGuard, /phantom-right-column/, "runtime audit must detect the black right-side gutter");
 assert.match(panelGuard, /map-tools-horizontal-overflow/, "runtime audit must detect Map Tools overflow");
+assert.match(panelGuard, /workspace-empty/, "runtime audit must reject selected workspaces without usable controls");
 assert.match(panelGuard, /__NETWORK_MAP_UI_INTEGRITY__/, "runtime UI audit must be externally inspectable");
 assert.match(panelGuard, /removeEventListener/, "UI integrity listeners must be cleaned up");
 
@@ -79,6 +94,27 @@ assert.match(productionUi, /assertWorkspace\("explorer"/, "production UI smoke m
 assert.match(productionUi, /phantom right-side column/, "production UI smoke must reject map gutters");
 assert.match(productionUi, /setViewportSize\(\{ width: 1024, height: 768 \}\)/, "workspace UI must be checked at a narrower desktop viewport");
 assert.match(productionUi, /__NETWORK_MAP_UI_INTEGRITY__/, "production UI smoke must consume the runtime audit");
+
+for (const control of [
+  "Route starting location",
+  "Route destination",
+  "Luminous Density",
+  "Occ-Med",
+  "occupational_health_clinic",
+]) {
+  assert.match(uiAcceptance, new RegExp(control), `rendered UI acceptance must exercise ${control}`);
+}
+assert.match(uiAcceptance, /closing Finder must return to Providers/, "Finder Close must not leave an empty selected workspace");
+assert.match(uiAcceptance, /second ArrowRight must select Finder/, "keyboard acceptance must traverse Finder");
+assert.match(uiAcceptance, /third ArrowRight must select Explorer/, "keyboard acceptance must traverse Explorer");
+assert.match(uiAcceptance, /fourth ArrowRight must wrap to Providers/, "keyboard acceptance must cover all four tabs");
+
+for (const tab of ["providers", "mapTools", "liveFinder", "explorer"]) {
+  assert.match(postIdleProbe, new RegExp(`tab: "${tab}"`), `post-idle probe must cycle ${tab}`);
+}
+assert.match(postIdleProbe, /assertFourWorkspaceCycle\(page, "before-idle"\)/, "post-idle probe must verify every tab before settling");
+assert.match(postIdleProbe, /waitForTimeout\(10_000\)/, "post-idle probe must include a real idle window");
+assert.match(postIdleProbe, /assertFourWorkspaceCycle\(page, "after-idle"\)/, "post-idle probe must verify every tab after settling");
 
 assert.match(mapControls, /workspaceReady/, "Map Controls must detect final sidebar ownership");
 assert.match(mapControls, /panel\.dataset\.sidebarDocked === "true"/, "Map Controls must respect a docked panel marker");

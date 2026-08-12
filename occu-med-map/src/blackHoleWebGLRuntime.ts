@@ -36,6 +36,8 @@ const FRAGMENT_SHADER = `
   uniform float uCameraDistance;
   uniform float uOrbitX;
   uniform float uIterations;
+  uniform float uProgress;
+  uniform float uWhiteHole;
 
   struct Ray {
     vec3 origin;
@@ -129,7 +131,7 @@ const FRAGMENT_SHADER = `
 
       if (distanceToHole <= EVENT_HORIZON_RADIUS) {
         swallowed = 1.0;
-        return vec3(0.0);
+        return mix(vec3(0.0), vec3(18.0, 14.5, 10.0), uWhiteHole);
       }
 
       if (distanceToHole >= BACKGROUND_DISTANCE) break;
@@ -155,7 +157,9 @@ const FRAGMENT_SHADER = `
         float radialPosition = (distanceToHole - innerDiskRadius) /
           (outerDiskRadius - innerDiskRadius);
         float angle = atan(nextPosition.z, nextPosition.x);
-        float differentialRotation = uTime * (0.82 / sqrt(max(distanceToHole, 0.1)));
+        float flowDirection = mix(1.0, -1.0, uWhiteHole);
+        float differentialRotation = flowDirection * uTime *
+          (0.82 / sqrt(max(distanceToHole, 0.1)));
         vec3 plasmaCoordinate = vec3(
           angle * 2.7 - differentialRotation * 5.6,
           radialPosition * 9.5,
@@ -186,6 +190,21 @@ const FRAGMENT_SHADER = `
         vec3 innerColor = vec3(12.0, 6.2, 2.25);
         vec3 plasmaColor = mix(innerColor, middleColor, smoothstep(0.05, 0.36, radialPosition));
         plasmaColor = mix(plasmaColor, outerColor, smoothstep(0.38, 0.9, radialPosition));
+
+        vec3 whiteOuterColor = vec3(1.35, 2.85, 5.4);
+        vec3 whiteMiddleColor = vec3(6.8, 9.6, 13.0);
+        vec3 whiteInnerColor = vec3(18.0, 15.2, 10.5);
+        vec3 whitePlasmaColor = mix(
+          whiteInnerColor,
+          whiteMiddleColor,
+          smoothstep(0.05, 0.36, radialPosition)
+        );
+        whitePlasmaColor = mix(
+          whitePlasmaColor,
+          whiteOuterColor,
+          smoothstep(0.38, 0.9, radialPosition)
+        );
+        plasmaColor = mix(plasmaColor, whitePlasmaColor, uWhiteHole);
         plasmaColor *= density * doppler * clamp(gravitationalShift, 0.36, 1.5);
 
         Ray escapedRay;
@@ -214,11 +233,26 @@ const FRAGMENT_SHADER = `
     vec3 color = traceBlackHole(ray, closestDistance, swallowed);
 
     float photonRing = exp(-pow((closestDistance - 1.48) * 5.2, 2.0));
-    vec3 ringColor = vec3(4.8, 1.35, 0.32) * photonRing * (1.0 - swallowed) * 0.7;
+    vec3 ringColor = mix(
+      vec3(4.8, 1.35, 0.32),
+      vec3(8.5, 11.5, 16.0),
+      uWhiteHole
+    ) * photonRing * mix(1.0 - swallowed, 1.0, uWhiteHole) * 0.7;
     color += ringColor;
 
     float centerFalloff = 1.0 - smoothstep(0.94, 1.24, closestDistance);
-    color *= 1.0 - centerFalloff;
+    vec3 blackHoleColor = color * (1.0 - centerFalloff);
+
+    vec2 centeredUv = vUv - 0.5;
+    centeredUv.x *= uResolution.x / max(uResolution.y, 1.0);
+    float screenRadius = length(centeredUv);
+    float whiteCore = centerFalloff * (1.0 + swallowed * 1.8);
+    float whiteHalo = exp(-screenRadius * mix(1.35, 3.8, uProgress));
+    float exitFlash = pow(1.0 - uProgress, 2.35);
+    vec3 whiteHoleColor = color +
+      vec3(15.5, 13.8, 11.2) * whiteCore +
+      vec3(5.8, 7.8, 11.5) * whiteHalo * exitFlash;
+    color = mix(blackHoleColor, whiteHoleColor, uWhiteHole);
 
     float vignette = 1.0 - smoothstep(0.26, 0.78, length(vUv - 0.5));
     color *= mix(0.48, 1.0, vignette);
@@ -231,6 +265,7 @@ const FRAGMENT_SHADER = `
 export type BlackHoleTransitionOptions = {
   durationMs?: number;
   reducedMotion?: boolean;
+  effect?: "black-hole" | "white-hole";
 };
 
 export type BlackHoleTransition = {
@@ -321,6 +356,7 @@ export function startBlackHoleTransition(
   options: BlackHoleTransitionOptions = {},
 ): BlackHoleTransition {
   const reducedMotion = options.reducedMotion ?? false;
+  const whiteHole = options.effect === "white-hole";
   const durationMs = reducedMotion ? 650 : (options.durationMs ?? 4100);
   const renderer = new THREE.WebGLRenderer({
     canvas,
@@ -345,6 +381,8 @@ export function startBlackHoleTransition(
     uCameraDistance: { value: 19.5 },
     uOrbitX: { value: -0.32 },
     uIterations: { value: reducedMotion ? 68 : 116 },
+    uProgress: { value: 0 },
+    uWhiteHole: { value: whiteHole ? 1 : 0 },
   };
   const material = new THREE.ShaderMaterial({
     vertexShader: VERTEX_SHADER,
@@ -391,12 +429,26 @@ export function startBlackHoleTransition(
     const accelerated = rawProgress * rawProgress * (3.0 - 2.0 * rawProgress);
     const plunge = Math.pow(accelerated, 1.72);
     uniforms.uTime.value = elapsedMs / 1000;
-    uniforms.uCameraDistance.value = THREE.MathUtils.lerp(19.5, 1.075, plunge);
-    uniforms.uOrbitX.value =
-      THREE.MathUtils.lerp(-0.32, 0.06, accelerated) +
+    uniforms.uProgress.value = rawProgress;
+    const cameraProgress = whiteHole ? Math.pow(accelerated, 0.72) : plunge;
+    uniforms.uCameraDistance.value = whiteHole
+      ? THREE.MathUtils.lerp(1.075, 19.5, cameraProgress)
+      : THREE.MathUtils.lerp(19.5, 1.075, cameraProgress);
+    uniforms.uOrbitX.value = THREE.MathUtils.lerp(
+      whiteHole ? 0.06 : -0.32,
+      whiteHole ? -0.32 : 0.06,
+      accelerated,
+    ) +
       Math.sin(rawProgress * Math.PI * 2.0) * 0.055 * (1.0 - rawProgress);
-    bloom.strength = THREE.MathUtils.lerp(1.72, 2.48, accelerated);
-    bloom.radius = THREE.MathUtils.lerp(0.68, 0.94, accelerated);
+    bloom.strength = whiteHole
+      ? THREE.MathUtils.lerp(3.35, 1.72, accelerated)
+      : THREE.MathUtils.lerp(1.72, 2.48, accelerated);
+    bloom.radius = whiteHole
+      ? THREE.MathUtils.lerp(1.0, 0.68, accelerated)
+      : THREE.MathUtils.lerp(0.68, 0.94, accelerated);
+    renderer.toneMappingExposure = whiteHole
+      ? THREE.MathUtils.lerp(1.62, 1.18, accelerated)
+      : 1.18;
     composer.render();
 
     if (rawProgress >= 1 && !finishResolved) {

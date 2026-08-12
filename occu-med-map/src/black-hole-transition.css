@@ -36,6 +36,21 @@
     linear-gradient(180deg, rgba(5, 1, 12, 0.08), rgba(0, 0, 0, 0.18));
 }
 
+.dual-engine-vortex.exiting {
+  background: #f7fbff;
+}
+
+.dual-engine-vortex.exiting::after {
+  background:
+    radial-gradient(circle at 50% 49%, transparent 26%, rgba(222, 239, 255, 0.05) 52%, rgba(177, 211, 255, 0.2) 118%),
+    linear-gradient(180deg, rgba(255, 252, 241, 0.04), rgba(168, 205, 255, 0.1));
+}
+
+.dual-engine-vortex.exiting .dual-engine-vortex-copy {
+  color: rgba(248, 252, 255, 0.96);
+  text-shadow: 0 0 18px rgba(255, 255, 255, 0.94), 0 0 48px rgba(94, 174, 255, 0.7);
+}
+
 .dual-engine-vortex-copy {
   position: absolute;
   left: 50%;

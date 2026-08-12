@@ -130,10 +130,10 @@ function beginBlackHole(targetMode: MapMode): {
 
   if (title) title.textContent = targetMode === "3d"
     ? "Entering the black hole"
-    : "Crossing the event horizon";
+    : "Exiting the white hole";
   if (detail) detail.textContent = targetMode === "3d"
     ? "Falling toward the Mapbox globe…"
-    : "Falling through to the Mapbox 2D view…";
+    : "Emerging into the Mapbox 2D view…";
 
   overlay.className = `dual-engine-vortex active ${targetMode === "3d" ? "entering" : "exiting"}`;
   overlay.setAttribute("aria-hidden", "false");
@@ -163,7 +163,11 @@ function beginBlackHole(targetMode: MapMode): {
     void loadBlackHoleRenderer()
       .then(({ startBlackHoleTransition }) => {
         if (stopped) return;
-        renderer = startBlackHoleTransition(canvas, { durationMs, reducedMotion });
+        renderer = startBlackHoleTransition(canvas, {
+          durationMs,
+          reducedMotion,
+          effect: targetMode === "3d" ? "black-hole" : "white-hole",
+        });
         void renderer.finished.then(finishFrame);
       })
       .catch((error) => {

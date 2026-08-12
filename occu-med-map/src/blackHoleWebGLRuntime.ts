@@ -131,7 +131,7 @@ const FRAGMENT_SHADER = `
 
       if (distanceToHole <= EVENT_HORIZON_RADIUS) {
         swallowed = 1.0;
-        return mix(vec3(0.0), vec3(18.0, 14.5, 10.0), uWhiteHole);
+        return mix(vec3(0.0), vec3(5.8, 7.2, 10.5), uWhiteHole);
       }
 
       if (distanceToHole >= BACKGROUND_DISTANCE) break;
@@ -185,15 +185,15 @@ const FRAGMENT_SHADER = `
           (1.0 - 1.0 / max(uCameraDistance, 1.01))
         ));
 
-        vec3 outerColor = vec3(3.8, 0.24, 0.055);
-        vec3 middleColor = vec3(8.0, 1.2, 0.17);
-        vec3 innerColor = vec3(12.0, 6.2, 2.25);
+        vec3 outerColor = vec3(1.9, 0.075, 0.018);
+        vec3 middleColor = vec3(3.8, 0.52, 0.065);
+        vec3 innerColor = vec3(6.2, 2.1, 0.34);
         vec3 plasmaColor = mix(innerColor, middleColor, smoothstep(0.05, 0.36, radialPosition));
         plasmaColor = mix(plasmaColor, outerColor, smoothstep(0.38, 0.9, radialPosition));
 
-        vec3 whiteOuterColor = vec3(1.35, 2.85, 5.4);
-        vec3 whiteMiddleColor = vec3(6.8, 9.6, 13.0);
-        vec3 whiteInnerColor = vec3(18.0, 15.2, 10.5);
+        vec3 whiteOuterColor = vec3(0.48, 1.75, 4.8);
+        vec3 whiteMiddleColor = vec3(2.8, 5.7, 9.2);
+        vec3 whiteInnerColor = vec3(7.2, 8.5, 11.5);
         vec3 whitePlasmaColor = mix(
           whiteInnerColor,
           whiteMiddleColor,
@@ -235,23 +235,25 @@ const FRAGMENT_SHADER = `
     float photonRing = exp(-pow((closestDistance - 1.48) * 5.2, 2.0));
     vec3 ringColor = mix(
       vec3(4.8, 1.35, 0.32),
-      vec3(8.5, 11.5, 16.0),
+      vec3(4.2, 7.8, 12.0),
       uWhiteHole
     ) * photonRing * mix(1.0 - swallowed, 1.0, uWhiteHole) * 0.7;
     color += ringColor;
 
-    float centerFalloff = 1.0 - smoothstep(0.94, 1.24, closestDistance);
-    vec3 blackHoleColor = color * (1.0 - centerFalloff);
+    // Keep a definite event-horizon silhouette. The old narrow mask let the
+    // accretion disk's bloom wash across the center until it looked pale.
+    float horizonSilhouette = 1.0 - smoothstep(1.08, 1.42, closestDistance);
+    vec3 blackHoleColor = color * (1.0 - horizonSilhouette);
 
     vec2 centeredUv = vUv - 0.5;
     centeredUv.x *= uResolution.x / max(uResolution.y, 1.0);
     float screenRadius = length(centeredUv);
-    float whiteCore = centerFalloff * (1.0 + swallowed * 1.8);
-    float whiteHalo = exp(-screenRadius * mix(1.35, 3.8, uProgress));
-    float exitFlash = pow(1.0 - uProgress, 2.35);
+    float whiteCore = horizonSilhouette * (0.76 + swallowed * 0.5);
+    float whiteHalo = exp(-screenRadius * mix(4.8, 7.2, uProgress));
+    float exitFlash = 1.0 - smoothstep(0.0, 0.085, uProgress);
     vec3 whiteHoleColor = color +
-      vec3(15.5, 13.8, 11.2) * whiteCore +
-      vec3(5.8, 7.8, 11.5) * whiteHalo * exitFlash;
+      vec3(4.8, 6.4, 9.5) * whiteCore +
+      vec3(0.7, 1.35, 2.4) * whiteHalo * exitFlash;
     color = mix(blackHoleColor, whiteHoleColor, uWhiteHole);
 
     float vignette = 1.0 - smoothstep(0.26, 0.78, length(vUv - 0.5));
@@ -368,7 +370,7 @@ export function startBlackHoleTransition(
   });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.18;
+  renderer.toneMappingExposure = 1.02;
   renderer.setClearColor(0x000000, 1);
 
   const scene = new THREE.Scene();
@@ -398,7 +400,7 @@ export function startBlackHoleTransition(
 
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 1.95, 0.78, 0.16);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 1.45, 0.48, 0.48);
   composer.addPass(bloom);
 
   let disposed = false;
@@ -430,9 +432,9 @@ export function startBlackHoleTransition(
     const plunge = Math.pow(accelerated, 1.72);
     uniforms.uTime.value = elapsedMs / 1000;
     uniforms.uProgress.value = rawProgress;
-    const cameraProgress = whiteHole ? Math.pow(accelerated, 0.72) : plunge;
+    const cameraProgress = whiteHole ? Math.pow(accelerated, 0.82) : plunge;
     uniforms.uCameraDistance.value = whiteHole
-      ? THREE.MathUtils.lerp(1.075, 19.5, cameraProgress)
+      ? THREE.MathUtils.lerp(2.4, 19.5, cameraProgress)
       : THREE.MathUtils.lerp(19.5, 1.075, cameraProgress);
     uniforms.uOrbitX.value = THREE.MathUtils.lerp(
       whiteHole ? 0.06 : -0.32,
@@ -441,14 +443,15 @@ export function startBlackHoleTransition(
     ) +
       Math.sin(rawProgress * Math.PI * 2.0) * 0.055 * (1.0 - rawProgress);
     bloom.strength = whiteHole
-      ? THREE.MathUtils.lerp(3.35, 1.72, accelerated)
-      : THREE.MathUtils.lerp(1.72, 2.48, accelerated);
+      ? THREE.MathUtils.lerp(1.9, 1.35, accelerated)
+      : THREE.MathUtils.lerp(1.28, 1.72, accelerated);
     bloom.radius = whiteHole
-      ? THREE.MathUtils.lerp(1.0, 0.68, accelerated)
-      : THREE.MathUtils.lerp(0.68, 0.94, accelerated);
+      ? THREE.MathUtils.lerp(0.6, 0.42, accelerated)
+      : THREE.MathUtils.lerp(0.4, 0.58, accelerated);
+    bloom.threshold = whiteHole ? 0.42 : 0.52;
     renderer.toneMappingExposure = whiteHole
-      ? THREE.MathUtils.lerp(1.62, 1.18, accelerated)
-      : 1.18;
+      ? THREE.MathUtils.lerp(1.12, 1.0, accelerated)
+      : 1.02;
     composer.render();
 
     if (rawProgress >= 1 && !finishResolved) {

@@ -3960,7 +3960,7 @@ export default function App() {
                 <button onClick={()=>void compareProviderExplorerArea(providerExplorerFilters)}><GitCompareArrows size={15}/>Compare stored and live</button>
                 <button onClick={()=>void renderProviderExplorerMap(providerExplorerMode,providerExplorerFilters)}><RefreshCw size={15}/>Refresh map</button>
                 <button disabled={!providerExplorerLiveEnabled} onClick={()=>void renderProviderExplorerLiveLayer()}><Radar size={15}/>Refresh live</button>
-                <button onClick={()=>{clearProviderExplorerMap();setProviderExplorerFilters(INITIAL_PROVIDER_EXPLORER_FILTERS);setProviderExplorerStatus('Provider map and database filters cleared');}}><X size={15}/>Clear filters</button>
+                <button onClick={()=>{clearProviderExplorerMap();setMasterProviderTypeFilter('');setProviderExplorerFilters(INITIAL_PROVIDER_EXPLORER_FILTERS);setProviderExplorerStatus('Provider map and database filters cleared');}}><X size={15}/>Clear filters</button>
               </div>
             </section>
 

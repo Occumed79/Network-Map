@@ -28,6 +28,11 @@ assert.doesNotMatch(main, /sidebarWorkspaceTabsRuntime/, "legacy tab runtime mus
 assert.doesNotMatch(main, /sidebarWorkspaceConsistencyRuntime/, "legacy consistency runtime must remain retired");
 assert.doesNotMatch(indexHtml, /sidebarWorkspacePersistence/, "duplicate public persistence observer must remain removed");
 assert.doesNotMatch(appSource, new RegExp(["export", "Leadership", "Package"].join("")), "obsolete export function must stay removed");
+assert.match(
+  appSource,
+  /setMasterProviderTypeFilter\(''\);setProviderExplorerFilters\(INITIAL_PROVIDER_EXPLORER_FILTERS\)[\s\S]*Clear filters/,
+  "Explorer Clear filters must reset the visible provider type selection",
+);
 assert.doesNotMatch(main, new RegExp(["liveFinder", "ControlCleanupRuntime"].join("")), "obsolete Finder cleanup runtime must stay retired");
 
 for (const tab of ["providers", "mapTools", "liveFinder", "explorer"]) {

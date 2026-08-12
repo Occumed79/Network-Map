@@ -274,23 +274,23 @@ function setActiveTab(tab: WorkspaceTab, managePanels = true): void {
 
 function syncFromPanelState(): void {
   if (performance.now() < suppressPanelSyncUntil) return;
-  const providerTool = document.body?.dataset.providerTool || "";
   const explorerOpen = panelIsOpen(".provider-explorer-drawer");
   const liveOpen = panelIsOpen(".live-panel");
 
-  if ((providerTool === "explorer" || explorerOpen) && activeTab !== "explorer") {
+  if (explorerOpen && activeTab !== "explorer") {
     setActiveTab("explorer", false);
     return;
   }
-  if ((providerTool === "live" || providerTool === "npi" || liveOpen) && activeTab !== "liveFinder") {
+  if (liveOpen && activeTab !== "liveFinder") {
     setActiveTab("liveFinder", false);
     return;
   }
-  if (activeTab === "explorer" && !explorerOpen && providerTool !== "explorer") {
+  if (activeTab === "explorer" && !explorerOpen) {
     setActiveTab("providers", false);
     return;
   }
-  if (activeTab === "liveFinder" && !liveOpen && providerTool !== "live" && providerTool !== "npi") {
+  if (activeTab === "liveFinder" && !liveOpen) {
+    delete document.body.dataset.providerTool;
     setActiveTab("providers", false);
   }
 }
@@ -335,6 +335,29 @@ function handleMapToolsPanelMounted(): void {
   scheduleSync(0);
 }
 
+function handlePanelCloseClick(event: Event): void {
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target) return;
+  const closesFinder = Boolean(target.closest(
+    ".live-panel .rp-close, .live-panel button[aria-label*='close' i], .live-panel button[title*='close' i]",
+  ));
+  const closesExplorer = Boolean(target.closest(
+    ".provider-explorer-drawer button[aria-label*='close' i], .provider-explorer-drawer button[title*='close' i], .provider-drawer-backdrop",
+  ));
+  if ((closesFinder && activeTab !== "liveFinder") || (closesExplorer && activeTab !== "explorer")) return;
+  if (!closesFinder && !closesExplorer) return;
+
+  clearPanelActionTimers();
+  suppressPanelSyncUntil = 0;
+  if (closesFinder) delete document.body.dataset.providerTool;
+  window.setTimeout(() => {
+    if ((closesFinder && !panelIsOpen(".live-panel"))
+      || (closesExplorer && !panelIsOpen(".provider-explorer-drawer"))) {
+      setActiveTab("providers", false);
+    }
+  }, 0);
+}
+
 function install(): void {
   if (!registerRuntimeOwner(
     "sidebar-workspace-controller",
@@ -348,6 +371,7 @@ function install(): void {
   window.addEventListener("resize", handleViewportChange, { passive: true });
   window.addEventListener("orientationchange", handleViewportChange, { passive: true });
   window.addEventListener("network-map:map-tools-panel-mounted", handleMapToolsPanelMounted);
+  document.addEventListener("click", handlePanelCloseClick, true);
 }
 
 function cleanup(): void {
@@ -363,6 +387,7 @@ function cleanup(): void {
   window.removeEventListener("resize", handleViewportChange);
   window.removeEventListener("orientationchange", handleViewportChange);
   window.removeEventListener("network-map:map-tools-panel-mounted", handleMapToolsPanelMounted);
+  document.removeEventListener("click", handlePanelCloseClick, true);
 }
 
 window.__NETWORK_MAP_SIDEBAR_WORKSPACES__ = {

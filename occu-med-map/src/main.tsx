@@ -30,6 +30,7 @@ import {
 } from "./startupDiagnostics";
 import "./dual-map-engines.css";
 import "./dual-map-transition-opaque.css";
+import "./black-hole-transition.css";
 import "./map-engine-final-fixes.css";
 import "./features/driveTime/nativeDriveTimeRuntime.css";
 import "./index.css";

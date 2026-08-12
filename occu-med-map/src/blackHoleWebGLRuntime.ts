@@ -230,31 +230,115 @@ const FRAGMENT_SHADER = `
     Ray ray = cameraRay();
     float closestDistance;
     float swallowed;
-    vec3 color = traceBlackHole(ray, closestDistance, swallowed);
+    vec3 tracedScene = traceBlackHole(ray, closestDistance, swallowed);
 
     float photonRing = exp(-pow((closestDistance - 1.48) * 5.2, 2.0));
     vec3 ringColor = mix(
       vec3(4.8, 1.35, 0.32),
       vec3(4.2, 7.8, 12.0),
       uWhiteHole
-    ) * photonRing * mix(1.0 - swallowed, 1.0, uWhiteHole) * 0.7;
-    color += ringColor;
-
-    // Keep a definite event-horizon silhouette. The old narrow mask let the
-    // accretion disk's bloom wash across the center until it looked pale.
-    float horizonSilhouette = 1.0 - smoothstep(1.08, 1.42, closestDistance);
-    vec3 blackHoleColor = color * (1.0 - horizonSilhouette);
+    ) * photonRing * mix(1.0 - swallowed, 1.0, uWhiteHole) * 0.16;
+    vec3 color = tracedScene * 0.34 + ringColor;
 
     vec2 centeredUv = vUv - 0.5;
     centeredUv.x *= uResolution.x / max(uResolution.y, 1.0);
-    float screenRadius = length(centeredUv);
-    float whiteCore = horizonSilhouette * (0.76 + swallowed * 0.5);
-    float whiteHalo = exp(-screenRadius * mix(4.8, 7.2, uProgress));
-    float exitFlash = 1.0 - smoothstep(0.0, 0.085, uProgress);
-    vec3 whiteHoleColor = color +
-      vec3(4.8, 6.4, 9.5) * whiteCore +
-      vec3(0.7, 1.35, 2.4) * whiteHalo * exitFlash;
-    color = mix(blackHoleColor, whiteHoleColor, uWhiteHole);
+
+    // Build the unmistakable reference silhouette in explicit depth order:
+    // rear accretion disk, spherical center, then the front half of the disk.
+    // The geodesic trace remains underneath to bend the star field and supply
+    // physically inspired plasma variation without obscuring the silhouette.
+    float objectRadius = clamp(1.42 / uCameraDistance, 0.085, 1.38);
+    vec2 localPoint = centeredUv / objectRadius;
+    float diskTilt = mix(-0.065, -0.31, uWhiteHole);
+    float tiltCosine = cos(diskTilt);
+    float tiltSine = sin(diskTilt);
+    vec2 diskPoint = mat2(
+      tiltCosine, -tiltSine,
+      tiltSine, tiltCosine
+    ) * localPoint;
+
+    float ellipseRadius = length(vec2(diskPoint.x / 1.72, diskPoint.y / 0.30));
+    float bandDistance = abs(ellipseRadius - 1.0);
+    float diskMask = 1.0 - smoothstep(0.055, 0.19, bandDistance);
+    float diskHotCore = 1.0 - smoothstep(0.0, 0.075, bandDistance);
+    float diskHalo = 1.0 - smoothstep(0.14, 0.39, bandDistance);
+
+    float orbitalAngle = atan(diskPoint.y / 0.30, diskPoint.x / 1.72);
+    float flowDirection = mix(1.0, -1.0, uWhiteHole);
+    float diskTurbulence = fbm(vec3(
+      orbitalAngle * 3.4 - uTime * flowDirection * 2.8,
+      bandDistance * 24.0,
+      uTime * 0.22
+    ));
+    float diskFilaments = 0.76 + 0.24 * sin(
+      orbitalAngle * 23.0 - uTime * flowDirection * 6.4 + diskTurbulence * 7.0
+    );
+
+    vec3 blackDiskHot = vec3(7.2, 5.6, 3.15);
+    vec3 blackDiskMiddle = vec3(5.2, 0.62, 0.14);
+    vec3 blackDiskOuter = vec3(1.55, 0.09, 2.35);
+    vec3 blackDiskColor = mix(
+      blackDiskMiddle,
+      blackDiskHot,
+      diskHotCore
+    );
+    blackDiskColor = mix(
+      blackDiskColor,
+      blackDiskOuter,
+      smoothstep(0.105, 0.19, bandDistance)
+    );
+
+    vec3 whiteDiskHot = vec3(7.0, 8.8, 10.5);
+    vec3 whiteDiskMiddle = vec3(0.5, 5.4, 9.2);
+    vec3 whiteDiskOuter = vec3(0.12, 0.72, 3.8);
+    vec3 whiteDiskColor = mix(
+      whiteDiskMiddle,
+      whiteDiskHot,
+      diskHotCore
+    );
+    whiteDiskColor = mix(
+      whiteDiskColor,
+      whiteDiskOuter,
+      smoothstep(0.105, 0.19, bandDistance)
+    );
+
+    vec3 diskColor = mix(blackDiskColor, whiteDiskColor, uWhiteHole);
+    diskColor *= 0.86 + diskTurbulence * 0.24 + diskFilaments * 0.18;
+    vec3 haloColor = mix(
+      vec3(0.72, 0.035, 1.28),
+      vec3(0.04, 1.1, 3.4),
+      uWhiteHole
+    );
+    color += haloColor * diskHalo * (1.0 - diskMask) * 0.38;
+
+    // Rear disk is laid down first so the center sphere can occlude it.
+    color = mix(color, diskColor, diskMask * 0.94);
+
+    float centerDistance = length(localPoint);
+    float centerMask = 1.0 - smoothstep(0.63, 0.69, centerDistance);
+    float centerInterior = 1.0 - smoothstep(0.0, 0.64, centerDistance);
+    vec3 blackCenter = vec3(0.000015, 0.000004, 0.000025);
+    vec3 whiteCenter = mix(
+      vec3(2.1, 4.8, 9.0),
+      vec3(8.5, 9.5, 10.8),
+      pow(centerInterior, 0.34)
+    );
+    vec3 centerColor = mix(blackCenter, whiteCenter, uWhiteHole);
+    color = mix(color, centerColor, centerMask);
+
+    float centerRim = 1.0 - smoothstep(0.025, 0.085, abs(centerDistance - 0.68));
+    vec3 centerRimColor = mix(
+      vec3(5.6, 1.05, 0.52),
+      vec3(2.0, 7.4, 11.0),
+      uWhiteHole
+    );
+    color += centerRimColor * centerRim * 0.64;
+
+    // The lower half of the projected ellipse is the foreground arc. Drawing
+    // it last makes the disk visibly cross in front of the spherical center.
+    float frontHalf = 1.0 - smoothstep(-0.015, 0.075, diskPoint.y);
+    float frontDiskMask = diskMask * frontHalf;
+    color = mix(color, diskColor * 1.08, frontDiskMask * 0.98);
 
     float vignette = 1.0 - smoothstep(0.26, 0.78, length(vUv - 0.5));
     color *= mix(0.48, 1.0, vignette);

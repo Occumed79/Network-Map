@@ -42,7 +42,10 @@ assert.match(blackHole, /geodesicAcceleration/, "the transition must bend light 
 assert.match(transition, /effect: targetMode === "3d" \? "black-hole" : "white-hole"/, "the reverse transition must use the white-hole renderer");
 assert.match(blackHole, /THREE\.MathUtils\.lerp\(2\.4, 19\.5, cameraProgress\)/, "the white-hole camera must pull away without presenting a screen-sized sun");
 assert.match(blackHole, /flowDirection = mix\(1\.0, -1\.0, uWhiteHole\)/, "the white-hole accretion flow must reverse");
-assert.match(blackHole, /horizonSilhouette = 1\.0 - smoothstep\(1\.08, 1\.42, closestDistance\)/, "the black-hole center must retain a protected event-horizon silhouette");
+assert.match(blackHole, /rear accretion disk, spherical center, then the front half of the disk/, "the transition must preserve the reference image's wrapped accretion-disk silhouette");
+assert.match(blackHole, /vec3 blackCenter = vec3\(0\.000015, 0\.000004, 0\.000025\)/, "the black-hole center must remain pitch black");
+assert.match(blackHole, /vec3 whiteCenter = mix/, "the white-hole center must remain brilliant white");
+assert.match(blackHole, /float frontDiskMask = diskMask \* frontHalf/, "the foreground disk arc must cross in front of the spherical center");
 assert.match(blackHole, /bloom\.threshold = whiteHole \? 0\.42 : 0\.52/, "bloom must preserve core and disk detail instead of clipping both holes into suns");
 assert.doesNotMatch(mapEngineCss, /dual-engine-vortex-rings|vortex-core-pulse|vortex-burst/, "legacy geometric vortex CSS must not return");
 

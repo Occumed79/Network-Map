@@ -39,6 +39,9 @@ assert.match(transition, /import\("\.\/blackHoleWebGLRuntime"\)/, "the GPU rende
 assert.match(blackHole, /UnrealBloomPass/, "the accretion disk must use a real HDR bloom pass");
 assert.match(blackHole, /traceBlackHole/, "the transition must ray trace the black-hole scene");
 assert.match(blackHole, /geodesicAcceleration/, "the transition must bend light instead of drawing flat concentric arcs");
+assert.match(transition, /effect: targetMode === "3d" \? "black-hole" : "white-hole"/, "the reverse transition must use the white-hole renderer");
+assert.match(blackHole, /THREE\.MathUtils\.lerp\(1\.075, 19\.5, cameraProgress\)/, "the white-hole camera must pull away from the event horizon");
+assert.match(blackHole, /flowDirection = mix\(1\.0, -1\.0, uWhiteHole\)/, "the white-hole accretion flow must reverse");
 assert.doesNotMatch(mapEngineCss, /dual-engine-vortex-rings|vortex-core-pulse|vortex-burst/, "legacy geometric vortex CSS must not return");
 
 assert.match(diagnostics, /__NETWORK_MAP_BOOT__/, "boot diagnostics must be externally inspectable");

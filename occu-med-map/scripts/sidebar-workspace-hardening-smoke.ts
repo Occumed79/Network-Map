@@ -43,7 +43,7 @@ assert.match(
 assert.doesNotMatch(main, new RegExp(["liveFinder", "ControlCleanupRuntime"].join("")), "obsolete Finder cleanup runtime must stay retired");
 
 for (const tab of ["providers", "mapTools", "liveFinder", "explorer"]) {
-  assert.match(controller, new RegExp(`id: "${tab}"`), `workspace tab ${tab} must remain registered`);
+  assert.match(appSource, new RegExp(`id:'${tab}'`), `React must register workspace tab ${tab}`);
 }
 
 assert.match(controller, /registerRuntimeOwner\([\s\S]*"sidebar-workspace-controller"/, "sidebar workspace behavior must have one explicit owner");
@@ -53,19 +53,19 @@ assert.doesNotMatch(controller, /new MutationObserver/, "sidebar must not create
 assert.match(controller, /occumed-sidebar-workspace-host/, "Map Tools must use a dedicated sidebar host");
 assert.match(controller, /host\.appendChild\(panel\)/, "Map Tools must be physically docked into the sidebar");
 assert.match(controller, /network-map:map-tools-panel-mounted/, "Map Tools must redock from its explicit late-mount event");
-assert.match(controller, /PANEL_RETRY_DELAYS_MS/, "Finder and Explorer must reconcile delayed React commits with bounded retries");
-assert.match(controller, /panelHasContent/, "workspace reconciliation must verify that an open panel has real content");
+assert.doesNotMatch(controller, /PANEL_RETRY_DELAYS_MS|panelHasContent|launcher\?\.click\(\)|\.click\(\);/, "workspace selection must not simulate clicks or retry React state transitions");
 assert.match(controller, /delete document\.body\.dataset\.providerTool/, "leaving Finder must clear stale provider tool state");
 assert.match(controller, /handlePanelCloseClick/, "Finder and Explorer close actions must return workspace ownership safely");
 assert.match(controller, /document\.addEventListener\("click", handlePanelCloseClick, true\)/, "panel close handling must observe the real user action");
 assert.match(controller, /document\.removeEventListener\("click", handlePanelCloseClick, true\)/, "panel close handling must be cleaned up");
 assert.match(controller, /new ResizeObserver/, "sidebar dimensions must update without polling");
 assert.doesNotMatch(controller, /setInterval\s*\(/, "sidebar synchronization must not poll continuously");
-assert.match(controller, /\.unified-live-tool/, "Finder must prefer a stable launcher selector during the remaining source-control migration");
-assert.match(controller, /\.unified-explorer-tool/, "Explorer must prefer a stable launcher selector during the remaining source-control migration");
+assert.match(appSource, /setShowProviderExplorerDrawer\(tab === 'explorer'\)/, "React must derive Explorer visibility from the selected workspace");
+assert.match(appSource, /tab === 'liveFinder' \? 'liveFinder'/, "React must derive Finder visibility from the selected workspace");
+assert.doesNotMatch(controller, /createTabs|createElement\("button"\)/, "the compatibility controller must never create a duplicate tab strip");
 assert.match(controller, /ArrowLeft.*ArrowRight.*Home.*End/s, "workspace tabs must support keyboard navigation");
 assert.match(controller, /handleWorkspaceTabClick/, "React-owned workspace tabs must use delegated activation");
-assert.match(controller, /nativeProviderContent/, "workspace reconciliation must not reclassify React-owned sidebar children");
+assert.doesNotMatch(controller, /classList\.add\(PROVIDER_CONTENT_CLASS\)|nativeProviderContent/, "workspace reconciliation must not reclassify React-owned sidebar children");
 assert.match(controller, /__NETWORK_MAP_SIDEBAR_WORKSPACES__/, "sidebar controller must expose diagnostics and explicit control");
 assert.match(controller, /removeEventListener\("resize", handleViewportChange\)/, "sidebar resize listener must be cleaned up");
 assert.match(controller, /beforeunload.*cleanup/s, "sidebar runtime resources must be cleaned up");

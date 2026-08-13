@@ -6,36 +6,18 @@ import {
 
 type WorkspaceTab = "providers" | "mapTools" | "liveFinder" | "explorer";
 
-type TabDefinition = {
-  id: WorkspaceTab;
-  label: string;
-  ariaLabel: string;
-};
-
 const TABS_CLASS = "occumed-sidebar-workspace-tabs";
 const HOST_CLASS = "occumed-sidebar-workspace-host";
-const PROVIDER_CONTENT_CLASS = "occumed-sidebar-provider-content";
 const SIDEBAR_SCOPE_CLASS = "occumed-sidebar-workspace-scope";
 const DATA_ATTRIBUTE = "occumedworkspace";
 const SYNC_DELAY_MS = 28;
-const PANEL_ACTION_GRACE_MS = 900;
-const PANEL_RETRY_DELAYS_MS = [0, 80, 220, 500] as const;
-
-const TAB_DEFINITIONS: TabDefinition[] = [
-  { id: "providers", label: "Providers", ariaLabel: "Providers workspace — provider layers and workflows" },
-  { id: "mapTools", label: "Map Tools", ariaLabel: "Map Tools workspace — routing and map tools" },
-  { id: "liveFinder", label: "Finder", ariaLabel: "Finder workspace — live provider finder" },
-  { id: "explorer", label: "Explorer", ariaLabel: "Explorer workspace — provider explorer" },
-];
 
 let activeTab: WorkspaceTab = "providers";
 let unsubscribeDomObserver: (() => void) | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let syncTimer: number | null = null;
-let suppressPanelSyncUntil = 0;
 let observedSidebar: HTMLElement | null = null;
 let observedTabs: HTMLElement | null = null;
-let panelActionTimers: number[] = [];
 
 declare global {
   interface Window {
@@ -45,46 +27,6 @@ declare global {
       sync: () => void;
     };
   }
-}
-
-function normalizedText(node: Element | null): string {
-  return (node?.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
-}
-
-function panelIsOpen(selector: string): boolean {
-  return document.querySelector<HTMLElement>(selector)?.classList.contains("open") ?? false;
-}
-
-function panelHasContent(selector: string): boolean {
-  const panel = document.querySelector<HTMLElement>(selector);
-  return Boolean(panel && (panel.children.length > 0 || normalizedText(panel).length > 24));
-}
-
-function clearPanelActionTimers(): void {
-  panelActionTimers.forEach((timer) => window.clearTimeout(timer));
-  panelActionTimers = [];
-}
-
-function createTabs(): HTMLElement {
-  const tabs = document.createElement("div");
-  tabs.className = TABS_CLASS;
-  tabs.setAttribute("role", "tablist");
-  tabs.setAttribute("aria-label", "Sidebar workspaces");
-
-  TAB_DEFINITIONS.forEach((definition, index) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "occumed-sidebar-workspace-tab";
-    button.dataset.workspaceTab = definition.id;
-    button.textContent = definition.label;
-    button.setAttribute("role", "tab");
-    button.setAttribute("aria-label", definition.ariaLabel);
-    button.setAttribute("aria-selected", "false");
-    button.tabIndex = index === 0 ? 0 : -1;
-    tabs.appendChild(button);
-  });
-
-  return tabs;
 }
 
 function workspaceButton(target: EventTarget | null): HTMLButtonElement | null {
@@ -129,11 +71,11 @@ function ensureSidebarStructure(): { sidebar: HTMLElement; tabs: HTMLElement; ho
   if (!sidebar) return null;
   sidebar.classList.add(SIDEBAR_SCOPE_CLASS);
 
-  let tabs = sidebar.querySelector<HTMLElement>(`:scope > .${TABS_CLASS}`);
-  if (!tabs) {
-    tabs = createTabs();
-    sidebar.prepend(tabs);
-  }
+  const tabs = sidebar.querySelector<HTMLElement>(`:scope > .${TABS_CLASS}`);
+  // React is the sole owner of the tab strip. Injecting a second, temporary
+  // implementation during a delayed commit created duplicate controls and
+  // allowed the compatibility runtime to retain detached DOM.
+  if (!tabs) return null;
 
   let host = sidebar.querySelector<HTMLElement>(`:scope > .${HOST_CLASS}`);
   if (!host) {
@@ -142,13 +84,6 @@ function ensureSidebarStructure(): { sidebar: HTMLElement; tabs: HTMLElement; ho
     host.setAttribute("aria-label", "Map tools workspace");
     tabs.insertAdjacentElement("afterend", host);
   }
-
-  const nativeProviderContent = sidebar.querySelector<HTMLElement>(`:scope > .${PROVIDER_CONTENT_CLASS}`);
-  Array.from(sidebar.children).forEach((child) => {
-    if (!(child instanceof HTMLElement)) return;
-    if (child === tabs || child === host) child.classList.remove(PROVIDER_CONTENT_CLASS);
-    else if (!nativeProviderContent) child.classList.add(PROVIDER_CONTENT_CLASS);
-  });
 
   return { sidebar, tabs, host };
 }
@@ -190,79 +125,6 @@ function observeDimensions(sidebar: HTMLElement, tabs: HTMLElement): void {
   observedTabs = tabs;
 }
 
-function primaryLiveLauncher(): HTMLButtonElement | null {
-  const direct = document.querySelector<HTMLButtonElement>(".unified-live-tool");
-  if (direct) return direct;
-  return Array.from(document.querySelectorAll<HTMLButtonElement>(".command-tool-grid button, .sidebar button"))
-    .find((button) => {
-      const text = normalizedText(button);
-      return text === "live places" || text === "live finder" || text.includes("live places");
-    }) || null;
-}
-
-function primaryExplorerLauncher(): HTMLButtonElement | null {
-  const direct = document.querySelector<HTMLButtonElement>(".unified-explorer-tool, .provider-explorer-launch");
-  if (direct) return direct;
-  return Array.from(document.querySelectorAll<HTMLButtonElement>(".command-header .command-action, .sidebar button"))
-    .find((button) => normalizedText(button).includes("provider explorer")) || null;
-}
-
-function closeButtonFor(selector: string): HTMLButtonElement | null {
-  const panel = document.querySelector<HTMLElement>(selector);
-  return panel?.querySelector<HTMLButtonElement>(
-    ".rp-close, .provider-drawer-header > button, button[aria-label*='close' i], button[title*='close' i]",
-  ) || null;
-}
-
-function ensureLivePanel(open: boolean): void {
-  const ready = panelIsOpen(".live-panel") && panelHasContent(".live-panel");
-  if ((open && ready) || (!open && !panelIsOpen(".live-panel"))) return;
-  if (!open) {
-    const close = closeButtonFor(".live-panel");
-    if (close) {
-      close.click();
-      return;
-    }
-  }
-  primaryLiveLauncher()?.click();
-}
-
-function ensureExplorerPanel(open: boolean): void {
-  const ready = panelIsOpen(".provider-explorer-drawer")
-    && panelHasContent(".provider-explorer-drawer");
-  if ((open && ready) || (!open && !panelIsOpen(".provider-explorer-drawer"))) return;
-  if (!open) {
-    const close = closeButtonFor(".provider-explorer-drawer");
-    if (close) {
-      close.click();
-      return;
-    }
-  }
-  primaryExplorerLauncher()?.click();
-}
-
-function managePanelsForTab(tab: WorkspaceTab): void {
-  clearPanelActionTimers();
-  const reconcile = () => {
-    if (activeTab !== tab) return;
-    if (tab === "liveFinder") {
-      ensureExplorerPanel(false);
-      ensureLivePanel(true);
-      return;
-    }
-    if (tab === "explorer") {
-      ensureLivePanel(false);
-      ensureExplorerPanel(true);
-      return;
-    }
-    ensureLivePanel(false);
-    ensureExplorerPanel(false);
-  };
-  PANEL_RETRY_DELAYS_MS.forEach((delay) => {
-    panelActionTimers.push(window.setTimeout(reconcile, delay));
-  });
-}
-
 function applyActiveTab(structure = ensureSidebarStructure()): void {
   document.documentElement.dataset[DATA_ATTRIBUTE] = activeTab;
   document.documentElement.dataset.occumedWorkspaceReady = "true";
@@ -279,7 +141,7 @@ function applyActiveTab(structure = ensureSidebarStructure()): void {
   observeDimensions(structure.sidebar, structure.tabs);
 }
 
-function setActiveTab(tab: WorkspaceTab, managePanels = true): void {
+function setActiveTab(tab: WorkspaceTab): void {
   activeTab = tab;
   if (tab === "liveFinder") {
     if (!["live", "npi"].includes(document.body.dataset.providerTool || "")) {
@@ -288,33 +150,8 @@ function setActiveTab(tab: WorkspaceTab, managePanels = true): void {
   } else {
     delete document.body.dataset.providerTool;
   }
-  suppressPanelSyncUntil = performance.now() + PANEL_ACTION_GRACE_MS;
   runWithoutSharedDomObservation(() => applyActiveTab());
-  if (managePanels) managePanelsForTab(tab);
   window.dispatchEvent(new CustomEvent("network-map:sidebar-workspace", { detail: { tab } }));
-}
-
-function syncFromPanelState(): void {
-  if (performance.now() < suppressPanelSyncUntil) return;
-  const explorerOpen = panelIsOpen(".provider-explorer-drawer");
-  const liveOpen = panelIsOpen(".live-panel");
-
-  if (explorerOpen && activeTab !== "explorer") {
-    setActiveTab("explorer", false);
-    return;
-  }
-  if (liveOpen && activeTab !== "liveFinder") {
-    setActiveTab("liveFinder", false);
-    return;
-  }
-  if (activeTab === "explorer" && !explorerOpen) {
-    setActiveTab("providers", false);
-    return;
-  }
-  if (activeTab === "liveFinder" && !liveOpen) {
-    delete document.body.dataset.providerTool;
-    setActiveTab("providers", false);
-  }
 }
 
 function runSync(): void {
@@ -323,7 +160,6 @@ function runSync(): void {
   dockMapTools(structure.host);
   markExternalPanels();
   applyActiveTab(structure);
-  syncFromPanelState();
 }
 
 function scheduleSync(delay = SYNC_DELAY_MS): void {
@@ -369,15 +205,8 @@ function handlePanelCloseClick(event: Event): void {
   if ((closesFinder && activeTab !== "liveFinder") || (closesExplorer && activeTab !== "explorer")) return;
   if (!closesFinder && !closesExplorer) return;
 
-  clearPanelActionTimers();
-  suppressPanelSyncUntil = 0;
   if (closesFinder) delete document.body.dataset.providerTool;
-  window.setTimeout(() => {
-    if ((closesFinder && !panelIsOpen(".live-panel"))
-      || (closesExplorer && !panelIsOpen(".provider-explorer-drawer"))) {
-      setActiveTab("providers", false);
-    }
-  }, 0);
+  setActiveTab("providers");
 }
 
 function install(): void {
@@ -401,7 +230,6 @@ function install(): void {
 function cleanup(): void {
   if (syncTimer !== null) window.clearTimeout(syncTimer);
   syncTimer = null;
-  clearPanelActionTimers();
   unsubscribeDomObserver?.();
   unsubscribeDomObserver = null;
   resizeObserver?.disconnect();

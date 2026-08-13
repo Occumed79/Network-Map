@@ -94,7 +94,10 @@ function workspaceButton(target: EventTarget | null): HTMLButtonElement | null {
 }
 
 function handleWorkspaceTabClick(event: Event): void {
-  const tab = workspaceButton(event.target)?.dataset.workspaceTab;
+  if (event.defaultPrevented) return;
+  const button = workspaceButton(event.target);
+  if (button?.dataset.workspaceReactOwned === "true") return;
+  const tab = button?.dataset.workspaceTab;
   if (tab === "providers" || tab === "mapTools" || tab === "liveFinder" || tab === "explorer") {
     setActiveTab(tab);
   }

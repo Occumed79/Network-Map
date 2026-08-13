@@ -1138,6 +1138,26 @@ function generateReportHtml(data:ReportData,evidence:EvidencePayload|null):strin
 // ─────────────────────────────────────────────────────────────────────────────
 // Main App Component
 // ─────────────────────────────────────────────────────────────────────────────
+type SidebarWorkspace = 'providers' | 'mapTools' | 'liveFinder' | 'explorer';
+
+const SIDEBAR_WORKSPACES: ReadonlyArray<{
+  id: SidebarWorkspace;
+  label: string;
+  ariaLabel: string;
+  controls: string;
+}> = [
+  {id:'providers',label:'Providers',ariaLabel:'Providers workspace — provider layers and workflows',controls:'sidebar-providers-panel'},
+  {id:'mapTools',label:'Map Tools',ariaLabel:'Map Tools workspace — routing and map tools',controls:'sidebar-map-tools-panel'},
+  {id:'liveFinder',label:'Finder',ariaLabel:'Finder workspace — live provider finder',controls:'sidebar-finder-panel'},
+  {id:'explorer',label:'Explorer',ariaLabel:'Explorer workspace — provider explorer',controls:'sidebar-explorer-panel'},
+];
+
+const MapToolsWorkspaceHost = React.memo(function MapToolsWorkspaceHost() {
+  // This component deliberately never updates: the map runtime owns the panel
+  // mounted inside this host, while React owns the host's lifetime.
+  return <div id="sidebar-map-tools-panel" className="occumed-sidebar-workspace-host" role="tabpanel" aria-label="Map tools workspace" />;
+});
+
 export default function App() {
   const mapRef = useRef<L.Map|null>(null);
   const mapDivRef = useRef<HTMLDivElement>(null);
@@ -1161,6 +1181,7 @@ export default function App() {
   const clinicFileInputRef = useRef<HTMLInputElement>(null);
 
   // UI State
+  const [sidebarWorkspace, setSidebarWorkspace] = useState<SidebarWorkspace>('providers');
   const [metric, setMetric] = useState('primaryCare');
   const [showLabels, setShowLabels] = useState(false);
   const [showTZ, setShowTZ] = useState(false);
@@ -3637,6 +3658,17 @@ export default function App() {
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
+  useEffect(() => {
+    const handleWorkspaceChange = (event: Event) => {
+      const tab = (event as CustomEvent<{tab?: SidebarWorkspace}>).detail?.tab;
+      if (SIDEBAR_WORKSPACES.some(workspace=>workspace.id===tab)) setSidebarWorkspace(tab!);
+    };
+    window.addEventListener('network-map:sidebar-workspace', handleWorkspaceChange);
+    const current = window.__NETWORK_MAP_SIDEBAR_WORKSPACES__?.getActiveTab?.();
+    if (SIDEBAR_WORKSPACES.some(workspace=>workspace.id===current)) setSidebarWorkspace(current!);
+    return () => window.removeEventListener('network-map:sidebar-workspace', handleWorkspaceChange);
+  }, []);
+
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER
   // ─────────────────────────────────────────────────────────────────────────
@@ -3668,6 +3700,11 @@ export default function App() {
   const toggleCommandTool = (tool:Exclude<ActiveTool,null>) => {
     setActiveTool(current=>current===tool?null:tool);
     setMobileSidebarOpen(false);
+  };
+  const selectSidebarWorkspace = (workspace:SidebarWorkspace) => {
+    const controller = window.__NETWORK_MAP_SIDEBAR_WORKSPACES__;
+    if (controller) controller.setActiveTab(workspace);
+    else setSidebarWorkspace(workspace);
   };
 
   return (
@@ -3729,28 +3766,26 @@ export default function App() {
         {mobileSidebarOpen && <button className="mobile-sidebar-backdrop" aria-label="Close navigation" onClick={()=>setMobileSidebarOpen(false)}/>}
         <aside className={`sidebar${mobileSidebarOpen ? ' mobile-open' : ''}`}>
           <div className="occumed-sidebar-workspace-tabs" role="tablist" aria-label="Sidebar workspaces">
-            {([
-              ['providers', 'Providers', 'Providers workspace — provider layers and workflows'],
-              ['mapTools', 'Map Tools', 'Map Tools workspace — routing and map tools'],
-              ['liveFinder', 'Finder', 'Finder workspace — live provider finder'],
-              ['explorer', 'Explorer', 'Explorer workspace — provider explorer'],
-            ] as const).map(([id, label, ariaLabel], index)=>(
+            {SIDEBAR_WORKSPACES.map(({id,label,ariaLabel,controls})=>(
               <button
                 key={id}
                 type="button"
                 className="occumed-sidebar-workspace-tab"
                 data-workspace-tab={id}
+                data-workspace-react-owned="true"
                 role="tab"
                 aria-label={ariaLabel}
-                aria-selected={id==='providers'}
-                tabIndex={index===0?0:-1}
+                aria-controls={controls}
+                aria-selected={sidebarWorkspace===id}
+                tabIndex={sidebarWorkspace===id?0:-1}
+                onClick={()=>selectSidebarWorkspace(id)}
               >
                 {label}
               </button>
             ))}
           </div>
-          <div className="occumed-sidebar-workspace-host" aria-label="Map tools workspace" />
-          <div className="occumed-sidebar-provider-content">
+          <MapToolsWorkspaceHost />
+          <div id="sidebar-providers-panel" className="occumed-sidebar-provider-content" role="tabpanel" aria-label="Providers workspace">
           <div className="hero-card">
             <div className="hero-eyebrow">Global provider workspace</div>
             <div className="hero-title">Provider intelligence at map speed</div>
@@ -3929,6 +3964,7 @@ export default function App() {
 
         {showProviderExplorerDrawer && <button className="provider-drawer-backdrop" aria-label="Close Provider Explorer" onClick={()=>setShowProviderExplorerDrawer(false)}/>}
         <aside
+          id="sidebar-explorer-panel"
           className={`provider-explorer-drawer${showProviderExplorerDrawer?' open':''}`}
           role="dialog"
           aria-label="Provider Explorer"
@@ -4097,7 +4133,7 @@ export default function App() {
 
 
         {/* ── LIVE PANEL ── */}
-        <div className={`live-panel${activeTool === 'liveFinder' ? ' open' : ''}${sheetState !== 'default' ? ` sheet-${sheetState}` : ''}`}>
+        <div id="sidebar-finder-panel" className={`live-panel${activeTool === 'liveFinder' ? ' open' : ''}${sheetState !== 'default' ? ` sheet-${sheetState}` : ''}`} role="region" aria-label="Provider finder workspace">
           {(activeTool === 'liveFinder')&&(
             <div className="lp-inner">
               {/* Mobile bottom sheet drag handle */}

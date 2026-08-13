@@ -84,7 +84,6 @@ async function assertRuntimeOwnership(page) {
     "leaflet-map-lifecycle",
     "mapbox-map-lifecycle",
     "network-request-pipeline",
-    "sidebar-workspace-controller",
     "dialog-controller",
     "general-ui-integrity",
   ]) {

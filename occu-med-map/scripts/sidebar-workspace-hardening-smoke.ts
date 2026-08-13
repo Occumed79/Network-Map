@@ -28,6 +28,13 @@ assert.doesNotMatch(main, /sidebarWorkspaceTabsRuntime/, "legacy tab runtime mus
 assert.doesNotMatch(main, /sidebarWorkspaceConsistencyRuntime/, "legacy consistency runtime must remain retired");
 assert.doesNotMatch(indexHtml, /sidebarWorkspacePersistence/, "duplicate public persistence observer must remain removed");
 assert.doesNotMatch(appSource, new RegExp(["export", "Leadership", "Package"].join("")), "obsolete export function must stay removed");
+assert.match(appSource, /className="occumed-sidebar-workspace-tabs"/, "workspace tabs must be owned by React rather than injected beside React children");
+assert.match(appSource, /className="occumed-sidebar-workspace-host"/, "the Map Tools docking host must survive React rerenders");
+assert.match(appSource, /className="occumed-sidebar-provider-content"/, "provider controls must remain in one React-owned workspace container");
+assert.match(appSource, /aria-selected=\{sidebarWorkspace===id\}/, "React rerenders must preserve the controller-selected workspace");
+assert.match(appSource, /MapToolsWorkspaceHost = React\.memo/, "the imperative Map Tools subtree must be isolated from unrelated React rerenders");
+assert.match(appSource, /network-map:sidebar-workspace/, "React workspace state must follow the authoritative controller");
+assert.match(appSource, /aria-controls=\{controls\}/, "workspace tabs must identify their controlled panels");
 assert.match(
   appSource,
   /setMasterProviderTypeFilter\(''\);setProviderExplorerFilters\(INITIAL_PROVIDER_EXPLORER_FILTERS\)[\s\S]*Clear filters/,
@@ -57,6 +64,8 @@ assert.doesNotMatch(controller, /setInterval\s*\(/, "sidebar synchronization mus
 assert.match(controller, /\.unified-live-tool/, "Finder must prefer a stable launcher selector during the remaining source-control migration");
 assert.match(controller, /\.unified-explorer-tool/, "Explorer must prefer a stable launcher selector during the remaining source-control migration");
 assert.match(controller, /ArrowLeft.*ArrowRight.*Home.*End/s, "workspace tabs must support keyboard navigation");
+assert.match(controller, /handleWorkspaceTabClick/, "React-owned workspace tabs must use delegated activation");
+assert.match(controller, /nativeProviderContent/, "workspace reconciliation must not reclassify React-owned sidebar children");
 assert.match(controller, /__NETWORK_MAP_SIDEBAR_WORKSPACES__/, "sidebar controller must expose diagnostics and explicit control");
 assert.match(controller, /removeEventListener\("resize", handleViewportChange\)/, "sidebar resize listener must be cleaned up");
 assert.match(controller, /beforeunload.*cleanup/s, "sidebar runtime resources must be cleaned up");
@@ -82,6 +91,8 @@ assert.match(finalFixes, /phantom|legacy right drawer/i, "final layout must docu
 assert.match(finalFixes, /position: fixed !important;[\s\S]*--workspace-panel-top/, "Finder and Explorer must align to measured sidebar geometry");
 assert.match(finalFixes, /data-occumedworkspace="mapTools"/, "Map Tools must have a workspace-scoped final theme");
 assert.match(finalFixes, /background: var\(--workspace-card-bg\) !important;/, "workspace cards must share the navy panel palette");
+assert.match(finalFixes, /occumed-sidebar-provider-content > :is\(\.hero-card, \.sb-section\)/, "React's provider wrapper must retain the direct-child card styling");
+assert.match(finalFixes, /occumed-sidebar-provider-content \{[\s\S]*background: transparent !important;/, "the structural provider wrapper must not become a legacy card surface");
 assert.match(finalFixes, /--command-sidebar-width: clamp\(292px, 21vw, 320px\)/, "desktop workspace width must remain consistent across tabs");
 assert.match(finalFixes, /overflow-x: hidden !important;/, "workspace panels must prevent horizontal overflow");
 assert.match(finalFixes, /data-occumedworkspace\]:not\(\[data-occumedworkspace="liveFinder"\]\)/, "inactive Finder must be forcibly hidden");

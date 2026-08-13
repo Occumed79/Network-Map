@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -20,6 +20,11 @@ const uiAcceptance = source("scripts/ci-ui-acceptance.mjs");
 const postIdleProbe = source("scripts/ci-post-idle-probe.mjs");
 const indexHtml = source("index.html");
 
+assert.equal(
+  existsSync(path.join(projectRoot, "src/sidebarWorkspaceControllerRuntime.ts")),
+  false,
+  "the retired imperative sidebar controller must not be restored during conflict resolution",
+);
 assert.doesNotMatch(main, /sidebarWorkspaceControllerRuntime/, "obsolete imperative sidebar controller must remain retired");
 assert.match(main, /import "\.\/sidebar-workspace-final-fixes\.css";/, "authoritative sidebar layout layer must load");
 assert.match(main, /import "\.\/ui-system\.css";[\s\S]*import "\.\/startup-hardening\.css";[\s\S]*import "\.\/sidebar-workspace-final-fixes\.css";/, "authoritative sidebar CSS must load after synchronous shell and UI layers");

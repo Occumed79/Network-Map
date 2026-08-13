@@ -1,0 +1,278 @@
+name: Import Healthsites API facilities to Neon
+
+on:
+  workflow_dispatch:
+    inputs:
+      country_codes:
+        description: "Comma-separated ISO alpha-2 codes. Countries beginning with A are protected because they are already loaded."
+        required: true
+        default: "BS"
+        type: string
+      confirmation:
+        description: "Type IMPORT to authorize a production Neon write"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: healthsites-api-neon-import
+  cancel-in-progress: false
+
+jobs:
+  import:
+    name: Import Healthsites facilities
+    if: ${{ inputs.confirmation == 'IMPORT' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      HEALTHSITES_API_KEY: ${{ secrets.HEALTHSITES_API_KEY }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      REQUESTED_COUNTRIES: ${{ inputs.country_codes }}
+      MAX_HEALTHSITES_PAGES: "1000"
+      SQL_CHUNK_SIZE: "150"
+
+    steps:
+      - name: Check out the reviewed Source 5 importer
+        uses: actions/checkout@v4
+        with:
+          ref: data/international-source-bootstrap
+          path: source5
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Validate secrets and country scope
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$HEALTHSITES_API_KEY" ]]; then
+            echo "HEALTHSITES_API_KEY is not configured" >&2
+            exit 1
+          fi
+          if [[ -z "$DATABASE_URL" || "$DATABASE_URL" != postgres* ]]; then
+            echo "DATABASE_URL is missing or is not a PostgreSQL URL" >&2
+            exit 1
+          fi
+
+          protected=" AF AL DZ AD AO AG AR AM AU AT AZ "
+          declare -A seen=()
+          codes=()
+          IFS=',' read -ra requested <<< "$REQUESTED_COUNTRIES"
+          for item in "${requested[@]}"; do
+            code="$(printf '%s' "$item" | tr '[:lower:]' '[:upper:]' | xargs)"
+            if [[ ! "$code" =~ ^[A-Z]{2}$ ]]; then
+              echo "Invalid ISO alpha-2 country code: $item" >&2
+              exit 1
+            fi
+            if [[ "$protected" == *" $code "* ]]; then
+              echo "$code is protected because the existing A-country dataset must not be duplicated" >&2
+              exit 1
+            fi
+            if [[ -z "${seen[$code]:-}" ]]; then
+              codes+=("$code")
+              seen[$code]=1
+            fi
+          done
+
+          if (( ${#codes[@]} == 0 || ${#codes[@]} > 8 )); then
+            echo "Choose between 1 and 8 unique country codes per run" >&2
+            exit 1
+          fi
+
+          normalized="$(IFS=,; echo "${codes[*]}")"
+          sql_list="'$(IFS=,; echo "${codes[*]}" | sed "s/,/','/g")'"
+          echo "COUNTRY_CODES=$normalized" >> "$GITHUB_ENV"
+          echo "COUNTRY_SQL_LIST=$sql_list" >> "$GITHUB_ENV"
+          echo "Validated countries: $normalized"
+
+      - name: Verify the Neon destination schema
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          database_name="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc 'select current_database()')"
+          if [[ "$database_name" != "neondb" ]]; then
+            echo "Refusing to import into unexpected database: $database_name" >&2
+            exit 1
+          fi
+
+          missing="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "
+            with required(name) as (
+              values
+                ('provider_source_catalog'),
+                ('provider_raw_records'),
+                ('provider_stage_records'),
+                ('provider_master'),
+                ('provider_master_sources'),
+                ('provider_master_types'),
+                ('provider_type_catalog'),
+                ('medical_providers')
+            )
+            select string_agg(name, ', ' order by name)
+            from required
+            where to_regclass('public.' || name) is null;
+          ")"
+          if [[ -n "$missing" ]]; then
+            echo "Destination schema is missing required tables: $missing" >&2
+            exit 1
+          fi
+          echo "Verified Neon database and canonical provider schema"
+
+      - name: Download and normalize Healthsites facilities
+        working-directory: source5
+        run: node scripts/bootstrap-global-health-facilities.mjs
+
+      - name: Validate generated manifest
+        working-directory: source5
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = 'data/generated/global-health-facilities/manifest.json';
+          const manifest = JSON.parse(fs.readFileSync(path, 'utf8'));
+          const expected = process.env.COUNTRY_CODES.split(',');
+
+          if (manifest.source !== 'Healthsites.io API v3') {
+            throw new Error(`Refusing non-Healthsites source: ${manifest.source}`);
+          }
+          if (JSON.stringify(manifest.countries_requested) !== JSON.stringify(expected)) {
+            throw new Error('Manifest country scope does not match the approved input');
+          }
+          let accepted = 0;
+          for (const code of expected) {
+            const result = manifest.country_results?.[code];
+            if (!result || result.mode !== 'healthsites' || result.error) {
+              throw new Error(`${code} did not complete through the Healthsites API: ${result?.error || 'missing result'}`);
+            }
+            if (!Number.isInteger(result.accepted) || result.accepted <= 0) {
+              throw new Error(`${code} returned no usable facilities`);
+            }
+            accepted += result.accepted;
+          }
+          if (accepted !== manifest.total_rows || manifest.total_rows <= 0) {
+            throw new Error(`Manifest row mismatch: countries=${accepted}, total=${manifest.total_rows}`);
+          }
+          if (!Array.isArray(manifest.sql_files) || !manifest.sql_files.length) {
+            throw new Error('No SQL import files were generated');
+          }
+          fs.appendFileSync(process.env.GITHUB_ENV, `EXPECTED_ROWS=${manifest.total_rows}\n`);
+          console.log(`Validated ${manifest.total_rows.toLocaleString()} Healthsites facilities`);
+          NODE
+
+      - name: Import canonical provider records
+        working-directory: source5
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(data/generated/global-health-facilities/global_health_facilities_*.sql)
+          if (( ${#files[@]} == 0 )); then
+            echo "No generated SQL files found" >&2
+            exit 1
+          fi
+          for file in "${files[@]}"; do
+            echo "Applying $(basename "$file")"
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 --file "$file" >/dev/null
+          done
+
+      - name: Verify all provider layers
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          read -r raw_count stage_count lineage_count master_count type_count legacy_count invalid_map invalid_type <<< "$(
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -At -F ' ' -c "
+              select
+                (select count(distinct r.source_record_id)
+                   from public.provider_raw_records r
+                   join public.provider_stage_records s
+                     on s.raw_record_id=r.id
+                  where r.source_key='healthsites_osm'
+                    and r.source_record_id like 'healthsites:%'
+                    and s.country_code in (${COUNTRY_SQL_LIST})),
+                (select count(distinct s.source_record_id)
+                   from public.provider_stage_records s
+                  where s.source_key='healthsites_osm'
+                    and s.source_record_id like 'healthsites:%'
+                    and s.country_code in (${COUNTRY_SQL_LIST})),
+                (select count(distinct pms.source_record_id)
+                   from public.provider_master_sources pms
+                   join public.provider_stage_records s on s.id=pms.stage_record_id
+                  where pms.source_key='healthsites_osm'
+                    and pms.source_record_id like 'healthsites:%'
+                    and s.country_code in (${COUNTRY_SQL_LIST})),
+                (select count(distinct pms.master_provider_id)
+                   from public.provider_master_sources pms
+                   join public.provider_stage_records s on s.id=pms.stage_record_id
+                  where pms.source_key='healthsites_osm'
+                    and pms.source_record_id like 'healthsites:%'
+                    and s.country_code in (${COUNTRY_SQL_LIST})),
+                (select count(distinct pmt.master_provider_id)
+                   from public.provider_master_types pmt
+                   join public.provider_master_sources pms on pms.master_provider_id=pmt.master_provider_id
+                   join public.provider_stage_records s on s.id=pms.stage_record_id
+                  where pms.source_key='healthsites_osm'
+                    and pms.source_record_id like 'healthsites:%'
+                    and s.country_code in (${COUNTRY_SQL_LIST})),
+                (select count(*)
+                   from public.medical_providers mp
+                  where mp.data_source='Healthsites / OpenStreetMap'
+                    and mp.source_id like 'healthsites_osm:healthsites:%'
+                    and mp.country_code in (${COUNTRY_SQL_LIST})),
+                (select count(*)
+                   from public.medical_providers mp
+                  where mp.data_source='Healthsites / OpenStreetMap'
+                    and mp.source_id like 'healthsites_osm:healthsites:%'
+                    and mp.country_code in (${COUNTRY_SQL_LIST})
+                    and (mp.lat not between -90 and 90 or mp.lng not between -180 and 180)),
+                (select count(*)
+                   from public.provider_master_types pmt
+                   join public.provider_master_sources pms on pms.master_provider_id=pmt.master_provider_id
+                   join public.provider_stage_records s on s.id=pms.stage_record_id
+                   left join public.provider_type_catalog ptc on ptc.type_key=pmt.type_key
+                  where pms.source_key='healthsites_osm'
+                    and pms.source_record_id like 'healthsites:%'
+                    and s.country_code in (${COUNTRY_SQL_LIST})
+                    and ptc.type_key is null);
+            "
+          )"
+
+          for value in "$raw_count" "$stage_count" "$lineage_count" "$legacy_count"; do
+            if [[ "$value" != "$EXPECTED_ROWS" ]]; then
+              echo "Canonical layer row mismatch: expected=$EXPECTED_ROWS raw=$raw_count stage=$stage_count lineage=$lineage_count legacy=$legacy_count" >&2
+              exit 1
+            fi
+          done
+          if (( master_count <= 0 || master_count > EXPECTED_ROWS || type_count <= 0 )); then
+            echo "Master/type linkage validation failed: master=$master_count types=$type_count" >&2
+            exit 1
+          fi
+          if (( invalid_map != 0 || invalid_type != 0 )); then
+            echo "Invalid map/type records found: map=$invalid_map type=$invalid_type" >&2
+            exit 1
+          fi
+
+          {
+            echo "## Healthsites → Neon import complete"
+            echo ""
+            echo "- Countries: $COUNTRY_CODES"
+            echo "- API facilities: $EXPECTED_ROWS"
+            echo "- Raw / staged / lineage / legacy: $raw_count / $stage_count / $lineage_count / $legacy_count"
+            echo "- Master providers: $master_count"
+            echo "- Providers with classified types: $type_count"
+            echo "- Invalid coordinates / type links: $invalid_map / $invalid_type"
+            echo "- Indexed source: Healthsites / OpenStreetMap"
+          } >> "$GITHUB_STEP_SUMMARY"

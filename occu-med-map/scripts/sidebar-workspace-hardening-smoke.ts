@@ -28,6 +28,9 @@ assert.doesNotMatch(main, /sidebarWorkspaceTabsRuntime/, "legacy tab runtime mus
 assert.doesNotMatch(main, /sidebarWorkspaceConsistencyRuntime/, "legacy consistency runtime must remain retired");
 assert.doesNotMatch(indexHtml, /sidebarWorkspacePersistence/, "duplicate public persistence observer must remain removed");
 assert.doesNotMatch(appSource, new RegExp(["export", "Leadership", "Package"].join("")), "obsolete export function must stay removed");
+assert.match(appSource, /className="occumed-sidebar-workspace-tabs"/, "workspace tabs must be owned by React rather than injected beside React children");
+assert.match(appSource, /className="occumed-sidebar-workspace-host"/, "the Map Tools docking host must survive React rerenders");
+assert.match(appSource, /className="occumed-sidebar-provider-content"/, "provider controls must remain in one React-owned workspace container");
 assert.match(
   appSource,
   /setMasterProviderTypeFilter\(''\);setProviderExplorerFilters\(INITIAL_PROVIDER_EXPLORER_FILTERS\)[\s\S]*Clear filters/,
@@ -57,6 +60,8 @@ assert.doesNotMatch(controller, /setInterval\s*\(/, "sidebar synchronization mus
 assert.match(controller, /\.unified-live-tool/, "Finder must prefer a stable launcher selector during the remaining source-control migration");
 assert.match(controller, /\.unified-explorer-tool/, "Explorer must prefer a stable launcher selector during the remaining source-control migration");
 assert.match(controller, /ArrowLeft.*ArrowRight.*Home.*End/s, "workspace tabs must support keyboard navigation");
+assert.match(controller, /handleWorkspaceTabClick/, "React-owned workspace tabs must use delegated activation");
+assert.match(controller, /nativeProviderContent/, "workspace reconciliation must not reclassify React-owned sidebar children");
 assert.match(controller, /__NETWORK_MAP_SIDEBAR_WORKSPACES__/, "sidebar controller must expose diagnostics and explicit control");
 assert.match(controller, /removeEventListener\("resize", handleViewportChange\)/, "sidebar resize listener must be cleaned up");
 assert.match(controller, /beforeunload.*cleanup/s, "sidebar runtime resources must be cleaned up");

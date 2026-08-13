@@ -17,6 +17,9 @@ type RoutePolicy = {
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const DEFAULT_WRITE_MAX_BYTES = 2 * 1024 * 1024;
 const UPLOAD_MAX_BYTES = 16 * 1024 * 1024;
+type RateLimitAvailability = "fail-open-read" | "fail-closed";
+
+let lastReadRateLimitFailure = "";
 
 export const ROUTE_POLICIES: RoutePolicy[] = [
   { prefix: "/api/provider-sources/search", methods: ["POST"], capability: "read", maxBytes: 512 * 1024, rateLimit: { windowSeconds: 600, max: 80 } },
@@ -99,12 +102,31 @@ function bodyHash(body: unknown): string {
   return createHash("sha256").update(JSON.stringify(body ?? null)).digest("hex");
 }
 
-async function distributedRateLimit(req: Request, res: Response, policy: { windowSeconds: number; max: number }, scope: string): Promise<boolean> {
+function allowDegradedReadRateLimit(res: Response, scope: string, reason: string): true {
+  res.setHeader("X-RateLimit-Status", "degraded");
+  const failure = `${scope}:${reason}`;
+  if (failure !== lastReadRateLimitFailure) {
+    lastReadRateLimitFailure = failure;
+    console.warn(`read rate limiting degraded for ${scope}`, reason);
+  }
+  return true;
+}
+
+async function distributedRateLimit(
+  req: Request,
+  res: Response,
+  policy: { windowSeconds: number; max: number },
+  scope: string,
+  availability: RateLimitAvailability = "fail-closed",
+): Promise<boolean> {
   const now = new Date();
   const clientIdentity = req.ip || req.socket.remoteAddress || "unknown";
   const bucketKey = createHash("sha256").update(`${scope}|${clientIdentity}`).digest("hex");
 
   if (!isPersistenceConfigured()) {
+    if (availability === "fail-open-read") {
+      return allowDegradedReadRateLimit(res, scope, "rate-limit persistence is not configured");
+    }
     if (process.env.NODE_ENV === "production") {
       res.status(503).json({ error: "Request limiting is temporarily unavailable.", code: "rate_limit_store_unavailable" });
       return false;
@@ -112,17 +134,30 @@ async function distributedRateLimit(req: Request, res: Response, policy: { windo
     return true;
   }
 
-  const result = await getPool().query(
-    `INSERT INTO public.api_rate_limit_buckets (bucket_key,window_started_at,window_seconds,request_count,updated_at)
-     VALUES ($1,$2,$3,1,now())
-     ON CONFLICT (bucket_key) DO UPDATE SET
-       window_started_at = CASE WHEN public.api_rate_limit_buckets.window_started_at + make_interval(secs=>public.api_rate_limit_buckets.window_seconds) <= $2 THEN $2 ELSE public.api_rate_limit_buckets.window_started_at END,
-       window_seconds = $3,
-       request_count = CASE WHEN public.api_rate_limit_buckets.window_started_at + make_interval(secs=>public.api_rate_limit_buckets.window_seconds) <= $2 THEN 1 ELSE public.api_rate_limit_buckets.request_count + 1 END,
-       updated_at = now()
-     RETURNING request_count,window_started_at,window_seconds`,
-    [bucketKey, now, policy.windowSeconds],
-  );
+  let result;
+  try {
+    result = await getPool().query(
+      `INSERT INTO public.api_rate_limit_buckets (bucket_key,window_started_at,window_seconds,request_count,updated_at)
+       VALUES ($1,$2,$3,1,now())
+       ON CONFLICT (bucket_key) DO UPDATE SET
+         window_started_at = CASE WHEN public.api_rate_limit_buckets.window_started_at + make_interval(secs=>public.api_rate_limit_buckets.window_seconds) <= $2 THEN $2 ELSE public.api_rate_limit_buckets.window_started_at END,
+         window_seconds = $3,
+         request_count = CASE WHEN public.api_rate_limit_buckets.window_started_at + make_interval(secs=>public.api_rate_limit_buckets.window_seconds) <= $2 THEN 1 ELSE public.api_rate_limit_buckets.request_count + 1 END,
+         updated_at = now()
+       RETURNING request_count,window_started_at,window_seconds`,
+      [bucketKey, now, policy.windowSeconds],
+    );
+    if (availability === "fail-open-read") lastReadRateLimitFailure = "";
+  } catch (error) {
+    if (availability === "fail-open-read") {
+      return allowDegradedReadRateLimit(
+        res,
+        scope,
+        error instanceof Error ? error.message : "rate-limit store query failed",
+      );
+    }
+    throw error;
+  }
   const count = Number(result.rows[0]?.request_count || 0);
   if (count <= policy.max) return true;
   const resetAt = new Date(result.rows[0].window_started_at).getTime() + Number(result.rows[0].window_seconds) * 1000;
@@ -231,7 +266,7 @@ export const apiSecurity: RequestHandler = async (req, res, next) => {
     const policy = policyFor(req);
     const safeMethod = SAFE_METHODS.has(req.method.toUpperCase());
     const readLimit = safeMethod && !policy ? readLimitFor(req) : null;
-    if (readLimit && !(await distributedRateLimit(req, res, readLimit, `read:${readLimit.prefix}`))) return;
+    if (readLimit && !(await distributedRateLimit(req, res, readLimit, `read:${readLimit.prefix}`, "fail-open-read"))) return;
 
     if (!policy) {
       if (safeMethod) {
@@ -253,7 +288,8 @@ export const apiSecurity: RequestHandler = async (req, res, next) => {
       return;
     }
 
-    if (policy.rateLimit && !(await distributedRateLimit(req, res, policy.rateLimit, `${policy.capability}:${policy.prefix}`))) return;
+    const rateLimitAvailability: RateLimitAvailability = policy.capability === "read" ? "fail-open-read" : "fail-closed";
+    if (policy.rateLimit && !(await distributedRateLimit(req, res, policy.rateLimit, `${policy.capability}:${policy.prefix}`, rateLimitAvailability))) return;
     if (policy.capability === "read") {
       next();
       return;

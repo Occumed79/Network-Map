@@ -8,7 +8,6 @@ import "./networkRequestPipelineRuntime";
 import "./uploadedDatasetLabelRuntime";
 import "./adminApiRuntime";
 import "./mapControlsBridgeRuntime";
-import "./diagnosticsReliabilityRuntime";
 import "./mapToolsCommandPanel";
 import "./routePlannerControlsRuntime";
 import "./healthsitesFlatDotsRuntime";

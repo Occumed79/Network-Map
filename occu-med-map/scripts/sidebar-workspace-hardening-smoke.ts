@@ -63,6 +63,9 @@ assert.match(appSource, /new ResizeObserver\(updateGeometry\)/, "React must obse
 assert.match(appSource, /observer\?\.disconnect\(\)/, "React must clean up sidebar geometry observation");
 assert.match(appSource, /network-map:map-tools-panel-mounted/, "React must dock Map Tools from its explicit mount event");
 assert.match(appSource, /host\.appendChild\(panel\)/, "Map Tools must be physically docked into the React host");
+assert.match(appSource, /mapToolsPanelRef/, "React must retain the registered Map Tools panel across workspace commits");
+assert.match(appSource, /sidebarWorkspace !== 'mapTools'[\s\S]*requestAnimationFrame\(redock\)/, "selecting Map Tools must re-dock its retained panel after the React commit");
+assert.match(appSource, /sync: \(\) => \{ dockMapToolsPanel/, "the explicit workspace sync API must restore Map Tools without simulated clicks");
 assert.match(appSource, /__NETWORK_MAP_SIDEBAR_WORKSPACES__ =/, "React must expose diagnostics and explicit external control");
 assert.doesNotMatch(appSource, /PANEL_RETRY_DELAYS_MS|panelHasContent|launcher\?\.click\(\)|handleWorkspaceTabClick|sidebarWorkspaceControllerRuntime/, "workspace ownership must not retain imperative controller workarounds");
 assert.match(appSource, /aria-hidden=\{activeTool !== 'liveFinder'\} inert=\{activeTool !== 'liveFinder'\}/, "inactive Finder must be natively non-interactive");

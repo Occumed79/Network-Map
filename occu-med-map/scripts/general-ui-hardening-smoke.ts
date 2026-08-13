@@ -11,6 +11,7 @@ function source(relativePath: string): string {
 }
 
 const main = source("src/main.tsx");
+const appSource = source("src/App.tsx");
 const uiSystem = source("src/ui-system.css");
 const css = uiSystem;
 const visualCss = uiSystem;
@@ -26,9 +27,13 @@ assert.doesNotMatch(main, /general-ui-hardening\.css|general-ui-visual-consisten
 assert.match(main, /import "\.\/dialogControllerRuntime";/, "authoritative dialog controller must load");
 assert.match(main, /import "\.\/generalUiIntegrityRuntime";/, "general UI integrity runtime must load");
 assert.ok(
-  main.indexOf('import "./ui-system.css";') > main.indexOf('import "./sidebar-workspace-final-fixes.css";'),
-  "authoritative UI system must load after feature-specific compatibility styling",
+  main.indexOf('import "./sidebar-workspace-final-fixes.css";') > main.indexOf('import "./ui-system.css";'),
+  "the focused sidebar ownership layer must load after the shared UI system",
 );
+assert.doesNotMatch(main, /diagnosticsReliabilityRuntime/, "diagnostics must not restore the retired runtime that clicks toggles off and on");
+assert.match(appSource, /stateGeoRevision/, "diagnostic overlays must rerun from explicit state-data readiness");
+assert.match(appSource, /\[showPopDensity, stateGeoRevision\]/, "population density must mount after asynchronous state data becomes ready");
+assert.match(appSource, /\[showTZ, stateGeoRevision\]/, "timezone overlays must mount after asynchronous state data becomes ready");
 assert.ok(
   main.indexOf('import "./dialogControllerRuntime";') < main.indexOf('import "./generalUiIntegrityRuntime";'),
   "dialog behavior owner must load before the read-only integrity monitor",

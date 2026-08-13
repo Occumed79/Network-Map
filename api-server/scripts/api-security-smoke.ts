@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { apiSecurityInternals, ROUTE_POLICIES } from "../src/middleware/apiSecurity";
+import { apiSecurity, apiSecurityInternals, ROUTE_POLICIES } from "../src/middleware/apiSecurity";
 
 const root = path.resolve(process.cwd());
 const app = fs.readFileSync(path.join(root, "src/app.ts"), "utf8");
@@ -47,6 +47,10 @@ assert.match(security, /policy.capability === "read"/, "read policies must bypas
 assert.match(security, /prefix: "\/api\/admin"/, "administrative GET/write routes must have an explicit admin policy");
 assert.equal((security.match(/distributedRateLimit\(req, res, policy\.rateLimit/g) || []).length, 1, "each explicit route policy must consume its rate-limit bucket only once");
 assert.match(security, /api_rate_limit_buckets/, "rate limiting must use a shared database store");
+assert.match(security, /allowDegradedReadRateLimit/, "public read routes must remain available when the rate-limit store is temporarily unavailable");
+assert.match(security, /readLimit[\s\S]*"fail-open-read"/, "safe read endpoints must explicitly degrade open instead of taking the map offline");
+assert.match(security, /policy\.capability === "read" \? "fail-open-read" : "fail-closed"/, "read-only POST policies may degrade open while mutation policies stay fail-closed");
+assert.match(security, /X-RateLimit-Status/, "degraded read protection must be observable without exposing internal errors in the response body");
 assert.match(security, /Idempotency-Key is required/, "bulk/write operations must require replay protection");
 assert.match(security, /api_idempotency_keys/, "idempotency must be persisted across instances/restarts");
 assert.match(security, /api_write_audit/, "writes must produce a durable audit record");
@@ -54,7 +58,7 @@ assert.match(security, /captureProtectedJsonResponse/, "protected response compl
 assert.match(security, /await auditWrite\(/, "write audit must complete before protected JSON response finalization");
 assert.doesNotMatch(security, /res\.on\("finish"[\s\S]*auditWrite/, "write audit must not regress to a fire-and-forget post-response finish listener");
 assert.match(security, /request_too_large/, "endpoint-specific request size limits must be enforced");
-assert.match(security, /security_control_unavailable/, "security store failures must fail closed");
+assert.match(security, /security_control_unavailable/, "mutation security-control failures must continue to fail closed");
 
 assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.api_rate_limit_buckets/, "distributed rate-limit table must exist");
 assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.api_idempotency_keys/, "idempotency table must exist");
@@ -66,5 +70,55 @@ const hashB = apiSecurityInternals.bodyHash({ a: 1 });
 const hashC = apiSecurityInternals.bodyHash({ a: 2 });
 assert.equal(hashA, hashB, "same request body must hash deterministically");
 assert.notEqual(hashA, hashC, "different request body must not reuse request hash");
+
+async function exerciseSecurity(method: string, requestPath: string) {
+  const responseHeaders = new Map<string, unknown>();
+  let responseStatus = 200;
+  let responseBody: unknown = null;
+  let nextCalled = false;
+  const req = {
+    method,
+    path: requestPath,
+    originalUrl: requestPath,
+    url: requestPath,
+    get: () => undefined,
+    ip: "security-smoke",
+    socket: { remoteAddress: "security-smoke" },
+    body: undefined,
+  } as any;
+  const res = {
+    statusCode: responseStatus,
+    setHeader: (name: string, value: unknown) => { responseHeaders.set(name, value); },
+    getHeader: (name: string) => responseHeaders.get(name),
+    status(code: number) { responseStatus = code; this.statusCode = code; return this; },
+    json(body: unknown) { responseBody = body; return this; },
+  } as any;
+  await apiSecurity(req, res, () => { nextCalled = true; });
+  return { nextCalled, responseStatus, responseBody, responseHeaders };
+}
+
+const originalNodeEnv = process.env.NODE_ENV;
+const originalDatabaseUrl = process.env.DATABASE_URL;
+process.env.NODE_ENV = "production";
+delete process.env.DATABASE_URL;
+try {
+  const readResult = await exerciseSecurity("GET", "/api/provider-layers/bluehive");
+  assert.equal(readResult.nextCalled, true, "public provider reads must continue when the distributed limiter is unavailable");
+  assert.equal(readResult.responseStatus, 200, "degraded read limiting must not turn a public map read into HTTP 503");
+  assert.equal(readResult.responseHeaders.get("X-RateLimit-Status"), "degraded", "degraded read limiting must be observable");
+
+  const writeResult = await exerciseSecurity("POST", "/api/provider-explorer/save-to-my-clinics");
+  assert.equal(writeResult.nextCalled, false, "protected writes must not bypass an unavailable security store");
+  assert.equal(writeResult.responseStatus, 503, "protected writes must remain fail-closed without distributed controls");
+  assert.deepEqual(writeResult.responseBody, {
+    error: "Request limiting is temporarily unavailable.",
+    code: "rate_limit_store_unavailable",
+  });
+} finally {
+  if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = originalNodeEnv;
+  if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+  else process.env.DATABASE_URL = originalDatabaseUrl;
+}
 
 console.log("API authorization, read/write separation, CORS, rate-limit, idempotency and durable audit hardening smoke passed.");

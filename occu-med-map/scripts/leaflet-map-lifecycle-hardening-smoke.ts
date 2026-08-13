@@ -23,13 +23,13 @@ const main = source("src/main.tsx");
 const lifecycle = source("src/leafletMapLifecycleRuntime.ts");
 const lifecycleImport = main.indexOf('import "./leafletMapLifecycleRuntime";');
 const firstMapInitializerImport = Math.min(
-  main.indexOf('import "./diagnosticsReliabilityRuntime";'),
   main.indexOf('import "./mapToolsCommandPanel";'),
   main.indexOf('import "./dualMapEngineRuntime";'),
 );
 
 assert.ok(lifecycleImport >= 0, "Leaflet lifecycle owner must be imported");
 assert.ok(lifecycleImport < firstMapInitializerImport, "lifecycle owner must load before map initializers");
+assert.doesNotMatch(main, /diagnosticsReliabilityRuntime/, "Leaflet lifecycle must not restore the diagnostic toggle replay runtime");
 assert.match(lifecycle, /const nativeMapFactory = L\.map\.bind\(L\)/, "lifecycle runtime must capture the native Leaflet factory once");
 assert.match(lifecycle, /orderedInitializers/, "initializer order must be deterministic");
 assert.match(lifecycle, /left\.priority - right\.priority/, "initializer priorities must control execution order");
@@ -55,7 +55,6 @@ assert.deepEqual(nativeCaptures, ["src/leafletMapLifecycleRuntime.ts"], "only th
 const registeredInitializers = [
   ["src/phaseTwoMapBridge.ts", "phase-two-map-bridge", 0],
   ["src/dualMapEngineRuntime.ts", "dual-map-engine", 10],
-  ["src/diagnosticsReliabilityRuntime.ts", "diagnostics-reliability", 20],
   ["src/mapOverlaySynchronizationControllerRuntime.ts", "overlay-synchronization", 30],
   ["src/mapToolsCommandPanel.ts", "map-tools-command-panel", 40],
   ["src/features/driveTime/nativeDriveTimeRuntime.ts", "native-drive-time", 60],

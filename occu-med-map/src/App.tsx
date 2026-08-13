@@ -1195,6 +1195,7 @@ export default function App() {
   const sidebarRef = useRef<HTMLElement>(null);
   const sidebarTabsRef = useRef<HTMLDivElement>(null);
   const mapToolsHostRef = useRef<HTMLDivElement>(null);
+  const mapToolsPanelRef = useRef<HTMLElement>(null);
   const sidebarWorkspaceRef = useRef<SidebarWorkspace>('providers');
   const [metric, setMetric] = useState('primaryCare');
   const [showLabels, setShowLabels] = useState(false);
@@ -1234,6 +1235,7 @@ export default function App() {
   // legend/filter/distribution, 70mi ring). Off by default so the global map
   // stays a clean world viewer. Only shown when explicitly enabled.
   const [showUsDiagnostics, setShowUsDiagnostics] = useState(false);
+  const [stateGeoRevision, setStateGeoRevision] = useState(0);
         const [showPdf, setShowPdf] = useState(false);
   const [pdfHtml, setPdfHtml] = useState('');
   const [pdfDlName, setPdfDlName] = useState('');
@@ -2276,6 +2278,7 @@ export default function App() {
         stateGeoRef.current = stateGeo;
         rawStateFeaturesRef.current = gj.features;
         buildStateLabels(map, stateGeo);
+        setStateGeoRevision(value=>value+1);
         break;
       } catch(e) { console.warn('GeoJSON load error',e); }
     }
@@ -2303,11 +2306,21 @@ export default function App() {
     const map = mapRef.current;
     if(!map) return;
     if(showUsDiagnostics && !stateGeoRef.current) {
-      loadStateGeo(map);
-    } else if(!showUsDiagnostics && stateGeoRef.current) {
-      try { map.removeLayer(stateGeoRef.current); } catch(e){}
-      stateGeoRef.current = null;
+      void loadStateGeo(map);
+    } else if(!showUsDiagnostics) {
+      if(stateGeoRef.current) {
+        try { map.removeLayer(stateGeoRef.current); } catch(e){}
+        stateGeoRef.current = null;
+      }
       if(labelLayerRef.current) { try{ map.removeLayer(labelLayerRef.current); }catch(e){} labelLayerRef.current = null; }
+      rawStateFeaturesRef.current = [];
+      setShowLabels(false);
+      setShowTZ(false);
+      setShowPopDensity(false);
+      setShowStateColors(false);
+      setShowRadius(false);
+      setShowCityDots(false);
+      setFilterDiff(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[showUsDiagnostics]);
@@ -2454,7 +2467,7 @@ export default function App() {
     const grp = L.layerGroup(layers).addTo(map);
     popDensityLayerRef.current = grp;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[showPopDensity]);
+  },[showPopDensity, stateGeoRevision]);
 
   // ── Uploaded clinic pins ───────────────────────────────────────────────────
   useEffect(()=>{
@@ -2800,7 +2813,7 @@ export default function App() {
     });
     tzLayerRef.current=L.layerGroup(layers).addTo(map);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[showTZ]);
+  },[showTZ, stateGeoRevision]);
 
   // ── View presets ─────────────────────────────────────────────────────────
   function flyToView(v:'world'|'us'|'east'|'central'|'west') {
@@ -3686,6 +3699,15 @@ export default function App() {
     window.dispatchEvent(new CustomEvent('network-map:sidebar-workspace', {detail:{tab:workspace}}));
   }, []);
 
+  const dockMapToolsPanel = useCallback((panel:Element|null): boolean => {
+    const host = mapToolsHostRef.current;
+    if (!(panel instanceof HTMLElement) || !host) return false;
+    mapToolsPanelRef.current = panel;
+    if (panel.parentElement !== host) host.appendChild(panel);
+    panel.dataset.sidebarDocked = 'true';
+    return true;
+  }, []);
+
   const handleSidebarTabKeyDown = useCallback((event:React.KeyboardEvent<HTMLButtonElement>, workspace:SidebarWorkspace) => {
     if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
     event.preventDefault();
@@ -3729,26 +3751,34 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const dockPanel = (panel:Element|null) => {
-      const host = mapToolsHostRef.current;
-      if (!(panel instanceof HTMLElement) || !host || panel.parentElement === host) return;
-      host.appendChild(panel);
-      panel.dataset.sidebarDocked = 'true';
-    };
-    const handlePanelMounted = (event:Event) => dockPanel((event as CustomEvent<{panel?:Element}>).detail?.panel || null);
-    document.querySelectorAll('.occumed-map-tools-panel').forEach(dockPanel);
+    const handlePanelMounted = (event:Event) => dockMapToolsPanel((event as CustomEvent<{panel?:Element}>).detail?.panel || null);
+    document.querySelectorAll('.occumed-map-tools-panel').forEach(panel=>dockMapToolsPanel(panel));
     window.addEventListener('network-map:map-tools-panel-mounted', handlePanelMounted);
     return () => window.removeEventListener('network-map:map-tools-panel-mounted', handlePanelMounted);
-  }, []);
+  }, [dockMapToolsPanel]);
+
+  useLayoutEffect(() => {
+    if (sidebarWorkspace !== 'mapTools') return;
+    const redock = () => dockMapToolsPanel(
+      mapToolsPanelRef.current || document.querySelector('.occumed-map-tools-panel'),
+    );
+    redock();
+    const frame = window.requestAnimationFrame(redock);
+    const timer = window.setTimeout(redock, 120);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [dockMapToolsPanel, sidebarWorkspace]);
 
   useEffect(() => {
     window.__NETWORK_MAP_SIDEBAR_WORKSPACES__ = {
       getActiveTab: () => sidebarWorkspaceRef.current,
       setActiveTab: selectSidebarWorkspace,
-      sync: () => undefined,
+      sync: () => { dockMapToolsPanel(mapToolsPanelRef.current || document.querySelector('.occumed-map-tools-panel')); },
     };
     return () => { delete window.__NETWORK_MAP_SIDEBAR_WORKSPACES__; };
-  }, [selectSidebarWorkspace]);
+  }, [dockMapToolsPanel, selectSidebarWorkspace]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER

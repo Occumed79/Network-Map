@@ -57,7 +57,7 @@ for (const file of fs.readdirSync(srcRoot).filter((name) => name.endsWith(".css"
 }
 assert.ok(importantCount <= 2000, `!important usage exceeded the hardening ceiling: ${importantCount}`);
 
-const sidebarController = fs.readFileSync(path.join(srcRoot, "sidebarWorkspaceControllerRuntime.ts"), "utf8");
-assert.doesNotMatch(sidebarController, /createElement\("style"\)|style\.textContent/, "runtime controllers must not recreate global stylesheet ownership");
+const app = fs.readFileSync(path.join(srcRoot, "App.tsx"), "utf8");
+assert.doesNotMatch(app, /createElement\("style"\)|style\.textContent/, "React sidebar ownership must not recreate global stylesheets");
 
 console.log(`UI style ownership smoke passed: ${applicationCssImports.length} application stylesheet imports; ${importantCount} !important declarations; authoritative UI system intact.`);

@@ -47,12 +47,13 @@ import "./map-tools-visible.css";
 import "./luxury-futuristic-shell.css";
 import "./map-tools-reliability.css";
 import "./provider-location-finder.css";
-import "./sidebar-button-theme.css";
-import "./sidebarWorkspaceControllerRuntime";
-import "./sidebar-workspace-final-fixes.css";
 import "./sidebarWorkspacePanelGuardRuntime";
 import "./ui-system.css";
 import "./startup-hardening.css";
+// The consolidated sidebar layer intentionally loads after every synchronous
+// shell/theme stylesheet. It is the sole final owner of sidebar geometry,
+// workspace visibility, hit testing, and scrolling.
+import "./sidebar-workspace-final-fixes.css";
 import "./dialogControllerRuntime";
 import "./generalUiIntegrityRuntime";
 

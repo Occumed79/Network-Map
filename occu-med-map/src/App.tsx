@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import * as topojson from 'topojson-client';
 import * as XLSX from 'xlsx';
@@ -1140,6 +1140,16 @@ function generateReportHtml(data:ReportData,evidence:EvidencePayload|null):strin
 // ─────────────────────────────────────────────────────────────────────────────
 type SidebarWorkspace = 'providers' | 'mapTools' | 'liveFinder' | 'explorer';
 
+declare global {
+  interface Window {
+    __NETWORK_MAP_SIDEBAR_WORKSPACES__?: {
+      getActiveTab: () => SidebarWorkspace;
+      setActiveTab: (tab: SidebarWorkspace) => void;
+      sync: () => void;
+    };
+  }
+}
+
 const SIDEBAR_WORKSPACES: ReadonlyArray<{
   id: SidebarWorkspace;
   label: string;
@@ -1152,11 +1162,11 @@ const SIDEBAR_WORKSPACES: ReadonlyArray<{
   {id:'explorer',label:'Explorer',ariaLabel:'Explorer workspace — provider explorer',controls:'sidebar-explorer-panel'},
 ];
 
-const MapToolsWorkspaceHost = React.memo(function MapToolsWorkspaceHost() {
+const MapToolsWorkspaceHost = React.memo(React.forwardRef<HTMLDivElement>(function MapToolsWorkspaceHost(_props, ref) {
   // This component deliberately never updates: the map runtime owns the panel
   // mounted inside this host, while React owns the host's lifetime.
-  return <div id="sidebar-map-tools-panel" className="occumed-sidebar-workspace-host" role="tabpanel" aria-label="Map tools workspace" />;
-});
+  return <div ref={ref} id="sidebar-map-tools-panel" className="occumed-sidebar-workspace-host" role="tabpanel" aria-label="Map tools workspace" />;
+}));
 
 export default function App() {
   const mapRef = useRef<L.Map|null>(null);
@@ -1182,6 +1192,10 @@ export default function App() {
 
   // UI State
   const [sidebarWorkspace, setSidebarWorkspace] = useState<SidebarWorkspace>('providers');
+  const sidebarRef = useRef<HTMLElement>(null);
+  const sidebarTabsRef = useRef<HTMLDivElement>(null);
+  const mapToolsHostRef = useRef<HTMLDivElement>(null);
+  const sidebarWorkspaceRef = useRef<SidebarWorkspace>('providers');
   const [metric, setMetric] = useState('primaryCare');
   const [showLabels, setShowLabels] = useState(false);
   const [showTZ, setShowTZ] = useState(false);
@@ -3658,16 +3672,83 @@ export default function App() {
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
-  useEffect(() => {
-    const handleWorkspaceChange = (event: Event) => {
-      const tab = (event as CustomEvent<{tab?: SidebarWorkspace}>).detail?.tab;
-      if (SIDEBAR_WORKSPACES.some(workspace=>workspace.id===tab)) setSidebarWorkspace(tab!);
-    };
-    window.addEventListener('network-map:sidebar-workspace', handleWorkspaceChange);
-    const current = window.__NETWORK_MAP_SIDEBAR_WORKSPACES__?.getActiveTab?.();
-    if (SIDEBAR_WORKSPACES.some(workspace=>workspace.id===current)) setSidebarWorkspace(current!);
-    return () => window.removeEventListener('network-map:sidebar-workspace', handleWorkspaceChange);
+  const selectSidebarWorkspace = useCallback((workspace:SidebarWorkspace) => {
+    sidebarWorkspaceRef.current = workspace;
+    setSidebarWorkspace(workspace);
+    setShowProviderExplorerDrawer(workspace === 'explorer');
+    setActiveTool(current => workspace === 'liveFinder' ? 'liveFinder' : current === 'liveFinder' ? null : current);
+    if (workspace === 'liveFinder') {
+      setProviderToolMode(current => current === 'npi' ? 'npi' : 'live');
+      if (!['live','npi'].includes(document.body.dataset.providerTool || '')) document.body.dataset.providerTool = 'live';
+    } else {
+      delete document.body.dataset.providerTool;
+    }
+    window.dispatchEvent(new CustomEvent('network-map:sidebar-workspace', {detail:{tab:workspace}}));
   }, []);
+
+  const handleSidebarTabKeyDown = useCallback((event:React.KeyboardEvent<HTMLButtonElement>, workspace:SidebarWorkspace) => {
+    if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+    event.preventDefault();
+    const currentIndex = SIDEBAR_WORKSPACES.findIndex(item=>item.id===workspace);
+    const targetIndex = event.key==='Home' ? 0 : event.key==='End' ? SIDEBAR_WORKSPACES.length-1
+      : (currentIndex+(event.key==='ArrowRight'?1:-1)+SIDEBAR_WORKSPACES.length)%SIDEBAR_WORKSPACES.length;
+    const targetWorkspace = SIDEBAR_WORKSPACES[targetIndex].id;
+    selectSidebarWorkspace(targetWorkspace);
+    sidebarTabsRef.current?.querySelector<HTMLButtonElement>(`[data-workspace-tab="${targetWorkspace}"]`)?.focus();
+  }, [selectSidebarWorkspace]);
+
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.dataset.occumedworkspace = sidebarWorkspace;
+    root.dataset.occumedWorkspaceReady = 'true';
+    sidebarWorkspaceRef.current = sidebarWorkspace;
+  }, [sidebarWorkspace]);
+
+  useLayoutEffect(() => {
+    const sidebar = sidebarRef.current;
+    const tabs = sidebarTabsRef.current;
+    if (!sidebar || !tabs) return;
+    const updateGeometry = () => {
+      const sidebarRect = sidebar.getBoundingClientRect();
+      const tabsRect = tabs.getBoundingClientRect();
+      const style = document.documentElement.style;
+      style.setProperty('--workspace-panel-top', `${Math.max(0, tabsRect.bottom)}px`);
+      style.setProperty('--workspace-panel-left', `${Math.max(0, sidebarRect.left)}px`);
+      style.setProperty('--workspace-panel-width', `${Math.max(280, sidebarRect.width)}px`);
+      style.setProperty('--workspace-panel-bottom', `${Math.max(0, window.innerHeight-sidebarRect.bottom)}px`);
+    };
+    updateGeometry();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateGeometry);
+    observer?.observe(sidebar);
+    observer?.observe(tabs);
+    window.addEventListener('resize', updateGeometry, {passive:true});
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', updateGeometry);
+    };
+  }, []);
+
+  useEffect(() => {
+    const dockPanel = (panel:Element|null) => {
+      const host = mapToolsHostRef.current;
+      if (!(panel instanceof HTMLElement) || !host || panel.parentElement === host) return;
+      host.appendChild(panel);
+      panel.dataset.sidebarDocked = 'true';
+    };
+    const handlePanelMounted = (event:Event) => dockPanel((event as CustomEvent<{panel?:Element}>).detail?.panel || null);
+    document.querySelectorAll('.occumed-map-tools-panel').forEach(dockPanel);
+    window.addEventListener('network-map:map-tools-panel-mounted', handlePanelMounted);
+    return () => window.removeEventListener('network-map:map-tools-panel-mounted', handlePanelMounted);
+  }, []);
+
+  useEffect(() => {
+    window.__NETWORK_MAP_SIDEBAR_WORKSPACES__ = {
+      getActiveTab: () => sidebarWorkspaceRef.current,
+      setActiveTab: selectSidebarWorkspace,
+      sync: () => undefined,
+    };
+    return () => { delete window.__NETWORK_MAP_SIDEBAR_WORKSPACES__; };
+  }, [selectSidebarWorkspace]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER
@@ -3701,12 +3782,6 @@ export default function App() {
     setActiveTool(current=>current===tool?null:tool);
     setMobileSidebarOpen(false);
   };
-  const selectSidebarWorkspace = (workspace:SidebarWorkspace) => {
-    const controller = window.__NETWORK_MAP_SIDEBAR_WORKSPACES__;
-    if (controller) controller.setActiveTab(workspace);
-    else setSidebarWorkspace(workspace);
-  };
-
   return (
     <div className="app-wrap">
       <div className="cursor-light" />
@@ -3756,7 +3831,7 @@ export default function App() {
             <span>sources active</span>
           </div>
 
-          <button className={`command-action${activeTool==='liveFinder'?' active':''}`} aria-expanded={activeTool==='liveFinder'} onClick={()=>{setShowProviderExplorerDrawer(false);setActiveTool(activeTool==='liveFinder'?null:'liveFinder');}}>
+          <button className={`command-action${activeTool==='liveFinder'?' active':''}`} aria-expanded={activeTool==='liveFinder'} onClick={()=>selectSidebarWorkspace(activeTool==='liveFinder'?'providers':'liveFinder')}>
             <PanelRightOpen size={16}/><span>Analysis</span>
           </button>
         </div>
@@ -3764,8 +3839,8 @@ export default function App() {
 
       <div className="app-body">
         {mobileSidebarOpen && <button className="mobile-sidebar-backdrop" aria-label="Close navigation" onClick={()=>setMobileSidebarOpen(false)}/>}
-        <aside className={`sidebar${mobileSidebarOpen ? ' mobile-open' : ''}`}>
-          <div className="occumed-sidebar-workspace-tabs" role="tablist" aria-label="Sidebar workspaces">
+        <aside ref={sidebarRef} className={`sidebar occumed-sidebar-workspace-scope${mobileSidebarOpen ? ' mobile-open' : ''}`} data-occumed-workspace-tab={sidebarWorkspace}>
+          <div ref={sidebarTabsRef} className="occumed-sidebar-workspace-tabs" role="tablist" aria-label="Sidebar workspaces">
             {SIDEBAR_WORKSPACES.map(({id,label,ariaLabel,controls})=>(
               <button
                 key={id}
@@ -3779,12 +3854,13 @@ export default function App() {
                 aria-selected={sidebarWorkspace===id}
                 tabIndex={sidebarWorkspace===id?0:-1}
                 onClick={()=>selectSidebarWorkspace(id)}
+                onKeyDown={event=>handleSidebarTabKeyDown(event,id)}
               >
                 {label}
               </button>
             ))}
           </div>
-          <MapToolsWorkspaceHost />
+          <MapToolsWorkspaceHost ref={mapToolsHostRef} />
           <div id="sidebar-providers-panel" className="occumed-sidebar-provider-content" role="tabpanel" aria-label="Providers workspace">
           <div className="hero-card">
             <div className="hero-eyebrow">Global provider workspace</div>
@@ -3796,11 +3872,11 @@ export default function App() {
           <section className="sb-section command-section">
             <div className="command-section-title"><Radar size={15}/><span>Workflows</span></div>
             <div className="command-tool-grid">
-              <button className={String((activeTool==='liveFinder'?'active':'') || '').concat(' unified-live-tool').trim()} onClick={()=>{setProviderToolMode('live');document.body.dataset.providerTool='live';(()=>{setShowProviderExplorerDrawer(false);toggleCommandTool('liveFinder');})();}}><Radar size={16}/><span>Live Finder</span></button>
-                <button type="button" className="unified-npi-tool" onClick={()=>{setProviderToolMode('npi');document.body.dataset.providerTool='npi';(()=>{setActiveTool('liveFinder');document.body.dataset.providerTool='npi';})();}} aria-pressed={providerToolMode==='npi'}>
+              <button className={String((activeTool==='liveFinder'?'active':'') || '').concat(' unified-live-tool').trim()} onClick={()=>{setProviderToolMode('live');document.body.dataset.providerTool='live';selectSidebarWorkspace('liveFinder');}}><Radar size={16}/><span>Live Finder</span></button>
+                <button type="button" className="unified-npi-tool" onClick={()=>{setProviderToolMode('npi');document.body.dataset.providerTool='npi';selectSidebarWorkspace('liveFinder');}} aria-pressed={providerToolMode==='npi'}>
                   <span>NPI Registry</span>
                 </button>
-                <button type="button" className="unified-explorer-tool" onClick={()=>{setShowProviderExplorerDrawer(value=>!value);if(activeTool==='liveFinder')setActiveTool(null);}}>
+                <button type="button" className="unified-explorer-tool" onClick={()=>selectSidebarWorkspace(showProviderExplorerDrawer?'providers':'explorer')}>
                   <span>Provider Explorer</span>
                 </button>
               <button className={activeTool==='radius'?'active':''} onClick={()=>toggleCommandTool('radius')}><Crosshair size={16}/><span>Radius Tool</span></button>
@@ -3977,6 +4053,7 @@ export default function App() {
               <span><SlidersHorizontal size={18}/></span>
               <div><strong>Provider Explorer</strong><small>Map visualization and database scope</small></div>
             </div>
+            <button type="button" className="rp-close" aria-label="Close Provider Explorer" onClick={()=>selectSidebarWorkspace('providers')}>Close</button>
 
           </div>
           <div className="provider-drawer-body">
@@ -4133,7 +4210,7 @@ export default function App() {
 
 
         {/* ── LIVE PANEL ── */}
-        <div id="sidebar-finder-panel" className={`live-panel${activeTool === 'liveFinder' ? ' open' : ''}${sheetState !== 'default' ? ` sheet-${sheetState}` : ''}`} role="region" aria-label="Provider finder workspace">
+        <div id="sidebar-finder-panel" className={`live-panel${activeTool === 'liveFinder' ? ' open' : ''}${sheetState !== 'default' ? ` sheet-${sheetState}` : ''}`} role="region" aria-label="Provider finder workspace" aria-hidden={activeTool !== 'liveFinder'} inert={activeTool !== 'liveFinder'}>
           {(activeTool === 'liveFinder')&&(
             <div className="lp-inner">
               {/* Mobile bottom sheet drag handle */}
@@ -4176,7 +4253,7 @@ export default function App() {
                   >
                     <Download size={13}/> Export CSV
                   </button>
-                  <button className="rp-close" onClick={()=>{setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder');setSheetState('default');}}>Close</button>
+                  <button className="rp-close" onClick={()=>{selectSidebarWorkspace('providers');setSheetState('default');}}>Close</button>
                 </div>
               </div>
               <div className="lp-controls">

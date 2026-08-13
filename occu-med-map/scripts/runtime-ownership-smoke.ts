@@ -48,7 +48,6 @@ const requiredOwners: Record<string, string> = {
   "mapboxGlobeLoadHardeningRuntime.ts": "mapbox-globe-load-hardening",
   "dialogControllerRuntime.ts": "dialog-controller",
   "generalUiIntegrityRuntime.ts": "general-ui-integrity",
-  "sidebarWorkspaceControllerRuntime.ts": "sidebar-workspace-controller",
   "sidebarWorkspacePanelGuardRuntime.ts": "sidebar-workspace-integrity",
   "providerSourceSelectionPersistenceRuntime.ts": "provider-source-selection-persistence",
 };
@@ -71,7 +70,6 @@ const sharedObserverConsumers = [
   "mapboxGlobeLoadHardeningRuntime.ts",
   "dialogControllerRuntime.ts",
   "generalUiIntegrityRuntime.ts",
-  "sidebarWorkspaceControllerRuntime.ts",
 ];
 
 for (const file of sharedObserverConsumers) {
@@ -88,11 +86,6 @@ const mapEngineFinalFix = source("mapEngineFinalFixRuntime.ts");
 assert(!mapEngineFinalFix.includes("new MutationObserver"), "mapEngineFinalFixRuntime.ts must not own a DOM observer");
 assert(!mapEngineFinalFix.includes("subscribeToSharedDomObserver"), "mapEngineFinalFixRuntime.ts must remain off the shared DOM observer to prevent feedback loops");
 assert(mapEngineFinalFix.includes("scheduleReconcile"), "mapEngineFinalFixRuntime.ts must use bounded reconciliation checkpoints");
-
-for (const file of ["sidebarWorkspaceControllerRuntime.ts"]) {
-  const text = source(file);
-  assert(text.includes("runWithoutSharedDomObservation"), `${file} must prevent its own compatibility writes from feeding back into the shared observer`);
-}
 
 for (const file of ["routePlannerControlsRuntime.ts", "healthsitesFlatDotsRuntime.ts", "providerLocationFinderRuntime.ts"]) {
   const text = source(file);
@@ -130,7 +123,6 @@ for (const runtime of [
   "./leafletMapLifecycleRuntime",
   "./mapboxMapLifecycleRuntime",
   "./networkRequestPipelineRuntime",
-  "./sidebarWorkspaceControllerRuntime",
   "./dialogControllerRuntime",
   "./generalUiIntegrityRuntime",
 ]) {

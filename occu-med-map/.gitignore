@@ -15,6 +15,11 @@ data/bluehive-audit/
 *.backup*
 *checkpoint.backup*.json
 
+# Browser/UI validation artifacts are generated locally and must not be
+# included in source changes. Existing historical files remain tracked until
+# deliberately removed.
+screenshots/
+
 # Zocdoc collector outputs
 .zocdoc-scrape-checkpoint.json
 zocdoc_providers.csv

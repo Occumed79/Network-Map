@@ -37,13 +37,13 @@
 }
 
 .dual-engine-vortex.exiting {
-  background: #f7fbff;
+  background: #00040b;
 }
 
 .dual-engine-vortex.exiting::after {
   background:
-    radial-gradient(circle at 50% 49%, transparent 26%, rgba(222, 239, 255, 0.05) 52%, rgba(177, 211, 255, 0.2) 118%),
-    linear-gradient(180deg, rgba(255, 252, 241, 0.04), rgba(168, 205, 255, 0.1));
+    radial-gradient(circle at 50% 49%, transparent 26%, rgba(110, 175, 255, 0.035) 58%, rgba(4, 18, 45, 0.26) 118%),
+    linear-gradient(180deg, rgba(8, 20, 45, 0.035), rgba(0, 4, 15, 0.14));
 }
 
 .dual-engine-vortex.exiting .dual-engine-vortex-copy {

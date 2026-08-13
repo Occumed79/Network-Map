@@ -80,27 +80,45 @@ function createTabs(): HTMLElement {
     button.setAttribute("role", "tab");
     button.setAttribute("aria-label", definition.ariaLabel);
     button.setAttribute("aria-selected", "false");
-    button.addEventListener("click", () => setActiveTab(definition.id));
-    button.addEventListener("keydown", (event) => {
-      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-      event.preventDefault();
-      const buttons = Array.from(tabs.querySelectorAll<HTMLButtonElement>(".occumed-sidebar-workspace-tab"));
-      const currentIndex = Math.max(0, buttons.indexOf(button));
-      const targetIndex = event.key === "Home"
-        ? 0
-        : event.key === "End"
-          ? buttons.length - 1
-          : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
-      const targetButton = buttons[targetIndex];
-      const target = TAB_DEFINITIONS[targetIndex];
-      targetButton?.focus();
-      if (target) setActiveTab(target.id);
-    });
     button.tabIndex = index === 0 ? 0 : -1;
     tabs.appendChild(button);
   });
 
   return tabs;
+}
+
+function workspaceButton(target: EventTarget | null): HTMLButtonElement | null {
+  return target instanceof Element
+    ? target.closest<HTMLButtonElement>(`.${TABS_CLASS} .occumed-sidebar-workspace-tab`)
+    : null;
+}
+
+function handleWorkspaceTabClick(event: Event): void {
+  const tab = workspaceButton(event.target)?.dataset.workspaceTab;
+  if (tab === "providers" || tab === "mapTools" || tab === "liveFinder" || tab === "explorer") {
+    setActiveTab(tab);
+  }
+}
+
+function handleWorkspaceTabKeydown(event: KeyboardEvent): void {
+  const button = workspaceButton(event.target);
+  if (!button || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  const tabs = button.closest<HTMLElement>(`.${TABS_CLASS}`);
+  if (!tabs) return;
+  event.preventDefault();
+  const buttons = Array.from(tabs.querySelectorAll<HTMLButtonElement>(".occumed-sidebar-workspace-tab"));
+  const currentIndex = Math.max(0, buttons.indexOf(button));
+  const targetIndex = event.key === "Home"
+    ? 0
+    : event.key === "End"
+      ? buttons.length - 1
+      : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
+  const target = buttons[targetIndex];
+  const tab = target?.dataset.workspaceTab;
+  target?.focus();
+  if (tab === "providers" || tab === "mapTools" || tab === "liveFinder" || tab === "explorer") {
+    setActiveTab(tab);
+  }
 }
 
 function ensureSidebarStructure(): { sidebar: HTMLElement; tabs: HTMLElement; host: HTMLElement } | null {
@@ -122,10 +140,11 @@ function ensureSidebarStructure(): { sidebar: HTMLElement; tabs: HTMLElement; ho
     tabs.insertAdjacentElement("afterend", host);
   }
 
+  const nativeProviderContent = sidebar.querySelector<HTMLElement>(`:scope > .${PROVIDER_CONTENT_CLASS}`);
   Array.from(sidebar.children).forEach((child) => {
     if (!(child instanceof HTMLElement)) return;
     if (child === tabs || child === host) child.classList.remove(PROVIDER_CONTENT_CLASS);
-    else child.classList.add(PROVIDER_CONTENT_CLASS);
+    else if (!nativeProviderContent) child.classList.add(PROVIDER_CONTENT_CLASS);
   });
 
   return { sidebar, tabs, host };
@@ -372,6 +391,8 @@ function install(): void {
   window.addEventListener("orientationchange", handleViewportChange, { passive: true });
   window.addEventListener("network-map:map-tools-panel-mounted", handleMapToolsPanelMounted);
   document.addEventListener("click", handlePanelCloseClick, true);
+  document.addEventListener("click", handleWorkspaceTabClick);
+  document.addEventListener("keydown", handleWorkspaceTabKeydown);
 }
 
 function cleanup(): void {
@@ -388,6 +409,8 @@ function cleanup(): void {
   window.removeEventListener("orientationchange", handleViewportChange);
   window.removeEventListener("network-map:map-tools-panel-mounted", handleMapToolsPanelMounted);
   document.removeEventListener("click", handlePanelCloseClick, true);
+  document.removeEventListener("click", handleWorkspaceTabClick);
+  document.removeEventListener("keydown", handleWorkspaceTabKeydown);
 }
 
 window.__NETWORK_MAP_SIDEBAR_WORKSPACES__ = {

@@ -3728,6 +3728,29 @@ export default function App() {
       <div className="app-body">
         {mobileSidebarOpen && <button className="mobile-sidebar-backdrop" aria-label="Close navigation" onClick={()=>setMobileSidebarOpen(false)}/>}
         <aside className={`sidebar${mobileSidebarOpen ? ' mobile-open' : ''}`}>
+          <div className="occumed-sidebar-workspace-tabs" role="tablist" aria-label="Sidebar workspaces">
+            {([
+              ['providers', 'Providers', 'Providers workspace — provider layers and workflows'],
+              ['mapTools', 'Map Tools', 'Map Tools workspace — routing and map tools'],
+              ['liveFinder', 'Finder', 'Finder workspace — live provider finder'],
+              ['explorer', 'Explorer', 'Explorer workspace — provider explorer'],
+            ] as const).map(([id, label, ariaLabel], index)=>(
+              <button
+                key={id}
+                type="button"
+                className="occumed-sidebar-workspace-tab"
+                data-workspace-tab={id}
+                role="tab"
+                aria-label={ariaLabel}
+                aria-selected={id==='providers'}
+                tabIndex={index===0?0:-1}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="occumed-sidebar-workspace-host" aria-label="Map tools workspace" />
+          <div className="occumed-sidebar-provider-content">
           <div className="hero-card">
             <div className="hero-eyebrow">Global provider workspace</div>
             <div className="hero-title">Provider intelligence at map speed</div>
@@ -3881,6 +3904,7 @@ export default function App() {
               <p className="command-section-help">Click anywhere on the map to set the extraction center. The radius controls stay visible over the map.</p>
             </section>
           )}
+          </div>
         </aside>
 
         {/* ── DATASET BROWSER MODAL ── */}

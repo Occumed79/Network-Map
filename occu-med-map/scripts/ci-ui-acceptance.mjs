@@ -268,6 +268,7 @@ async function assertSidebarControlsInteractive(page, viewportName) {
   const densityBefore = await density.getAttribute("aria-pressed");
   await density.click();
   assert.notEqual(await density.getAttribute("aria-pressed"), densityBefore, `${viewportName}: Map Tools controls must react to clicks`);
+  const densityAfter = await density.getAttribute("aria-pressed");
 
   const finder = await workspaceButton(page, "Finder");
   await finder.click();
@@ -283,6 +284,16 @@ async function assertSidebarControlsInteractive(page, viewportName) {
   const occMedChip = finderPanel.getByRole("button", { name: "Occ-Med", exact: true });
   await occMedChip.click();
   assert.match(await occMedChip.getAttribute("class") || "", /on/, `${viewportName}: Finder source chips must update their selected state`);
+  await mapTools.click();
+  await assertWorkspaceReady(page, "Map Tools", viewportName);
+  assert.equal(await density.getAttribute("aria-pressed"), densityAfter, `${viewportName}: Map Tools control state must survive a tab round trip`);
+  await density.click();
+  await finder.click();
+  await assertWorkspaceReady(page, "Finder", viewportName);
+  assert.equal(await radius.inputValue(), "25", `${viewportName}: Finder radius must survive a tab round trip`);
+  assert.equal(await textFilter.inputValue(), "occupational", `${viewportName}: Finder input must survive a tab round trip`);
+  await radius.fill("30");
+  assert.equal(await radius.inputValue(), "30", `${viewportName}: Finder controls must remain interactive after returning`);
   await finderPanel.getByRole("button", { name: "Close", exact: true }).click();
   await page.waitForFunction(() => document.documentElement.dataset.occumedworkspace === "providers"
     && !document.querySelector(".live-panel.open")
@@ -323,6 +334,64 @@ async function assertSidebarControlsInteractive(page, viewportName) {
   const mapViewBefore = await mapView.getAttribute("aria-expanded");
   await mapView.click();
   assert.notEqual(await mapView.getAttribute("aria-expanded"), mapViewBefore, `${viewportName}: Providers sections must expand and collapse`);
+
+  const sidebar = page.locator(".sidebar.occumed-sidebar-workspace-scope");
+  await sidebar.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  const scrolled = await sidebar.evaluate((element) => ({ top: element.scrollTop, max: element.scrollHeight - element.clientHeight }));
+  if (scrolled.max > 2) assert.ok(scrolled.top > 0, `${viewportName}: Providers workspace must scroll`);
+  await mapTools.click();
+  await assertWorkspaceReady(page, "Map Tools", viewportName);
+  await providers.click();
+  await assertWorkspaceReady(page, "Providers", viewportName);
+  await sidebar.evaluate((element) => { element.scrollTop = 0; });
+  assert.equal(await sidebar.evaluate((element) => element.scrollTop), 0, `${viewportName}: sidebar scrolling must remain attached after switching`);
+}
+
+async function assertRapidSidebarStress(page, viewportName) {
+  const sequence = ["Providers", "Map Tools", "Finder", "Explorer", "Providers"];
+  for (let repetition = 0; repetition < 4; repetition += 1) {
+    for (const label of sequence) {
+      const button = await workspaceButton(page, label);
+      await button.click({ delay: 0 });
+    }
+  }
+  await assertWorkspaceReady(page, "Providers", viewportName);
+  const state = await page.evaluate(() => {
+    const visible = (element) => {
+      if (!(element instanceof HTMLElement)) return false;
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== "none" && style.visibility !== "hidden" && style.pointerEvents !== "none"
+        && rect.width > 0 && rect.height > 0;
+    };
+    return {
+      selected: document.querySelectorAll(".occumed-sidebar-workspace-tab[aria-selected='true']").length,
+      active: document.querySelector(".occumed-sidebar-workspace-tab[aria-selected='true']")?.getAttribute("data-workspace-tab"),
+      finderInteractive: visible(document.querySelector(".live-panel")),
+      explorerInteractive: visible(document.querySelector(".provider-explorer-drawer")),
+      providers: visible(document.querySelector(".occumed-sidebar-provider-content")),
+    };
+  });
+  assert.deepEqual(state, {
+    selected: 1,
+    active: "providers",
+    finderInteractive: false,
+    explorerInteractive: false,
+    providers: true,
+  }, `${viewportName}: rapid switching must finish with one interactive Providers workspace`);
+}
+
+async function assertSidebarResizeStress(page, viewportName) {
+  for (const size of [{ width: 1180, height: 720 }, { width: 1024, height: 768 }, { width: 1440, height: 900 }]) {
+    await page.setViewportSize(size);
+    await assertWorkspaceReady(page, "Providers", viewportName);
+    await assertGeometry(page, `${viewportName}/resize-${size.width}x${size.height}`);
+    const tabs = page.locator(".occumed-sidebar-workspace-tab");
+    assert.equal(await tabs.count(), 4, `${viewportName}: all four tabs must remain available after resize`);
+    await tabs.nth(3).click();
+    await assertWorkspaceReady(page, "Explorer", viewportName);
+    await tabs.nth(0).click();
+  }
 }
 
 async function assertKeyboardTabs(page, viewportName) {
@@ -399,7 +468,11 @@ async function runViewport(browser, viewport) {
     await assertRuntimeOwnership(page);
     await assertGeometry(page, viewport.name);
     await assertWorkspaceSwitching(page, viewport.name);
-    if (viewport.name === "desktop") await assertSidebarControlsInteractive(page, viewport.name);
+    await assertRapidSidebarStress(page, viewport.name);
+    if (viewport.name === "desktop") {
+      await assertSidebarControlsInteractive(page, viewport.name);
+      await assertSidebarResizeStress(page, viewport.name);
+    }
     await assertKeyboardTabs(page, viewport.name);
     await assertDialogBehavior(page, viewport.name);
     await assertGeometry(page, `${viewport.name}/final`);

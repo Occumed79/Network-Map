@@ -25,6 +25,11 @@ assert.equal(
   false,
   "the retired imperative sidebar controller must not be restored during conflict resolution",
 );
+assert.equal(
+  existsSync(path.join(projectRoot, "src/components/ui/sidebar.tsx")),
+  false,
+  "the unused alternate sidebar component must not be restored",
+);
 assert.doesNotMatch(main, /sidebarWorkspaceControllerRuntime/, "obsolete imperative sidebar controller must remain retired");
 assert.match(main, /import "\.\/sidebar-workspace-final-fixes\.css";/, "authoritative sidebar layout layer must load");
 assert.match(main, /import "\.\/ui-system\.css";[\s\S]*import "\.\/startup-hardening\.css";[\s\S]*import "\.\/sidebar-workspace-final-fixes\.css";/, "authoritative sidebar CSS must load after synchronous shell and UI layers");
@@ -110,6 +115,10 @@ for (const control of [
   assert.match(uiAcceptance, new RegExp(control), `rendered UI acceptance must exercise ${control}`);
 }
 assert.match(uiAcceptance, /closing Finder must return to Providers/, "Finder Close must not leave an empty selected workspace");
+assert.match(uiAcceptance, /assertRapidSidebarStress/, "UI acceptance must repeatedly stress the four-tab sequence");
+assert.match(uiAcceptance, /control state must survive a tab round trip/, "UI acceptance must verify control persistence");
+assert.match(uiAcceptance, /scrolling must remain attached after switching/, "UI acceptance must verify workspace scrolling after tab changes");
+assert.match(uiAcceptance, /assertSidebarResizeStress/, "UI acceptance must verify sidebar controls while resizing");
 assert.match(uiAcceptance, /second ArrowRight must select Finder/, "keyboard acceptance must traverse Finder");
 assert.match(uiAcceptance, /third ArrowRight must select Explorer/, "keyboard acceptance must traverse Explorer");
 assert.match(uiAcceptance, /fourth ArrowRight must wrap to Providers/, "keyboard acceptance must cover all four tabs");

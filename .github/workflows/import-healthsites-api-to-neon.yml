@@ -1,6 +1,12 @@
 name: Import Healthsites API facilities to Neon
 
 on:
+  # One-time production pilot. Remove this push trigger after the BS run is verified.
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/import-healthsites-api-to-neon.yml"
   workflow_dispatch:
     inputs:
       country_codes:
@@ -23,13 +29,13 @@ concurrency:
 jobs:
   import:
     name: Import Healthsites facilities
-    if: ${{ inputs.confirmation == 'IMPORT' }}
+    if: ${{ github.event_name == 'push' || inputs.confirmation == 'IMPORT' }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
       HEALTHSITES_API_KEY: ${{ secrets.HEALTHSITES_API_KEY }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      REQUESTED_COUNTRIES: ${{ inputs.country_codes }}
+      REQUESTED_COUNTRIES: ${{ github.event_name == 'push' && 'BS' || inputs.country_codes }}
       MAX_HEALTHSITES_PAGES: "1000"
       SQL_CHUNK_SIZE: "150"
 

@@ -3661,7 +3661,18 @@ export default function App() {
   useEffect(() => {
     const handleWorkspaceChange = (event: Event) => {
       const tab = (event as CustomEvent<{tab?: SidebarWorkspace}>).detail?.tab;
-      if (SIDEBAR_WORKSPACES.some(workspace=>workspace.id===tab)) setSidebarWorkspace(tab!);
+      if (!SIDEBAR_WORKSPACES.some(workspace=>workspace.id===tab)) return;
+      setSidebarWorkspace(tab!);
+      // A workspace change is one atomic React state transition. The previous
+      // compatibility controller used synthetic clicks and retry timers, which
+      // could toggle a panel twice during rapid tab changes or after a rerender.
+      setShowProviderExplorerDrawer(tab === 'explorer');
+      setActiveTool(current => tab === 'liveFinder' ? 'liveFinder' : current === 'liveFinder' ? null : current);
+      if (tab === 'liveFinder') {
+        setProviderToolMode(current => current === 'npi' ? 'npi' : 'live');
+      } else {
+        delete document.body.dataset.providerTool;
+      }
     };
     window.addEventListener('network-map:sidebar-workspace', handleWorkspaceChange);
     const current = window.__NETWORK_MAP_SIDEBAR_WORKSPACES__?.getActiveTab?.();
@@ -3756,7 +3767,7 @@ export default function App() {
             <span>sources active</span>
           </div>
 
-          <button className={`command-action${activeTool==='liveFinder'?' active':''}`} aria-expanded={activeTool==='liveFinder'} onClick={()=>{setShowProviderExplorerDrawer(false);setActiveTool(activeTool==='liveFinder'?null:'liveFinder');}}>
+          <button className={`command-action${activeTool==='liveFinder'?' active':''}`} aria-expanded={activeTool==='liveFinder'} onClick={()=>selectSidebarWorkspace(activeTool==='liveFinder'?'providers':'liveFinder')}>
             <PanelRightOpen size={16}/><span>Analysis</span>
           </button>
         </div>
@@ -3796,11 +3807,11 @@ export default function App() {
           <section className="sb-section command-section">
             <div className="command-section-title"><Radar size={15}/><span>Workflows</span></div>
             <div className="command-tool-grid">
-              <button className={String((activeTool==='liveFinder'?'active':'') || '').concat(' unified-live-tool').trim()} onClick={()=>{setProviderToolMode('live');document.body.dataset.providerTool='live';(()=>{setShowProviderExplorerDrawer(false);toggleCommandTool('liveFinder');})();}}><Radar size={16}/><span>Live Finder</span></button>
-                <button type="button" className="unified-npi-tool" onClick={()=>{setProviderToolMode('npi');document.body.dataset.providerTool='npi';(()=>{setActiveTool('liveFinder');document.body.dataset.providerTool='npi';})();}} aria-pressed={providerToolMode==='npi'}>
+              <button className={String((activeTool==='liveFinder'?'active':'') || '').concat(' unified-live-tool').trim()} onClick={()=>{setProviderToolMode('live');document.body.dataset.providerTool='live';selectSidebarWorkspace('liveFinder');}}><Radar size={16}/><span>Live Finder</span></button>
+                <button type="button" className="unified-npi-tool" onClick={()=>{setProviderToolMode('npi');document.body.dataset.providerTool='npi';selectSidebarWorkspace('liveFinder');}} aria-pressed={providerToolMode==='npi'}>
                   <span>NPI Registry</span>
                 </button>
-                <button type="button" className="unified-explorer-tool" onClick={()=>{setShowProviderExplorerDrawer(value=>!value);if(activeTool==='liveFinder')setActiveTool(null);}}>
+                <button type="button" className="unified-explorer-tool" onClick={()=>selectSidebarWorkspace(showProviderExplorerDrawer?'providers':'explorer')}>
                   <span>Provider Explorer</span>
                 </button>
               <button className={activeTool==='radius'?'active':''} onClick={()=>toggleCommandTool('radius')}><Crosshair size={16}/><span>Radius Tool</span></button>
@@ -3977,6 +3988,7 @@ export default function App() {
               <span><SlidersHorizontal size={18}/></span>
               <div><strong>Provider Explorer</strong><small>Map visualization and database scope</small></div>
             </div>
+            <button type="button" className="rp-close" aria-label="Close Provider Explorer" onClick={()=>selectSidebarWorkspace('providers')}>Close</button>
 
           </div>
           <div className="provider-drawer-body">
@@ -4176,7 +4188,7 @@ export default function App() {
                   >
                     <Download size={13}/> Export CSV
                   </button>
-                  <button className="rp-close" onClick={()=>{setActiveTool(activeTool === 'liveFinder' ? null : 'liveFinder');setSheetState('default');}}>Close</button>
+                  <button className="rp-close" onClick={()=>{selectSidebarWorkspace('providers');setSheetState('default');}}>Close</button>
                 </div>
               </div>
               <div className="lp-controls">

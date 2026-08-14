@@ -46,10 +46,31 @@ jobs:
       USA_EMBASSY_DATABASE_URL_4: ${{ secrets.USA_EMBASSY_DATABASE_URL_4 }}
 
     steps:
-      - name: Install PostgreSQL client
+      - name: Install PostgreSQL 18 client
+        shell: bash
         run: |
+          set -euo pipefail
           sudo apt-get update
-          sudo apt-get install --yes postgresql-client
+          sudo apt-get install --yes ca-certificates curl
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl \
+            --fail \
+            --show-error \
+            --silent \
+            --output /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          ubuntu_codename="$(. /etc/os-release && printf '%s' "$VERSION_CODENAME")"
+          sudo tee /etc/apt/sources.list.d/pgdg.sources >/dev/null <<EOF
+          Types: deb
+          URIs: https://apt.postgresql.org/pub/repos/apt
+          Suites: ${ubuntu_codename}-pgdg
+          Components: main
+          Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          EOF
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client-18
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+          /usr/lib/postgresql/18/bin/pg_dump --version
 
       - name: Select and validate empty target
         shell: bash

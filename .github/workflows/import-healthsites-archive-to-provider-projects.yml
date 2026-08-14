@@ -1,0 +1,239 @@
+name: Import all Healthsites countries into provider Neon projects
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_count:
+        description: Number of provider Neon projects already initialized
+        required: true
+        default: "8"
+        type: choice
+        options: ["2", "3", "4", "5", "6", "7", "8"]
+      confirmation:
+        description: Type IMPORT_ALL_COUNTRIES
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: healthsites-provider-neon-import
+  cancel-in-progress: false
+
+jobs:
+  import:
+    name: Import all countries through the canonical provider pipeline
+    if: ${{ inputs.confirmation == 'IMPORT_ALL_COUNTRIES' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      PROJECT_COUNT: ${{ inputs.project_count }}
+      HEALTHSITES_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
+      HEALTHSITES_DATABASE_URL_2: ${{ secrets.HEALTHSITES_DATABASE_URL_2 }}
+      HEALTHSITES_DATABASE_URL_3: ${{ secrets.HEALTHSITES_DATABASE_URL_3 }}
+      HEALTHSITES_DATABASE_URL_4: ${{ secrets.HEALTHSITES_DATABASE_URL_4 }}
+      HEALTHSITES_DATABASE_URL_5: ${{ secrets.HEALTHSITES_DATABASE_URL_5 }}
+      HEALTHSITES_DATABASE_URL_6: ${{ secrets.HEALTHSITES_DATABASE_URL_6 }}
+      HEALTHSITES_DATABASE_URL_7: ${{ secrets.HEALTHSITES_DATABASE_URL_7 }}
+      HEALTHSITES_DATABASE_URL_8: ${{ secrets.HEALTHSITES_DATABASE_URL_8 }}
+      R2_BUCKET: healthsites-data
+      R2_SOURCE_KEY: source/World.zip
+      RCLONE_CONFIG_R2_TYPE: s3
+      RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+      RCLONE_CONFIG_R2_REGION: auto
+      RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      RCLONE_CONFIG_R2_ACL: private
+      RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
+
+    steps:
+      - name: Check out the provider importer
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install archive and PostgreSQL tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes gdal-bin postgresql-client rclone unzip jq
+
+      - name: Validate every provider project
+        shell: bash
+        run: |
+          set -euo pipefail
+          for slot in $(seq 1 "$PROJECT_COUNT"); do
+            if [[ "$slot" == "1" ]]; then
+              variable=HEALTHSITES_DATABASE_URL
+            else
+              variable="HEALTHSITES_DATABASE_URL_${slot}"
+            fi
+            [[ "${!variable:-}" == postgres* ]] || { echo "${variable} is missing" >&2; exit 1; }
+          done
+          [[ -n "$RCLONE_CONFIG_R2_ENDPOINT" ]] || { echo "R2_ENDPOINT is missing" >&2; exit 1; }
+          [[ -n "$RCLONE_CONFIG_R2_ACCESS_KEY_ID" ]] || { echo "R2_ACCESS_KEY_ID is missing" >&2; exit 1; }
+          [[ -n "$RCLONE_CONFIG_R2_SECRET_ACCESS_KEY" ]] || { echo "R2_SECRET_ACCESS_KEY is missing" >&2; exit 1; }
+
+      - name: Download the Healthsites source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/healthsites
+          rclone copyto \
+            "r2:${R2_BUCKET}/${R2_SOURCE_KEY}" \
+            /tmp/healthsites/World.zip \
+            --s3-no-check-bucket \
+            --transfers 8 \
+            --multi-thread-streams 8 \
+            --checkers 16 \
+            --stats 30s \
+            --stats-one-line
+          test -s /tmp/healthsites/World.zip
+          unzip -tq /tmp/healthsites/World.zip
+          ls -lh /tmp/healthsites/World.zip
+
+      - name: Normalize all node and way facilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          NORMALIZED=/tmp/healthsites/healthsites-world.tsv
+          mapfile -t shape_files < <(zipinfo -1 /tmp/healthsites/World.zip | grep -Ei '(^|/).*-(node|way)\.shp$' | sort)
+          if [[ "${#shape_files[@]}" -lt 2 ]]; then
+            echo "Expected both node and way shapefiles; found ${#shape_files[@]}" >&2
+            printf '%s\n' "${shape_files[@]}" >&2
+            exit 1
+          fi
+          for shape_file in "${shape_files[@]}"; do
+            lower="${shape_file,,}"
+            if [[ "$lower" == *-node.shp ]]; then
+              layer=node
+            elif [[ "$lower" == *-way.shp ]]; then
+              layer=way
+            else
+              continue
+            fi
+            echo "Normalizing ${shape_file} as ${layer} facilities"
+            ogr2ogr \
+              -f GeoJSONSeq \
+              /vsistdout/ \
+              "/vsizip//tmp/healthsites/World.zip/${shape_file}" \
+              -t_srs EPSG:4326 \
+            | node scripts/normalize-healthsites-archive.mjs \
+                --layer "$layer" \
+                --output "$NORMALIZED"
+          done
+          test -s "$NORMALIZED"
+          echo "Normalized rows: $(( $(wc -l < "$NORMALIZED") - 1 ))"
+          df -h /
+
+      - name: Allocate every country across provider projects
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/partition-healthsites-provider-projects.mjs \
+            --input /tmp/healthsites/healthsites-world.tsv \
+            --output-dir /tmp/healthsites/provider-projects \
+            --project-count "$PROJECT_COUNT"
+          jq . /tmp/healthsites/provider-projects/provider-project-allocation.json
+
+      - name: Save the country allocation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: healthsites-provider-project-allocation
+          path: /tmp/healthsites/provider-projects/provider-project-allocation.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Load and promote every provider project
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest=/tmp/healthsites/provider-projects/provider-project-allocation.json
+          columns="source_record_id,source_url,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,primary_provider_type,capability_tags,quality_score,master_key"
+
+          for slot in $(seq 1 "$PROJECT_COUNT"); do
+            if [[ "$slot" == "1" ]]; then
+              target_url="$HEALTHSITES_DATABASE_URL"
+            else
+              variable="HEALTHSITES_DATABASE_URL_${slot}"
+              target_url="${!variable}"
+            fi
+            echo "::add-mask::${target_url}"
+            file="/tmp/healthsites/provider-projects/healthsites_provider_project_${slot}.tsv"
+            expected="$(jq -r ".projects[] | select(.slot == ${slot}) | .rows" "$manifest")"
+            expected_master="$(jq -r ".projects[] | select(.slot == ${slot}) | .distinct_master_keys" "$manifest")"
+            test -s "$file"
+
+            missing="$(psql "$target_url" -Atqc "
+              WITH required(name) AS (VALUES
+                ('provider_raw_records'),
+                ('provider_stage_records'),
+                ('provider_master'),
+                ('provider_master_sources'),
+                ('provider_master_types'),
+                ('provider_type_catalog'),
+                ('medical_providers'),
+                ('provider_master_map_view')
+              )
+              SELECT string_agg(name, ', ' ORDER BY name)
+              FROM required
+              WHERE to_regclass('public.' || name) IS NULL
+            ")"
+            [[ -z "$missing" ]] || { echo "Provider project ${slot} is not initialized. Missing: ${missing}" >&2; exit 1; }
+
+            psql "$target_url" -v ON_ERROR_STOP=1 <<'SQL'
+            CREATE TABLE IF NOT EXISTS public.source5_import_staging (
+              source_record_id text PRIMARY KEY,
+              source_url text,
+              name text NOT NULL,
+              normalized_name text,
+              address_line1 text,
+              formatted_address text,
+              city text,
+              state_region text,
+              postal_code text,
+              country_code text NOT NULL,
+              lat double precision NOT NULL,
+              lng double precision NOT NULL,
+              phone text,
+              website text,
+              email text,
+              primary_provider_type text,
+              capability_tags text[] NOT NULL DEFAULT ARRAY[]::text[],
+              quality_score numeric,
+              master_key text NOT NULL
+            );
+            TRUNCATE public.source5_import_staging;
+            SQL
+
+            if ! psql "$target_url" -v ON_ERROR_STOP=1 -c "\\copy public.source5_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" < "$file"; then
+              psql "$target_url" -c 'TRUNCATE public.source5_import_staging' || true
+              exit 1
+            fi
+
+            if ! psql "$target_url" \
+              -v ON_ERROR_STOP=1 \
+              -v expected="$expected" \
+              -v expected_master="$expected_master" \
+              -f scripts/promote-healthsites-world.sql; then
+              psql "$target_url" -c 'TRUNCATE public.source5_import_staging' || true
+              exit 1
+            fi
+
+            actual="$(psql "$target_url" -Atqc "SELECT count(*) FROM public.medical_providers WHERE data_source='Healthsites / OpenStreetMap'")"
+            [[ "$actual" == "$expected" ]] || { echo "Provider project ${slot} verification failed: ${actual} vs ${expected}" >&2; exit 1; }
+            echo "Provider project ${slot}: promoted ${actual} Healthsites facilities"
+            echo "- Provider project ${slot}: ${actual} facilities" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          imported="$(jq '[.projects[].rows] | add' "$manifest")"
+          source="$(jq '.source_rows' "$manifest")"
+          [[ "$imported" == "$source" ]] || { echo "Final all-country total mismatch: ${imported} vs ${source}" >&2; exit 1; }
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "All ${source} normalized facilities were assigned and promoted through the existing provider pipeline." >> "$GITHUB_STEP_SUMMARY"

@@ -2634,11 +2634,14 @@ export default function App() {
     return ()=>{ if(myClinicsLayerRef.current) { myClinicsLayerRef.current.destroy(); myClinicsLayerRef.current = null; } };
   },[showMyClinicsLayer,myClinicsData,showGlowPoints]);
 
-  async function uploadClinicChunk(groupName:string, filename:string, rows:any[], chunkIndex:number, totalChunks:number) {
-    const suffix = totalChunks > 1 ? ` (${chunkIndex + 1}/${totalChunks})` : '';
+  async function uploadClinicChunk(groupName:string, filename:string, rows:any[], chunkIndex:number, totalChunks:number, uploadSessionId:string, rowOffset:number) {
     const response = await fetch('/api/my-clinics/upload', {
-      method:'POST', headers:{'content-type':'application/json'},
-      body:JSON.stringify({ groupName: `${groupName}${suffix}`, filename, rows }),
+      method:'POST',
+      headers:{
+        'content-type':'application/json',
+        'idempotency-key':`my-clinics:${uploadSessionId}:${chunkIndex}`,
+      },
+      body:JSON.stringify({ groupName, filename, rows, rowOffset, chunkIndex, chunkCount:totalChunks }),
     });
     const data = await response.json().catch(()=>({}));
     if(!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
@@ -2658,12 +2661,15 @@ export default function App() {
       const rows: any[] = XLSX.utils.sheet_to_json(ws, {defval:''});
       if (!rows.length) { setUploadProgress('No data found in file.'); return; }
       const groupName = uploadGroupName.trim() || `Import ${new Date().toLocaleDateString('en-US',{month:'short',day:'numeric'})}`;
-      const chunkSize = 5000;
+      const chunkSize = 1000;
       const chunks = Array.from({length:Math.ceil(rows.length/chunkSize)},(_,index)=>rows.slice(index*chunkSize,(index+1)*chunkSize));
+      const uploadSessionId = typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const summary = { rawRows:0, stagedRows:0, masteredRows:0, errorRows:0, needsGeocodeRows:0 };
       for (let index=0; index<chunks.length; index++) {
         setUploadProgress(`Uploading ${file.name} to Provider Ingest Pipeline (${index+1}/${chunks.length})…`);
-        const result = await uploadClinicChunk(groupName, file.name, chunks[index], index, chunks.length);
+        const result = await uploadClinicChunk(groupName, file.name, chunks[index], index, chunks.length, uploadSessionId, index * chunkSize);
         summary.rawRows += Number(result.rawRows || 0);
         summary.stagedRows += Number(result.stagedRows || 0);
         summary.masteredRows += Number(result.masteredRows || 0);

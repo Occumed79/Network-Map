@@ -19,7 +19,8 @@ permissions:
 
 concurrency:
   group: healthsites-api-neon-import
-  cancel-in-progress: false
+  # A newer reviewed importer supersedes an older pre-promotion download safely.
+  cancel-in-progress: true
 
 jobs:
   import:

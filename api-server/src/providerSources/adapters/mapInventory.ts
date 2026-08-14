@@ -1,4 +1,4 @@
-import { getPool } from "@workspace/db";
+import { getProviderDatabaseProjects } from "@workspace/db";
 import { isPersistenceConfigured } from "../../lib/networkMapPersistence";
 import type { ProviderCandidate, CoordinateStatus, SearchParams } from "../types";
 import { haversineMiles, isValidCoordinate } from "../distance";
@@ -19,7 +19,6 @@ export async function searchMapInventory(params: SearchParams): Promise<Provider
   const latDelta = radiusMiles / 69;
   const lngCos = Math.cos(params.centerLat * Math.PI / 180);
   const lngDelta = radiusMiles / Math.max(69 * Math.abs(lngCos), 1);
-  const pool = getPool();
   const query = `
     SELECT name, formatted_address, lat, lng, phone, website, locality,
            administrative_area_level_1, postal_code, data_source, source_id, raw_data
@@ -32,13 +31,19 @@ export async function searchMapInventory(params: SearchParams): Promise<Provider
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), QUERY_TIMEOUT_MS);
   try {
-    const result = await pool.query({
-      text: query,
-      values: [params.centerLat - latDelta, params.centerLat + latDelta, params.centerLng - lngDelta, params.centerLng + lngDelta],
-      signal: controller.signal,
-    } as any);
+    const databaseProjects = getProviderDatabaseProjects();
+    const results = await Promise.allSettled(databaseProjects.map((project) => project.pool.query({
+        text: query,
+        values: [params.centerLat - latDelta, params.centerLat + latDelta, params.centerLng - lngDelta, params.centerLng + lngDelta],
+        signal: controller.signal,
+      } as any)));
+    const successful = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+    if (!successful.length) {
+      const firstFailure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+      throw firstFailure?.reason || new Error("No provider database project is available");
+    }
     const observedAt = new Date().toISOString();
-    return result.rows.flatMap((row: Record<string, unknown>, index: number) => {
+    const providers = successful.flatMap((result) => result.value.rows).flatMap((row: Record<string, unknown>, index: number) => {
       const lat = Number(row.lat);
       const lng = Number(row.lng);
       if (!isValidCoordinate(lat, lng)) return [];
@@ -101,6 +106,12 @@ export async function searchMapInventory(params: SearchParams): Promise<Provider
         _rawSources: [source],
       } satisfies ProviderCandidate];
     });
+    const unique = new Map<string, ProviderCandidate>();
+    for (const provider of providers.sort((a, b) => (a.distanceMiles || 0) - (b.distanceMiles || 0))) {
+      const key = `${provider.name.toLowerCase()}|${provider.lat.toFixed(5)}|${provider.lng.toFixed(5)}`;
+      if (!unique.has(key)) unique.set(key, provider);
+    }
+    return [...unique.values()].slice(0, 1500);
   } catch (error) {
     if (controller.signal.aborted) throw new Error(`Map inventory query timed out after ${QUERY_TIMEOUT_MS}ms`);
     throw error;

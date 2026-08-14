@@ -7,8 +7,6 @@ import { registerRuntimeOwner } from "./runtimeControllerRegistry";
 
 const SOURCE_ID = "provider-location-search-results";
 const LAYER_ID = "provider-location-search-dots";
-const FLATGEOBUF_URL = "/api/healthsites/flatgeobuf";
-const FLATGEOBUF_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/flatgeobuf@4.4.0/dist/flatgeobuf-geojson.min.js";
 const PAGE_SIZE = 5_000;
 const MAX_RESULTS = 75_000;
 const MAX_PAGES_PER_QUERY = 20;
@@ -16,7 +14,6 @@ const MAX_PAGES_PER_QUERY = 20;
 const COUNTRIES = `Afghanistan|Albania|Algeria|Andorra|Angola|Antigua and Barbuda|Argentina|Armenia|Australia|Austria|Azerbaijan|Bahamas|Bahrain|Bangladesh|Barbados|Belarus|Belgium|Belize|Benin|Bhutan|Bolivia|Bosnia and Herzegovina|Botswana|Brazil|Brunei|Bulgaria|Burkina Faso|Burundi|Cabo Verde|Cambodia|Cameroon|Canada|Central African Republic|Chad|Chile|China|Colombia|Comoros|Costa Rica|Croatia|Cuba|Cyprus|Czechia|Democratic Republic of the Congo|Denmark|Djibouti|Dominica|Dominican Republic|Ecuador|Egypt|El Salvador|Equatorial Guinea|Eritrea|Estonia|Eswatini|Ethiopia|Fiji|Finland|France|Gabon|Gambia|Georgia|Germany|Ghana|Greece|Grenada|Guatemala|Guinea|Guinea-Bissau|Guyana|Haiti|Honduras|Hungary|Iceland|India|Indonesia|Iran|Iraq|Ireland|Israel|Italy|Ivory Coast|Jamaica|Japan|Jordan|Kazakhstan|Kenya|Kiribati|Kosovo|Kuwait|Kyrgyzstan|Laos|Latvia|Lebanon|Lesotho|Liberia|Libya|Liechtenstein|Lithuania|Luxembourg|Madagascar|Malawi|Malaysia|Maldives|Mali|Malta|Marshall Islands|Mauritania|Mauritius|Mexico|Micronesia|Moldova|Monaco|Mongolia|Montenegro|Morocco|Mozambique|Myanmar|Namibia|Nauru|Nepal|Netherlands|New Zealand|Nicaragua|Niger|Nigeria|North Korea|North Macedonia|Norway|Oman|Pakistan|Palau|Palestine|Panama|Papua New Guinea|Paraguay|Peru|Philippines|Poland|Portugal|Qatar|Republic of the Congo|Romania|Russia|Rwanda|Saint Kitts and Nevis|Saint Lucia|Saint Vincent and the Grenadines|Samoa|San Marino|Sao Tome and Principe|Saudi Arabia|Senegal|Serbia|Seychelles|Sierra Leone|Singapore|Slovakia|Slovenia|Solomon Islands|Somalia|South Africa|South Korea|South Sudan|Spain|Sri Lanka|Sudan|Suriname|Sweden|Switzerland|Syria|Taiwan|Tajikistan|Tanzania|Thailand|Timor-Leste|Togo|Tonga|Trinidad and Tobago|Tunisia|Turkey|Turkmenistan|Tuvalu|Uganda|Ukraine|United Arab Emirates|United Kingdom|United States|Uruguay|Uzbekistan|Vanuatu|Vatican City|Venezuela|Vietnam|Yemen|Zambia|Zimbabwe`.split("|");
 
 type Bounds = { west: number; south: number; east: number; north: number };
-type Rect = { minX: number; minY: number; maxX: number; maxY: number };
 type ResultProperties = {
   name: string;
   address: string;
@@ -47,26 +44,9 @@ type ExplorerProvider = Record<string, unknown> & {
   lat?: number | string | null;
   lng?: number | string | null;
 };
-type FlatGeobufApi = {
-  deserialize: (
-    input: string,
-    rect?: Rect,
-    headerMetaFn?: ((metadata: unknown) => void) | undefined,
-    nocache?: boolean,
-    headers?: HeadersInit,
-  ) => AsyncIterable<GeoJSON.Feature>;
-};
-
-declare global {
-  interface Window {
-    flatgeobuf?: FlatGeobufApi;
-  }
-}
-
 const trackedMaps = new Set<mapboxgl.Map>();
 const clickBoundMaps = new WeakSet<mapboxgl.Map>();
 let latestCollection: ResultCollection = emptyCollection();
-let flatGeobufPromise: Promise<FlatGeobufApi> | null = null;
 let searchGeneration = 0;
 let activeController: AbortController | null = null;
 let currentCountry = "";
@@ -98,15 +78,6 @@ function escapeHtml(value: unknown): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
-}
-
-function firstText(source: Record<string, unknown> | null | undefined, keys: string[]): string {
-  if (!source) return "";
-  for (const key of keys) {
-    const value = source[key];
-    if (value !== null && value !== undefined && String(value).trim()) return String(value).trim();
-  }
-  return "";
 }
 
 function textList(value: unknown): string {
@@ -249,34 +220,6 @@ function registerMap(map: mapboxgl.Map): () => void {
   };
 }
 
-function loadFlatGeobuf(): Promise<FlatGeobufApi> {
-  if (window.flatgeobuf?.deserialize) return Promise.resolve(window.flatgeobuf);
-  if (flatGeobufPromise) return flatGeobufPromise;
-  flatGeobufPromise = new Promise<FlatGeobufApi>((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>(`script[src="${FLATGEOBUF_SCRIPT_URL}"]`);
-    const script = existing || document.createElement("script");
-    const finish = () => {
-      if (window.flatgeobuf?.deserialize) resolve(window.flatgeobuf);
-      else reject(new Error("FlatGeobuf browser library did not initialize."));
-    };
-    if (existing) {
-      if (window.flatgeobuf?.deserialize) finish();
-      else {
-        existing.addEventListener("load", finish, { once: true });
-        existing.addEventListener("error", () => reject(new Error("FlatGeobuf browser library failed to load.")), { once: true });
-      }
-      return;
-    }
-    script.src = FLATGEOBUF_SCRIPT_URL;
-    script.async = true;
-    script.crossOrigin = "anonymous";
-    script.addEventListener("load", finish, { once: true });
-    script.addEventListener("error", () => reject(new Error("FlatGeobuf browser library failed to load.")), { once: true });
-    document.head.appendChild(script);
-  });
-  return flatGeobufPromise;
-}
-
 function fallbackBounds(place: MapboxPlace, city: string): Bounds {
   const latDelta = city ? 0.45 : 5;
   const longitudeScale = Math.max(Math.cos(place.lat * Math.PI / 180), 0.25);
@@ -293,16 +236,6 @@ function placeBounds(place: MapboxPlace, city: string): Bounds {
   const bbox = place.bbox as MapboxBounds | undefined;
   if (bbox) return { west: bbox[0], south: bbox[1], east: bbox[2], north: bbox[3] };
   return fallbackBounds(place, city);
-}
-
-function rectangles(bounds: Bounds): Rect[] {
-  if (bounds.west <= bounds.east) {
-    return [{ minX: bounds.west, minY: bounds.south, maxX: bounds.east, maxY: bounds.north }];
-  }
-  return [
-    { minX: bounds.west, minY: bounds.south, maxX: 180, maxY: bounds.north },
-    { minX: -180, minY: bounds.south, maxX: bounds.east, maxY: bounds.north },
-  ];
 }
 
 function withinBounds(lng: number, lat: number, bounds: Bounds): boolean {
@@ -421,6 +354,7 @@ function networkFeature(provider: ExplorerProvider, bounds: Bounds): ResultFeatu
   const lng = finiteNumber(provider.lng);
   if (lat === null || lng === null || !withinBounds(lng, lat, bounds)) return null;
   const saved = provider.source_kind === "saved" || provider.status === "saved" || normalize(provider.source).includes("my clinics");
+  const healthsites = normalize(provider.source).includes("healthsites");
   return {
     type: "Feature",
     geometry: { type: "Point", coordinates: [lng, lat] },
@@ -434,74 +368,9 @@ function networkFeature(provider: ExplorerProvider, bounds: Bounds): ResultFeatu
       website: String(provider.website || ""),
       services: textList(provider.services || provider.categories),
       source: String(provider.source || (saved ? "My Clinics" : "Provider network")),
-      sourceGroup: saved ? "saved" : "network",
+      sourceGroup: saved ? "saved" : healthsites ? "healthsites" : "network",
     },
   };
-}
-
-function matchesLocation(properties: Record<string, unknown>, countryKeys: string[], city: string): boolean {
-  const countryValue = firstText(properties, ["country", "country_name", "iso2", "iso3", "addr_country", "addr:country"]);
-  if (countryValue && countryKeys.length) {
-    const normalizedCountry = normalize(countryValue);
-    if (!countryKeys.some((key) => normalizedCountry === key || normalizedCountry.includes(key) || key.includes(normalizedCountry))) return false;
-  }
-  const cityValue = firstText(properties, ["city", "addr_city", "addr:city", "town", "village", "locality"]);
-  if (city && cityValue) {
-    const requested = normalize(city);
-    const actual = normalize(cityValue);
-    if (actual !== requested && !actual.includes(requested) && !requested.includes(actual)) return false;
-  }
-  return true;
-}
-
-async function fetchHealthsites(
-  country: string,
-  city: string,
-  place: MapboxPlace,
-  bounds: Bounds,
-  generation: number,
-  remaining: number,
-): Promise<{ features: ResultFeature[]; capped: boolean }> {
-  if (remaining <= 0) return { features: [], capped: true };
-  const api = await loadFlatGeobuf();
-  const features: ResultFeature[] = [];
-  const countryKeys = countryVariants(country, place).map(normalize);
-  let capped = false;
-  for (const rect of rectangles(bounds)) {
-    const iterator = api.deserialize(FLATGEOBUF_URL, rect, undefined, false, { Accept: "application/octet-stream" });
-    for await (const raw of iterator) {
-      if (generation !== searchGeneration) return { features: [], capped: false };
-      if (raw.geometry?.type !== "Point") continue;
-      const coordinates = raw.geometry.coordinates as number[];
-      const lng = Number(coordinates[0]);
-      const lat = Number(coordinates[1]);
-      if (!Number.isFinite(lat) || !Number.isFinite(lng) || !withinBounds(lng, lat, bounds)) continue;
-      const properties = (raw.properties || {}) as Record<string, unknown>;
-      if (!matchesLocation(properties, countryKeys, city)) continue;
-      features.push({
-        type: "Feature",
-        geometry: { type: "Point", coordinates: [lng, lat] },
-        properties: {
-          name: firstText(properties, ["name", "facility_name", "name_en", "operator", "uuid"]) || "Healthsite facility",
-          address: firstText(properties, ["addr_full", "address", "addr_street", "addr:street"]),
-          city: firstText(properties, ["city", "addr_city", "addr:city", "town", "village"]),
-          adminArea: firstText(properties, ["state", "province", "admin_area", "addr_state", "addr:state"]),
-          country: firstText(properties, ["country", "country_name", "iso3", "iso2", "addr_country", "addr:country"]),
-          phone: firstText(properties, ["phone", "contact_number", "contact:phone"]),
-          website: firstText(properties, ["website", "url", "contact:website"]),
-          services: firstText(properties, ["healthcare", "amenity", "facility_type", "type"]),
-          source: "Healthsites.io",
-          sourceGroup: "healthsites",
-        },
-      });
-      if (features.length >= remaining) {
-        capped = true;
-        break;
-      }
-    }
-    if (capped) break;
-  }
-  return { features, capped };
 }
 
 function dedupeFeatures(features: ResultFeature[]): ResultFeature[] {
@@ -585,36 +454,17 @@ async function runSearch(country: string, city: string): Promise<void> {
       .map((provider) => networkFeature(provider, bounds))
       .filter((feature): feature is ResultFeature => Boolean(feature));
 
-    setStatus(`${networkFeatures.length.toLocaleString()} network dots found. Adding Healthsites…`, "loading");
-    let healthsites: { features: ResultFeature[]; capped: boolean } = { features: [], capped: false };
-    let healthsitesWarning = "";
-    try {
-      healthsites = await fetchHealthsites(
-        trimmedCountry,
-        trimmedCity,
-        place,
-        bounds,
-        generation,
-        Math.max(0, MAX_RESULTS - networkFeatures.length),
-      );
-    } catch (error) {
-      healthsitesWarning = error instanceof Error ? error.message : "Healthsites could not be loaded";
-      console.error("Provider Location Finder Healthsites load failed", error);
-    }
-    if (generation !== searchGeneration) return;
-
-    const features = dedupeFeatures([...networkFeatures, ...healthsites.features]);
+    const features = dedupeFeatures(networkFeatures);
     pushCollection({ type: "FeatureCollection", features });
     const location = trimmedCity ? `${trimmedCity}, ${trimmedCountry}` : trimmedCountry;
-    const capped = network.capped || healthsites.capped || features.length >= MAX_RESULTS;
+    const capped = network.capped || features.length >= MAX_RESULTS;
     const fallback = network.usedBoundsFallback ? " Location fields were incomplete, so stored records were matched by the mapped boundary." : "";
-    const partial = healthsitesWarning ? " Healthsites was unavailable, so stored and saved providers are shown." : "";
     if (features.length === 0) {
-      setStatus(`No provider dots were found for ${location}.${partial}`, healthsitesWarning ? "warning" : "neutral");
+      setStatus(`No provider dots were found for ${location}.`, "neutral");
     } else if (capped) {
-      setStatus(`${features.length.toLocaleString()} individual dots shown in ${location}. Refine by city to reveal additional providers. ${sourceSummary(features)}.${partial}${fallback}`, "warning");
+      setStatus(`${features.length.toLocaleString()} individual dots shown in ${location}. Refine by city to reveal additional providers. ${sourceSummary(features)}.${fallback}`, "warning");
     } else {
-      setStatus(`${features.length.toLocaleString()} individual providers shown in ${location}. ${sourceSummary(features)}.${partial}${fallback}`, healthsitesWarning ? "warning" : "success");
+      setStatus(`${features.length.toLocaleString()} individual providers shown in ${location}. ${sourceSummary(features)}.${fallback}`, "success");
     }
   } catch (error) {
     if (generation !== searchGeneration || (error instanceof DOMException && error.name === "AbortError")) return;

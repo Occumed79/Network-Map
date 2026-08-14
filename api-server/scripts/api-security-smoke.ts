@@ -8,6 +8,8 @@ const app = fs.readFileSync(path.join(root, "src/app.ts"), "utf8");
 const security = fs.readFileSync(path.join(root, "src/middleware/apiSecurity.ts"), "utf8");
 const migration = fs.readFileSync(path.join(root, "src/db/migrations/20260806_api_security.sql"), "utf8");
 const clinicSync = fs.readFileSync(path.join(root, "../occu-med-map/src/myClinicsBackendSync.ts"), "utf8");
+const clinicUploadUi = fs.readFileSync(path.join(root, "../occu-med-map/src/App.tsx"), "utf8");
+const adminApiRuntime = fs.readFileSync(path.join(root, "../occu-med-map/src/adminApiRuntime.ts"), "utf8");
 const providerSearchRoute = fs.readFileSync(path.join(root, "src/routes/universalDiscovery.ts"), "utf8");
 
 assert.match(app, /origin === sameOrigin \|\| CLIENT_ORIGINS\.includes\(origin\)/, "CORS must explicitly allow only same-origin or configured origins");
@@ -35,6 +37,7 @@ assert.equal(providerUploadPolicy?.capability, "upload", "provider upload lifecy
 assert.equal(providerUploadPolicy?.idempotent, true, "provider upload lifecycle writes must require idempotency protection");
 const clinicUploadPolicy = ROUTE_POLICIES.find((policy) => policy.prefix === "/api/my-clinics" && policy.methods?.includes("POST"));
 assert.equal(clinicUploadPolicy?.capability, "upload", "clinic dataset writes must remain under upload capability");
+assert.equal(clinicUploadPolicy?.authentication, "none", "My Clinics uploads must not require an admin token");
 assert.equal(clinicUploadPolicy?.idempotent, true, "clinic dataset writes must retain replay protection");
 const priceDiscoveryPolicy = ROUTE_POLICIES.find((policy) => policy.prefix === "/api/price-discovery" && policy.methods?.includes("POST"));
 assert.equal(priceDiscoveryPolicy?.capability, "write", "price-discovery persistence must be explicitly write-protected");
@@ -63,7 +66,10 @@ assert.match(security, /security_control_unavailable/, "mutation security-contro
 assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.api_rate_limit_buckets/, "distributed rate-limit table must exist");
 assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.api_idempotency_keys/, "idempotency table must exist");
 assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.api_write_audit/, "write audit table must exist");
-assert.match(clinicSync, /idempotency-key/, "frontend bulk uploads must send idempotency keys");
+assert.match(clinicSync, /idempotency-key/, "background bulk uploads must send idempotency keys");
+assert.match(clinicUploadUi, /'idempotency-key':`my-clinics:/, "Upload Clinics modal must send idempotency keys");
+assert.match(clinicUploadUi, /const chunkSize = 1000/, "Upload Clinics modal must keep each guarded request below the full 5,000-row ceiling");
+assert.doesNotMatch(adminApiRuntime, /"\/api\/my-clinics"/, "My Clinics uploads must not trigger the admin-token prompt");
 
 const hashA = apiSecurityInternals.bodyHash({ a: 1 });
 const hashB = apiSecurityInternals.bodyHash({ a: 1 });

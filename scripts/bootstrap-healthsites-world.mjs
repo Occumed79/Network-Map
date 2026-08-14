@@ -322,12 +322,15 @@ async function main() {
     country_codes_present: [...new Set(allRecords.map((row) => row.country_code).filter(Boolean))].sort(),
     total_rows: allRecords.length,
     distinct_master_keys: new Set(allRecords.map((row) => row.master_key)).size,
-    coordinate_bounds: {
-      min_lat: Math.min(...allRecords.map((row) => row.lat)),
-      max_lat: Math.max(...allRecords.map((row) => row.lat)),
-      min_lng: Math.min(...allRecords.map((row) => row.lng)),
-      max_lng: Math.max(...allRecords.map((row) => row.lng)),
-    },
+    coordinate_bounds: allRecords.reduce(
+      (bounds, row) => ({
+        min_lat: Math.min(bounds.min_lat, row.lat),
+        max_lat: Math.max(bounds.max_lat, row.lat),
+        min_lng: Math.min(bounds.min_lng, row.lng),
+        max_lng: Math.max(bounds.max_lng, row.lng),
+      }),
+      { min_lat: 90, max_lat: -90, min_lng: 180, max_lng: -180 },
+    ),
     geographic_quadrants: {
       north_west: allRecords.filter((row) => row.lat >= 0 && row.lng < 0).length,
       north_east: allRecords.filter((row) => row.lat >= 0 && row.lng >= 0).length,

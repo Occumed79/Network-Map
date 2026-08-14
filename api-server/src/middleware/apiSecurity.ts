@@ -9,6 +9,7 @@ type RoutePolicy = {
   prefix: string;
   methods?: string[];
   capability: ApiCapability;
+  authentication?: "required" | "none";
   maxBytes?: number;
   rateLimit?: { windowSeconds: number; max: number };
   idempotent?: boolean;
@@ -28,7 +29,7 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   { prefix: "/api/admin", methods: ["GET", "POST", "PUT", "PATCH", "DELETE"], capability: "admin", rateLimit: { windowSeconds: 600, max: 60 }, idempotent: false },
   { prefix: "/api/provider-uploads", methods: ["GET"], capability: "admin", rateLimit: { windowSeconds: 600, max: 60 } },
   { prefix: "/api/provider-uploads", methods: ["POST"], capability: "upload", maxBytes: UPLOAD_MAX_BYTES, rateLimit: { windowSeconds: 600, max: 60 }, idempotent: true },
-  { prefix: "/api/my-clinics", methods: ["POST", "PUT", "PATCH"], capability: "upload", maxBytes: UPLOAD_MAX_BYTES, rateLimit: { windowSeconds: 600, max: 80 }, idempotent: true },
+  { prefix: "/api/my-clinics", methods: ["POST", "PUT", "PATCH"], capability: "upload", authentication: "none", maxBytes: UPLOAD_MAX_BYTES, rateLimit: { windowSeconds: 600, max: 80 }, idempotent: true },
   { prefix: "/api/provider-sources/import", methods: ["POST"], capability: "upload", maxBytes: UPLOAD_MAX_BYTES, rateLimit: { windowSeconds: 600, max: 30 }, idempotent: true },
   { prefix: "/api/provider-explorer", methods: ["POST", "PUT", "PATCH"], capability: "write", rateLimit: { windowSeconds: 600, max: 120 }, idempotent: true },
   { prefix: "/api/indexing", methods: ["POST", "PUT", "PATCH"], capability: "write", rateLimit: { windowSeconds: 600, max: 30 }, idempotent: true },
@@ -295,19 +296,21 @@ export const apiSecurity: RequestHandler = async (req, res, next) => {
       return;
     }
 
-    const expected = tokenFor(policy.capability);
-    if (!expected) {
-      if (process.env.NODE_ENV !== "production") {
-        next();
+    if (policy.authentication !== "none") {
+      const expected = tokenFor(policy.capability);
+      if (!expected) {
+        if (process.env.NODE_ENV !== "production") {
+          next();
+          return;
+        }
+        res.status(503).json({ error: "Write authorization is not configured for this capability.", code: "write_auth_not_configured" });
         return;
       }
-      res.status(503).json({ error: "Write authorization is not configured for this capability.", code: "write_auth_not_configured" });
-      return;
-    }
-    const supplied = extractBearer(req);
-    if (!supplied || !safeEqual(expected, supplied)) {
-      res.status(401).json({ error: "Authentication is required for this operation.", code: "write_auth_required" });
-      return;
+      const supplied = extractBearer(req);
+      if (!supplied || !safeEqual(expected, supplied)) {
+        res.status(401).json({ error: "Authentication is required for this operation.", code: "write_auth_required" });
+        return;
+      }
     }
 
     if (policy.idempotent) {

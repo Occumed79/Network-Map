@@ -314,9 +314,9 @@ function masterKeyFor(row: NormalizedRow): string {
   })}`;
 }
 
-function prepareRows(rows: IncomingRow[]): PreparedRow[] {
+function prepareRows(rows: IncomingRow[], rowOffset = 0): PreparedRow[] {
   return rows.map((row, index) => {
-    const normalized = normalizeRow(row || {}, index);
+    const normalized = normalizeRow(row || {}, rowOffset + index);
     const fatalReasons = normalized.qualityReasons.filter((reason) => reason === "blank_name" || reason === "placeholder_name");
     return {
       ...normalized,
@@ -377,7 +377,8 @@ router.post("/my-clinics/upload", async (req: Request, res: Response, next: Next
   const sourceKey = sourceKeyForLabel(sourceLabel);
   const uploadLabel = text(req.body?.uploadLabel || req.body?.groupName) || sourceLabel;
   const uploadedBy = text(req.body?.uploadedBy) || null;
-  const prepared = prepareRows(rows);
+  const rowOffset = Math.max(0, Math.trunc(Number(req.body?.rowOffset) || 0));
+  const prepared = prepareRows(rows, rowOffset);
   const staged = prepared.filter((row) => !row.errorMessage);
   const mapReady = staged.filter((row) => row.coordinatesReady);
   const masters = uniqueBy(mapReady, (row) => row.masterKey);

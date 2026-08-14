@@ -10,7 +10,6 @@ import "./adminApiRuntime";
 import "./mapControlsBridgeRuntime";
 import "./mapToolsCommandPanel";
 import "./routePlannerControlsRuntime";
-import "./healthsitesFlatDotsRuntime";
 import "./providerLocationFinderRuntime";
 import "./providerTypeNormalizationRuntime";
 import "./dualMapEngineRuntime";

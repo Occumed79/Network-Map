@@ -62,7 +62,7 @@ jobs:
       - name: Install archive and PostgreSQL tools
         run: |
           sudo apt-get update
-          sudo apt-get install --yes gdal-bin postgresql-client rclone unzip jq
+          sudo apt-get install --yes curl gdal-bin postgresql-client rclone unzip jq
 
       - name: Validate every provider project
         shell: bash
@@ -129,6 +129,22 @@ jobs:
                 --output "$NORMALIZED"
           done
           test -s "$NORMALIZED"
+
+          boundaries_dir=/tmp/healthsites/country-boundaries
+          mkdir -p "$boundaries_dir"
+          curl --fail --location --retry 3 \
+            https://naciscdn.org/naturalearth/10m/cultural/ne_10m_admin_0_countries.zip \
+            --output "$boundaries_dir/countries.zip"
+          unzip -q "$boundaries_dir/countries.zip" -d "$boundaries_dir"
+          ogr2ogr \
+            -f GeoJSON \
+            "$boundaries_dir/countries.geojson" \
+            "$boundaries_dir/ne_10m_admin_0_countries.shp"
+          node scripts/assign-healthsites-country-codes.mjs \
+            --input "$NORMALIZED" \
+            --boundaries "$boundaries_dir/countries.geojson" \
+            --minimum-resolved-ratio 0.95
+
           echo "Normalized rows: $(( $(wc -l < "$NORMALIZED") - 1 ))"
           df -h /
 

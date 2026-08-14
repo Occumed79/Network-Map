@@ -63,23 +63,20 @@ ON CONFLICT (source_key) DO UPDATE SET
 INSERT INTO public.provider_raw_records
   (source_key, source_record_id, content_hash, raw_payload, raw_text, status)
 SELECT
-  'healthsites_osm', t.source_record_id, md5(to_jsonb(t)::text),
-  to_jsonb(t), to_jsonb(t)::text, 'raw_loaded'
-FROM public.source5_import_staging t
-WHERE NOT EXISTS (
-  SELECT 1 FROM public.provider_raw_records r
-  WHERE r.source_key='healthsites_osm' AND r.source_record_id=t.source_record_id
-);
-
-UPDATE public.provider_raw_records r
-SET content_hash=md5(to_jsonb(t)::text),
-    raw_payload=to_jsonb(t),
-    raw_text=to_jsonb(t)::text,
-    status='raw_loaded',
-    updated_at=now()
-FROM public.source5_import_staging t
-WHERE r.source_key='healthsites_osm'
-  AND r.source_record_id=t.source_record_id;
+  'healthsites_osm',
+  t.source_record_id,
+  md5(to_jsonb(t)::text),
+  jsonb_build_object(
+    'source_record_id', t.source_record_id,
+    'source_url', t.source_url,
+    'name', t.name,
+    'country_code', t.country_code,
+    'lat', t.lat,
+    'lng', t.lng
+  ),
+  '',
+  'raw_loaded'
+FROM public.source5_import_staging t;
 
 INSERT INTO public.provider_stage_records (
   raw_record_id, source_key, source_record_id, name, normalized_name,

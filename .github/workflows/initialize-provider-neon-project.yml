@@ -1,0 +1,146 @@
+name: Initialize a source provider Neon project
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_family:
+        description: Provider source stored in this Neon project
+        required: true
+        type: choice
+        options: ["healthsites", "usa_embassy"]
+      project_slot:
+        description: Provider database project to initialize
+        required: true
+        type: choice
+        options: ["1", "2", "3", "4", "5", "6", "7", "8"]
+      confirmation:
+        description: Type INITIALIZE_EMPTY_PROJECT
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: initialize-provider-neon-project-${{ inputs.source_family }}-${{ inputs.project_slot }}
+  cancel-in-progress: false
+
+jobs:
+  initialize:
+    if: ${{ inputs.confirmation == 'INITIALIZE_EMPTY_PROJECT' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SOURCE_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      HEALTHSITES_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
+      HEALTHSITES_DATABASE_URL_2: ${{ secrets.HEALTHSITES_DATABASE_URL_2 }}
+      HEALTHSITES_DATABASE_URL_3: ${{ secrets.HEALTHSITES_DATABASE_URL_3 }}
+      HEALTHSITES_DATABASE_URL_4: ${{ secrets.HEALTHSITES_DATABASE_URL_4 }}
+      HEALTHSITES_DATABASE_URL_5: ${{ secrets.HEALTHSITES_DATABASE_URL_5 }}
+      HEALTHSITES_DATABASE_URL_6: ${{ secrets.HEALTHSITES_DATABASE_URL_6 }}
+      HEALTHSITES_DATABASE_URL_7: ${{ secrets.HEALTHSITES_DATABASE_URL_7 }}
+      HEALTHSITES_DATABASE_URL_8: ${{ secrets.HEALTHSITES_DATABASE_URL_8 }}
+      USA_EMBASSY_DATABASE_URL: ${{ secrets.USA_EMBASSY_DATABASE_URL }}
+      USA_EMBASSY_DATABASE_URL_2: ${{ secrets.USA_EMBASSY_DATABASE_URL_2 }}
+      USA_EMBASSY_DATABASE_URL_3: ${{ secrets.USA_EMBASSY_DATABASE_URL_3 }}
+      USA_EMBASSY_DATABASE_URL_4: ${{ secrets.USA_EMBASSY_DATABASE_URL_4 }}
+
+    steps:
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Select and validate empty target
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ inputs.source_family }}" in
+            healthsites)
+              target_prefix=HEALTHSITES_DATABASE_URL
+              maximum_slot=8
+              ;;
+            usa_embassy)
+              target_prefix=USA_EMBASSY_DATABASE_URL
+              maximum_slot=4
+              ;;
+            *)
+              echo "Unsupported source family" >&2
+              exit 1
+              ;;
+          esac
+          slot="${{ inputs.project_slot }}"
+          (( slot <= maximum_slot )) || { echo "${{ inputs.source_family }} supports slots 1-${maximum_slot}" >&2; exit 1; }
+          if [[ "$slot" == "1" ]]; then
+            target_variable="$target_prefix"
+          else
+            target_variable="${target_prefix}_${slot}"
+          fi
+          target_url="${!target_variable:-}"
+          echo "::add-mask::${target_url}"
+          echo "TARGET_DATABASE_URL=${target_url}" >> "$GITHUB_ENV"
+          [[ "$SOURCE_DATABASE_URL" == postgres* ]] || { echo "DATABASE_URL is missing" >&2; exit 1; }
+          [[ "$target_url" == postgres* ]] || { echo "Target provider database secret is missing" >&2; exit 1; }
+          [[ "$SOURCE_DATABASE_URL" != "$target_url" ]] || { echo "Source and target must be different Neon projects" >&2; exit 1; }
+
+          table_count="$(psql "$target_url" -Atqc "
+            SELECT count(*)
+            FROM pg_catalog.pg_tables
+            WHERE schemaname='public'
+          ")"
+          if [[ "$table_count" != "0" ]]; then
+            echo "Target project is not empty (${table_count} public tables). Nothing was changed." >&2
+            exit 1
+          fi
+
+      - name: Clone the exact provider schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          pg_dump "$SOURCE_DATABASE_URL" \
+            --schema-only \
+            --no-owner \
+            --no-privileges \
+            --file=/tmp/provider-schema.sql
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/provider-schema.sql
+
+      - name: Copy schema state rows
+        shell: bash
+        run: |
+          set -euo pipefail
+          for table in provider_schema_state schema_migration_versions; do
+            if psql "$SOURCE_DATABASE_URL" -Atqc "SELECT to_regclass('public.${table}') IS NOT NULL" | grep -qx t; then
+              pg_dump "$SOURCE_DATABASE_URL" \
+                --data-only \
+                --inserts \
+                --no-owner \
+                --no-privileges \
+                --table="public.${table}" \
+              | psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1
+            fi
+          done
+
+      - name: Verify identical provider pipeline
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          DECLARE relation_name text;
+          BEGIN
+            FOREACH relation_name IN ARRAY ARRAY[
+              'provider_raw_records',
+              'provider_stage_records',
+              'provider_master',
+              'provider_master_sources',
+              'provider_master_types',
+              'medical_providers',
+              'provider_master_map_view'
+            ] LOOP
+              IF to_regclass('public.' || relation_name) IS NULL THEN
+                RAISE EXCEPTION 'Required provider relation is missing: %', relation_name;
+              END IF;
+            END LOOP;
+          END $$;
+          SQL
+          echo "${{ inputs.source_family }} Neon project ${{ inputs.project_slot }} now has the same provider schema as the primary project."

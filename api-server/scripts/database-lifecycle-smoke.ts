@@ -23,6 +23,10 @@ for (const required of [
 
 assert.match(dbIndex, /DATABASE_URL_POOLED \|\| process\.env\.DATABASE_URL/, "provider database selection must prefer pooled URL and fall back to DATABASE_URL");
 assert.match(dbIndex, /DATABASE_URL_2/, "scoring database must have separate explicit ownership");
+assert.match(dbIndex, /HEALTHSITES_DATABASE_URL/, "Healthsites projects must use their source-specific environment variables");
+assert.match(dbIndex, /USA_EMBASSY_DATABASE_URL/, "embassy projects must use their source-specific environment variables");
+assert.match(dbIndex, /getProviderDatabaseProjects/, "database package must expose the provider project registry");
+assert.match(dbIndex, /PGPOOL_PROVIDER_PROJECT_MAX/, "additional provider project pools must have a bounded connection limit");
 assert.match(dbIndex, /closeDatabasePools/, "database package must expose graceful pool closure");
 assert.match(dbIndex, /Promise\.allSettled\(targets\.map\(\(target\) => target\.end\(\)\)\)/, "both pools must close during shutdown");
 assert.match(dbIndex, /checkRequiredDatabases/, "database package must expose bounded readiness checks");
@@ -48,6 +52,8 @@ assert.match(explorer, /to_regclass\('public\.provider_candidates'\)/, "Provider
 assert.match(explorer, /Provider Explorer persistence migration is not applied/, "candidate writes must fail clearly when migration is missing");
 assert.match(explorer, /setup\.candidatePersistence[\s\S]*queryCandidates/, "candidate reads must be conditional on migration readiness");
 assert.match(docs, /DATABASE_URL_POOLED/, "database connection ownership must be documented");
+assert.match(docs, /HEALTHSITES_DATABASE_URL/, "Healthsites project ownership must be documented");
+assert.match(docs, /USA_EMBASSY_DATABASE_URL/, "embassy project ownership must be documented");
 assert.match(docs, /Runtime request handlers must not create extensions, tables, or indexes/, "runtime schema ownership must be documented as migration-only");
 assert.match(docs, /Backup \/ restore procedure/, "backup/restore verification must be documented");
 assert.match(docs, /Never test restore by overwriting the production branch/, "restore procedure must explicitly protect production");

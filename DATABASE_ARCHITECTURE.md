@@ -6,9 +6,13 @@
 | --- | --- | --- |
 | `DATABASE_URL_POOLED` | Preferred provider/map database connection through the Neon pooler | Used first when present. All provider inventory, upload, map/search, audit, and operational metadata use this database. |
 | `DATABASE_URL` | Provider/map database fallback/direct connection | Used only when `DATABASE_URL_POOLED` is absent. It is not a second logical provider database. |
+| `HEALTHSITES_DATABASE_URL` … `_8` | Healthsites provider database projects | Independent Neon projects containing the identical provider schema and assigned Healthsites country groups. |
+| `USA_EMBASSY_DATABASE_URL` … `_4` | U.S. Embassy provider database projects | Independent Neon projects containing the identical provider schema and assigned embassy country groups. |
 | `DATABASE_URL_2` | Separate scoring / health-indicator database | Required by scoring routes/jobs only and checked separately for readiness. Never use it for provider inventory. |
 
 Default pool ceilings remain intentionally small for Render/Neon: provider/map pool 4 connections, scoring pool 2. Both can be tuned only through the documented pool environment variables. The API closes both pools on `SIGTERM`/`SIGINT` after stopping new HTTP connections.
+
+Additional provider projects use a default pool ceiling of 2 connections each, configurable with `PGPOOL_PROVIDER_PROJECT_MAX`. Their schema initialization, all-country Healthsites import, and partial-read behavior are documented in [PROVIDER_DATABASE_PROJECTS.md](./PROVIDER_DATABASE_PROJECTS.md).
 
 ## Liveness and readiness
 

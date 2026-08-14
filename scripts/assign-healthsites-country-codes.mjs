@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
@@ -27,6 +28,10 @@ function decodeField(value) {
 
 function encodedField(value) {
   return `"${String(value).replaceAll('"', '""')}"`;
+}
+
+function hash(value) {
+  return createHash("sha256").update(String(value)).digest("hex");
 }
 
 function iso2(properties = {}) {
@@ -112,6 +117,9 @@ try {
         country: columns.indexOf("country_code"),
         lat: columns.indexOf("lat"),
         lng: columns.indexOf("lng"),
+        normalizedName: columns.indexOf("normalized_name"),
+        formattedAddress: columns.indexOf("formatted_address"),
+        masterKey: columns.indexOf("master_key"),
       };
       if (Object.values(indexes).some((index) => index < 0)) throw new Error("Input header is missing country_code, lat, or lng");
       output.write(`${line}\n`);
@@ -129,6 +137,15 @@ try {
       const match = boundaries.find((feature) => contains(feature, lng, lat));
       if (match) {
         fields[indexes.country] = encodedField(match.code);
+        const normalizedName = decodeField(fields[indexes.normalizedName]);
+        const formattedAddress = decodeField(fields[indexes.formattedAddress]);
+        fields[indexes.masterKey] = encodedField(`loc:${hash(JSON.stringify({
+          name: normalizedName,
+          address: formattedAddress.toLowerCase(),
+          country: match.code,
+          lat: Number(lat.toFixed(6)),
+          lng: Number(lng.toFixed(6)),
+        }))}`);
         spatiallyResolved += 1;
       } else {
         fields[indexes.country] = encodedField("XX");

@@ -22,6 +22,11 @@ assert.match(bounds.where, /mp\.lng BETWEEN/);
 const liveGuard = buildStoredWhereForTest({ source: 'live', includeLive: true, includeStored: true, includeSaved: true, includeCandidates: true }, 'legacy', 'numeric-fallback');
 assert.match(liveGuard.where, /FALSE/);
 
+const canonicalIndexed = buildStoredWhereForTest({ source: 'indexed', includeLive: false, includeStored: true, includeSaved: false, includeCandidates: false }, 'canonical', 'numeric-fallback');
+assert.match(canonicalIndexed.where, /pmv\.source_kind = 'stored'/);
+assert.match(canonicalIndexed.where, /dentist_dataset/);
+assert.match(canonicalIndexed.where, /my_clinics_upload/);
+
 const liveScope = { lat: 34.0522, lng: -118.2437, radiusMiles: 10 };
 assert.notEqual(
   buildLiveCacheKeyForTest({ ...liveScope, q: 'urgent care' }),

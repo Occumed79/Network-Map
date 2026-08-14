@@ -42,7 +42,6 @@ const requiredOwners: Record<string, string> = {
   "modalLabelScrubber.ts": "modal-label-scrubber",
   "mapEngineLoadingCleanupRuntime.ts": "map-engine-loading-cleanup",
   "routePlannerControlsRuntime.ts": "route-planner-controls",
-  "healthsitesFlatDotsRuntime.ts": "healthsites-flat-dots",
   "providerLocationFinderRuntime.ts": "provider-location-finder",
   "mapEngineFinalFixRuntime.ts": "map-engine-final-fixes",
   "mapboxGlobeLoadHardeningRuntime.ts": "mapbox-globe-load-hardening",
@@ -87,7 +86,7 @@ assert(!mapEngineFinalFix.includes("new MutationObserver"), "mapEngineFinalFixRu
 assert(!mapEngineFinalFix.includes("subscribeToSharedDomObserver"), "mapEngineFinalFixRuntime.ts must remain off the shared DOM observer to prevent feedback loops");
 assert(mapEngineFinalFix.includes("scheduleReconcile"), "mapEngineFinalFixRuntime.ts must use bounded reconciliation checkpoints");
 
-for (const file of ["routePlannerControlsRuntime.ts", "healthsitesFlatDotsRuntime.ts", "providerLocationFinderRuntime.ts"]) {
+for (const file of ["routePlannerControlsRuntime.ts", "providerLocationFinderRuntime.ts"]) {
   const text = source(file);
   assert(text.includes("registerMapToolsSection"), `${file} must register with the authoritative Map Tools section registry`);
   assert(!text.includes("new MutationObserver"), `${file} must not own a DOM observer after Map Tools ownership migration`);

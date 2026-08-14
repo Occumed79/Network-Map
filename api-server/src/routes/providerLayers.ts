@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { getPool } from "@workspace/db";
+import { getPool, getProviderDatabaseProjects, type ProviderDatabaseProject } from "@workspace/db";
 import { isPersistenceConfigured } from "../lib/networkMapPersistence";
 import { detectProviderSchema } from "../lib/providerSchema";
 import { queryWithStatementTimeout } from "../lib/queryWithStatementTimeout";
@@ -29,6 +29,8 @@ type LayerProvider = Record<string, unknown> & {
 };
 
 type Bounds = { north: number; south: number; east: number; west: number };
+type ProviderLayerStorage = "provider_master" | "medical_providers" | "providers" | "none";
+type LayerLoadOptions = { countOnly?: boolean; offset?: number };
 
 function normalizeTrustTier(confidenceScore: number | null): "verified" | "registry" | "directory" | "lead" {
   if (confidenceScore !== null && confidenceScore >= 0.85) return "verified";
@@ -182,9 +184,11 @@ function sendLayerResponse(
     limit: number;
     all: boolean;
     storage: string;
+    databaseProjects?: string[];
+    warnings?: string[];
   },
 ): void {
-  const { providers, total, source, page, limit, all, storage } = input;
+  const { providers, total, source, page, limit, all, storage, databaseProjects = ["provider-project-1"], warnings = [] } = input;
   res.json({
     providers,
     count: providers.length,
@@ -196,6 +200,9 @@ function sendLayerResponse(
     hasMore: all ? false : (page - 1) * limit + providers.length < total,
     all,
     storage,
+    databaseProjects,
+    partial: warnings.length > 0,
+    ...(warnings.length ? { warnings, warning: warnings.join(" ") } : {}),
     visibleCapped: false,
   });
 }
@@ -209,6 +216,7 @@ async function loadCanonicalLayer(
   limit: number,
   all: boolean,
   savedCandidates: LayerProvider[],
+  options: LayerLoadOptions = {},
 ): Promise<{ providers: LayerProvider[]; total: number }> {
   const config = SOURCE_CONFIG[source];
   const params: Array<string | number> = [];
@@ -244,12 +252,13 @@ async function loadCanonicalLayer(
     WHERE ${whereSql}
   `, params);
   const storedTotal = Number(countResult.rows[0]?.total || 0);
+  if (options.countOnly) return { providers: [], total: storedTotal };
 
   const dataParams = [...params];
   const combineSavedCandidates = source === "my-clinics";
   const limitClause = all || combineSavedCandidates
     ? ""
-    : `LIMIT ${addParam(dataParams, limit)} OFFSET ${addParam(dataParams, (page - 1) * limit)}`;
+    : `LIMIT ${addParam(dataParams, limit)} OFFSET ${addParam(dataParams, options.offset ?? (page - 1) * limit)}`;
 
   const { rows } = await queryWithStatementTimeout(pool, `
     SELECT *
@@ -307,6 +316,7 @@ async function loadLegacyLayer(
   limit: number,
   all: boolean,
   savedCandidates: LayerProvider[],
+  options: LayerLoadOptions = {},
 ): Promise<{ providers: LayerProvider[]; total: number }> {
   const config = SOURCE_CONFIG[source];
   const eligibleViewExists = await relationExists(pool, "provider_map_eligible");
@@ -337,12 +347,13 @@ async function loadLegacyLayer(
     WHERE ${whereSql}
   `, params);
   const storedTotal = Number(countResult.rows[0]?.total || 0);
+  if (options.countOnly) return { providers: [], total: storedTotal };
 
   const combineSavedCandidates = source === "my-clinics";
   const dataParams = [...params];
   const limitClause = all || combineSavedCandidates
     ? ""
-    : `LIMIT ${addParam(dataParams, limit)} OFFSET ${addParam(dataParams, (page - 1) * limit)}`;
+    : `LIMIT ${addParam(dataParams, limit)} OFFSET ${addParam(dataParams, options.offset ?? (page - 1) * limit)}`;
 
   const { rows } = await queryWithStatementTimeout(pool, `
     SELECT mp.id, mp.name, mp.formatted_address, mp.locality, mp.administrative_area_level_1,
@@ -391,6 +402,7 @@ async function loadNormalizedLayer(
   limit: number,
   all: boolean,
   savedCandidates: LayerProvider[],
+  options: LayerLoadOptions = {},
 ): Promise<{ providers: LayerProvider[]; total: number }> {
   const config = SOURCE_CONFIG[source];
   const params: Array<string | number> = [];
@@ -437,12 +449,13 @@ async function loadNormalizedLayer(
     WHERE ${whereSql}
   `, params);
   const storedTotal = Number(countResult.rows[0]?.total || 0);
+  if (options.countOnly) return { providers: [], total: storedTotal };
 
   const combineSavedCandidates = source === "my-clinics";
   const dataParams = [...params];
   const limitClause = all || combineSavedCandidates
     ? ""
-    : `LIMIT ${addParam(dataParams, limit)} OFFSET ${addParam(dataParams, (page - 1) * limit)}`;
+    : `LIMIT ${addParam(dataParams, limit)} OFFSET ${addParam(dataParams, options.offset ?? (page - 1) * limit)}`;
 
   const { rows } = await queryWithStatementTimeout(pool, `
     SELECT p.name, p.npi, pl.address, pl.city, pl.state, pl.postal_code, pl.lat, pl.lng,
@@ -476,6 +489,141 @@ async function loadNormalizedLayer(
   if (!combineSavedCandidates) return { providers: storedProviders, total: storedTotal };
   const combined = mergeMyClinicsLayerProviders(storedProviders, savedCandidates);
   return { providers: paginate(combined, all, page, limit), total: combined.length };
+}
+
+async function detectLayerStorage(pool: ReturnType<typeof getPool>): Promise<ProviderLayerStorage> {
+  if (await canonicalReadsEnabled(pool)) return "provider_master";
+  const schema = await detectProviderSchema(pool);
+  if (schema === "legacy") return "medical_providers";
+  if (schema === "normalized") return "providers";
+  return "none";
+}
+
+async function loadLayerFromProject(
+  project: ProviderDatabaseProject,
+  storage: ProviderLayerStorage,
+  source: string,
+  bounds: Bounds | null,
+  clinicType: string,
+  page: number,
+  limit: number,
+  all: boolean,
+  options: LayerLoadOptions = {},
+): Promise<{ providers: LayerProvider[]; total: number }> {
+  if (storage === "provider_master") {
+    return loadCanonicalLayer(project.pool, source, bounds, clinicType, page, limit, all, [], options);
+  }
+  if (storage === "medical_providers") {
+    return loadLegacyLayer(project.pool, source, bounds, page, limit, all, [], options);
+  }
+  if (storage === "providers") {
+    return loadNormalizedLayer(project.pool, source, bounds, page, limit, all, [], options);
+  }
+  return { providers: [], total: 0 };
+}
+
+type ProjectProbe = {
+  project: ProviderDatabaseProject;
+  storage: Exclude<ProviderLayerStorage, "none">;
+  total: number;
+};
+
+async function loadIndexedAcrossProviderProjects(input: {
+  projects: ProviderDatabaseProject[];
+  bounds: Bounds | null;
+  clinicType: string;
+  page: number;
+  limit: number;
+  all: boolean;
+}): Promise<{
+  providers: LayerProvider[];
+  total: number;
+  databaseProjects: string[];
+  warnings: string[];
+}> {
+  const warnings: string[] = [];
+  const probeResults = await Promise.all(input.projects.map(async (project) => {
+    try {
+      const storage = await detectLayerStorage(project.pool);
+      if (storage === "none") throw new Error("provider schema is not initialized");
+      const result = await loadLayerFromProject(
+        project,
+        storage,
+        "indexed",
+        input.bounds,
+        input.clinicType,
+        1,
+        1,
+        false,
+        { countOnly: true },
+      );
+      return { project, storage, total: result.total } satisfies ProjectProbe;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      warnings.push(`${project.id} is temporarily unavailable: ${message}`);
+      return null;
+    }
+  }));
+  const probes: ProjectProbe[] = probeResults.flatMap((result) => result ? [result] : []);
+  if (!probes.length) throw new Error(warnings.join(" ") || "No provider database project is available.");
+
+  const total = probes.reduce((sum, probe) => sum + probe.total, 0);
+  const databaseProjects = probes.map((probe) => probe.project.id);
+  const providerGroups: LayerProvider[][] = [];
+
+  if (input.all) {
+    await Promise.all(probes.map(async (probe) => {
+      try {
+        const result = await loadLayerFromProject(
+          probe.project,
+          probe.storage,
+          "indexed",
+          input.bounds,
+          input.clinicType,
+          1,
+          input.limit,
+          true,
+        );
+        providerGroups.push(result.providers);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        warnings.push(`${probe.project.id} could not return provider records: ${message}`);
+      }
+    }));
+  } else {
+    let offset = (input.page - 1) * input.limit;
+    let remaining = input.limit;
+    for (const probe of probes) {
+      if (remaining <= 0) break;
+      if (offset >= probe.total) {
+        offset -= probe.total;
+        continue;
+      }
+      const requested = Math.min(remaining, probe.total - offset);
+      try {
+        const result = await loadLayerFromProject(
+          probe.project,
+          probe.storage,
+          "indexed",
+          input.bounds,
+          input.clinicType,
+          1,
+          requested,
+          false,
+          { offset },
+        );
+        providerGroups.push(result.providers);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        warnings.push(`${probe.project.id} could not return provider records: ${message}`);
+      }
+      remaining -= requested;
+      offset = 0;
+    }
+  }
+
+  const providers = mergeMyClinicsLayerProviders(...providerGroups);
+  return { providers, total, databaseProjects, warnings };
 }
 
 /**
@@ -515,7 +663,29 @@ router.get("/provider-layers/:source", async (req: Request, res: Response) => {
         ? req.query.provider_type
         : "";
 
-    const pool = getPool();
+    const providerProjects = getProviderDatabaseProjects();
+    const pool = providerProjects[0].pool;
+
+    if (source === "indexed" && providerProjects.length > 1) {
+      const result = await loadIndexedAcrossProviderProjects({
+        projects: providerProjects,
+        bounds,
+        clinicType,
+        page,
+        limit,
+        all,
+      });
+      sendLayerResponse(res, {
+        ...result,
+        source,
+        page,
+        limit,
+        all,
+        storage: "provider_projects",
+      });
+      return;
+    }
+
     const savedCandidates = source === "my-clinics"
       ? await loadSavedCandidateProviders(pool, bounds, clinicType)
       : [];

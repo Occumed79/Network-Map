@@ -25,7 +25,6 @@ const sourcePipeline = source("src/mapboxSourcePipelineRuntime.ts");
 const lifecycleImport = main.indexOf('import "./mapboxMapLifecycleRuntime";');
 const firstInitializerImport = Math.min(
   main.indexOf('import "./mapControlsBridgeRuntime";'),
-  main.indexOf('import "./healthsitesFlatDotsRuntime";'),
   main.indexOf('import "./mapOverlaySynchronizationControllerRuntime";'),
 );
 assert.ok(lifecycleImport >= 0, "Mapbox lifecycle runtime must be imported");
@@ -55,7 +54,6 @@ assert.equal((dualEngine.match(/unregisterMapboxMap\(instance\)/g) || []).length
 const registeredInitializers = [
   ["src/mapControlsBridgeRuntime.ts", "map-controls-bridge", 10],
   ["src/mapOverlaySynchronizationControllerRuntime.ts", "overlay-synchronization", 20],
-  ["src/healthsitesFlatDotsRuntime.ts", "healthsites-flat-dots", 30],
   ["src/providerLocationFinderRuntime.ts", "provider-location-finder", 40],
 ] as const;
 for (const [file, id, priority] of registeredInitializers) {

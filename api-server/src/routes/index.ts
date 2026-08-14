@@ -1,7 +1,6 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
 import diagnosticsRouter from "./diagnostics";
-import healthsitesFlatGeobufRouter from "./healthsitesFlatGeobuf";
 import dentalProviderDiscoveryRouter from "./dentalProviderDiscovery";
 import liveFinderRouter from "./liveFinder";
 import priceFinderUnifiedRouter from "./priceFinderUnified";
@@ -33,7 +32,6 @@ const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use(diagnosticsRouter);
-router.use(healthsitesFlatGeobufRouter);
 router.use(scoringDatabaseRouter);
 
 // Authoritative provider architecture takes precedence.

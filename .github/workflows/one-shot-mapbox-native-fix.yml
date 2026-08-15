@@ -20,8 +20,8 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable
-      - name: Apply Mapbox-native hardening patch
-        run: python occu-med-map/scripts/apply-mapbox-native-hardening.py
+      - name: Apply tool and geographic interaction fixes
+        run: python occu-med-map/scripts/apply-mapbox-native-tool-fixes.py
       - run: pnpm install --frozen-lockfile
       - name: Typecheck frontend
         run: pnpm --filter @workspace/occu-med-map typecheck
@@ -33,10 +33,10 @@ jobs:
         run: pnpm --filter @workspace/occu-med-map test:leaflet-map-lifecycle-hardening
       - name: Build frontend
         run: pnpm --filter @workspace/occu-med-map build
-      - name: Commit validated hardening
+      - name: Commit validated tool fixes
         run: |
           git config user.name "Occumed79"
           git config user.email "Occumed79@users.noreply.github.com"
-          git add occu-med-map/src/mapboxNativeCompat.ts occu-med-map/src/dualMapEngineRuntime.ts
-          git commit -m "Harden Mapbox native interaction ownership"
+          git add occu-med-map/src/mapboxNativeCompat.ts occu-med-map/src/App.tsx occu-med-map/scripts/ci-mapbox-native-tools-acceptance.mjs
+          git commit -m "Fix Mapbox native tool and geographic interactions"
           git push origin HEAD:nuclear/mapbox-native-runtime

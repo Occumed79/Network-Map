@@ -1,0 +1,59 @@
+name: One-shot Mapbox native compatibility fix
+
+on:
+  push:
+    paths:
+      - .github/workflows/one-shot-mapbox-native-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: nuclear/mapbox-native-runtime
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - name: Patch compatibility contracts and camera handoff
+        shell: python
+        run: |
+          from pathlib import Path
+
+          compat = Path('occu-med-map/src/mapboxNativeCompat.ts')
+          text = compat.read_text()
+          replacements = {
+            'flattenCoordinates(geojson.geometry?.coordinates, points);': 'flattenCoordinates((geojson.geometry as any)?.coordinates, points);',
+            'flattenCoordinates(feature.geometry?.coordinates, points);': 'flattenCoordinates((feature.geometry as any)?.coordinates, points);',
+            'addTo(map: Map): this { map.addLayer(this); return this; }': 'addTo(target: Map | LayerGroup): this { target.addLayer(this); return this; }',
+            'override toGeoJSON(): GeoJSON.Feature<GeoJSON.Point> {': 'override toGeoJSON(): GeoJSON.Feature {',
+            'override toGeoJSON(): GeoJSON.Feature<GeoJSON.LineString> {': 'override toGeoJSON(): GeoJSON.Feature {',
+          }
+          for old, new in replacements.items():
+            if old not in text:
+              raise SystemExit(f'missing compatibility patch target: {old}')
+            text = text.replace(old, new)
+          compat.write_text(text)
+
+          dual = Path('occu-med-map/src/dualMapEngineRuntime.ts')
+          text = dual.read_text()
+          old = '  canonicalMap.setView([center.lat, center.lng], Math.max(2, Math.min(17, Math.round(zoom))), { animate: false });'
+          new = '''  const logicalMap = canonicalMap as L.Map & { _setViewFromNative?: (center: L.LatLngExpression, zoom: number) => void };\n  const normalizedZoom = Math.max(2, Math.min(17, zoom));\n  if (typeof logicalMap._setViewFromNative === "function") {\n    logicalMap._setViewFromNative([center.lat, center.lng], normalizedZoom);\n  } else {\n    canonicalMap.setView([center.lat, center.lng], normalizedZoom, { animate: false });\n  }'''
+          if old not in text:
+            raise SystemExit('missing camera patch target')
+          dual.write_text(text.replace(old, new))
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck frontend
+        run: pnpm --filter @workspace/occu-med-map typecheck
+      - name: Commit validated fixes
+        run: |
+          git config user.name "Occumed79"
+          git config user.email "Occumed79@users.noreply.github.com"
+          git add occu-med-map/src/mapboxNativeCompat.ts occu-med-map/src/dualMapEngineRuntime.ts
+          git commit -m "Fix Mapbox native compatibility contracts"
+          git push origin HEAD:nuclear/mapbox-native-runtime

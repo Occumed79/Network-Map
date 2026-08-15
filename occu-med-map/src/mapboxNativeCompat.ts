@@ -715,15 +715,17 @@ namespace L {
       const lngSpan = Math.min(360, 360 / Math.pow(2, Math.max(0, this.zoom - 1)));
       return new LatLngBounds([this.center.lat - latSpan / 2, this.center.lng - lngSpan / 2], [this.center.lat + latSpan / 2, this.center.lng + lngSpan / 2]);
     }
-    setView(center: LatLngExpression, zoom = this.zoom, options: Record<string, any> = {}): this {
-      this.center = normalizeLatLng(center); this.zoom = Number(zoom);
+    setView(center: LatLngExpression, zoom?: number, options: Record<string, any> = {}): this {
+      const resolvedZoom = zoom ?? this.zoom;
+      this.center = normalizeLatLng(center); this.zoom = Number(resolvedZoom);
       const native = activeNativeMap();
       if (native) native.jumpTo({ center: [this.center.lng, this.center.lat], zoom: this.zoom });
       if (!options.silent) { this.fire("moveend"); this.fire("zoomend"); }
       return this;
     }
-    flyTo(center: LatLngExpression, zoom = this.zoom, options: Record<string, any> = {}): this {
-      this.center = normalizeLatLng(center); this.zoom = Number(zoom);
+    flyTo(center: LatLngExpression, zoom?: number, options: Record<string, any> = {}): this {
+      const resolvedZoom = zoom ?? this.zoom;
+      this.center = normalizeLatLng(center); this.zoom = Number(resolvedZoom);
       const native = activeNativeMap();
       if (native) native.flyTo({ center: [this.center.lng, this.center.lat], zoom: this.zoom, duration: Number(options.duration || 1) * (Number(options.duration || 1) < 20 ? 1000 : 1) });
       return this;
@@ -739,19 +741,21 @@ namespace L {
     setZoom(zoom: number): this { return this.setView(this.center, zoom); }
     zoomIn(delta = 1): this { return this.setZoom(this.getZoom() + delta); }
     zoomOut(delta = 1): this { return this.setZoom(this.getZoom() - delta); }
-    project(value: LatLngExpression, zoom = this.getZoom()): Point {
+    project(value: LatLngExpression, zoom?: number): Point {
+      const resolvedZoom = zoom ?? this.getZoom();
       const p = normalizeLatLng(value); const native = activeNativeMap();
-      if (native && Math.abs(native.getZoom() - zoom) < 0.05) { const q = native.project([p.lng, p.lat]); return new Point(q.x, q.y); }
-      const scale = 256 * Math.pow(2, zoom);
+      if (native && Math.abs(native.getZoom() - resolvedZoom) < 0.05) { const q = native.project([p.lng, p.lat]); return new Point(q.x, q.y); }
+      const scale = 256 * Math.pow(2, resolvedZoom);
       const x = (p.lng + 180) / 360 * scale;
       const sin = Math.sin(Math.max(-85.0511, Math.min(85.0511, p.lat)) * Math.PI / 180);
       const y = (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale;
       return new Point(x, y);
     }
-    unproject(value: Point | PointTuple, zoom = this.getZoom()): LatLng {
+    unproject(value: Point | PointTuple, zoom?: number): LatLng {
+      const resolvedZoom = zoom ?? this.getZoom();
       const p = value instanceof Point ? value : new Point(Number(value[0]), Number(value[1])); const native = activeNativeMap();
-      if (native && Math.abs(native.getZoom() - zoom) < 0.05) { const q = native.unproject([p.x, p.y]); return new LatLng(q.lat, q.lng); }
-      const scale = 256 * Math.pow(2, zoom);
+      if (native && Math.abs(native.getZoom() - resolvedZoom) < 0.05) { const q = native.unproject([p.x, p.y]); return new LatLng(q.lat, q.lng); }
+      const scale = 256 * Math.pow(2, resolvedZoom);
       const lng = p.x / scale * 360 - 180;
       const n = Math.PI - 2 * Math.PI * p.y / scale;
       return new LatLng(180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n))), lng);

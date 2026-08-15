@@ -1,0 +1,55 @@
+name: One-shot Mapbox native readiness fix
+
+on:
+  push:
+    paths:
+      - .github/workflows/one-shot-mapbox-native-readiness-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: nuclear/mapbox-native-runtime
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - name: Replace stale Indexed Providers readiness handle
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('occu-med-map/scripts/ci-mapbox-native-tools-acceptance.mjs')
+          text = path.read_text()
+          old = '''  await page.waitForFunction((input) => {
+            const row = input.closest(".workflow-layer");
+            const text = String(row?.textContent || "");
+            return input.checked && !/loading/i.test(text) && /2\\s+(?:total|loaded)/i.test(text);
+          }, await indexedToggle.elementHandle(), { timeout: 15_000 });'''
+          new = '''  await page.waitForFunction(() => {
+            const input = document.querySelector('input[aria-label="Indexed Providers"]');
+            const row = input?.closest(".workflow-layer");
+            const text = String(row?.textContent || "");
+            return Boolean(input?.checked) && /2\\s+loaded/i.test(text);
+          }, null, { timeout: 15_000 });'''
+          if old not in text:
+              raise SystemExit('Indexed Providers readiness block not found')
+          path.write_text(text.replace(old, new, 1))
+      - run: pnpm install --frozen-lockfile
+      - name: Frontend typecheck
+        run: pnpm --filter @workspace/occu-med-map typecheck
+      - name: Production build
+        run: pnpm --filter @workspace/occu-med-map build
+      - name: Commit validated readiness fix
+        run: |
+          git config user.name "Occumed79"
+          git config user.email "Occumed79@users.noreply.github.com"
+          git add occu-med-map/scripts/ci-mapbox-native-tools-acceptance.mjs
+          git commit -m "Stabilize Indexed Providers browser readiness"
+          git push origin HEAD:nuclear/mapbox-native-runtime

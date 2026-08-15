@@ -1,5 +1,4 @@
 import { createRoot } from "react-dom/client";
-import "leaflet/dist/leaflet.css";
 import "mapbox-gl/dist/mapbox-gl.css";
 import "./leafletMapLifecycleRuntime";
 import "./mapboxMapLifecycleRuntime";
@@ -15,7 +14,6 @@ import "./providerTypeNormalizationRuntime";
 import "./dualMapEngineRuntime";
 import { switchMapModeWithTransition } from "./dualMapTransitionRuntime";
 import "./providerExplorerStabilityRuntime";
-import "./mapOverlaySynchronizationControllerRuntime";
 import App from "./App";
 import AppErrorBoundary, { ApplicationFailureScreen } from "./AppErrorBoundary";
 import {
@@ -100,10 +98,6 @@ function scheduleOptionalRuntimes(): void {
   };
   const start = () => { void loadOptionalRuntimes(); };
 
-  // Do not let optional compatibility/telemetry runtimes race React's initial
-  // commit. The first usable application frame owns startup; optional work is
-  // admitted only after the browser has had a paint opportunity and an idle
-  // slice, with a bounded fallback for browsers without requestIdleCallback.
   window.requestAnimationFrame(() => {
     if (idleWindow.requestIdleCallback) {
       idleWindow.requestIdleCallback(start, { timeout: 1600 });

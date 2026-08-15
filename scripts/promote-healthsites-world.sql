@@ -82,40 +82,33 @@ ON CONFLICT (source_key) DO UPDATE SET
   notes=EXCLUDED.notes,
   updated_at=now();
 
+-- The immutable R2 archive is the full raw source of truth. Keep only a compact
+-- lineage row in Postgres instead of duplicating provider attributes in JSONB.
 INSERT INTO public.provider_raw_records
   (source_key, source_record_id, content_hash, raw_payload, raw_text, status)
 SELECT
   'healthsites_osm',
   t.source_record_id,
   md5(to_jsonb(t)::text),
-  jsonb_build_object(
-    'source_record_id', t.source_record_id,
-    'source_url', t.source_url,
-    'name', t.name,
-    'country_code', t.country_code,
-    'lat', t.lat,
-    'lng', t.lng
-  ),
-  '',
+  '{}'::jsonb,
+  NULL,
   'raw_loaded'
 FROM public.source5_import_staging t;
 
--- Healthsites rows for this source were deleted above and the staging table has
--- a primary key on source_record_id, so this can be a single set-based insert.
--- Avoid per-row LATERAL lookups and the redundant UPDATE of the rows just inserted.
+-- Stage is intentionally compact: it preserves normalized identity, location,
+-- classification and lineage while provider_master owns the complete canonical
+-- address/contact record. This keeps the canonical 3-layer architecture without
+-- storing every Healthsites string three times.
 INSERT INTO public.provider_stage_records (
   raw_record_id, source_key, source_record_id, name, normalized_name,
-  address_line1, formatted_address, city, state_region, postal_code,
-  country_code, lat, lng, phone, website, email, primary_provider_type,
-  capability_tags, confidence_score, normalization_status, normalized_payload
+  country_code, lat, lng, primary_provider_type, capability_tags,
+  confidence_score, normalization_status, normalized_payload
 )
 SELECT
   r.id, 'healthsites_osm', t.source_record_id, t.name,
-  NULLIF(t.normalized_name,''), t.address_line1, t.formatted_address,
-  t.city, t.state_region, t.postal_code, t.country_code, t.lat, t.lng,
-  t.phone, t.website, t.email, t.primary_provider_type,
-  t.capability_tags, t.quality_score, 'staged',
-  jsonb_build_object('source_record_id',t.source_record_id,'master_key',t.master_key,'country_code',t.country_code)
+  NULLIF(t.normalized_name,''), t.country_code, t.lat, t.lng,
+  t.primary_provider_type, t.capability_tags, t.quality_score, 'staged',
+  jsonb_build_object('master_key', t.master_key)
 FROM public.source5_import_staging t
 JOIN public.provider_raw_records r
   ON r.source_key='healthsites_osm'
@@ -172,16 +165,15 @@ ANALYZE public.provider_stage_records;
 ANALYZE public.provider_raw_records;
 ANALYZE public.provider_master;
 
--- Raw and stage rows are one-to-one with source5_import_staging during this
--- replacement import. Use set joins instead of 2 x N ordered LATERAL lookups.
+-- Relational columns already carry all source lineage. Avoid a fourth JSON copy
+-- of source_record_id/master_key/country on these high-volume rows.
 INSERT INTO public.provider_master_sources (
   master_provider_id, stage_record_id, raw_record_id, source_key,
   source_record_id, source_url, source_confidence_score, raw_payload
 )
 SELECT
   pm.id, s.id, r.id, 'healthsites_osm', t.source_record_id,
-  t.source_url, t.quality_score,
-  jsonb_build_object('source_record_id',t.source_record_id,'master_key',t.master_key,'country_code',t.country_code)
+  t.source_url, t.quality_score, '{}'::jsonb
 FROM public.source5_import_staging t
 JOIN public.provider_master pm
   ON pm.master_key=t.master_key
@@ -230,7 +222,7 @@ SELECT
   country_code, city, state_region, postal_code,
   'Healthsites / OpenStreetMap', 'healthsites_osm:' || source_record_id,
   'open_data', quality_score::double precision,
-  jsonb_build_object('provider_master_key',master_key,'source_key','healthsites_osm','source_record_id',source_record_id,'source_url',source_url),
+  NULL,
   now(), now()
 FROM public.source5_import_staging t
 ON CONFLICT (source_id) DO UPDATE SET

@@ -57,7 +57,7 @@ function featureHit(feature: mapboxgl.MapboxGeoJSONFeature, fallback: mapboxgl.L
 function renderedHits(map: mapboxgl.Map, point: ScreenPoint, layerIds: string[]): mapboxgl.MapboxGeoJSONFeature[] {
   if (!layerIds.length) return [];
   try {
-    return map.queryRenderedFeatures(point, { layers: layerIds });
+    return map.queryRenderedFeatures([point.x, point.y], { layers: layerIds });
   } catch {
     return [];
   }
@@ -155,7 +155,7 @@ registerMapboxMapInitializer({
   id: "mapbox-compat-interaction-owner",
   priority: 6,
   initialize: (map) => {
-    const onClick = (event: mapboxgl.MapMouseEvent & mapboxgl.EventData) => {
+    const onClick = (event: mapboxgl.MapMouseEvent) => {
       const hit = findCompatPopupHit(map, event.point, event.lngLat);
       if (!hit || hit.exactRenderedHit) return;
 

@@ -291,11 +291,12 @@ try {
     const refreshPayload = await viewportRefresh.json();
     assert.equal(refreshPayload.providers?.length, 2, "Indexed viewport refresh must keep both CI clinics");
   }
-  await page.waitForFunction((input) => {
-    const row = input.closest(".workflow-layer");
+  await page.waitForFunction(() => {
+    const input = document.querySelector('input[aria-label="Indexed Providers"]');
+    const row = input?.closest(".workflow-layer");
     const text = String(row?.textContent || "");
-    return input.checked && !/loading/i.test(text) && /2\s+(?:total|loaded)/i.test(text);
-  }, await indexedToggle.elementHandle(), { timeout: 15_000 });
+    return Boolean(input?.checked) && /2\s+loaded/i.test(text);
+  }, null, { timeout: 15_000 });
   await waitForActiveMapIdle(page, "2d");
   await page.waitForFunction(() => {
     const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];

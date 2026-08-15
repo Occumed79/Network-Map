@@ -40,7 +40,7 @@ jobs:
             fi
             echo "::add-mask::${target_url}"
             echo "===== SLOT ${slot} ====="
-            PGOPTIONS='-c statement_timeout=10000' psql "$target_url" -X -v ON_ERROR_STOP=1 -P pager=off -c "
+            psql "$target_url" -X -v ON_ERROR_STOP=1 -P pager=off -c "
               SELECT
                 (SELECT count(*) FROM public.provider_type_catalog) AS provider_types,
                 (SELECT count(*) FROM public.provider_raw_records WHERE source_key='healthsites_osm') AS raw_rows,

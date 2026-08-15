@@ -192,6 +192,15 @@ ON CONFLICT (master_key) DO UPDATE SET
   last_seen_at=now(),
   updated_at=now();
 
+-- Bulk source linking looks up every staged Healthsites record by source id.
+-- Keep that lookup indexed so a ~144k-row project remains set-scale instead of
+-- repeatedly scanning the entire staging table.
+CREATE INDEX IF NOT EXISTS idx_provider_stage_records_source_record
+  ON public.provider_stage_records(source_key, source_record_id);
+
+ANALYZE public.provider_stage_records;
+ANALYZE public.provider_raw_records;
+
 INSERT INTO public.provider_master_sources (
   master_provider_id, stage_record_id, raw_record_id, source_key,
   source_record_id, source_url, source_confidence_score, raw_payload

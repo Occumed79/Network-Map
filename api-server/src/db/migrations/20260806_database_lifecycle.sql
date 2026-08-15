@@ -113,3 +113,7 @@ WHERE prr.id IS NULL;
 
 COMMENT ON VIEW public.provider_orphan_audit IS
   'Read-only lifecycle audit. Expected row count is zero; never deletes records automatically.';
+
+-- Required by source promotion lookups on bulk provider datasets.
+CREATE INDEX IF NOT EXISTS idx_provider_stage_records_source_record
+  ON public.provider_stage_records(source_key, source_record_id);

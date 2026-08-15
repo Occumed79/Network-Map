@@ -1,0 +1,70 @@
+name: One-shot Mapbox native migration audit
+
+on:
+  push:
+    branches:
+      - nuclear/mapbox-native-runtime
+    paths:
+      - .github/workflows/one-shot-mapbox-native-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit Leaflet and Mapbox runtime ownership
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          from collections import Counter, defaultdict
+
+          root = Path('occu-med-map')
+          source_files = [p for p in root.rglob('*') if p.suffix in {'.ts', '.tsx'} and 'node_modules' not in p.parts]
+          leaflet_files = []
+          api_counts = Counter()
+          api_files = defaultdict(set)
+          mapbox_files = []
+          for path in source_files:
+              text = path.read_text(encoding='utf-8', errors='ignore')
+              if re.search(r"from\s+['\"]leaflet['\"]", text):
+                  leaflet_files.append(path)
+                  for name in re.findall(r'\bL\.([A-Za-z_$][\w$]*)', text):
+                      api_counts[name] += 1
+                      api_files[name].add(str(path))
+              if re.search(r"from\s+['\"]mapbox-gl['\"]", text):
+                  mapbox_files.append(path)
+
+          print('=== LEAFLET IMPORT FILES ===')
+          for path in sorted(leaflet_files):
+              text = path.read_text(encoding='utf-8', errors='ignore')
+              print(f'{path} :: lines={text.count(chr(10))+1} :: L.calls={len(re.findall(r"\\bL\\.", text))}')
+
+          print('\n=== LEAFLET API SURFACE ===')
+          for name, count in api_counts.most_common():
+              files = ', '.join(sorted(api_files[name]))
+              print(f'{name}: {count} :: {files}')
+
+          print('\n=== MAPBOX IMPORT FILES ===')
+          for path in sorted(mapbox_files):
+              print(path)
+
+          print('\n=== HIGH-RISK OWNERSHIP TERMS ===')
+          terms = [
+              'mapRef.current', 'layerGroup', 'circleMarker', 'geoJSON', 'fitBounds',
+              'getBounds', 'setView', 'project(', 'unproject(', 'bindPopup', 'bindTooltip',
+              'providerExplorer', 'density', 'radius', 'Live Finder', 'doLiveSearch'
+          ]
+          for term in terms:
+              hits=[]
+              for path in source_files:
+                  text=path.read_text(encoding='utf-8', errors='ignore')
+                  n=text.count(term)
+                  if n: hits.append((n, str(path)))
+              if hits:
+                  print(f'-- {term} --')
+                  for n,path in sorted(hits, reverse=True)[:20]:
+                      print(f'{n:4d} {path}')

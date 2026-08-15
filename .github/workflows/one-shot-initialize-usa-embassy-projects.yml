@@ -85,6 +85,62 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          cat >/tmp/embassy-canonical-reference.sql <<'SQL'
+          INSERT INTO public.provider_type_catalog
+            (type_key, display_name, description, active)
+          VALUES
+            ('urgent_care','Urgent Care','Urgent care and walk-in clinic locations',true),
+            ('dot_provider','DOT Provider','DOT exam or CDL medical examiner capable provider',true),
+            ('faa_provider','FAA Provider','FAA aviation medical examiner or aviation medical clinic',true),
+            ('lab','Lab','Lab, toxicology, specimen collection, drug screen, or diagnostics location',true),
+            ('general_practitioner','General Practitioner','Primary care, family medicine, internal medicine, or general practice provider',true),
+            ('occupational_health_clinic','Occupational Health Clinic','Occupational medicine, employee health, workers comp, fit-for-duty, or employer services clinic',true),
+            ('dental','Dental','Dental provider or DD 2813 capable clinic',true),
+            ('imaging','Imaging','X-ray, radiology, mammogram, MRI, CT, ultrasound, or imaging center',true),
+            ('pharmacy_vaccination','Pharmacy / Vaccination','Pharmacy, immunization, vaccination, or travel medicine provider',true),
+            ('hospital','Hospital','Hospital, medical center, or emergency facility',true),
+            ('specialist','Specialist','Specialty physician or specialist clinic',true),
+            ('unknown','Unknown','Unclassified provider',true)
+          ON CONFLICT (type_key) DO UPDATE SET
+            display_name = EXCLUDED.display_name,
+            description = EXCLUDED.description,
+            active = EXCLUDED.active;
+
+          DO $$
+          DECLARE relation_name text;
+          DECLARE canonical_type_count integer;
+          BEGIN
+            FOREACH relation_name IN ARRAY ARRAY[
+              'provider_raw_records',
+              'provider_stage_records',
+              'provider_master',
+              'provider_master_sources',
+              'provider_master_types',
+              'provider_type_catalog',
+              'medical_providers',
+              'provider_master_map_view'
+            ] LOOP
+              IF to_regclass('public.' || relation_name) IS NULL THEN
+                RAISE EXCEPTION 'Required provider relation is missing: %', relation_name;
+              END IF;
+            END LOOP;
+
+            SELECT count(*) INTO canonical_type_count
+            FROM public.provider_type_catalog
+            WHERE active
+              AND type_key IN (
+                'urgent_care','dot_provider','faa_provider','lab',
+                'general_practitioner','occupational_health_clinic','dental',
+                'imaging','pharmacy_vaccination','hospital','specialist','unknown'
+              );
+
+            IF canonical_type_count <> 12 THEN
+              RAISE EXCEPTION 'Canonical provider type catalog incomplete: %', canonical_type_count;
+            END IF;
+          END $$;
+          SQL
+
           declare -a urls=(
             "$USA_EMBASSY_DATABASE_URL"
             "$USA_EMBASSY_DATABASE_URL_2"
@@ -117,60 +173,7 @@ jobs:
               echo "Project ${slot}: already contains ${table_count} public tables; validating/repairing in place"
             fi
 
-            psql "$target_url" -v ON_ERROR_STOP=1 <<'SQL'
-            INSERT INTO public.provider_type_catalog
-              (type_key, display_name, description, active)
-            VALUES
-              ('urgent_care','Urgent Care','Urgent care and walk-in clinic locations',true),
-              ('dot_provider','DOT Provider','DOT exam or CDL medical examiner capable provider',true),
-              ('faa_provider','FAA Provider','FAA aviation medical examiner or aviation medical clinic',true),
-              ('lab','Lab','Lab, toxicology, specimen collection, drug screen, or diagnostics location',true),
-              ('general_practitioner','General Practitioner','Primary care, family medicine, internal medicine, or general practice provider',true),
-              ('occupational_health_clinic','Occupational Health Clinic','Occupational medicine, employee health, workers comp, fit-for-duty, or employer services clinic',true),
-              ('dental','Dental','Dental provider or DD 2813 capable clinic',true),
-              ('imaging','Imaging','X-ray, radiology, mammogram, MRI, CT, ultrasound, or imaging center',true),
-              ('pharmacy_vaccination','Pharmacy / Vaccination','Pharmacy, immunization, vaccination, or travel medicine provider',true),
-              ('hospital','Hospital','Hospital, medical center, or emergency facility',true),
-              ('specialist','Specialist','Specialty physician or specialist clinic',true),
-              ('unknown','Unknown','Unclassified provider',true)
-            ON CONFLICT (type_key) DO UPDATE SET
-              display_name = EXCLUDED.display_name,
-              description = EXCLUDED.description,
-              active = EXCLUDED.active;
-
-            DO $$
-            DECLARE relation_name text;
-            DECLARE canonical_type_count integer;
-            BEGIN
-              FOREACH relation_name IN ARRAY ARRAY[
-                'provider_raw_records',
-                'provider_stage_records',
-                'provider_master',
-                'provider_master_sources',
-                'provider_master_types',
-                'provider_type_catalog',
-                'medical_providers',
-                'provider_master_map_view'
-              ] LOOP
-                IF to_regclass('public.' || relation_name) IS NULL THEN
-                  RAISE EXCEPTION 'Required provider relation is missing: %', relation_name;
-                END IF;
-              END LOOP;
-
-              SELECT count(*) INTO canonical_type_count
-              FROM public.provider_type_catalog
-              WHERE active
-                AND type_key IN (
-                  'urgent_care','dot_provider','faa_provider','lab',
-                  'general_practitioner','occupational_health_clinic','dental',
-                  'imaging','pharmacy_vaccination','hospital','specialist','unknown'
-                );
-
-              IF canonical_type_count <> 12 THEN
-                RAISE EXCEPTION 'Canonical provider type catalog incomplete: %', canonical_type_count;
-              END IF;
-            END $$;
-            SQL
+            psql "$target_url" -v ON_ERROR_STOP=1 -f /tmp/embassy-canonical-reference.sql
 
             provider_rows="$(psql "$target_url" -Atqc "SELECT count(*) FROM public.provider_master")"
             catalog_rows="$(psql "$target_url" -Atqc "SELECT count(*) FROM public.provider_type_catalog WHERE active")"

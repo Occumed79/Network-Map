@@ -1,4 +1,4 @@
-name: One-shot Healthsites slot 1 promotion smoke
+name: One-shot Healthsites set-based slot 1 smoke
 
 on:
   push:
@@ -15,7 +15,7 @@ jobs:
     env:
       HEALTHSITES_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
     steps:
-      - name: Check out repaired importer
+      - name: Check out set-based importer
         uses: actions/checkout@v4
 
       - name: Install PostgreSQL client
@@ -23,18 +23,17 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install --yes -qq postgresql-client
 
-      - name: Promote retained slot 1 staging data
+      - name: Promote retained slot 1 staging data with set joins
         shell: bash
         run: |
           set -euo pipefail
+          echo "Importer commit: $(git rev-parse HEAD)"
           echo "::add-mask::${HEALTHSITES_DATABASE_URL}"
           expected="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(*) FROM public.source5_import_staging")"
           expected_master="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(DISTINCT master_key) FROM public.source5_import_staging")"
           echo "Retained staging rows: ${expected}; distinct master keys: ${expected_master}"
-          if [[ "$expected" == "0" ]]; then
-            echo "No retained staging rows; nothing to smoke-promote."
-            exit 0
-          fi
+          [[ "$expected" -gt 0 ]] || { echo "Retained staging batch is empty" >&2; exit 1; }
+
           psql "$HEALTHSITES_DATABASE_URL" \
             -v ON_ERROR_STOP=1 \
             -v expected="$expected" \
@@ -43,6 +42,8 @@ jobs:
 
           actual="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(*) FROM public.medical_providers WHERE data_source='Healthsites / OpenStreetMap'")"
           types="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_type_catalog WHERE active")"
-          echo "PROMOTION_SMOKE_SUCCESS rows=${actual} provider_types=${types}"
+          staging="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(*) FROM public.source5_import_staging")"
+          echo "PROMOTION_SMOKE_SUCCESS rows=${actual} provider_types=${types} staging_after=${staging}"
           [[ "$actual" == "$expected" ]]
           [[ "$types" -ge 12 ]]
+          [[ "$staging" == "0" ]]

@@ -125,11 +125,11 @@ jobs:
             --file=/tmp/provider-schema.sql
           psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/provider-schema.sql
 
-      - name: Copy schema state rows
+      - name: Copy schema state and canonical reference rows
         shell: bash
         run: |
           set -euo pipefail
-          for table in provider_schema_state schema_migration_versions; do
+          for table in provider_schema_state schema_migration_versions provider_type_catalog; do
             if psql "$SOURCE_DATABASE_URL" -Atqc "SELECT to_regclass('public.${table}') IS NOT NULL" | grep -qx t; then
               pg_dump "$SOURCE_DATABASE_URL" \
                 --data-only \
@@ -148,6 +148,7 @@ jobs:
           psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
           DO $$
           DECLARE relation_name text;
+          DECLARE canonical_type_count integer;
           BEGIN
             FOREACH relation_name IN ARRAY ARRAY[
               'provider_raw_records',
@@ -155,6 +156,7 @@ jobs:
               'provider_master',
               'provider_master_sources',
               'provider_master_types',
+              'provider_type_catalog',
               'medical_providers',
               'provider_master_map_view'
             ] LOOP
@@ -162,6 +164,28 @@ jobs:
                 RAISE EXCEPTION 'Required provider relation is missing: %', relation_name;
               END IF;
             END LOOP;
+
+            SELECT count(*) INTO canonical_type_count
+            FROM public.provider_type_catalog
+            WHERE active
+              AND type_key IN (
+                'urgent_care',
+                'dot_provider',
+                'faa_provider',
+                'lab',
+                'general_practitioner',
+                'occupational_health_clinic',
+                'dental',
+                'imaging',
+                'pharmacy_vaccination',
+                'hospital',
+                'specialist',
+                'unknown'
+              );
+
+            IF canonical_type_count <> 12 THEN
+              RAISE EXCEPTION 'Canonical provider type catalog is incomplete: expected 12 active types, found %', canonical_type_count;
+            END IF;
           END $$;
           SQL
-          echo "${{ inputs.source_family }} Neon project ${{ inputs.project_slot }} now has the same provider schema as the primary project."
+          echo "${{ inputs.source_family }} Neon project ${{ inputs.project_slot }} now has the same provider schema and canonical type catalog as the primary project."

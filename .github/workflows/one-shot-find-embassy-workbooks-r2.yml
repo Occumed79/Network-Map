@@ -1,0 +1,44 @@
+name: One-shot locate Embassy workbooks in R2
+
+on:
+  push:
+    paths:
+      - .github/workflows/one-shot-find-embassy-workbooks-r2.yml
+
+permissions:
+  contents: read
+
+jobs:
+  locate:
+    runs-on: ubuntu-latest
+    env:
+      R2_BUCKET: healthsites-data
+      RCLONE_CONFIG_R2_TYPE: s3
+      RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+      RCLONE_CONFIG_R2_REGION: auto
+      RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      RCLONE_CONFIG_R2_ACL: private
+      RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
+    steps:
+      - name: Locate final Embassy workbooks
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install --yes -qq rclone
+          inventory=/tmp/r2-files.txt
+          rclone lsf "r2:${R2_BUCKET}" --recursive --files-only --s3-no-check-bucket > "$inventory"
+          echo "R2 object count: $(wc -l < "$inventory")"
+          echo "===== Embassy/geocoded candidates ====="
+          grep -Ei 'embassy|geocoded|medical_provider' "$inventory" || true
+          echo "===== Exact required basenames ====="
+          for basename in \
+            'Embassy_Medical_Providers_Geocoded_Part_1_Rows_00001-05000.xlsx' \
+            'Embassy_Medical_Providers_Geocoded_Part_2_Rows_05001-10000.xlsx' \
+            'Embassy_Medical_Providers_Geocoded_Part_3_Rows_10001-14552.xlsx'; do
+            count="$(awk -v name="$basename" '$0 == name || index($0, "/" name) == length($0) - length(name) {n++} END {print n+0}' "$inventory")"
+            echo "${basename}: ${count} match(es)"
+            awk -v name="$basename" '$0 == name || index($0, "/" name) == length($0) - length(name) {print "  " $0}' "$inventory"
+          done

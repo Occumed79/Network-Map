@@ -21,13 +21,22 @@ jobs:
           node-version: 22
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
+      - name: Remove stale Leaflet stylesheet import
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('occu-med-map/src/index.css')
+          text = path.read_text()
+          text = text.replace("@import 'leaflet/dist/leaflet.css';\n\n", "")
+          text = text.replace('@import "leaflet/dist/leaflet.css";\n\n', '')
+          path.write_text(text)
       - name: Remove Leaflet runtime and React bindings
         working-directory: occu-med-map
         run: pnpm remove leaflet react-leaflet @types/leaflet
-      - name: Verify no installed Leaflet dependency remains
+      - name: Verify no installed Leaflet dependency or stylesheet remains
         run: |
           node -e "const p=require('./occu-med-map/package.json'); const all={...(p.dependencies||{}),...(p.devDependencies||{})}; for (const n of ['leaflet','react-leaflet','@types/leaflet']) if (all[n]) process.exit(1)"
-          if grep -q 'leaflet/dist/leaflet.css' occu-med-map/src/main.tsx; then echo 'Leaflet CSS import remains' >&2; exit 1; fi
+          if grep -R -n -E "leaflet/dist/leaflet\.css|react-leaflet" occu-med-map/src; then echo 'Leaflet runtime/CSS reference remains' >&2; exit 1; fi
       - name: Typecheck frontend without Leaflet
         run: pnpm --filter @workspace/occu-med-map typecheck
       - name: Build frontend without Leaflet
@@ -36,6 +45,6 @@ jobs:
         run: |
           git config user.name "Occumed79"
           git config user.email "Occumed79@users.noreply.github.com"
-          git add occu-med-map/package.json pnpm-lock.yaml
+          git add occu-med-map/src/index.css occu-med-map/package.json pnpm-lock.yaml
           git commit -m "Remove Leaflet runtime dependencies"
           git push origin HEAD:nuclear/mapbox-native-runtime

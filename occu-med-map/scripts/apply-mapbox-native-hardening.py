@@ -3,6 +3,36 @@ from pathlib import Path
 compat = Path('occu-med-map/src/mapboxNativeCompat.ts')
 text = compat.read_text()
 
+old_initializer = '''registerMapboxMapInitializer({
+  id: "mapbox-native-leaflet-compat",
+  priority: 5,
+  initialize: (native) => {
+    const sync = () => renderLogicalMap(native);
+    native.on("style.load", sync);
+    if (native.isStyleLoaded()) queueMicrotask(sync);
+    return () => native.off("style.load", sync);
+  },
+});'''
+new_initializer = '''registerMapboxMapInitializer({
+  id: "mapbox-native-leaflet-compat",
+  priority: 5,
+  initialize: (native) => {
+    const sync = () => renderLogicalMap(native);
+    const canvas = native.getCanvas();
+    const onWebglRestored = () => sync();
+    native.on("style.load", sync);
+    canvas.addEventListener("webglcontextrestored", onWebglRestored);
+    if (native.isStyleLoaded()) queueMicrotask(sync);
+    return () => {
+      native.off("style.load", sync);
+      canvas.removeEventListener("webglcontextrestored", onWebglRestored);
+    };
+  },
+});'''
+if old_initializer not in text:
+    raise SystemExit('missing Mapbox initializer patch target')
+text = text.replace(old_initializer, new_initializer)
+
 old_bounds = '''    constructor(a: LatLngExpression | LatLngExpression[], b?: LatLngExpression) {
       const values: LatLngExpression[] = Array.isArray(a) && Array.isArray((a as any)[0]) ? a as LatLngExpression[] : b ? [a as LatLngExpression, b] : [a as LatLngExpression];
       const points = values.map(normalizeLatLng);
@@ -43,6 +73,16 @@ new_bounds = '''    constructor(a: LatLngExpression | LatLngExpression[], b?: La
 if old_bounds not in text:
     raise SystemExit('missing LatLngBounds patch target')
 text = text.replace(old_bounds, new_bounds)
+
+old_grid = '  export class GridLayer extends Layer {}'
+new_grid = '''  export class GridLayer extends Layer {
+    static defaultOptions: GridLayerOptions = {};
+    static mergeOptions(options: GridLayerOptions): void { Object.assign(GridLayer.defaultOptions, options); }
+    constructor(options: GridLayerOptions = {}) { super({ ...GridLayer.defaultOptions, ...options }); }
+  }'''
+if old_grid not in text:
+    raise SystemExit('missing GridLayer patch target')
+text = text.replace(old_grid, new_grid)
 
 old_control = '''    addTo(map: Map): this {
       this.map = map;
@@ -94,6 +134,35 @@ new_control = '''    addTo(map: Map): this {
 if old_control not in text:
     raise SystemExit('missing Control.addTo patch target')
 text = text.replace(old_control, new_control)
+
+old_map_header = '''  export class Map extends Evented {
+    private container: HTMLElement;'''
+new_map_header = '''  export class Map extends Evented {
+    static defaultOptions: MapOptions = {};
+    static mergeOptions(options: MapOptions): void { Object.assign(Map.defaultOptions, options); }
+    private container: HTMLElement;'''
+if old_map_header not in text:
+    raise SystemExit('missing Map static defaults patch target')
+text = text.replace(old_map_header, new_map_header)
+
+old_map_constructor = '''    constructor(element: string | HTMLElement, options: MapOptions = {}) {
+      super();
+      const container = typeof element === "string" ? document.getElementById(element) : element;
+      if (!container) throw new Error("Map container not found");
+      this.container = container;
+      this.center = normalizeLatLng(options.center || [20, 0]);
+      this.zoom = Number(options.zoom ?? 2);'''
+new_map_constructor = '''    constructor(element: string | HTMLElement, options: MapOptions = {}) {
+      super();
+      const resolvedOptions = { ...Map.defaultOptions, ...options };
+      const container = typeof element === "string" ? document.getElementById(element) : element;
+      if (!container) throw new Error("Map container not found");
+      this.container = container;
+      this.center = normalizeLatLng(resolvedOptions.center || [20, 0]);
+      this.zoom = Number(resolvedOptions.zoom ?? resolvedOptions.minZoom ?? 2);'''
+if old_map_constructor not in text:
+    raise SystemExit('missing Map constructor defaults patch target')
+text = text.replace(old_map_constructor, new_map_constructor)
 compat.write_text(text)
 
 dual = Path('occu-med-map/src/dualMapEngineRuntime.ts')
@@ -134,4 +203,4 @@ if old_click not in text:
     raise SystemExit('missing Mapbox click ownership patch target')
 dual.write_text(text.replace(old_click, new_click))
 
-print('Applied Mapbox native bounds, control, and click ownership hardening.')
+print('Applied Mapbox native defaults, bounds, controls, WebGL, and click hardening.')

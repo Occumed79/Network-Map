@@ -20,10 +20,8 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable
-      - name: Migrate critical map input to native Mapbox events
-        run: python occu-med-map/scripts/apply-mapbox-native-direct-input-fix.py
-      - name: Add indexed-provider native visibility acceptance
-        run: python occu-med-map/scripts/apply-mapbox-native-indexed-provider-test.py
+      - name: Strengthen indexed provider native Mapbox proof
+        run: python occu-med-map/scripts/apply-mapbox-native-indexed-proof-fix.py
       - run: pnpm install --frozen-lockfile
       - name: Typecheck frontend
         run: pnpm --filter @workspace/occu-med-map typecheck
@@ -35,10 +33,10 @@ jobs:
         run: pnpm --filter @workspace/occu-med-map test:leaflet-map-lifecycle-hardening
       - name: Build frontend
         run: pnpm --filter @workspace/occu-med-map build
-      - name: Commit validated native-input migration
+      - name: Commit validated indexed-provider proof
         run: |
           git config user.name "Occumed79"
           git config user.email "Occumed79@users.noreply.github.com"
-          git add occu-med-map/src/App.tsx occu-med-map/src/dualMapEngineRuntime.ts occu-med-map/scripts/ci-mapbox-native-tools-acceptance.mjs
-          git commit -m "Move Radius and Live Finder input to native Mapbox"
+          git add occu-med-map/scripts/ci-mapbox-native-tools-acceptance.mjs
+          git commit -m "Strengthen indexed provider Mapbox acceptance"
           git push origin HEAD:nuclear/mapbox-native-runtime

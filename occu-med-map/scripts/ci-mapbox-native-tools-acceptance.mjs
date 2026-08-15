@@ -111,8 +111,8 @@ async function mockApi(page) {
     if (pathname === "/api/provider-layers/indexed") {
       return json(route, {
         providers: [
-          { clinic_name: "CI Indexed Clinic One", name: "CI Indexed Clinic One", lat: 20.0, lng: 0.0, address_1: "10 Indexed Way", city: "CI City", state: "CI", zip: "00001", phone: "+1 555 0301", website: "https://example.invalid/indexed-one", source_id: "indexed-ci-1", data_source: "indexed", category: "clinic", clinic_type: "general_practitioner", providerType: "general_practitioner", services: "primary care", types: ["primary care"] },
-          { clinic_name: "CI Indexed Clinic Two", name: "CI Indexed Clinic Two", lat: 20.03, lng: 0.03, address_1: "20 Indexed Way", city: "CI City", state: "CI", zip: "00002", phone: "+1 555 0302", website: "https://example.invalid/indexed-two", source_id: "indexed-ci-2", data_source: "indexed", category: "clinic", clinic_type: "general_practitioner", providerType: "general_practitioner", services: "primary care", types: ["primary care"] },
+          { clinic_name: "CI Indexed Clinic One", name: "CI Indexed Clinic One", lat: 20.4, lng: 0.4, address_1: "10 Indexed Way", city: "CI City", state: "CI", zip: "00001", phone: "+1 555 0301", website: "https://example.invalid/indexed-one", source_id: "indexed-ci-1", data_source: "indexed", category: "clinic", clinic_type: "general_practitioner", providerType: "general_practitioner", services: "primary care", types: ["primary care"] },
+          { clinic_name: "CI Indexed Clinic Two", name: "CI Indexed Clinic Two", lat: 20.43, lng: 0.43, address_1: "20 Indexed Way", city: "CI City", state: "CI", zip: "00002", phone: "+1 555 0302", website: "https://example.invalid/indexed-two", source_id: "indexed-ci-2", data_source: "indexed", category: "clinic", clinic_type: "general_practitioner", providerType: "general_practitioner", services: "primary care", types: ["primary care"] },
         ],
         count: 2,
         loaded: 2,
@@ -200,9 +200,8 @@ try {
   await page.waitForFunction(() => (window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || []).some((map) => map.getContainer().closest(".mapbox-2d-host")), null, { timeout: 20_000 });
   await page.locator(".mapbox-2d-host .mapboxgl-canvas").waitFor({ state: "visible", timeout: 15_000 });
 
-  // Indexed Providers: API response -> native Mapbox point layer exists -> real
-  // Mapbox click opens the provider popup. This is deliberately end-to-end;
-  // headless engines can make UI status copy and source introspection timing vary.
+  // Indexed Providers: API response -> specific source is ready -> native Mapbox
+  // point layer exists -> real Mapbox click opens the provider popup.
   const indexedToggle = page.getByRole("checkbox", { name: "Indexed Providers" });
   const indexedResponsePromise = page.waitForResponse((response) => {
     try {
@@ -220,8 +219,13 @@ try {
     const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
     const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
     if (!map) throw new Error("2D Mapbox map unavailable for indexed-provider test");
-    map.jumpTo({ center: [0.015, 20.015], zoom: 9 });
+    map.jumpTo({ center: [0.415, 20.415], zoom: 9 });
   });
+  await page.waitForFunction((input) => {
+    const row = input.closest(".workflow-layer");
+    const text = String(row?.textContent || "");
+    return input.checked && !/loading/i.test(text) && /2\s+(?:total|loaded)/i.test(text);
+  }, await indexedToggle.elementHandle(), { timeout: 15_000 });
   await page.waitForFunction(() => {
     const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
     const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
@@ -231,7 +235,7 @@ try {
     );
   }, null, { timeout: 10_000 });
 
-  const indexedPoint = await active2dMapPoint(page, 0, 20);
+  const indexedPoint = await active2dMapPoint(page, 0.4, 20.4);
   await page.mouse.click(indexedPoint.x, indexedPoint.y);
   await page.getByText("CI Indexed Clinic One").first().waitFor({ state: "visible", timeout: 8_000 });
 

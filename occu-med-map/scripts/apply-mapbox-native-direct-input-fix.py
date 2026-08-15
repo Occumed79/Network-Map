@@ -2,6 +2,12 @@ from pathlib import Path
 
 app = Path('occu-med-map/src/App.tsx')
 text = app.read_text()
+state_target = "  const [dropRadiusMiles, setDropRadiusMiles] = useState(25);\n"
+state_replacement = "  const [dropRadiusMiles, setDropRadiusMiles] = useState(25);\n  const dropRadiusMilesRef = useRef(dropRadiusMiles);\n  useLayoutEffect(()=>{ dropRadiusMilesRef.current = dropRadiusMiles; },[dropRadiusMiles]);\n"
+if state_target not in text:
+    raise SystemExit('missing Radius state ref target')
+text = text.replace(state_target, state_replacement, 1)
+
 old = '''    // Single clicks remain reserved for tools that explicitly use them.
     map.on('click',(e:L.LeafletMouseEvent)=>{
       const { lat, lng } = e.latlng;

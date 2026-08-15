@@ -27,49 +27,42 @@ jobs:
 
           app = Path('occu-med-map/src/App.tsx')
           text = app.read_text()
-          old = "setDatasetStatus(prev=>({...prev,[key]:{loading:true,error:'',loaded:false}}));"
-          new = "setDatasetStatus(prev=>({...prev,[key]:{loading:true,error:'',loaded:prev[key].loaded}}));"
-          if old not in text:
-              raise SystemExit('provider dataset loading-state target not found')
-          text = text.replace(old, new, 1)
-
-          old_status = """  function providerLayerStatus(key:DatasetKey, count:number, emptyMessage:string, visible:boolean) {
-            const state=datasetStatus[key];
-            if(state.loading) return 'Loading provider data…';
-            if(state.error) return state.error;
-            if(!state.loaded) return visible ? 'Loading starts when enabled' : 'Toggle on to load';
-            if(count===0) return emptyMessage;
-            return `${count.toLocaleString()} loaded · ${visible ? 'visible' : 'toggle off'}`;
-          }"""
-          new_status = """  function providerLayerStatus(key:DatasetKey, count:number, emptyMessage:string, visible:boolean) {
-            const state=datasetStatus[key];
-            if(state.loading && !state.loaded) return 'Loading provider data…';
-            if(state.error) return state.error;
-            if(!state.loaded) return visible ? 'Loading starts when enabled' : 'Toggle on to load';
-            if(count===0 && !state.loading) return emptyMessage;
-            if(state.loading) return `${count.toLocaleString()} loaded · refreshing viewport…`;
-            return `${count.toLocaleString()} loaded · ${visible ? 'visible' : 'toggle off'}`;
-          }"""
-          if old_status not in text:
-              raise SystemExit('provider layer status target not found')
-          app.write_text(text.replace(old_status, new_status, 1))
+          replacements = [
+              (
+                  "setDatasetStatus(prev=>({...prev,[key]:{loading:true,error:'',loaded:false}}));",
+                  "setDatasetStatus(prev=>({...prev,[key]:{loading:true,error:'',loaded:prev[key].loaded}}));",
+              ),
+              (
+                  "if(state.loading) return 'Loading provider data…';",
+                  "if(state.loading && !state.loaded) return 'Loading provider data…';",
+              ),
+              (
+                  "if(count===0) return emptyMessage;",
+                  "if(count===0 && !state.loading) return emptyMessage;\n    if(state.loading) return `${count.toLocaleString()} loaded · refreshing viewport…`;",
+              ),
+          ]
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'provider refresh target not found: {old}')
+              text = text.replace(old, new, 1)
+          app.write_text(text)
 
           test = Path('occu-med-map/scripts/ci-mapbox-native-tools-acceptance.mjs')
           text = test.read_text()
-          old_wait = """  await page.waitForFunction((input) => {
+          old = """  await page.waitForFunction((input) => {
             const row = input.closest(\".workflow-layer\");
             const text = String(row?.textContent || \"\");
             return input.checked && !/loading/i.test(text) && /2\\s+(?:total|loaded)/i.test(text);
           }, await indexedToggle.elementHandle(), { timeout: 15_000 });"""
-          new_wait = """  await page.waitForFunction(() => {
+          new = """  await page.waitForFunction(() => {
             const input = document.querySelector('input[aria-label=\"Indexed Providers\"]');
             const row = input?.closest(\".workflow-layer\");
             const text = String(row?.textContent || \"\");
             return Boolean(input?.checked) && /2\\s+loaded/i.test(text);
           }, null, { timeout: 15_000 });"""
-          if old_wait not in text:
+          if old not in text:
               raise SystemExit('indexed provider refresh readiness target not found')
-          test.write_text(text.replace(old_wait, new_wait, 1))
+          test.write_text(text.replace(old, new, 1))
       - run: pnpm install --frozen-lockfile
       - name: Frontend typecheck
         run: pnpm --filter @workspace/occu-med-map typecheck

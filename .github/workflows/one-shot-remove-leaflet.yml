@@ -1,0 +1,41 @@
+name: One-shot remove Leaflet packages
+
+on:
+  push:
+    paths:
+      - .github/workflows/one-shot-remove-leaflet.yml
+
+permissions:
+  contents: write
+
+jobs:
+  remove-leaflet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: nuclear/mapbox-native-runtime
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Remove Leaflet runtime and React bindings
+        working-directory: occu-med-map
+        run: pnpm remove leaflet react-leaflet @types/leaflet
+      - name: Verify no installed Leaflet dependency remains
+        run: |
+          node -e "const p=require('./occu-med-map/package.json'); const all={...(p.dependencies||{}),...(p.devDependencies||{})}; for (const n of ['leaflet','react-leaflet','@types/leaflet']) if (all[n]) process.exit(1)"
+          if grep -q 'leaflet/dist/leaflet.css' occu-med-map/src/main.tsx; then echo 'Leaflet CSS import remains' >&2; exit 1; fi
+      - name: Typecheck frontend without Leaflet
+        run: pnpm --filter @workspace/occu-med-map typecheck
+      - name: Build frontend without Leaflet
+        run: pnpm --filter @workspace/occu-med-map build
+      - name: Commit package removal
+        run: |
+          git config user.name "Occumed79"
+          git config user.email "Occumed79@users.noreply.github.com"
+          git add occu-med-map/package.json pnpm-lock.yaml
+          git commit -m "Remove Leaflet runtime dependencies"
+          git push origin HEAD:nuclear/mapbox-native-runtime

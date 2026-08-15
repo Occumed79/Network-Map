@@ -1,0 +1,58 @@
+name: One-shot Healthsites promotion progress probe
+
+on:
+  push:
+    paths:
+      - '.github/workflows/one-shot-healthsites-progress-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      HEALTHSITES_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
+      HEALTHSITES_DATABASE_URL_2: ${{ secrets.HEALTHSITES_DATABASE_URL_2 }}
+      HEALTHSITES_DATABASE_URL_3: ${{ secrets.HEALTHSITES_DATABASE_URL_3 }}
+      HEALTHSITES_DATABASE_URL_4: ${{ secrets.HEALTHSITES_DATABASE_URL_4 }}
+      HEALTHSITES_DATABASE_URL_5: ${{ secrets.HEALTHSITES_DATABASE_URL_5 }}
+      HEALTHSITES_DATABASE_URL_6: ${{ secrets.HEALTHSITES_DATABASE_URL_6 }}
+      HEALTHSITES_DATABASE_URL_7: ${{ secrets.HEALTHSITES_DATABASE_URL_7 }}
+      HEALTHSITES_DATABASE_URL_8: ${{ secrets.HEALTHSITES_DATABASE_URL_8 }}
+    steps:
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install --yes -qq postgresql-client
+
+      - name: Probe all provider projects
+        shell: bash
+        run: |
+          set -euo pipefail
+          for slot in $(seq 1 8); do
+            if [[ "$slot" == "1" ]]; then
+              target_url="$HEALTHSITES_DATABASE_URL"
+            else
+              variable="HEALTHSITES_DATABASE_URL_${slot}"
+              target_url="${!variable}"
+            fi
+            echo "::add-mask::${target_url}"
+            echo "===== SLOT ${slot} ====="
+            PGOPTIONS='-c statement_timeout=10000' psql "$target_url" -X -v ON_ERROR_STOP=1 -P pager=off -c "
+              SELECT
+                (SELECT count(*) FROM public.provider_type_catalog) AS provider_types,
+                (SELECT count(*) FROM public.provider_raw_records WHERE source_key='healthsites_osm') AS raw_rows,
+                (SELECT count(*) FROM public.provider_stage_records WHERE source_key='healthsites_osm') AS stage_rows,
+                (SELECT count(*) FROM public.provider_master_sources WHERE source_key='healthsites_osm') AS source_links,
+                (SELECT count(*) FROM public.medical_providers WHERE data_source='Healthsites / OpenStreetMap') AS legacy_rows;
+              SELECT pid, state, wait_event_type, wait_event, now()-query_start AS query_age,
+                     left(regexp_replace(query, E'[\\n\\r\\t]+', ' ', 'g'), 220) AS query
+              FROM pg_stat_activity
+              WHERE pid <> pg_backend_pid()
+                AND datname=current_database()
+                AND state <> 'idle'
+              ORDER BY query_start;
+            " || true
+          done

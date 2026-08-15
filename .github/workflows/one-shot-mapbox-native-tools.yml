@@ -1,0 +1,57 @@
+name: One-shot Mapbox native tool acceptance
+
+on:
+  push:
+    paths:
+      - .github/workflows/one-shot-mapbox-native-tools.yml
+
+permissions:
+  contents: read
+
+jobs:
+  tools:
+    name: ${{ matrix.browser }} native tools
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+    env:
+      VITE_MAPBOX_TOKEN: pk.ci-network-map-placeholder
+      VITE_MAPBOX_TOKEN_2: pk.ci-network-map-placeholder
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: nuclear/mapbox-native-runtime
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Install browser
+        run: pnpm --filter @workspace/occu-med-map exec playwright install --with-deps ${{ matrix.browser }}
+      - name: Start deterministic preview
+        run: |
+          pnpm --filter @workspace/occu-med-map exec vite preview --config vite.config.ts --host 127.0.0.1 --port 4173 > /tmp/network-map-tools-preview.log 2>&1 &
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:4173/ >/dev/null; then exit 0; fi
+            sleep 0.5
+          done
+          cat /tmp/network-map-tools-preview.log
+          exit 1
+      - name: Run tool interaction acceptance
+        env:
+          NETWORK_MAP_BROWSER: ${{ matrix.browser }}
+          NETWORK_MAP_CI_UI_URL: http://127.0.0.1:4173
+        run: timeout --signal=TERM --kill-after=10s 120s pnpm --filter @workspace/occu-med-map exec node scripts/ci-mapbox-native-tools-acceptance.mjs
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mapbox-native-tools-${{ matrix.browser }}
+          path: |
+            occu-med-map/test-results/mapbox-native-tools
+            /tmp/network-map-tools-preview.log
+          if-no-files-found: ignore
+          retention-days: 7

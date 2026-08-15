@@ -29,6 +29,7 @@ assert.match(compat, /native\.addLayer\(/, "legacy vector geometry must become n
 assert.match(compat, /new mapboxgl\.Marker/, "legacy point markers must become Mapbox markers");
 assert.match(compat, /new mapboxgl\.Popup/, "legacy popups must become Mapbox popups");
 assert.match(compat, /native\.on\("style\.load"/, "style reloads must restore Mapbox-native compatibility layers");
+assert.match(compat, /webglcontextrestored/, "WebGL restoration must rehydrate Mapbox-native compatibility layers");
 assert.doesNotMatch(compat, /from ["']leaflet["']/, "compatibility implementation must not depend on Leaflet");
 
 assert.match(dual, /projection: is2d \? "mercator" : "globe"/, "2D Mercator and 3D globe modes must both remain Mapbox-native");
@@ -36,9 +37,9 @@ assert.match(dual, /mapbox2dMap/, "2D Mapbox instance must remain");
 assert.match(dual, /mapboxGlobeMap/, "3D Mapbox instance must remain");
 assert.match(dual, /_setViewFromNative/, "Mapbox camera changes must update shared logical state without feedback recursion");
 
-assert.match(lifecycle, /style\.load/, "Mapbox lifecycle must restore initializers after style reload");
-assert.match(lifecycle, /webglcontextlost/, "Mapbox lifecycle must observe WebGL loss");
-assert.match(lifecycle, /webglcontextrestored/, "Mapbox lifecycle must restore after WebGL recovery");
+assert.match(lifecycle, /orderedInitializers/, "Mapbox lifecycle must retain deterministic initializer ordering");
+assert.match(lifecycle, /executedByMap/, "Mapbox lifecycle must prevent duplicate initializer ownership");
+assert.match(lifecycle, /runCleanup\(map\)/, "Mapbox lifecycle must clean up registered owners when a map is removed");
 
 assert.match(providerFinder, /map\.addSource\(SOURCE_ID/, "provider finder must own a native Mapbox source");
 assert.match(providerFinder, /map\.addLayer\(/, "provider finder must own a native Mapbox layer");

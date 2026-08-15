@@ -200,7 +200,10 @@ try {
   await page.waitForFunction(() => (window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || []).some((map) => map.getContainer().closest(".mapbox-2d-host")), null, { timeout: 20_000 });
   await page.locator(".mapbox-2d-host .mapboxgl-canvas").waitFor({ state: "visible", timeout: 15_000 });
 
-  // Indexed Providers must make the full API -> provider layer -> native Mapbox path visible.
+  // Indexed Providers: API response -> app reports rendered -> native Mapbox
+  // point layer exists -> real Mapbox click opens the provider popup. This is
+  // deliberately end-to-end; headless WebKit can return empty source/rendered
+  // introspection results even while the same GeoJSON circle layer is visible.
   const indexedToggle = page.getByRole("checkbox", { name: "Indexed Providers" });
   const indexedResponsePromise = page.waitForResponse((response) => {
     try {
@@ -220,25 +223,15 @@ try {
     if (!map) throw new Error("2D Mapbox map unavailable for indexed-provider test");
     map.jumpTo({ center: [0.015, 20.015], zoom: 9 });
   });
-
-  // GeoJSON source membership is the deterministic proof that React provider data
-  // crossed the Mapbox-native compatibility boundary. Headless WebKit can report
-  // an empty global queryRenderedFeatures() result even while the same circle layer
-  // is visibly drawn, so source data + the real Mapbox hit-test popup is the stronger
-  // cross-browser functional assertion here.
+  await page.waitForFunction(() => /2 rendered in viewport/i.test(document.body.innerText), null, { timeout: 15_000 });
   await page.waitForFunction(() => {
     const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
     const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
     if (!map || !map.isStyleLoaded()) return false;
-    const sourceIds = Object.keys(map.getStyle()?.sources || {}).filter((id) => id.startsWith("leaflet-compat-"));
-    return sourceIds.some((id) => {
-      try {
-        return map.querySourceFeatures(id).some((feature) =>
-          String(feature.properties?.__popupHtml || "").includes("CI Indexed Clinic One")
-        );
-      } catch { return false; }
-    });
-  }, null, { timeout: 15_000 });
+    return (map.getStyle()?.layers || []).some((layer) =>
+      layer.type === "circle" && String(layer.id).startsWith("leaflet-compat-") && String(layer.id).endsWith("-points")
+    );
+  }, null, { timeout: 10_000 });
 
   const indexedPoint = await active2dMapPoint(page, 0, 20);
   await page.mouse.click(indexedPoint.x, indexedPoint.y);
@@ -312,7 +305,7 @@ try {
   await page.waitForFunction(() => /1 facilities from OSM/i.test(document.querySelector(".live-panel.open")?.textContent || ""), null, { timeout: 15_000 });
 
   assert.deepEqual(pageErrors, [], `Mapbox native tool acceptance saw page errors: ${pageErrors.join("; ")}`);
-  console.log(`Mapbox native tool acceptance passed in ${browserName}: radius, 2D/3D, density, hex, provider click ownership, and OSM Live Finder.`);
+  console.log(`Mapbox native tool acceptance passed in ${browserName}: indexed providers, radius, 2D/3D, density, hex, provider click ownership, and OSM Live Finder.`);
 } catch (error) {
   await page.screenshot({ path: path.join(artifactDir, "failure.png"), fullPage: true }).catch(() => undefined);
   fs.writeFileSync(path.join(artifactDir, "error.txt"), `${error instanceof Error ? error.stack || error.message : String(error)}\n\nPage errors:\n${pageErrors.join("\n")}`);

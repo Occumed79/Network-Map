@@ -376,6 +376,9 @@ function installMapboxInteractions(instance: mapboxgl.Map, mode: MapMode): void 
     });
     if (overlayHit) return;
 
+    window.dispatchEvent(new CustomEvent("network-map:native-click", {
+      detail: { lat: event.lngLat.lat, lng: event.lngLat.lng, originalEvent: event.originalEvent, mode },
+    }));
     canonicalMap.fire("click", {
       latlng: L.latLng(event.lngLat.lat, event.lngLat.lng),
       originalEvent: event.originalEvent,
@@ -385,6 +388,9 @@ function installMapboxInteractions(instance: mapboxgl.Map, mode: MapMode): void 
   instance.on("dblclick", (event) => {
     if (currentMode !== mode || !canonicalMap) return;
     event.preventDefault();
+    window.dispatchEvent(new CustomEvent("network-map:native-dblclick", {
+      detail: { lat: event.lngLat.lat, lng: event.lngLat.lng, originalEvent: event.originalEvent, mode },
+    }));
     canonicalMap.fire("dblclick", {
       latlng: L.latLng(event.lngLat.lat, event.lngLat.lng),
       originalEvent: event.originalEvent,

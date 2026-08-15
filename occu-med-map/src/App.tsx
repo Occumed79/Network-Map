@@ -1292,6 +1292,8 @@ export default function App() {
 
   const [dropCenter, setDropCenter] = useState<{lat:number;lng:number}|null>(null);
   const [dropRadiusMiles, setDropRadiusMiles] = useState(25);
+  const dropRadiusMilesRef = useRef(dropRadiusMiles);
+  useLayoutEffect(()=>{ dropRadiusMilesRef.current = dropRadiusMiles; },[dropRadiusMiles]);
   const [dropFacilityType, setDropFacilityType] = useState('all');
   const [dropIncludeFacilities, setDropIncludeFacilities] = useState(true);
   const [savedRadii, setSavedRadii] = useState<Array<{id:number;lat:number;lng:number;radiusMiles:number;color:string;label:string}>>([]);
@@ -1663,36 +1665,43 @@ export default function App() {
     // Load GeoJSON only if US Diagnostics is already enabled
     if (showUsDiagnostics) loadStateGeo(map);
 
-    // Single clicks remain reserved for tools that explicitly use them.
-    map.on('click',(e:L.LeafletMouseEvent)=>{
-      const { lat, lng } = e.latlng;
+    // User-facing map tools consume Mapbox-native input directly. The temporary
+    // Leaflet-shaped facade remains only for legacy geometry/control APIs; Radius,
+    // Coverage, and Live Finder no longer depend on its event bus.
+    const onNativeMapClick = (rawEvent: Event) => {
+      const detail = (rawEvent as CustomEvent<{ lat:number; lng:number; originalEvent?: Event }>).detail;
+      if (!detail) return;
+      const { lat, lng } = detail;
       const tool = activeToolRef.current;
 
       if (tool === 'radius') {
-        // Radius tool is explicit and separate: set center, open UI, draw ring.
         setDropCenter({ lat, lng });
         setDropUi(prev=>({ ...prev, panelOpen:true, status:'' }));
-        drawDropRadius(lat, lng, dropRadiusMiles);
+        drawDropRadius(lat, lng, dropRadiusMilesRef.current);
         return;
       }
 
       if (tool === 'coverage' && isUsPoint(lat, lng)) {
-        // U.S. coverage diagnostics only inside the U.S.
         const est = estimateLocalPopulationDensity(lat, lng);
         setLocalPopInfo(est ?? null);
-        return;
       }
-    });
+    };
 
-    map.on('dblclick',(e:L.LeafletMouseEvent)=>{
+    const onNativeMapDoubleClick = (rawEvent: Event) => {
+      const detail = (rawEvent as CustomEvent<{ lat:number; lng:number; originalEvent?: Event }>).detail;
+      if (!detail) return;
       const tool = activeToolRef.current;
       if (tool !== null && tool !== 'liveFinder') return;
-      const { lat, lng } = e.latlng;
+      const { lat, lng } = detail;
       setLocalPopInfo(null);
       setDropCenter({ lat, lng });
+      activeToolRef.current = 'liveFinder';
       setActiveTool('liveFinder');
       doLiveSearch(lat, lng, undefined, undefined, 'live_finder_double_click');
-    });
+    };
+
+    window.addEventListener('network-map:native-click', onNativeMapClick);
+    window.addEventListener('network-map:native-dblclick', onNativeMapDoubleClick);
 
     setMapReady(true);
 
@@ -1702,7 +1711,14 @@ export default function App() {
     });
     resizeObserver.observe(mapDivRef.current);
 
-    return ()=>{ resizeObserver.disconnect(); map.remove(); mapRef.current=null; cityLayerRef.current=null; };
+    return ()=>{
+      window.removeEventListener('network-map:native-click', onNativeMapClick);
+      window.removeEventListener('network-map:native-dblclick', onNativeMapDoubleClick);
+      resizeObserver.disconnect();
+      map.remove();
+      mapRef.current=null;
+      cityLayerRef.current=null;
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 

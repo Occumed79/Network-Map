@@ -67,9 +67,9 @@ function flattenCoordinates(value: unknown, output: Array<[number, number]>): vo
 function boundsFromGeoJSON(geojson: GeoJSON.GeoJSON): L.LatLngBounds {
   const points: Array<[number, number]> = [];
   if ((geojson as any).coordinates) flattenCoordinates((geojson as any).coordinates, points);
-  if (geojson.type === "Feature") flattenCoordinates(geojson.geometry?.coordinates, points);
+  if (geojson.type === "Feature") flattenCoordinates((geojson.geometry as any)?.coordinates, points);
   if (geojson.type === "FeatureCollection") {
-    for (const feature of geojson.features) flattenCoordinates(feature.geometry?.coordinates, points);
+    for (const feature of geojson.features) flattenCoordinates((feature.geometry as any)?.coordinates, points);
   }
   if (!points.length) return new L.LatLngBounds([-85, -180], [85, 180]);
   let south = 90, north = -90, west = 180, east = -180;
@@ -456,7 +456,7 @@ namespace L {
     private popupValue: Popup | null = null;
     private tooltipValue: Tooltip | null = null;
     constructor(options: Record<string, any> = {}) { super(); this.options = options; allLayers.set(this._leaflet_id, this); }
-    addTo(map: Map): this { map.addLayer(this); return this; }
+    addTo(target: Map | LayerGroup): this { target.addLayer(this); return this; }
     remove(): this { this._map?.removeLayer(this); return this; }
     bindPopup(content: Content, options: Record<string, any> = {}): this { this.popupValue = new Popup(options, this).setContent(content); this.touch(); return this; }
     unbindPopup(): this { this.popupValue?.close(); this.popupValue = null; this.touch(); return this; }
@@ -553,7 +553,7 @@ namespace L {
     }
     override cleanupNative(native: mapboxgl.Map): void { const marker = this.nativeMarkers.get(native); try { marker?.remove(); } catch {} this.nativeMarkers.delete(native); }
     private renderMarkers(): void { eachNativeMap((native) => this.renderNative(native)); }
-    override toGeoJSON(): GeoJSON.Feature<GeoJSON.Point> { return { type: "Feature", geometry: { type: "Point", coordinates: [this.latlng.lng, this.latlng.lat] }, properties: {} }; }
+    override toGeoJSON(): GeoJSON.Feature { return { type: "Feature", geometry: { type: "Point", coordinates: [this.latlng.lng, this.latlng.lat] }, properties: {} }; }
   }
 
   export class CircleMarker extends Marker {
@@ -585,7 +585,7 @@ namespace L {
     addLatLng(value: LatLngExpression): this { this.latlngs.push(normalizeLatLng(value)); this.touch(); return this; }
     getBounds(): LatLngBounds { return new LatLngBounds(this.latlngs as any); }
     override defaultLatLng(): LatLng { return this.latlngs[0] || super.defaultLatLng(); }
-    override toGeoJSON(): GeoJSON.Feature<GeoJSON.LineString> { return { type: "Feature", geometry: { type: "LineString", coordinates: this.latlngs.map((p) => [p.lng, p.lat]) }, properties: {} }; }
+    override toGeoJSON(): GeoJSON.Feature { return { type: "Feature", geometry: { type: "LineString", coordinates: this.latlngs.map((p) => [p.lng, p.lat]) }, properties: {} }; }
   }
 
   export class Polygon extends Polyline {

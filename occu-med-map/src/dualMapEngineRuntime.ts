@@ -421,7 +421,13 @@ function syncLeafletCameraFromMapbox(instance: mapboxgl.Map, mode: MapMode): voi
   const rawZoom = Number(instance.getZoom());
   const zoom = mode === "3d" ? leafletZoomFromGlobe(rawZoom) : rawZoom;
   lastEngineDrivenLeafletMove = Date.now();
-  canonicalMap.setView([center.lat, center.lng], Math.max(2, Math.min(17, Math.round(zoom))), { animate: false });
+  const logicalMap = canonicalMap as L.Map & { _setViewFromNative?: (center: L.LatLngExpression, zoom: number) => void };
+  const normalizedZoom = Math.max(2, Math.min(17, zoom));
+  if (typeof logicalMap._setViewFromNative === "function") {
+    logicalMap._setViewFromNative([center.lat, center.lng], normalizedZoom);
+  } else {
+    canonicalMap.setView([center.lat, center.lng], normalizedZoom, { animate: false });
+  }
 }
 
 function destroyMapbox2dView(): void {

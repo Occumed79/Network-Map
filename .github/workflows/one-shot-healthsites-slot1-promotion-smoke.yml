@@ -1,4 +1,4 @@
-name: One-shot Healthsites set-based slot 1 smoke
+name: One-shot Healthsites slot 1 storage probe
 
 on:
   push:
@@ -9,41 +9,34 @@ permissions:
   contents: read
 
 jobs:
-  smoke:
+  probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     env:
       HEALTHSITES_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
     steps:
-      - name: Check out set-based importer
-        uses: actions/checkout@v4
-
       - name: Install PostgreSQL client
         run: |
           sudo apt-get update -qq
           sudo apt-get install --yes -qq postgresql-client
 
-      - name: Promote retained slot 1 staging data with set joins
+      - name: Measure slot 1 table footprint
         shell: bash
         run: |
           set -euo pipefail
-          echo "Importer commit: $(git rev-parse HEAD)"
           echo "::add-mask::${HEALTHSITES_DATABASE_URL}"
-          expected="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(*) FROM public.source5_import_staging")"
-          expected_master="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(DISTINCT master_key) FROM public.source5_import_staging")"
-          echo "Retained staging rows: ${expected}; distinct master keys: ${expected_master}"
-          [[ "$expected" -gt 0 ]] || { echo "Retained staging batch is empty" >&2; exit 1; }
-
-          psql "$HEALTHSITES_DATABASE_URL" \
-            -v ON_ERROR_STOP=1 \
-            -v expected="$expected" \
-            -v expected_master="$expected_master" \
-            -f scripts/promote-healthsites-world.sql
-
-          actual="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(*) FROM public.medical_providers WHERE data_source='Healthsites / OpenStreetMap'")"
-          types="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_type_catalog WHERE active")"
-          staging="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(*) FROM public.source5_import_staging")"
-          echo "PROMOTION_SMOKE_SUCCESS rows=${actual} provider_types=${types} staging_after=${staging}"
-          [[ "$actual" == "$expected" ]]
-          [[ "$types" -ge 12 ]]
-          [[ "$staging" == "0" ]]
+          psql "$HEALTHSITES_DATABASE_URL" -X -v ON_ERROR_STOP=1 -P pager=off -c "
+            SELECT pg_size_pretty(pg_database_size(current_database())) AS database_size;
+            SELECT c.relname,
+                   pg_size_pretty(pg_relation_size(c.oid)) AS heap,
+                   pg_size_pretty(pg_indexes_size(c.oid)) AS indexes,
+                   pg_size_pretty(pg_total_relation_size(c.oid)) AS total,
+                   COALESCE(s.n_live_tup::bigint,0) AS estimated_rows
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid=c.relnamespace
+            LEFT JOIN pg_stat_user_tables s ON s.relid=c.oid
+            WHERE n.nspname='public' AND c.relkind='r'
+            ORDER BY pg_total_relation_size(c.oid) DESC
+            LIMIT 25;
+            SELECT count(*) AS staging_rows FROM public.source5_import_staging;
+          "

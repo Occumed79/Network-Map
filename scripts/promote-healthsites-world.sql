@@ -19,6 +19,28 @@ FROM public.source5_import_staging
   \quit 2
 \endif
 
+-- Provider projects are cloned schema-only. Seed the canonical provider type
+-- reference rows before any FK-constrained stage/master inserts.
+INSERT INTO public.provider_type_catalog
+  (type_key, display_name, description, active)
+VALUES
+  ('urgent_care', 'Urgent Care', 'Urgent care and walk-in clinic locations', true),
+  ('dot_provider', 'DOT Provider', 'DOT exam or CDL medical examiner capable provider', true),
+  ('faa_provider', 'FAA Provider', 'FAA aviation medical examiner or aviation medical clinic', true),
+  ('lab', 'Lab', 'Lab, toxicology, specimen collection, drug screen, or diagnostics location', true),
+  ('general_practitioner', 'General Practitioner', 'Primary care, family medicine, internal medicine, or general practice provider', true),
+  ('occupational_health_clinic', 'Occupational Health Clinic', 'Occupational medicine, employee health, workers comp, fit-for-duty, or employer services clinic', true),
+  ('dental', 'Dental', 'Dental provider or DD 2813 capable clinic', true),
+  ('imaging', 'Imaging', 'X-ray, radiology, mammogram, MRI, CT, ultrasound, or imaging center', true),
+  ('pharmacy_vaccination', 'Pharmacy / Vaccination', 'Pharmacy, immunization, vaccination, or travel medicine provider', true),
+  ('hospital', 'Hospital', 'Hospital, medical center, or emergency facility', true),
+  ('specialist', 'Specialist', 'Specialty physician or specialist clinic', true),
+  ('unknown', 'Unknown', 'Unclassified provider', true)
+ON CONFLICT (type_key) DO UPDATE SET
+  display_name=EXCLUDED.display_name,
+  description=EXCLUDED.description,
+  active=EXCLUDED.active;
+
 CREATE TEMP TABLE healthsites_old_master_ids ON COMMIT DROP AS
 SELECT DISTINCT master_provider_id
 FROM public.provider_master_sources

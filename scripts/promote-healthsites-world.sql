@@ -100,6 +100,9 @@ SELECT
   'raw_loaded'
 FROM public.source5_import_staging t;
 
+-- Healthsites rows for this source were deleted above and the staging table has
+-- a primary key on source_record_id, so this can be a single set-based insert.
+-- Avoid per-row LATERAL lookups and the redundant UPDATE of the rows just inserted.
 INSERT INTO public.provider_stage_records (
   raw_record_id, source_key, source_record_id, name, normalized_name,
   address_line1, formatted_address, city, state_region, postal_code,
@@ -114,39 +117,9 @@ SELECT
   t.capability_tags, t.quality_score, 'staged',
   jsonb_build_object('source_record_id',t.source_record_id,'master_key',t.master_key,'country_code',t.country_code)
 FROM public.source5_import_staging t
-JOIN LATERAL (
-  SELECT id FROM public.provider_raw_records r
-  WHERE r.source_key='healthsites_osm' AND r.source_record_id=t.source_record_id
-  ORDER BY r.created_at ASC LIMIT 1
-) r ON true
-WHERE NOT EXISTS (
-  SELECT 1 FROM public.provider_stage_records s
-  WHERE s.source_key='healthsites_osm' AND s.source_record_id=t.source_record_id
-);
-
-UPDATE public.provider_stage_records s
-SET name=t.name,
-    normalized_name=NULLIF(t.normalized_name,''),
-    address_line1=t.address_line1,
-    formatted_address=t.formatted_address,
-    city=t.city,
-    state_region=t.state_region,
-    postal_code=t.postal_code,
-    country_code=t.country_code,
-    lat=t.lat,
-    lng=t.lng,
-    phone=t.phone,
-    website=t.website,
-    email=t.email,
-    primary_provider_type=t.primary_provider_type,
-    capability_tags=t.capability_tags,
-    confidence_score=t.quality_score,
-    normalization_status='staged',
-    normalized_payload=jsonb_build_object('source_record_id',t.source_record_id,'master_key',t.master_key,'country_code',t.country_code),
-    updated_at=now()
-FROM public.source5_import_staging t
-WHERE s.source_key='healthsites_osm'
-  AND s.source_record_id=t.source_record_id;
+JOIN public.provider_raw_records r
+  ON r.source_key='healthsites_osm'
+ AND r.source_record_id=t.source_record_id;
 
 INSERT INTO public.provider_master (
   master_key, name, normalized_name, address_line1, formatted_address,
@@ -192,15 +165,15 @@ ON CONFLICT (master_key) DO UPDATE SET
   last_seen_at=now(),
   updated_at=now();
 
--- Bulk source linking looks up every staged Healthsites record by source id.
--- Keep that lookup indexed so a ~144k-row project remains set-scale instead of
--- repeatedly scanning the entire staging table.
 CREATE INDEX IF NOT EXISTS idx_provider_stage_records_source_record
   ON public.provider_stage_records(source_key, source_record_id);
 
 ANALYZE public.provider_stage_records;
 ANALYZE public.provider_raw_records;
+ANALYZE public.provider_master;
 
+-- Raw and stage rows are one-to-one with source5_import_staging during this
+-- replacement import. Use set joins instead of 2 x N ordered LATERAL lookups.
 INSERT INTO public.provider_master_sources (
   master_provider_id, stage_record_id, raw_record_id, source_key,
   source_record_id, source_url, source_confidence_score, raw_payload
@@ -210,17 +183,14 @@ SELECT
   t.source_url, t.quality_score,
   jsonb_build_object('source_record_id',t.source_record_id,'master_key',t.master_key,'country_code',t.country_code)
 FROM public.source5_import_staging t
-JOIN public.provider_master pm ON pm.master_key=t.master_key
-LEFT JOIN LATERAL (
-  SELECT id FROM public.provider_raw_records r
-  WHERE r.source_key='healthsites_osm' AND r.source_record_id=t.source_record_id
-  ORDER BY r.created_at ASC LIMIT 1
-) r ON true
-LEFT JOIN LATERAL (
-  SELECT id FROM public.provider_stage_records s
-  WHERE s.source_key='healthsites_osm' AND s.source_record_id=t.source_record_id
-  ORDER BY s.created_at ASC LIMIT 1
-) s ON true
+JOIN public.provider_master pm
+  ON pm.master_key=t.master_key
+JOIN public.provider_raw_records r
+  ON r.source_key='healthsites_osm'
+ AND r.source_record_id=t.source_record_id
+JOIN public.provider_stage_records s
+  ON s.source_key='healthsites_osm'
+ AND s.source_record_id=t.source_record_id
 ON CONFLICT (master_provider_id, source_key, (COALESCE(source_record_id,''))) DO UPDATE SET
   stage_record_id=EXCLUDED.stage_record_id,
   raw_record_id=EXCLUDED.raw_record_id,

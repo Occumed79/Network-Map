@@ -287,9 +287,15 @@ registerMapboxMapInitializer({
   priority: 5,
   initialize: (native) => {
     const sync = () => renderLogicalMap(native);
+    const canvas = native.getCanvas();
+    const onWebglRestored = () => sync();
     native.on("style.load", sync);
+    canvas.addEventListener("webglcontextrestored", onWebglRestored);
     if (native.isStyleLoaded()) queueMicrotask(sync);
-    return () => native.off("style.load", sync);
+    return () => {
+      native.off("style.load", sync);
+      canvas.removeEventListener("webglcontextrestored", onWebglRestored);
+    };
   },
 });
 
@@ -337,8 +343,29 @@ namespace L {
     private north: number;
     private east: number;
     constructor(a: LatLngExpression | LatLngExpression[], b?: LatLngExpression) {
-      const values: LatLngExpression[] = Array.isArray(a) && Array.isArray((a as any)[0]) ? a as LatLngExpression[] : b ? [a as LatLngExpression, b] : [a as LatLngExpression];
-      const points = values.map(normalizeLatLng);
+      let values: LatLngExpression[];
+      if (b) {
+        values = [a as LatLngExpression, b];
+      } else if (
+        Array.isArray(a)
+        && a.length === 2
+        && typeof a[0] === "number"
+        && typeof a[1] === "number"
+      ) {
+        values = [a as LatLngTuple];
+      } else if (Array.isArray(a)) {
+        values = a as LatLngExpression[];
+      } else {
+        values = [a as LatLngExpression];
+      }
+      const points = values.map(normalizeLatLng).filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng));
+      if (!points.length) {
+        this.south = -85;
+        this.north = 85;
+        this.west = -180;
+        this.east = 180;
+        return;
+      }
       this.south = Math.min(...points.map((p) => p.lat));
       this.north = Math.max(...points.map((p) => p.lat));
       this.west = Math.min(...points.map((p) => p.lng));
@@ -631,7 +658,11 @@ namespace L {
     override toGeoJSON(): any { return this.raw || { type: "FeatureCollection", features: [] }; }
   }
 
-  export class GridLayer extends Layer {}
+  export class GridLayer extends Layer {
+    static defaultOptions: GridLayerOptions = {};
+    static mergeOptions(options: GridLayerOptions): void { Object.assign(GridLayer.defaultOptions, options); }
+    constructor(options: GridLayerOptions = {}) { super({ ...GridLayer.defaultOptions, ...options }); }
+  }
   export class TileLayer extends GridLayer {
     constructor(public url: string, options: TileLayerOptions = {}) { super(options); }
     setUrl(url: string): this {
@@ -653,10 +684,33 @@ namespace L {
       this.map = map;
       const content = this.onAdd?.(map);
       if (content) {
+        const position = String(this.options.position || "topright").toLowerCase();
+        const host = map.getContainer().parentElement || map.getContainer();
+        host.style.position ||= "relative";
+        const cornerClass = `mapbox-native-control-corner-${position}`;
+        let corner = host.querySelector<HTMLElement>(`.${cornerClass}`);
+        if (!corner) {
+          corner = document.createElement("div");
+          corner.className = `mapbox-native-control-corner ${cornerClass}`;
+          Object.assign(corner.style, {
+            position: "absolute",
+            zIndex: "1200",
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px",
+            pointerEvents: "none",
+          });
+          const top = position.startsWith("top");
+          const left = position.endsWith("left");
+          if (top) corner.style.top = "12px"; else corner.style.bottom = "12px";
+          if (left) corner.style.left = "52px"; else corner.style.right = top ? "228px" : "12px";
+          host.appendChild(corner);
+        }
         const wrapper = document.createElement("div");
-        wrapper.className = `leaflet-compat-control leaflet-${this.options.position || "topright"}`;
+        wrapper.className = `leaflet-compat-control leaflet-${position}`;
+        wrapper.style.pointerEvents = "auto";
         wrapper.appendChild(content);
-        (map.getContainer().parentElement || map.getContainer()).appendChild(wrapper);
+        corner.appendChild(wrapper);
         this.container = wrapper;
       }
       return this;
@@ -669,6 +723,8 @@ namespace L {
   export class Icon extends DivIcon {}
 
   export class Map extends Evented {
+    static defaultOptions: MapOptions = {};
+    static mergeOptions(options: MapOptions): void { Object.assign(Map.defaultOptions, options); }
     private container: HTMLElement;
     private center: LatLng;
     private zoom: number;
@@ -683,11 +739,12 @@ namespace L {
     tap = { enable() {}, disable() {}, enabled: () => true };
     constructor(element: string | HTMLElement, options: MapOptions = {}) {
       super();
+      const resolvedOptions = { ...Map.defaultOptions, ...options };
       const container = typeof element === "string" ? document.getElementById(element) : element;
       if (!container) throw new Error("Map container not found");
       this.container = container;
-      this.center = normalizeLatLng(options.center || [20, 0]);
-      this.zoom = Number(options.zoom ?? 2);
+      this.center = normalizeLatLng(resolvedOptions.center || [20, 0]);
+      this.zoom = Number(resolvedOptions.zoom ?? resolvedOptions.minZoom ?? 2);
       logicalMaps.add(this);
       queueMicrotask(() => this.fire("load"));
     }

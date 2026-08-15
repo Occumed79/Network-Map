@@ -360,6 +360,22 @@ function installMapboxInteractions(instance: mapboxgl.Map, mode: MapMode): void 
       new mapboxgl.Popup({ closeButton: true }).setLngLat(event.lngLat).setHTML(html).addTo(instance);
       return;
     }
+
+    // Layer-specific Mapbox handlers own provider/compatibility feature clicks.
+    // Do not let those same clicks fall through into generic map-click tools
+    // such as radius selection or Live Finder coordinate selection.
+    const overlayHit = instance.queryRenderedFeatures(event.point).some((feature) => {
+      const layerId = String(feature.layer?.id || "");
+      const properties = feature.properties || {};
+      const compatibilityFeature = properties.__compatLayerId !== undefined
+        && properties.__compatLayerId !== null
+        && properties.__interactive !== false;
+      return compatibilityFeature
+        || layerId === "provider-location-search-dots"
+        || layerId.startsWith("leaflet-compat-");
+    });
+    if (overlayHit) return;
+
     canonicalMap.fire("click", {
       latlng: L.latLng(event.lngLat.lat, event.lngLat.lng),
       originalEvent: event.originalEvent,

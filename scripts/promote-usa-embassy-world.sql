@@ -187,19 +187,26 @@ ON CONFLICT (master_provider_id, source_key, (COALESCE(source_record_id,''))) DO
   raw_payload=EXCLUDED.raw_payload,
   updated_at=now();
 
+-- capability_tags may contain descriptive labels such as "Family Medicine".
+-- Only canonical catalog keys are allowed in provider_master_types.
 INSERT INTO public.provider_master_types
   (master_provider_id, type_key, source_key, confidence_score)
 SELECT
   pm.id,
-  type_key,
+  expanded.type_key,
   'embassy_clinic_docs',
   MAX(t.quality_score)
 FROM public.source5_import_staging t
-JOIN public.provider_master pm ON pm.master_key=t.master_key
-CROSS JOIN LATERAL unnest(ARRAY[t.primary_provider_type] || t.capability_tags) type_key
-WHERE type_key IS NOT NULL AND type_key<>''
-  AND EXISTS (SELECT 1 FROM public.provider_type_catalog c WHERE c.type_key=type_key)
-GROUP BY pm.id, type_key
+JOIN public.provider_master pm
+  ON pm.master_key=t.master_key
+CROSS JOIN LATERAL unnest(
+  ARRAY[t.primary_provider_type] || t.capability_tags
+) AS expanded(type_key)
+JOIN public.provider_type_catalog c
+  ON c.type_key=expanded.type_key
+WHERE expanded.type_key IS NOT NULL
+  AND expanded.type_key<>''
+GROUP BY pm.id, expanded.type_key
 ON CONFLICT (master_provider_id, type_key) DO UPDATE SET
   source_key=EXCLUDED.source_key,
   confidence_score=GREATEST(

@@ -2007,7 +2007,7 @@ export default function App() {
       myClinics:'my-clinics',
     };
     const request = (async ()=>{
-      setDatasetStatus(prev=>({...prev,[key]:{loading:true,error:'',loaded:false}}));
+      setDatasetStatus(prev=>({...prev,[key]:{loading:true,error:'',loaded:prev[key].loaded}}));
       try {
         const params = new URLSearchParams({limit:'1000',page:'1'});
         if(key==='myClinics' && masterProviderTypeFilter) params.set('clinic_type', masterProviderTypeFilter);
@@ -3832,10 +3832,11 @@ export default function App() {
 
   function providerLayerStatus(key:DatasetKey, count:number, emptyMessage:string, visible:boolean) {
     const state=datasetStatus[key];
-    if(state.loading) return 'Loading provider data…';
+    if(state.loading && !state.loaded) return 'Loading provider data…';
     if(state.error) return state.error;
     if(!state.loaded) return visible ? 'Loading starts when enabled' : 'Toggle on to load';
-    if(count===0) return emptyMessage;
+    if(count===0 && !state.loading) return emptyMessage;
+    if(state.loading) return `${count.toLocaleString()} loaded · refreshing viewport…`;
     return `${count.toLocaleString()} loaded · ${visible ? 'visible' : 'toggle off'}`;
   }
 

@@ -1,4 +1,4 @@
-name: One-shot reclaim Healthsites storage and smoke compact promotion
+name: One-shot reset Healthsites targets and launch final world import
 
 on:
   push:
@@ -10,9 +10,9 @@ permissions:
   contents: read
 
 jobs:
-  repair:
+  launch:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
     env:
       HEALTHSITES_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
       HEALTHSITES_DATABASE_URL_2: ${{ secrets.HEALTHSITES_DATABASE_URL_2 }}
@@ -23,31 +23,12 @@ jobs:
       HEALTHSITES_DATABASE_URL_7: ${{ secrets.HEALTHSITES_DATABASE_URL_7 }}
       HEALTHSITES_DATABASE_URL_8: ${{ secrets.HEALTHSITES_DATABASE_URL_8 }}
     steps:
-      - name: Check out compact importer
-        uses: actions/checkout@v4
-
       - name: Install PostgreSQL client
         run: |
           sudo apt-get update -qq
           sudo apt-get install --yes -qq postgresql-client
 
-      - name: Cancel stale full import before touching provider projects
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/31861739098/cancel" || true
-          for attempt in $(seq 1 60); do
-            status="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/31861739098" --jq .status)"
-            echo "Run 31861739098: ${status}"
-            [[ "$status" == "completed" ]] && exit 0
-            sleep 2
-          done
-          echo "Stale import did not stop cleanly" >&2
-          exit 1
-
-      - name: Reclaim aborted-attempt storage on all eight projects
+      - name: Reset all eight provider projects to a physically clean state
         shell: bash
         run: |
           set -euo pipefail
@@ -59,8 +40,7 @@ jobs:
               target_url="${!variable}"
             fi
             echo "::add-mask::${target_url}"
-            echo "===== CLEAN SLOT ${slot} ====="
-            before="$(psql "$target_url" -Atqc "SELECT pg_database_size(current_database())")"
+            echo "===== FINAL RESET SLOT ${slot} ====="
             psql "$target_url" -X -v ON_ERROR_STOP=1 -c "
               TRUNCATE TABLE
                 public.provider_master_types,
@@ -68,45 +48,26 @@ jobs:
                 public.provider_stage_records,
                 public.provider_raw_records,
                 public.medical_providers,
-                public.provider_master;
+                public.provider_master,
+                public.source5_import_staging;
             "
-            after="$(psql "$target_url" -Atqc "SELECT pg_database_size(current_database())")"
-            staging="$(psql "$target_url" -Atqc "SELECT count(*) FROM public.source5_import_staging")"
-            echo "slot=${slot} bytes_before=${before} bytes_after=${after} staging_rows=${staging}"
+            size_bytes="$(psql "$target_url" -Atqc "SELECT pg_database_size(current_database())")"
+            provider_rows="$(psql "$target_url" -Atqc "SELECT count(*) FROM public.provider_master")"
+            staging_rows="$(psql "$target_url" -Atqc "SELECT count(*) FROM public.source5_import_staging")"
+            echo "slot=${slot} db_bytes=${size_bytes} provider_rows=${provider_rows} staging_rows=${staging_rows}"
+            [[ "$provider_rows" == "0" ]]
+            [[ "$staging_rows" == "0" ]]
+            [[ "$size_bytes" -lt 100000000 ]]
           done
 
-      - name: Smoke compact promotion on retained slot 1 batch
+      - name: Launch final optimized all-country import
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          echo "Importer commit: $(git rev-parse HEAD)"
-          echo "::add-mask::${HEALTHSITES_DATABASE_URL}"
-          expected="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(*) FROM public.source5_import_staging")"
-          expected_master="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(DISTINCT master_key) FROM public.source5_import_staging")"
-          echo "Retained staging rows: ${expected}; distinct master keys: ${expected_master}"
-          [[ "$expected" == "143927" ]] || { echo "Unexpected retained slot-1 row count: ${expected}" >&2; exit 1; }
-          [[ "$expected_master" == "143883" ]] || { echo "Unexpected retained slot-1 master count: ${expected_master}" >&2; exit 1; }
-
-          psql "$HEALTHSITES_DATABASE_URL" \
-            -v ON_ERROR_STOP=1 \
-            -v expected="$expected" \
-            -v expected_master="$expected_master" \
-            -f scripts/promote-healthsites-world.sql
-
-          actual="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(*) FROM public.medical_providers WHERE data_source='Healthsites / OpenStreetMap'")"
-          masters="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master WHERE primary_source_key='healthsites_osm'")"
-          raw="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_raw_records WHERE source_key='healthsites_osm'")"
-          stage="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_stage_records WHERE source_key='healthsites_osm'")"
-          links="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='healthsites_osm'")"
-          types="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_type_catalog WHERE active")"
-          staging_after="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(*) FROM public.source5_import_staging")"
-          size_bytes="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT pg_database_size(current_database())")"
-          echo "COMPACT_SMOKE_SUCCESS legacy=${actual} masters=${masters} raw=${raw} stage=${stage} links=${links} catalog=${types} staging_after=${staging_after} db_bytes=${size_bytes}"
-          [[ "$actual" == "$expected" ]]
-          [[ "$masters" == "$expected_master" ]]
-          [[ "$raw" == "$expected" ]]
-          [[ "$stage" == "$expected" ]]
-          [[ "$links" == "$expected" ]]
-          [[ "$types" -ge 12 ]]
-          [[ "$staging_after" == "0" ]]
-          [[ "$size_bytes" -lt 500000000 ]]
+          gh workflow run import-healthsites-archive-to-provider-projects.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f project_count=8 \
+            -f confirmation=IMPORT_ALL_COUNTRIES

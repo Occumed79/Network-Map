@@ -36,6 +36,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "src"),
+      "leaflet": path.resolve(import.meta.dirname, "src/mapboxNativeCompat.ts"),
     },
     dedupe: ["react", "react-dom"],
   },

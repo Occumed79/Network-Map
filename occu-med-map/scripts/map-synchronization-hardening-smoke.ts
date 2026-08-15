@@ -11,24 +11,36 @@ function source(relativePath: string): string {
 }
 
 const main = source("src/main.tsx");
-const controller = source("src/mapOverlaySynchronizationControllerRuntime.ts");
+const compat = source("src/mapboxNativeCompat.ts");
+const dual = source("src/dualMapEngineRuntime.ts");
+const lifecycle = source("src/mapboxMapLifecycleRuntime.ts");
+const providerFinder = source("src/providerLocationFinderRuntime.ts");
 
-assert.match(main, /import "\.\/dualMapEngineRuntime";/, "dual map engine must remain the camera and engine owner");
-assert.match(main, /import "\.\/mapOverlaySynchronizationControllerRuntime";/, "unified overlay controller must load before App");
+assert.match(main, /import "\.\/dualMapEngineRuntime";/, "dual Mapbox engine must remain the 2D/3D owner");
+assert.doesNotMatch(main, /mapOverlaySynchronizationControllerRuntime/, "Leaflet-to-Mapbox overlay mirroring must not load");
+assert.doesNotMatch(main, /leaflet\/dist\/leaflet\.css/, "Leaflet stylesheet must not load");
 assert.doesNotMatch(main, /completeProviderPinMirrorRuntime/, "legacy periodic complete mirror must not load");
 assert.doesNotMatch(main, /providerExplorerMapboxCommitGuardRuntime/, "legacy source guard must not load");
 
-assert.match(controller, /MAX_MIRRORED_FEATURES\s*=\s*75_000/, "controller must preserve complete provider coverage capacity");
-assert.match(controller, /layeradd layerremove overlayadd overlayremove/, "overlay rebuilds must be event driven");
-assert.doesNotMatch(controller, /setInterval\s*\(/, "overlay synchronization must not use periodic full-map reconciliation");
-assert.doesNotMatch(controller, /map\.on\("moveend zoomend"/, "camera movement must not rebuild all overlay GeoJSON");
-assert.match(controller, /externalWritesSuppressed/, "competing network-overlays setData writers must be suppressed");
-assert.match(controller, /document\.hidden/, "background tabs must pause expensive rebuilds");
-assert.match(controller, /visibilitychange/, "foreground restoration must resume pending synchronization");
-assert.match(controller, /style\.load/, "Mapbox style reloads must restore overlay sources and layers");
-assert.match(controller, /webglcontextlost/, "WebGL loss must be observed");
-assert.match(controller, /webglcontextrestored/, "WebGL restoration must reapply the latest collection");
-assert.match(controller, /empty-frame-held/, "temporary empty snapshots must be held before release");
-assert.match(controller, /__NETWORK_MAP_OVERLAY_SYNC__/, "controller must expose explicit synchronization diagnostics");
+assert.match(compat, /import mapboxgl from "mapbox-gl"/, "compatibility layer must render through Mapbox GL");
+assert.match(compat, /registerMapboxMapInitializer/, "compatibility layer must participate in the Mapbox lifecycle");
+assert.match(compat, /native\.addSource\(/, "legacy vector geometry must become native Mapbox sources");
+assert.match(compat, /native\.addLayer\(/, "legacy vector geometry must become native Mapbox layers");
+assert.match(compat, /new mapboxgl\.Marker/, "legacy point markers must become Mapbox markers");
+assert.match(compat, /new mapboxgl\.Popup/, "legacy popups must become Mapbox popups");
+assert.match(compat, /native\.on\("style\.load"/, "style reloads must restore Mapbox-native compatibility layers");
+assert.doesNotMatch(compat, /from ["']leaflet["']/, "compatibility implementation must not depend on Leaflet");
 
-console.log("Unified map synchronization hardening smoke test passed.");
+assert.match(dual, /projection: is2d \? "mercator" : "globe"/, "2D Mercator and 3D globe modes must both remain Mapbox-native");
+assert.match(dual, /mapbox2dMap/, "2D Mapbox instance must remain");
+assert.match(dual, /mapboxGlobeMap/, "3D Mapbox instance must remain");
+assert.match(dual, /_setViewFromNative/, "Mapbox camera changes must update shared logical state without feedback recursion");
+
+assert.match(lifecycle, /style\.load/, "Mapbox lifecycle must restore initializers after style reload");
+assert.match(lifecycle, /webglcontextlost/, "Mapbox lifecycle must observe WebGL loss");
+assert.match(lifecycle, /webglcontextrestored/, "Mapbox lifecycle must restore after WebGL recovery");
+
+assert.match(providerFinder, /map\.addSource\(SOURCE_ID/, "provider finder must own a native Mapbox source");
+assert.match(providerFinder, /map\.addLayer\(/, "provider finder must own a native Mapbox layer");
+
+console.log("Mapbox-native map synchronization hardening smoke test passed.");

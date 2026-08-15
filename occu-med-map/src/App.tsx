@@ -1651,8 +1651,9 @@ export default function App() {
     map.doubleClickZoom.disable();
     mapRef.current = map;
 
-    // Leaflet remains a hidden controller for the existing tools. The visible
-    // basemap is rendered exclusively by the ArcGIS MapView runtime.
+    // This logical map object is supplied by the temporary Mapbox-native
+    // compatibility facade. No Leaflet renderer is created; both visible 2D and
+    // 3D surfaces are owned by Mapbox GL.
 
     // City layer
     const cityLayer = L.layerGroup().addTo(map);

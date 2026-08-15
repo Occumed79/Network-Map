@@ -215,10 +215,10 @@ function bindSourceInteractions(map: mapboxgl.Map, root: L.Layer): void {
   }
 }
 
-function renderVectorRoot(root: L.Layer, native: mapboxgl.Map): void {
+function renderVectorRoot(root: L.Layer, native: mapboxgl.Map, preparedCollection?: GeoJSON.FeatureCollection): void {
   if (!native.isStyleLoaded()) return;
   const ids = sourceIds(root);
-  const collection = featureCollectionForRoot(root);
+  const collection = preparedCollection || featureCollectionForRoot(root);
   const existing = native.getSource(ids.source) as mapboxgl.GeoJSONSource | undefined;
   if (existing) {
     existing.setData(collection);
@@ -278,12 +278,33 @@ function cleanupVectorRoot(root: L.Layer, native: mapboxgl.Map): void {
   safeRemoveMapboxSource(native, ids.source);
 }
 
+const pendingVectorRefreshRoots = new Set<L.Layer>();
+let vectorRefreshScheduled = false;
+
+function flushVectorRefreshes(): void {
+  vectorRefreshScheduled = false;
+  const roots = [...pendingVectorRefreshRoots];
+  pendingVectorRefreshRoots.clear();
+
+  for (const root of roots) {
+    const attached = root._map;
+    if (!attached || !attached.hasLayer(root)) continue;
+
+    // Build the feature collection once per logical root, not once per native map.
+    // A 1,000-provider layer can add/clear hundreds of children synchronously; the
+    // queue below collapses that burst into one GeoJSON setData per 2D/3D map.
+    const collection = featureCollectionForRoot(root);
+    eachNativeMap((native) => {
+      try { renderVectorRoot(root, native, collection); } catch (error) { console.warn("Mapbox compatibility layer refresh failed", error); }
+    });
+  }
+}
+
 function refreshRoot(root: L.Layer): void {
-  const attached = root._map;
-  if (!attached || !attached.hasLayer(root)) return;
-  eachNativeMap((native) => {
-    try { renderVectorRoot(root, native); } catch (error) { console.warn("Mapbox compatibility layer refresh failed", error); }
-  });
+  pendingVectorRefreshRoots.add(root);
+  if (vectorRefreshScheduled) return;
+  vectorRefreshScheduled = true;
+  queueMicrotask(flushVectorRefreshes);
 }
 
 function renderLogicalMap(native: mapboxgl.Map): void {

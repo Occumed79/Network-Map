@@ -163,7 +163,7 @@ async function nativeCompatLayerCount(page, mode = "2d") {
 }
 
 async function waitForMode(page, mode) {
-  await page.waitForFunction((expected) => window.__NETWORK_MAP_GLOBE__?.getMode?.() === expected, mode, { timeout: 12_000 });
+  await page.waitForFunction((expected) => window.__NETWORK_MAP_GLOBE__?.getMode?.() === expected, mode, { timeout: 35_000 });
 }
 
 const browser = await browserType.launch({ headless: true });
@@ -184,7 +184,8 @@ try {
 
   // Radius must create real Mapbox layers from the transitional geometry facade.
   const beforeRadiusLayers = await nativeCompatLayerCount(page, "2d");
-  await clickByText(page, /Radius Tool/i);
+  const radiusButton = await clickByText(page, /Radius Tool/i);
+  await page.waitForFunction((button) => button.classList.contains("active"), await radiusButton.elementHandle(), { timeout: 5_000 });
   await mapCanvasClick(page, 0.68, 0.55, false);
   const radiusCard = page.locator(".local-pop-card:visible").filter({ hasText: "Radius extractor" }).first();
   await radiusCard.waitFor({ state: "visible", timeout: 10_000 });

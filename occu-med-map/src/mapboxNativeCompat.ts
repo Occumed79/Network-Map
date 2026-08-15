@@ -188,12 +188,24 @@ function bindSourceInteractions(map: mapboxgl.Map, root: L.Layer): void {
       const feature = event.features?.[0];
       const id = Number(feature?.properties?.__compatLayerId || 0);
       const layer = allLayers.get(id);
-      const tooltip = layer?.getTooltip?.();
-      if (layer && tooltip?.getContent?.()) tooltip.openOnNative(map, event.lngLat, layer);
+      if (!layer || (layer as any).options?.interactive === false) return;
+      const latlng = new L.LatLng(event.lngLat.lat, event.lngLat.lng);
+      layer.fire("mouseover", { latlng, originalEvent: event.originalEvent, target: layer });
+      layer.fire("mouseenter", { latlng, originalEvent: event.originalEvent, target: layer });
+      const tooltip = layer.getTooltip?.();
+      if (tooltip?.getContent?.()) tooltip.openOnNative(map, event.lngLat, layer);
     };
-    const leave = () => {
+    const leave = (event: any) => {
       map.getCanvas().style.cursor = "";
-      for (const layer of allLayers.values()) layer.getTooltip?.()?.close();
+      const feature = event.features?.[0];
+      const id = Number(feature?.properties?.__compatLayerId || 0);
+      const layer = allLayers.get(id);
+      if (layer) {
+        const latlng = event.lngLat ? new L.LatLng(event.lngLat.lat, event.lngLat.lng) : layer.defaultLatLng();
+        layer.fire("mouseout", { latlng, originalEvent: event.originalEvent, target: layer });
+        layer.fire("mouseleave", { latlng, originalEvent: event.originalEvent, target: layer });
+        layer.getTooltip?.()?.close();
+      }
     };
     try {
       map.on("click", layerId, click);
@@ -404,15 +416,24 @@ namespace L {
 
   class Evented {
     private handlers = new globalThis.Map<string, Set<LeafletEventHandlerFn>>();
-    on(types: string, fn: LeafletEventHandlerFn): this {
+    on(types: string | Record<string, LeafletEventHandlerFn>, fn?: LeafletEventHandlerFn): this {
+      if (typeof types === "object") {
+        for (const [type, handler] of Object.entries(types)) this.on(type, handler);
+        return this;
+      }
+      if (!fn) return this;
       for (const type of types.split(/\s+/).filter(Boolean)) {
         let set = this.handlers.get(type); if (!set) { set = new Set(); this.handlers.set(type, set); }
         set.add(fn);
       }
       return this;
     }
-    off(types?: string, fn?: LeafletEventHandlerFn): this {
+    off(types?: string | Record<string, LeafletEventHandlerFn>, fn?: LeafletEventHandlerFn): this {
       if (!types) { this.handlers.clear(); return this; }
+      if (typeof types === "object") {
+        for (const [type, handler] of Object.entries(types)) this.off(type, handler);
+        return this;
+      }
       for (const type of types.split(/\s+/).filter(Boolean)) {
         if (!fn) this.handlers.delete(type); else this.handlers.get(type)?.delete(fn);
       }

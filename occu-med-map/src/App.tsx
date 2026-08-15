@@ -3695,7 +3695,11 @@ export default function App() {
     sidebarWorkspaceRef.current = workspace;
     setSidebarWorkspace(workspace);
     setShowProviderExplorerDrawer(workspace === 'explorer');
-    setActiveTool(current => workspace === 'liveFinder' ? 'liveFinder' : current === 'liveFinder' ? null : current);
+    setActiveTool(current => {
+      const nextTool: ActiveTool = workspace === 'liveFinder' ? 'liveFinder' : current === 'liveFinder' ? null : current;
+      activeToolRef.current = nextTool;
+      return nextTool;
+    });
     if (workspace === 'liveFinder') {
       setProviderToolMode(current => current === 'npi' ? 'npi' : 'live');
       if (!['live','npi'].includes(document.body.dataset.providerTool || '')) document.body.dataset.providerTool = 'live';
@@ -3815,7 +3819,11 @@ export default function App() {
   const loadedProviderCount = indexedLayerData.length + blueHiveData.length + dentistData.length + myClinicsData.length;
   const toggleSection = (section:string) => setCollapsedSections(prev=>({...prev,[section]:!prev[section]}));
   const toggleCommandTool = (tool:Exclude<ActiveTool,null>) => {
-    setActiveTool(current=>current===tool?null:tool);
+    setActiveTool(current=>{
+      const nextTool: ActiveTool = current===tool ? null : tool;
+      activeToolRef.current = nextTool;
+      return nextTool;
+    });
     setMobileSidebarOpen(false);
   };
   return (

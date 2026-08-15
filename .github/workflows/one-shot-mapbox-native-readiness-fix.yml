@@ -26,21 +26,23 @@ jobs:
           from pathlib import Path
 
           path = Path('occu-med-map/scripts/ci-mapbox-native-tools-acceptance.mjs')
-          text = path.read_text()
-          old = '''  await page.waitForFunction((input) => {
-            const row = input.closest(".workflow-layer");
-            const text = String(row?.textContent || "");
-            return input.checked && !/loading/i.test(text) && /2\\s+(?:total|loaded)/i.test(text);
-          }, await indexedToggle.elementHandle(), { timeout: 15_000 });'''
-          new = '''  await page.waitForFunction(() => {
-            const input = document.querySelector('input[aria-label="Indexed Providers"]');
-            const row = input?.closest(".workflow-layer");
-            const text = String(row?.textContent || "");
-            return Boolean(input?.checked) && /2\\s+loaded/i.test(text);
-          }, null, { timeout: 15_000 });'''
-          if old not in text:
-              raise SystemExit('Indexed Providers readiness block not found')
-          path.write_text(text.replace(old, new, 1))
+          lines = path.read_text().splitlines()
+          start = next((i for i, line in enumerate(lines) if 'await page.waitForFunction((input) => {' in line), None)
+          if start is None:
+              raise SystemExit('Indexed Providers readiness start not found')
+          end = next((i for i in range(start, min(len(lines), start + 12)) if 'indexedToggle.elementHandle()' in lines[i]), None)
+          if end is None:
+              raise SystemExit('Indexed Providers readiness end not found')
+          replacement = [
+              '  await page.waitForFunction(() => {',
+              '    const input = document.querySelector(\'input[aria-label="Indexed Providers"]\');',
+              '    const row = input?.closest(".workflow-layer");',
+              '    const text = String(row?.textContent || "");',
+              '    return Boolean(input?.checked) && /2\\s+loaded/i.test(text);',
+              '  }, null, { timeout: 15_000 });',
+          ]
+          lines[start:end + 1] = replacement
+          path.write_text('\n'.join(lines) + '\n')
       - run: pnpm install --frozen-lockfile
       - name: Frontend typecheck
         run: pnpm --filter @workspace/occu-med-map typecheck

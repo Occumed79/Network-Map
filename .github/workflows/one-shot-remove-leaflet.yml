@@ -32,13 +32,16 @@ jobs:
             'setView(center: LatLngExpression, zoom = this.zoom, options: Record<string, any> = {}): this {\n      this.center = normalizeLatLng(center); this.zoom = Number(zoom);': 'setView(center: LatLngExpression, zoom?: number, options: Record<string, any> = {}): this {\n      const resolvedZoom = zoom ?? this.zoom;\n      this.center = normalizeLatLng(center); this.zoom = Number(resolvedZoom);',
             'flyTo(center: LatLngExpression, zoom = this.zoom, options: Record<string, any> = {}): this {\n      this.center = normalizeLatLng(center); this.zoom = Number(zoom);': 'flyTo(center: LatLngExpression, zoom?: number, options: Record<string, any> = {}): this {\n      const resolvedZoom = zoom ?? this.zoom;\n      this.center = normalizeLatLng(center); this.zoom = Number(resolvedZoom);',
             'project(value: LatLngExpression, zoom = this.getZoom()): Point {\n      const p = normalizeLatLng(value); const native = activeNativeMap();\n      if (native && Math.abs(native.getZoom() - zoom) < 0.05)': 'project(value: LatLngExpression, zoom?: number): Point {\n      const resolvedZoom = zoom ?? this.getZoom();\n      const p = normalizeLatLng(value); const native = activeNativeMap();\n      if (native && Math.abs(native.getZoom() - resolvedZoom) < 0.05)',
-            'const scale = 256 * Math.pow(2, zoom);': 'const scale = 256 * Math.pow(2, resolvedZoom);',
             'unproject(value: Point | PointTuple, zoom = this.getZoom()): LatLng {\n      const p = value instanceof Point ? value : new Point(Number(value[0]), Number(value[1])); const native = activeNativeMap();\n      if (native && Math.abs(native.getZoom() - zoom) < 0.05)': 'unproject(value: Point | PointTuple, zoom?: number): LatLng {\n      const resolvedZoom = zoom ?? this.getZoom();\n      const p = value instanceof Point ? value : new Point(Number(value[0]), Number(value[1])); const native = activeNativeMap();\n      if (native && Math.abs(native.getZoom() - resolvedZoom) < 0.05)',
           }
           for old, new in replacements.items():
             if old not in text:
               raise SystemExit(f'missing facade build patch target: {old[:80]}')
             text = text.replace(old, new, 1)
+          scale_target = 'const scale = 256 * Math.pow(2, zoom);'
+          if text.count(scale_target) != 2:
+            raise SystemExit(f'expected two WebMercator scale targets, found {text.count(scale_target)}')
+          text = text.replace(scale_target, 'const scale = 256 * Math.pow(2, resolvedZoom);')
           compat.write_text(text)
 
           css = Path('occu-med-map/src/index.css')

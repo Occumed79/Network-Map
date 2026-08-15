@@ -173,7 +173,10 @@ jobs:
           manifest=/tmp/healthsites/provider-projects/provider-project-allocation.json
           columns="source_record_id,source_url,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,primary_provider_type,capability_tags,quality_score,master_key"
 
-          for slot in $(seq 1 "$PROJECT_COUNT"); do
+          process_slot() {
+            local slot="$1"
+            local target_url variable file expected expected_master missing actual
+
             if [[ "$slot" == "1" ]]; then
               target_url="$HEALTHSITES_DATABASE_URL"
             else
@@ -181,6 +184,7 @@ jobs:
               target_url="${!variable}"
             fi
             echo "::add-mask::${target_url}"
+
             file="/tmp/healthsites/provider-projects/healthsites_provider_project_${slot}.tsv"
             expected="$(jq -r ".projects[] | select(.slot == ${slot}) | .rows" "$manifest")"
             expected_master="$(jq -r ".projects[] | select(.slot == ${slot}) | .distinct_master_keys" "$manifest")"
@@ -201,7 +205,7 @@ jobs:
               FROM required
               WHERE to_regclass('public.' || name) IS NULL
             ")"
-            [[ -z "$missing" ]] || { echo "Provider project ${slot} is not initialized. Missing: ${missing}" >&2; exit 1; }
+            [[ -z "$missing" ]] || { echo "Provider project ${slot} is not initialized. Missing: ${missing}" >&2; return 1; }
 
             psql "$target_url" -v ON_ERROR_STOP=1 -c "
               CREATE TABLE IF NOT EXISTS public.source5_import_staging (
@@ -230,7 +234,7 @@ jobs:
 
             if ! psql "$target_url" -v ON_ERROR_STOP=1 -c "\\copy public.source5_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" < "$file"; then
               psql "$target_url" -c 'TRUNCATE public.source5_import_staging' || true
-              exit 1
+              return 1
             fi
 
             if ! psql "$target_url" \
@@ -239,13 +243,38 @@ jobs:
               -v expected_master="$expected_master" \
               -f scripts/promote-healthsites-world.sql; then
               psql "$target_url" -c 'TRUNCATE public.source5_import_staging' || true
-              exit 1
+              return 1
             fi
 
             actual="$(psql "$target_url" -Atqc "SELECT count(*) FROM public.medical_providers WHERE data_source='Healthsites / OpenStreetMap'")"
-            [[ "$actual" == "$expected" ]] || { echo "Provider project ${slot} verification failed: ${actual} vs ${expected}" >&2; exit 1; }
+            [[ "$actual" == "$expected" ]] || { echo "Provider project ${slot} verification failed: ${actual} vs ${expected}" >&2; return 1; }
             echo "Provider project ${slot}: promoted ${actual} Healthsites facilities"
-            echo "- Provider project ${slot}: ${actual} facilities" >> "$GITHUB_STEP_SUMMARY"
+            printf '%s\n' "- Provider project ${slot}: ${actual} facilities" > "/tmp/healthsites/provider-project-${slot}.summary"
+          }
+
+          declare -a pids=()
+          declare -a slots=()
+          for slot in $(seq 1 "$PROJECT_COUNT"); do
+            process_slot "$slot" > "/tmp/healthsites/provider-project-${slot}.log" 2>&1 &
+            pids+=("$!")
+            slots+=("$slot")
+          done
+
+          failed=0
+          for i in "${!pids[@]}"; do
+            slot="${slots[$i]}"
+            if wait "${pids[$i]}"; then
+              cat "/tmp/healthsites/provider-project-${slot}.log"
+            else
+              echo "Provider project ${slot} promotion failed" >&2
+              cat "/tmp/healthsites/provider-project-${slot}.log" >&2
+              failed=1
+            fi
+          done
+          [[ "$failed" == "0" ]] || exit 1
+
+          for slot in $(seq 1 "$PROJECT_COUNT"); do
+            cat "/tmp/healthsites/provider-project-${slot}.summary" >> "$GITHUB_STEP_SUMMARY"
           done
 
           imported="$(jq '[.projects[].rows] | add' "$manifest")"

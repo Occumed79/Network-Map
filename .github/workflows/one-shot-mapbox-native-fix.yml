@@ -20,8 +20,8 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable
-      - name: Strengthen indexed provider native Mapbox proof
-        run: python occu-med-map/scripts/apply-mapbox-native-indexed-proof-fix.py
+      - name: Batch compatibility GeoJSON refreshes
+        run: python occu-med-map/scripts/apply-mapbox-native-batched-refresh.py
       - run: pnpm install --frozen-lockfile
       - name: Typecheck frontend
         run: pnpm --filter @workspace/occu-med-map typecheck
@@ -33,10 +33,10 @@ jobs:
         run: pnpm --filter @workspace/occu-med-map test:leaflet-map-lifecycle-hardening
       - name: Build frontend
         run: pnpm --filter @workspace/occu-med-map build
-      - name: Commit validated indexed-provider proof
+      - name: Commit validated batching hardening
         run: |
           git config user.name "Occumed79"
           git config user.email "Occumed79@users.noreply.github.com"
-          git add occu-med-map/scripts/ci-mapbox-native-tools-acceptance.mjs
-          git commit -m "Strengthen indexed provider Mapbox acceptance"
+          git add occu-med-map/src/mapboxNativeCompat.ts occu-med-map/src/App.tsx
+          git commit -m "Batch Mapbox compatibility provider refreshes"
           git push origin HEAD:nuclear/mapbox-native-runtime

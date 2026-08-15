@@ -1,0 +1,23 @@
+name: One-shot active tool ownership audit
+
+on:
+  push:
+    paths:
+      - .github/workflows/one-shot-active-tool-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: nuclear/mapbox-native-runtime
+      - name: Show every active tool state read/write
+        run: |
+          echo '=== activeToolRef ==='
+          grep -n -C 3 'activeToolRef' occu-med-map/src/App.tsx || true
+          echo '=== setActiveTool ==='
+          grep -n -C 2 'setActiveTool' occu-med-map/src/App.tsx || true

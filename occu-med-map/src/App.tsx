@@ -2211,7 +2211,17 @@ export default function App() {
   },[mapReady, showNacchoLayer]);
 
   const activeToolRef = React.useRef(activeTool);
-  React.useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
+  React.useLayoutEffect(() => {
+    activeToolRef.current = activeTool;
+    (window as any).__NETWORK_MAP_TOOL_STATE__ = {
+      getActiveTool: () => activeToolRef.current,
+    };
+    return () => {
+      if ((window as any).__NETWORK_MAP_TOOL_STATE__?.getActiveTool) {
+        delete (window as any).__NETWORK_MAP_TOOL_STATE__;
+      }
+    };
+  }, [activeTool]);
 
   const showStateColorsRef = useRef(showStateColors);
   useEffect(()=>{ showStateColorsRef.current = showStateColors; },[showStateColors]);

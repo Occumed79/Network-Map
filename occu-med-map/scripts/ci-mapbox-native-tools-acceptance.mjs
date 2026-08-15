@@ -186,6 +186,7 @@ try {
   const beforeRadiusLayers = await nativeCompatLayerCount(page, "2d");
   const radiusButton = await clickByText(page, /Radius Tool/i);
   await page.waitForFunction((button) => button.classList.contains("active"), await radiusButton.elementHandle(), { timeout: 5_000 });
+  await page.waitForFunction(() => window.__NETWORK_MAP_TOOL_STATE__?.getActiveTool?.() === "radius", null, { timeout: 5_000 });
   await mapCanvasClick(page, 0.68, 0.55, false);
   const radiusCard = page.locator(".local-pop-card:visible").filter({ hasText: "Radius extractor" }).first();
   await radiusCard.waitFor({ state: "visible", timeout: 10_000 });
@@ -210,9 +211,11 @@ try {
   assert.ok(await nativeCompatLayerCount(page, "3d") > 0, "3D Mapbox globe must receive the same logical overlay geometry");
   await page.locator(".map-dimension-toggle button[data-map-mode='2d']").evaluate((element) => element.click());
   await waitForMode(page, "2d");
+  await page.waitForFunction(() => !document.querySelector(".dual-engine-vortex.active"), null, { timeout: 20_000 });
+  await radiusCard.waitFor({ state: "visible", timeout: 10_000 });
 
   const saveRing = radiusCard.getByRole("button", { name: /Save ring/i });
-  await saveRing.waitFor({ state: "visible", timeout: 5_000 });
+  await saveRing.waitFor({ state: "visible", timeout: 10_000 });
   assert.equal(await saveRing.isDisabled(), false, "Save ring must enable after a native Mapbox radius click");
   await saveRing.click();
   await radiusCard.getByText(/Ring 1/i).waitFor({ state: "visible", timeout: 5_000 });

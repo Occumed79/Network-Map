@@ -1,6 +1,7 @@
 import L from "leaflet";
 import { registerLeafletMapInitializer } from "./leafletMapLifecycleRuntime";
 import { registerMapboxMap, unregisterMapboxMap } from "./mapboxMapLifecycleRuntime";
+import { findCompatPopupHit, wasCompatibilityClickHandled } from "./mapboxCompatInteractionRuntime";
 import mapboxgl from "mapbox-gl";
 
 type MapMode = "2d" | "3d";
@@ -361,9 +362,17 @@ function installMapboxInteractions(instance: mapboxgl.Map, mode: MapMode): void 
       return;
     }
 
-    // Only a real interactive feature owns the click. Non-interactive
-    // compatibility geometry (for example density/radius overlays) must not
-    // suppress generic map tools simply because its Mapbox layer is present.
+    // Tiny provider circles can miss Mapbox's exact rendered-feature query by a
+    // few CSS pixels (especially under device-pixel-ratio/WebKit transforms).
+    // The compatibility interaction owner falls back to a small rendered/source
+    // hit radius. Any popup-capable compatibility feature owns the click and must
+    // never fall through into Radius, Map Tools, or Live Finder map-click logic.
+    const compatibilityPopupHit = findCompatPopupHit(instance, event.point, event.lngLat);
+    if (compatibilityPopupHit || wasCompatibilityClickHandled(event.originalEvent)) return;
+
+    // Keep exact ownership for other legacy interactive shapes that have no
+    // popup contract of their own. Non-interactive density/radius geometry does
+    // not block generic map tools.
     const overlayHit = instance.queryRenderedFeatures(event.point).some((feature) => {
       const layerId = String(feature.layer?.id || "");
       const properties = feature.properties || {};

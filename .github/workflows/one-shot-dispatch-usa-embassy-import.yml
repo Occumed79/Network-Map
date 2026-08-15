@@ -19,7 +19,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Trigger the permanent importer after the provider-type dedup fix.
+          # Trigger the permanent importer after canonical provider-type filtering.
           curl --fail-with-body \
             --request POST \
             --header "Accept: application/vnd.github+json" \

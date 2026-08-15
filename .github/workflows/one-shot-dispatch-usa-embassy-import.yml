@@ -19,6 +19,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Trigger the permanent importer after the one-shot workflow is registered on main.
           curl --fail-with-body \
             --request POST \
             --header "Accept: application/vnd.github+json" \

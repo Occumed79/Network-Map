@@ -184,6 +184,67 @@ async function waitForMode(page, mode) {
   await page.waitForFunction((expected) => window.__NETWORK_MAP_GLOBE__?.getMode?.() === expected, mode, { timeout: 35_000 });
 }
 
+async function waitForActiveMapIdle(page, mode = "2d") {
+  await page.evaluate(async (requestedMode) => {
+    const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
+    const selector = requestedMode === "3d" ? ".mapbox-globe-host" : ".mapbox-2d-host";
+    const map = maps.find((candidate) => candidate.getContainer().closest(selector));
+    if (!map) throw new Error(`Mapbox ${requestedMode} map not available`);
+    if (map.loaded() && !map.isMoving()) return;
+    await Promise.race([
+      new Promise((resolve) => map.once("idle", resolve)),
+      new Promise((resolve) => setTimeout(resolve, 5000)),
+    ]);
+  }, mode);
+}
+
+async function indexedProviderDiagnostics(page) {
+  return page.evaluate(() => {
+    const lifecycle = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getDiagnostics?.() || null;
+    const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
+    const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
+    const toggle = document.querySelector('input[aria-label="Indexed Providers"]');
+    const row = toggle?.closest(".workflow-layer");
+    if (!map) return { lifecycle, noMap: true, indexedRow: row?.textContent || "" };
+
+    const style = map.getStyle();
+    const compatLayers = (style?.layers || [])
+      .filter((layer) => String(layer.id).startsWith("leaflet-compat-"))
+      .map((layer) => ({ id: layer.id, type: layer.type, source: layer.source || null }));
+    const compatSources = Object.keys(style?.sources || {})
+      .filter((id) => id.startsWith("leaflet-compat-") && id.endsWith("-source"))
+      .map((id) => {
+        let features = [];
+        try { features = map.querySourceFeatures(id); } catch {}
+        return {
+          id,
+          count: features.length,
+          clinicOneCount: features.filter((feature) => String(feature.properties?.__popupHtml || "").includes("CI Indexed Clinic One")).length,
+          features: features.slice(0, 20).map((feature) => ({
+            geometry: feature.geometry,
+            compatLayerId: feature.properties?.__compatLayerId,
+            interactive: feature.properties?.__interactive,
+            popupHasClinicOne: String(feature.properties?.__popupHtml || "").includes("CI Indexed Clinic One"),
+            popupPreview: String(feature.properties?.__popupHtml || "").slice(0, 180),
+          })),
+        };
+      });
+
+    return {
+      lifecycle,
+      indexedChecked: Boolean(toggle?.checked),
+      indexedRow: String(row?.textContent || "").replace(/\s+/g, " ").trim(),
+      styleLoaded: map.isStyleLoaded(),
+      loaded: map.loaded(),
+      moving: map.isMoving(),
+      center: { lng: map.getCenter().lng, lat: map.getCenter().lat },
+      zoom: map.getZoom(),
+      compatLayers,
+      compatSources,
+    };
+  });
+}
+
 const browser = await browserType.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
 const page = await context.newPage();
@@ -200,32 +261,42 @@ try {
   await page.waitForFunction(() => (window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || []).some((map) => map.getContainer().closest(".mapbox-2d-host")), null, { timeout: 20_000 });
   await page.locator(".mapbox-2d-host .mapboxgl-canvas").waitFor({ state: "visible", timeout: 15_000 });
 
-  // Indexed Providers: API response -> specific source is ready -> native Mapbox
-  // point layer exists -> real Mapbox click opens the provider popup.
   const indexedToggle = page.getByRole("checkbox", { name: "Indexed Providers" });
-  const indexedResponsePromise = page.waitForResponse((response) => {
+  const indexedResponsePredicate = (response) => {
     try {
       const url = new URL(response.url());
       return url.pathname === "/api/provider-layers/indexed" && response.request().method() === "GET";
     } catch { return false; }
-  }, { timeout: 12_000 });
+  };
+  const indexedResponsePromise = page.waitForResponse(indexedResponsePredicate, { timeout: 12_000 });
   await indexedToggle.check();
   const indexedResponse = await indexedResponsePromise;
   assert.equal(indexedResponse.ok(), true, `Indexed Providers request failed with HTTP ${indexedResponse.status()}`);
   const indexedPayload = await indexedResponse.json();
   assert.equal(indexedPayload.providers?.length, 2, "Indexed Providers API must return both CI clinics");
 
+  // Camera movement deliberately exercises the real viewport-refresh path. Wait
+  // for that second fetch (when emitted), the source row to settle, and Mapbox to
+  // reach idle before asking the provider point to own a click.
+  const viewportRefreshPromise = page.waitForResponse(indexedResponsePredicate, { timeout: 6000 }).catch(() => null);
   await page.evaluate(() => {
     const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
     const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
     if (!map) throw new Error("2D Mapbox map unavailable for indexed-provider test");
     map.jumpTo({ center: [0.415, 20.415], zoom: 9 });
   });
+  const viewportRefresh = await viewportRefreshPromise;
+  if (viewportRefresh) {
+    assert.equal(viewportRefresh.ok(), true, `Indexed viewport refresh failed with HTTP ${viewportRefresh.status()}`);
+    const refreshPayload = await viewportRefresh.json();
+    assert.equal(refreshPayload.providers?.length, 2, "Indexed viewport refresh must keep both CI clinics");
+  }
   await page.waitForFunction((input) => {
     const row = input.closest(".workflow-layer");
     const text = String(row?.textContent || "");
     return input.checked && !/loading/i.test(text) && /2\s+(?:total|loaded)/i.test(text);
   }, await indexedToggle.elementHandle(), { timeout: 15_000 });
+  await waitForActiveMapIdle(page, "2d");
   await page.waitForFunction(() => {
     const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
     const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
@@ -235,11 +306,23 @@ try {
     );
   }, null, { timeout: 10_000 });
 
+  const beforeIndexedClick = await indexedProviderDiagnostics(page);
+  console.log("INDEXED_PROVIDER_DIAGNOSTICS_BEFORE_CLICK", JSON.stringify(beforeIndexedClick));
+  assert.ok(
+    beforeIndexedClick.lifecycle?.initializers?.some((initializer) => initializer.id === "mapbox-compat-interaction-owner"),
+    "Mapbox compatibility interaction owner must be registered before provider clicks",
+  );
+
   const indexedPoint = await active2dMapPoint(page, 0.4, 20.4);
   await page.mouse.click(indexedPoint.x, indexedPoint.y);
-  await page.getByText("CI Indexed Clinic One").first().waitFor({ state: "visible", timeout: 8_000 });
+  try {
+    await page.getByText("CI Indexed Clinic One").first().waitFor({ state: "visible", timeout: 8_000 });
+  } catch (error) {
+    const afterIndexedClick = await indexedProviderDiagnostics(page);
+    console.error("INDEXED_PROVIDER_DIAGNOSTICS_AFTER_CLICK", JSON.stringify(afterIndexedClick));
+    throw error;
+  }
 
-  // Radius must create real Mapbox layers from the transitional geometry facade.
   const beforeRadiusLayers = await nativeCompatLayerCount(page, "2d");
   const radiusButton = await clickByText(page, /Radius Tool/i);
   await page.waitForFunction((button) => button.classList.contains("active"), await radiusButton.elementHandle(), { timeout: 5_000 });
@@ -256,7 +339,6 @@ try {
   const radiusCenterBefore = ((await radiusCard.textContent()) || "").match(/Center:\s*[-\d.]+,\s*[-\d.]+/)?.[0] || "";
   assert.ok(radiusCenterBefore, "Radius center must be visible after clicking the native Mapbox canvas");
 
-  // 2D -> 3D must preserve native compatibility geometry, then return to 2D.
   await page.locator(".map-dimension-toggle button[data-map-mode='3d']").evaluate((element) => element.click());
   await waitForMode(page, "3d");
   await page.locator(".mapbox-globe-host .mapboxgl-canvas").waitFor({ state: "visible", timeout: 15_000 });
@@ -277,7 +359,6 @@ try {
   await saveRing.click();
   await radiusCard.getByText(/Ring 1/i).waitFor({ state: "visible", timeout: 5_000 });
 
-  // Density and hex must render into native Mapbox layers and report aggregate counts.
   await page.getByRole("tab", { name: /Explorer workspace/i }).click();
   const explorer = page.locator(".provider-explorer-drawer.open:visible");
   await explorer.waitFor({ state: "visible", timeout: 10_000 });
@@ -290,7 +371,6 @@ try {
   await clickByText(page, /Hex field/i, explorer);
   await page.waitForFunction(() => /hex view.*17 matching records.*2 aggregated cells/i.test(document.querySelector(".provider-map-status")?.textContent || ""), null, { timeout: 10_000 });
 
-  // Provider pin click must open its popup but must NOT move the still-active Radius center.
   await clickByText(page, /8px points/i, explorer);
   await page.waitForFunction(() => /showing 1 visible pins of 1 matching records/i.test(document.querySelector(".provider-map-status")?.textContent || ""), null, { timeout: 10_000 });
   const providerPoint = await active2dMapPoint(page, 0, 20);
@@ -299,7 +379,6 @@ try {
   const radiusCenterAfterProviderClick = ((await radiusCard.textContent()) || "").match(/Center:\s*[-\d.]+,\s*[-\d.]+/)?.[0] || "";
   assert.equal(radiusCenterAfterProviderClick, radiusCenterBefore, "Provider clicks must not fall through into Radius map-click ownership");
 
-  // Live Finder must survive Leaflet removal: native double-click -> OSM API -> Mapbox result marker + result UI.
   await page.getByRole("tab", { name: /Finder workspace/i }).click();
   await page.locator(".live-panel.open:visible").waitFor({ state: "visible", timeout: 10_000 });
   await mapCanvasClick(page, 0.52, 0.5, true);

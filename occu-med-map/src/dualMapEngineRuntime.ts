@@ -361,18 +361,16 @@ function installMapboxInteractions(instance: mapboxgl.Map, mode: MapMode): void 
       return;
     }
 
-    // Layer-specific Mapbox handlers own provider/compatibility feature clicks.
-    // Do not let those same clicks fall through into generic map-click tools
-    // such as radius selection or Live Finder coordinate selection.
+    // Only a real interactive feature owns the click. Non-interactive
+    // compatibility geometry (for example density/radius overlays) must not
+    // suppress generic map tools simply because its Mapbox layer is present.
     const overlayHit = instance.queryRenderedFeatures(event.point).some((feature) => {
       const layerId = String(feature.layer?.id || "");
       const properties = feature.properties || {};
       const compatibilityFeature = properties.__compatLayerId !== undefined
         && properties.__compatLayerId !== null
         && properties.__interactive !== false;
-      return compatibilityFeature
-        || layerId === "provider-location-search-dots"
-        || layerId.startsWith("leaflet-compat-");
+      return compatibilityFeature || layerId === "provider-location-search-dots";
     });
     if (overlayHit) return;
 

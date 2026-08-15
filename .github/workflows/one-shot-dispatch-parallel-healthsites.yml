@@ -1,4 +1,4 @@
-name: One-shot dispatch optimized Healthsites import
+name: One-shot restart optimized Healthsites import
 
 on:
   push:
@@ -13,10 +13,25 @@ jobs:
   dispatch:
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch optimized all-country import from main
+      - name: Cancel stale runs and dispatch fully optimized import
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
+          set -euo pipefail
+          for run_id in 31861334392 31861638569; do
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" || true
+          done
+
+          for run_id in 31861334392 31861638569; do
+            for attempt in $(seq 1 40); do
+              status="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" --jq .status)"
+              echo "Run ${run_id}: ${status}"
+              [[ "$status" == "completed" ]] && break
+              sleep 2
+            done
+          done
+
           gh workflow run import-healthsites-archive-to-provider-projects.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main \

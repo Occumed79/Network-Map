@@ -29,6 +29,8 @@ jobs:
           node-version: 22
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
+      - name: Build frontend
+        run: pnpm --filter @workspace/occu-med-map build
       - name: Install browser
         run: pnpm --filter @workspace/occu-med-map exec playwright install --with-deps ${{ matrix.browser }}
       - name: Start deterministic preview

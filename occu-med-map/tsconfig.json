@@ -11,7 +11,8 @@
     "moduleResolution": "bundler",
     "types": ["node", "vite/client"],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "leaflet": ["./src/mapboxNativeCompat.ts"]
     }
   },
   "references": [

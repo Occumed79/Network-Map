@@ -1,0 +1,48 @@
+name: One-shot Healthsites slot 1 promotion smoke
+
+on:
+  push:
+    paths:
+      - '.github/workflows/one-shot-healthsites-slot1-promotion-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HEALTHSITES_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
+    steps:
+      - name: Check out repaired importer
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install --yes -qq postgresql-client
+
+      - name: Promote retained slot 1 staging data
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::${HEALTHSITES_DATABASE_URL}"
+          expected="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(*) FROM public.source5_import_staging")"
+          expected_master="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(DISTINCT master_key) FROM public.source5_import_staging")"
+          echo "Retained staging rows: ${expected}; distinct master keys: ${expected_master}"
+          if [[ "$expected" == "0" ]]; then
+            echo "No retained staging rows; nothing to smoke-promote."
+            exit 0
+          fi
+          psql "$HEALTHSITES_DATABASE_URL" \
+            -v ON_ERROR_STOP=1 \
+            -v expected="$expected" \
+            -v expected_master="$expected_master" \
+            -f scripts/promote-healthsites-world.sql
+
+          actual="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(*) FROM public.medical_providers WHERE data_source='Healthsites / OpenStreetMap'")"
+          types="$(psql "$HEALTHSITES_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_type_catalog WHERE active")"
+          echo "PROMOTION_SMOKE_SUCCESS rows=${actual} provider_types=${types}"
+          [[ "$actual" == "$expected" ]]
+          [[ "$types" -ge 12 ]]

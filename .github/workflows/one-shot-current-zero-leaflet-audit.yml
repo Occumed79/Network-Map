@@ -79,7 +79,7 @@ jobs:
           }
 
           '''
-          text, count = helper_pattern.subn(helper_replacement, text, count=1)
+          text, count = helper_pattern.subn(lambda _: helper_replacement, text, count=1)
           if count != 1:
               raise SystemExit(f"helper replacement count={count}")
 
@@ -123,7 +123,7 @@ jobs:
           }
 
           '''
-          text, count = diagnostics_pattern.subn(diagnostics_replacement, text, count=1)
+          text, count = diagnostics_pattern.subn(lambda _: diagnostics_replacement, text, count=1)
           if count != 1:
               raise SystemExit(f"diagnostics replacement count={count}")
 

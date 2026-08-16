@@ -1,4 +1,4 @@
-name: One-shot final MapScene root removal
+name: One-shot exhaustive zero-compat residue audit
 
 on:
   push:
@@ -6,11 +6,10 @@ on:
       - .github/workflows/one-shot-current-zero-leaflet-audit.yml
 
 permissions:
-  contents: write
+  contents: read
 
-# Final zero-MapScene validation and commit gate.
 jobs:
-  migrate:
+  audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,32 +20,40 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable
-      - name: Apply final MapScene root migration
-        run: python occu-med-map/scripts/migrate-final-mapscene-root.py
       - run: pnpm install --frozen-lockfile
       - name: Typecheck frontend
         run: pnpm --filter @workspace/occu-med-map typecheck
       - name: Production build
         run: pnpm --filter @workspace/occu-med-map build
-      - name: Native synchronization hardening
-        run: pnpm --filter @workspace/occu-med-map test:map-synchronization-hardening
-      - name: Provider Explorer hardening
-        run: pnpm --filter @workspace/occu-med-map test:provider-explorer-hardening
-      - name: General UI hardening
-        run: pnpm --filter @workspace/occu-med-map test:general-ui-hardening
-      - name: Zero-compat audit
+      - name: Architecture audit
         working-directory: occu-med-map
         run: pnpm exec tsx scripts/zero-leaflet-architecture-audit.ts
-      - name: Verify runtime compatibility is physically gone
+      - name: Tracked filename residue
         run: |
-          test ! -e occu-med-map/src/mapSceneRuntime.ts
-          test ! -e occu-med-map/src/features/networkMap/mapLayerHelpers.ts
-          ! grep -RInE 'mapSceneRuntime|MapScene\.|mapRef\.current|multiDropLayerRef' occu-med-map/src
-      - name: Commit validated removal
+          echo '=== TRACKED FILENAMES ==='
+          git ls-files | grep -Ei 'leaflet|mapscene|map-scene|mapboxnativecompat|scene.*compat|compat.*scene' || true
+      - name: Production and tooling text residue
         run: |
-          rm -f occu-med-map/scripts/migrate-final-mapscene-root.py
-          git config user.name "Occumed79"
-          git config user.email "Occumed79@users.noreply.github.com"
-          git add -A
-          git commit -m "Remove final MapScene runtime ownership"
-          git push origin HEAD:nuclear/remove-leaflet-compat
+          echo '=== SOURCE / SCRIPTS / CONFIG / WORKFLOWS ==='
+          git grep -n -i -E 'leaflet|mapscene|map scene|map-scene|mapboxnativecompat|leafletmaplifecycle|scene-lifecycle|scene-root|__NETWORK_MAP_SCENE|\.leaflet-' -- \
+            'occu-med-map/src/**' \
+            'occu-med-map/scripts/**' \
+            'occu-med-map/package.json' \
+            'occu-med-map/tsconfig.json' \
+            'occu-med-map/vite.config.ts' \
+            '.github/workflows/**' || true
+      - name: Documentation residue
+        run: |
+          echo '=== DOCS / COMMENTS ==='
+          git grep -n -i -E 'leaflet|mapscene|map scene|map-scene|mapboxnativecompat|leafletmaplifecycle|scene-lifecycle|scene-root' -- \
+            '*.md' 'occu-med-map/**/*.md' || true
+      - name: Lockfile dependency residue
+        run: |
+          echo '=== LOCKFILE ==='
+          grep -n -i -E '(^|[/@])leaflet(@|:|/)|react-leaflet|@types/leaflet' pnpm-lock.yaml || true
+      - name: Built bundle residue
+        run: |
+          echo '=== BUILT BUNDLE ==='
+          grep -RIn -i -E 'leaflet|mapSceneRuntime|MapScene\.|mapboxNativeCompat|leafletMapLifecycle|__NETWORK_MAP_SCENE|\.leaflet-' occu-med-map/dist/public || true
+      - name: Git status
+        run: git status --short

@@ -1,4 +1,4 @@
-name: One-shot diagnose U.S. diagnostics seam
+name: One-shot expose full U.S. diagnostics residue
 
 on:
   push:
@@ -20,24 +20,26 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable
-      - name: Temporarily bypass only the stateGeoRef self-check
+      - name: Disable migration self-check in disposable workspace
         shell: python
         run: |
           from pathlib import Path
           path = Path('occu-med-map/scripts/migrate-us-diagnostics-native.py')
           text = path.read_text()
-          old = "for forbidden in ['stateGeoRef','cityLayerRef','customPinRef','tzLayerRef','popDensityLayerRef','savedRadiusLayerRef','labelLayerRef','buildStateLabels(']:"
-          new = "for forbidden in ['cityLayerRef','customPinRef','tzLayerRef','popDensityLayerRef','savedRadiusLayerRef','labelLayerRef','buildStateLabels(']:"
-          if old not in text:
-              raise SystemExit('stateGeoRef self-check anchor missing')
-          path.write_text(text.replace(old, new, 1))
+          start = text.index("# No migrated refs/symbols should survive this slice.")
+          end = text.index("app.write_text(text)", start)
+          text = text[:start] + "# Disposable CI diagnosis: permanent self-check remains unchanged on branch.\n\n" + text[end:]
+          path.write_text(text)
       - name: Apply migration in disposable workspace
         run: python occu-med-map/scripts/migrate-us-diagnostics-native.py
-      - name: Print residual stateGeoRef
-        run: grep -n -C 8 'stateGeoRef' occu-med-map/src/App.tsx || true
       - run: pnpm install --frozen-lockfile
+      - name: Print all migrated-symbol residue
+        run: grep -n -C 3 -E 'stateGeoRef|cityLayerRef|customPinRef|tzLayerRef|popDensityLayerRef|savedRadiusLayerRef|labelLayerRef|buildStateLabels' occu-med-map/src/App.tsx || true
       - name: Typecheck transformed frontend
         run: pnpm --filter @workspace/occu-med-map typecheck
+      - name: Production build transformed frontend
+        if: success()
+        run: pnpm --filter @workspace/occu-med-map build
       - name: Audit transformed residue
         if: always()
         working-directory: occu-med-map

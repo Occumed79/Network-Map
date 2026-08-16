@@ -29,11 +29,21 @@ jobs:
           path = Path("occu-med-map/scripts/ci-mapbox-native-tools-acceptance.mjs")
           text = path.read_text()
 
-          helper_pattern = re.compile(
+          def sub_once(pattern, replacement, label, flags=re.S):
+              global text
+              text, count = re.subn(pattern, lambda _: replacement, text, count=1, flags=flags)
+              if count != 1:
+                  raise SystemExit(f"{label}: replacement count={count}")
+
+          def replace_once(old, new, label):
+              global text
+              if old not in text:
+                  raise SystemExit(f"{label}: marker not found")
+              text = text.replace(old, new, 1)
+
+          sub_once(
               r'async function nativeCompatLayerCount\(page, mode = "2d"\) \{.*?(?=async function waitForMode\(page, mode\))',
-              re.S,
-          )
-          helper_replacement = '''async function nativeSourceFeatureCount(page, sourceId, mode = "2d") {
+              '''async function nativeSourceFeatureCount(page, sourceId, mode = "2d") {
             return page.evaluate(({ requestedSourceId, requestedMode }) => {
               const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
               const selector = requestedMode === "3d" ? ".mapbox-globe-host" : ".mapbox-2d-host";
@@ -66,28 +76,19 @@ jobs:
                 const coordinates = feature.geometry.coordinates;
                 const point = map.project(coordinates);
                 const rect = map.getCanvas().getBoundingClientRect();
-                return {
-                  x: rect.left + point.x,
-                  y: rect.top + point.y,
-                  sourceId,
-                  coordinates,
-                  diagnostics,
-                };
+                return { x: rect.left + point.x, y: rect.top + point.y, sourceId, coordinates, diagnostics };
               }
               return { x: null, y: null, sourceId: null, coordinates: null, diagnostics };
             }, needle);
           }
 
-          '''
-          text, count = helper_pattern.subn(lambda _: helper_replacement, text, count=1)
-          if count != 1:
-              raise SystemExit(f"helper replacement count={count}")
-
-          diagnostics_pattern = re.compile(
-              r'async function indexedProviderDiagnostics\(page\) \{.*?\n\}\n\n(?=const browser =)',
-              re.S,
+          ''',
+              "native helper block",
           )
-          diagnostics_replacement = '''async function indexedProviderDiagnostics(page) {
+
+          sub_once(
+              r'async function indexedProviderDiagnostics\(page\) \{.*?\n\}\n\n(?=const browser =)',
+              '''async function indexedProviderDiagnostics(page) {
             return page.evaluate(() => {
               const lifecycle = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getDiagnostics?.() || null;
               const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
@@ -95,7 +96,6 @@ jobs:
               const toggle = document.querySelector('input[aria-label="Indexed Providers"]');
               const row = toggle?.closest(".workflow-layer");
               if (!map) return { lifecycle, noMap: true, indexedRow: row?.textContent || "" };
-
               const style = map.getStyle();
               const nativeLayers = (style?.layers || [])
                 .filter((layer) => String(layer.id).startsWith("provider-dataset-native-indexed"))
@@ -103,7 +103,6 @@ jobs:
               const sourceId = "provider-dataset-native-indexed";
               let sourceFeatures = [];
               try { sourceFeatures = map.querySourceFeatures(sourceId) || []; } catch {}
-
               return {
                 lifecycle,
                 indexedChecked: Boolean(toggle?.checked),
@@ -122,89 +121,89 @@ jobs:
             });
           }
 
-          '''
-          text, count = diagnostics_pattern.subn(lambda _: diagnostics_replacement, text, count=1)
-          if count != 1:
-              raise SystemExit(f"diagnostics replacement count={count}")
+          ''',
+              "indexed diagnostics block",
+          )
 
-          old_indexed_wait = '''  await page.waitForFunction(() => {
-            const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
-            const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
-            if (!map || !map.isStyleLoaded()) return false;
-            return (map.getStyle()?.layers || []).some((layer) =>
-              layer.type === "circle" && String(layer.id).startsWith("map-scene-") && String(layer.id).endsWith("-points")
-            );
-          }, null, { timeout: 10_000 });'''
-          new_indexed_wait = '''  await page.waitForFunction(() => {
+          sub_once(
+              r'(?<=  await waitForActiveMapIdle\(page, "2d"\);\n)  await page\.waitForFunction\(\(\) => \{.*?String\(layer\.id\)\.startsWith\("map-scene-"\).*?\n  \}, null, \{ timeout: 10_000 \}\);',
+              '''  await page.waitForFunction(() => {
             const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
             const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
             if (!map || !map.isStyleLoaded()) return false;
             if (!map.getLayer("provider-dataset-native-indexed-points") || !map.getSource("provider-dataset-native-indexed")) return false;
             try { return (map.querySourceFeatures("provider-dataset-native-indexed") || []).length >= 2; } catch { return false; }
-          }, null, { timeout: 10_000 });'''
-          if old_indexed_wait not in text:
-              raise SystemExit("indexed native-layer wait block not found")
-          text = text.replace(old_indexed_wait, new_indexed_wait, 1)
+          }, null, { timeout: 10_000 });''',
+              "indexed native readiness",
+          )
 
-          text = text.replace(
+          replace_once(
               'beforeIndexedClick.lifecycle?.initializers?.some((initializer) => initializer.id === "mapbox-compat-interaction-owner"),\n    "Mapbox compatibility interaction owner must be registered before provider clicks",',
               'beforeIndexedClick.lifecycle?.initializers?.some((initializer) => initializer.id === "provider-dataset-native-map"),\n    "Native provider dataset interaction owner must be registered before provider clicks",',
-              1,
+              "indexed interaction owner",
           )
 
-          text = text.replace(
-              '  const beforeRadiusLayers = await nativeCompatLayerCount(page, "2d");',
-              '  const beforeRadiusFeatures = await nativeSourceFeatureCount(page, "radius-extractor-native", "2d");',
-              1,
-          )
-
-          old_radius_wait = '''  await page.waitForFunction((before) => {
-            const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
-            const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
-            const count = (map?.getStyle()?.layers || []).filter((layer) => String(layer.id).startsWith("map-scene-")).length;
-            return count > before;
-          }, beforeRadiusLayers, { timeout: 10_000 });'''
-          new_radius_wait = '''  await page.waitForFunction((before) => {
+          sub_once(
+              r'  const beforeRadiusLayers = await nativeCompatLayerCount\(page, "2d"\);.*?(?=  await page\.waitForFunction\(\(\) => /Center:)',
+              '''  const beforeRadiusFeatures = await nativeSourceFeatureCount(page, "radius-extractor-native", "2d");
+          const radiusButton = await clickByText(page, /Radius Tool/i);
+          await page.waitForFunction((button) => button.classList.contains("active"), await radiusButton.elementHandle(), { timeout: 5_000 });
+          await page.waitForFunction(() => window.__NETWORK_MAP_TOOL_STATE__?.getActiveTool?.() === "radius", null, { timeout: 5_000 });
+          await mapCanvasClick(page, 0.68, 0.55, false);
+          const radiusCard = page.locator(".local-pop-card:visible").filter({ hasText: "Radius extractor" }).first();
+          await radiusCard.waitFor({ state: "visible", timeout: 10_000 });
+          await page.waitForFunction((before) => {
             const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
             const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
             if (!map?.getLayer("radius-extractor-native-fill") || !map.getSource("radius-extractor-native")) return false;
             try { return (map.querySourceFeatures("radius-extractor-native") || []).length > before; } catch { return false; }
-          }, beforeRadiusFeatures, { timeout: 10_000 });'''
-          if old_radius_wait not in text:
-              raise SystemExit("radius native source wait block not found")
-          text = text.replace(old_radius_wait, new_radius_wait, 1)
+          }, beforeRadiusFeatures, { timeout: 10_000 });
+          ''',
+              "radius native readiness",
+          )
 
-          old_globe_wait = '''  await page.waitForFunction(() => {
-            const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
-            const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-globe-host"));
-            return (map?.getStyle()?.layers || []).some((layer) => String(layer.id).startsWith("map-scene-"));
-          }, null, { timeout: 10_000 });
-          assert.ok(await nativeCompatLayerCount(page, "3d") > 0, "3D Mapbox globe must receive the same logical overlay geometry");'''
-          new_globe_wait = '''  await page.waitForFunction(() => {
+          sub_once(
+              r'(?<=  await page\.locator\("\.mapbox-globe-host \.mapboxgl-canvas"\)\.waitFor\(\{ state: "visible", timeout: 15_000 \}\);\n)  await page\.waitForFunction\(\(\) => \{.*?\n  assert\.ok\(await nativeCompatLayerCount\(page, "3d"\) > 0, "3D Mapbox globe must receive the same logical overlay geometry"\);',
+              '''  await page.waitForFunction(() => {
             const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
             const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-globe-host"));
             if (!map?.getLayer("radius-extractor-native-fill") || !map.getSource("radius-extractor-native")) return false;
             try { return (map.querySourceFeatures("radius-extractor-native") || []).length > 0; } catch { return false; }
           }, null, { timeout: 10_000 });
-          assert.ok(await nativeSourceFeatureCount(page, "radius-extractor-native", "3d") > 0, "3D Mapbox globe must receive the same native radius geometry");'''
-          if old_globe_wait not in text:
-              raise SystemExit("3D native radius wait block not found")
-          text = text.replace(old_globe_wait, new_globe_wait, 1)
+          assert.ok(await nativeSourceFeatureCount(page, "radius-extractor-native", "3d") > 0, "3D Mapbox globe must receive the same native radius geometry");''',
+              "3d native radius readiness",
+          )
 
-          text = text.replace(
+          replace_once(
               '  const densityLayerCount = await nativeCompatLayerCount(page, "2d");\n  assert.ok(densityLayerCount > 0, "Density cells must exist as native Mapbox compatibility layers");',
-              '  await page.waitForFunction(() => {\n    const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];\n    const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));\n    if (!map?.getLayer("provider-explorer-native-density") || !map.getSource("provider-explorer-native-aggregate")) return false;\n    try { return (map.querySourceFeatures("provider-explorer-native-aggregate") || []).length === 2; } catch { return false; }\n  }, null, { timeout: 10_000 });\n  const densityFeatureCount = await nativeSourceFeatureCount(page, "provider-explorer-native-aggregate", "2d");\n  assert.equal(densityFeatureCount, 2, "Density cells must exist in the native Provider Explorer aggregate source");',
-              1,
+              '''  await page.waitForFunction(() => {
+            const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
+            const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
+            if (!map?.getLayer("provider-explorer-native-density") || !map.getSource("provider-explorer-native-aggregate")) return false;
+            try { return (map.querySourceFeatures("provider-explorer-native-aggregate") || []).length === 2; } catch { return false; }
+          }, null, { timeout: 10_000 });
+          const densityFeatureCount = await nativeSourceFeatureCount(page, "provider-explorer-native-aggregate", "2d");
+          assert.equal(densityFeatureCount, 2, "Density cells must exist in the native Provider Explorer aggregate source");''',
+              "density native readiness",
           )
 
-          text = text.replace(
-              '  await clickByText(page, /Hex field/i, explorer);\n  await page.waitForFunction(() => /hex view.*17 matching records.*2 aggregated cells/i.test(document.querySelector(".provider-map-status")?.textContent || ""), null, { timeout: 10_000 });',
-              '  await clickByText(page, /Hex field/i, explorer);\n  await page.waitForFunction(() => /hex view.*17 matching records.*2 aggregated cells/i.test(document.querySelector(".provider-map-status")?.textContent || ""), null, { timeout: 10_000 });\n  await page.waitForFunction(() => {\n    const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];\n    const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));\n    if (!map?.getLayer("provider-explorer-native-hex-fill") || !map.getSource("provider-explorer-native-aggregate")) return false;\n    try {\n      const features = map.querySourceFeatures("provider-explorer-native-aggregate") || [];\n      return features.length === 2 && features.every((feature) => feature.geometry?.type === "Polygon");\n    } catch { return false; }\n  }, null, { timeout: 10_000 });',
-              1,
+          replace_once(
+              '  await page.waitForFunction(() => /hex view.*17 matching records.*2 aggregated cells/i.test(document.querySelector(".provider-map-status")?.textContent || ""), null, { timeout: 10_000 });',
+              '''  await page.waitForFunction(() => /hex view.*17 matching records.*2 aggregated cells/i.test(document.querySelector(".provider-map-status")?.textContent || ""), null, { timeout: 10_000 });
+          await page.waitForFunction(() => {
+            const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
+            const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
+            if (!map?.getLayer("provider-explorer-native-hex-fill") || !map.getSource("provider-explorer-native-aggregate")) return false;
+            try {
+              const features = map.querySourceFeatures("provider-explorer-native-aggregate") || [];
+              return features.length === 2 && features.every((feature) => feature.geometry?.type === "Polygon");
+            } catch { return false; }
+          }, null, { timeout: 10_000 });''',
+              "hex native readiness",
           )
 
-          text = text.replace('compatPopupFeaturePoint(page, "CI Stored Clinic")', 'nativePopupFeaturePoint(page, "CI Stored Clinic")', 1)
-          text = text.replace('native Mapbox popup metadata', 'native Provider Explorer popup metadata', 1)
+          replace_once('compatPopupFeaturePoint(page, "CI Stored Clinic")', 'nativePopupFeaturePoint(page, "CI Stored Clinic")', "stored provider helper")
+          text = text.replace('native Mapbox popup metadata', 'native Provider Explorer popup metadata')
 
           if "map-scene-" in text:
               raise SystemExit("stale map-scene prefix remains in native tools acceptance")

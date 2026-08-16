@@ -307,7 +307,9 @@ registerMapboxMapInitializer({
       if (!feature) return;
       markHandled(event.originalEvent);
       const html = String(feature.properties?.popupHtml || "");
-      const coordinates = feature.geometry.type === "Point" ? feature.geometry.coordinates as [number, number] : [event.lngLat.lng, event.lngLat.lat];
+      const coordinates: [number, number] = feature.geometry.type === "Point"
+        ? feature.geometry.coordinates as [number, number]
+        : [event.lngLat.lng, event.lngLat.lat];
       const popup = new mapboxgl.Popup({ closeButton: true, closeOnClick: true, maxWidth: "380px" })
         .setLngLat(coordinates)
         .setHTML(html)

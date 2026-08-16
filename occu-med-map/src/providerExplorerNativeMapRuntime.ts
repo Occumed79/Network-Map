@@ -13,6 +13,14 @@ type ProviderRenderOptions = {
 
 type Channel = "pins" | "aggregate" | "dots" | "live" | "gaps";
 
+type ProviderExplorerHit = {
+  coordinates: [number, number];
+  popupHtml: string;
+  channel: string;
+  providerId: string;
+  distance: number;
+};
+
 const IDS = {
   pins: { source: "provider-explorer-native-pins", layer: "provider-explorer-native-pins" },
   aggregate: {
@@ -123,9 +131,11 @@ function updateMaps(channel?: Channel): void {
     if (!map.isStyleLoaded()) continue;
     try {
       ensureLayers(map);
-      if (!channel) continue;
-      const id = channel === "aggregate" ? IDS.aggregate.source : IDS[channel].source;
-      (map.getSource(id) as mapboxgl.GeoJSONSource | undefined)?.setData(collections[channel]);
+      if (channel) {
+        const id = channel === "aggregate" ? IDS.aggregate.source : IDS[channel].source;
+        (map.getSource(id) as mapboxgl.GeoJSONSource | undefined)?.setData(collections[channel]);
+      }
+      map.triggerRepaint();
     } catch (error) {
       console.warn("Provider Explorer native source update failed", error);
     }
@@ -269,6 +279,7 @@ export function clearProviderExplorerNative(channels: Channel[] = ["pins", "aggr
     const id = channel === "aggregate" ? IDS.aggregate.source : IDS[channel].source;
     for (const map of getTrackedMapboxMaps()) {
       (map.getSource(id) as mapboxgl.GeoJSONSource | undefined)?.setData(collections[channel]);
+      map.triggerRepaint();
     }
   }
 }
@@ -279,22 +290,62 @@ function markHandled(originalEvent: unknown): void {
   }
 }
 
-function popupHit(map: mapboxgl.Map, point: mapboxgl.PointLike): mapboxgl.MapboxGeoJSONFeature | null {
+function renderedPopupHit(map: mapboxgl.Map, point: mapboxgl.PointLike): ProviderExplorerHit | null {
   const layers = [IDS.pins.layer, IDS.live.layer, IDS.gaps.layer].filter((id) => Boolean(map.getLayer(id)));
   if (!layers.length) return null;
   const p = point as mapboxgl.Point;
-  const box: [[number, number], [number, number]] = [[p.x - 10, p.y - 10], [p.x + 10, p.y + 10]];
+  const box: [[number, number], [number, number]] = [[p.x - 12, p.y - 12], [p.x + 12, p.y + 12]];
   try {
-    return map.queryRenderedFeatures(box, { layers })
-      .filter((feature) => String(feature.properties?.popupHtml || "").trim())
+    const feature = map.queryRenderedFeatures(box, { layers })
+      .filter((candidate) => candidate.geometry.type === "Point" && String(candidate.properties?.popupHtml || "").trim())
       .sort((a, b) => {
         const pa = a.geometry.type === "Point" ? map.project(a.geometry.coordinates as [number, number]) : p;
         const pb = b.geometry.type === "Point" ? map.project(b.geometry.coordinates as [number, number]) : p;
         return Math.hypot(pa.x - p.x, pa.y - p.y) - Math.hypot(pb.x - p.x, pb.y - p.y);
-      })[0] || null;
+      })[0];
+    if (!feature || feature.geometry.type !== "Point") return null;
+    const coordinates = feature.geometry.coordinates as [number, number];
+    const projected = map.project(coordinates);
+    return {
+      coordinates,
+      popupHtml: String(feature.properties?.popupHtml || ""),
+      channel: String(feature.properties?.channel || ""),
+      providerId: String(feature.properties?.providerId || ""),
+      distance: Math.hypot(projected.x - p.x, projected.y - p.y),
+    };
   } catch {
     return null;
   }
+}
+
+function collectionPopupHit(map: mapboxgl.Map, point: mapboxgl.PointLike, maxDistance = 16): ProviderExplorerHit | null {
+  const p = point as mapboxgl.Point;
+  let nearest: ProviderExplorerHit | null = null;
+  for (const channel of ["pins", "live", "gaps"] as const) {
+    const channelIds = IDS[channel];
+    if (!map.getLayer(channelIds.layer) || !map.getSource(channelIds.source)) continue;
+    for (const feature of collections[channel].features) {
+      if (feature.geometry.type !== "Point") continue;
+      const popupHtml = String(feature.properties?.popupHtml || "").trim();
+      if (!popupHtml) continue;
+      const coordinates = feature.geometry.coordinates as [number, number];
+      const projected = map.project(coordinates);
+      const distance = Math.hypot(projected.x - p.x, projected.y - p.y);
+      if (distance > maxDistance || (nearest && nearest.distance <= distance)) continue;
+      nearest = {
+        coordinates,
+        popupHtml,
+        channel: String(feature.properties?.channel || channel),
+        providerId: String(feature.properties?.providerId || ""),
+        distance,
+      };
+    }
+  }
+  return nearest;
+}
+
+function popupHit(map: mapboxgl.Map, point: mapboxgl.PointLike): ProviderExplorerHit | null {
+  return renderedPopupHit(map, point) || collectionPopupHit(map, point);
 }
 
 registerMapboxMapInitializer({
@@ -306,17 +357,12 @@ registerMapboxMapInitializer({
       const feature = popupHit(map, event.point);
       if (!feature) return;
       markHandled(event.originalEvent);
-      const html = String(feature.properties?.popupHtml || "");
-      const coordinates: [number, number] = feature.geometry.type === "Point"
-        ? feature.geometry.coordinates as [number, number]
-        : [event.lngLat.lng, event.lngLat.lat];
       const popup = new mapboxgl.Popup({ closeButton: true, closeOnClick: true, maxWidth: "380px" })
-        .setLngLat(coordinates)
-        .setHTML(html)
+        .setLngLat(feature.coordinates)
+        .setHTML(feature.popupHtml)
         .addTo(map);
-      if (feature.properties?.channel === "live" && liveAction) {
-        const id = String(feature.properties?.providerId || "");
-        const provider = liveProviders.get(id);
+      if (feature.channel === "live" && liveAction) {
+        const provider = liveProviders.get(feature.providerId);
         const button = popup.getElement()?.querySelector<HTMLButtonElement>(".provider-popup-save");
         if (provider && button) button.addEventListener("click", (domEvent) => {
           domEvent.preventDefault();

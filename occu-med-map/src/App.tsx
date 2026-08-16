@@ -68,6 +68,10 @@ import {
   setReferenceRadiusOverlay,
   type NativeLivePoint,
 } from './liveFinderNativeMapRuntime';
+import {
+  clearProviderDataset,
+  renderProviderDataset,
+} from './providerDatasetNativeMapRuntime';
 
 const NATIVE_DRIVE_TIME_ENABLED = import.meta.env.VITE_NATIVE_DRIVE_TIME === 'true';
 
@@ -689,91 +693,6 @@ function providerCategoryStyle(provider:any) {
 // Provider sources stay visually distinct without collapsing into numbered
 // clusters. Every viewport gets a soft, non-interactive density field beneath
 // the individual 8px points; popups remain attached to the real provider point.
-interface ProviderFieldRendererOptions {
-  color: string;
-  glow: boolean;
-  cellPx?: number;
-  badgeLabel: string;
-  buildPopup: (p: any) => string;
-  getStyle?: (p: any) => { key: ProviderCategoryKey; label: string; color: string };
-}
-
-function createProviderFieldLayer(
-  map: MapScene.Map,
-  points: any[],
-  opts: ProviderFieldRendererOptions,
-): { group: MapScene.LayerGroup; destroy: () => void } {
-  // Build the provider geometry before attaching the root so the first
-  // Mapbox GeoJSON source is never born empty. Provider API requests are already
-  // viewport-bounded, so the returned records are the authoritative render set.
-  const group = MapScene.layerGroup();
-  const cellPx = opts.cellPx ?? 54;
-  const valid = points.filter(p => p && p.lat != null && p.lng != null && isValidCoord(p.lat, p.lng));
-
-  function styleFor(p: any) { return opts.getStyle?.(p) || { key: 'unknown' as ProviderCategoryKey, label: opts.badgeLabel, color: opts.color }; }
-
-  function render() {
-    group.clearLayers();
-    if (!valid.length) return;
-    const zoom = map.getZoom();
-    // Do not re-filter API-bounded providers through the temporary scene
-    // camera facade. That second viewport gate could disagree with the native
-    // Mapbox camera and silently erase otherwise valid provider points.
-    const visible = valid;
-
-    const cells = new Map<string, { sx: number; sy: number; count: number; colors: string[] }>();
-    for (const p of visible) {
-      const pt = map.project([p.lat, p.lng] as MapScene.LatLngTuple, zoom);
-      const key = `${Math.floor(pt.x / cellPx)}:${Math.floor(pt.y / cellPx)}`;
-      const c = cells.get(key);
-      const style = styleFor(p);
-      if (c) { c.sx += pt.x; c.sy += pt.y; c.count++; c.colors.push(style.color); }
-      else cells.set(key, { sx: pt.x, sy: pt.y, count: 1, colors: [style.color] });
-    }
-
-    cells.forEach(c => {
-      const center = map.unproject([c.sx / c.count, c.sy / c.count] as MapScene.PointTuple, zoom);
-      const intensity = Math.min(1, Math.log2(c.count + 1) / 5);
-      const dominantColor = c.colors[0] || opts.color;
-      group.addLayer(MapScene.circleMarker(center, {
-        radius: 10 + intensity * 30,
-        stroke: false,
-        fillColor: dominantColor,
-        fillOpacity: 0.055 + intensity * (opts.glow ? 0.18 : 0.1),
-        interactive: false,
-        className: 'provider-density-field',
-      }));
-    });
-
-    for (const p of visible) {
-      const style = styleFor(p);
-      const point = MapScene.circleMarker([p.lat, p.lng], {
-        radius: 4,
-        color: 'rgba(255,255,255,.94)',
-        weight: 1,
-        fillColor: style.color,
-        fillOpacity: 0.9,
-        opacity: 0.96,
-        className: opts.glow ? 'provider-point provider-point-glow' : 'provider-point',
-      });
-      point.bindTooltip(style.label, { direction:'top', offset:[0,-5], opacity:0.9 });
-      point.bindPopup(opts.buildPopup(p));
-      group.addLayer(point);
-    }
-  }
-
-  render();
-  group.addTo(map);
-  map.on('moveend zoomend', render);
-  return {
-    group,
-    destroy() {
-      map.off('moveend zoomend', render);
-      try { map.removeLayer(group); } catch { /* noop */ }
-    },
-  };
-}
-
 function classifyFacility(tags:any):string {
   const a=(tags.amenity||'').toLowerCase(),h=(tags.healthcare||'').toLowerCase(),
     n=(tags.name||'').toLowerCase(),o=(tags.office||'').toLowerCase(),
@@ -1201,9 +1120,6 @@ export default function App() {
   const tzLayerRef = useRef<MapScene.LayerGroup|null>(null);
   const popDensityLayerRef = useRef<MapScene.LayerGroup|null>(null);
   const clinicLayerRef = useRef<MapScene.LayerGroup|null>(null);
-  const blueHiveLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
-  const indexedProviderLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
-  const myClinicsLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
   const savedRadiusLayerRef = useRef<MapScene.LayerGroup|null>(null);
   const rawStateFeaturesRef = useRef<any[]>([]);
   const clinicFileInputRef = useRef<HTMLInputElement>(null);
@@ -1326,12 +1242,10 @@ export default function App() {
   const [inventoryLoading, setInventoryLoading] = useState(false);
   const [inventoryError, setInventoryError] = useState('');
   const [serviceInventoryEnabled, setServiceInventoryEnabled] = useState(false);
-  const inventoryLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
   const inventoryFetchRef = useRef<AbortController|null>(null);
   const [showIndexedProviders, setShowIndexedProviders] = useState(false);
   const [showDentists, setShowDentists] = useState(false);
   const [dentistData, setDentistData] = useState<any[]>([]);
-  const dentistLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
   const [showMyClinicsLayer, setShowMyClinicsLayer] = useState(false);
   const [myClinicsData, setMyClinicsData] = useState<any[]>([]);
   // NACCHO Local Health Department layer — Issue #37
@@ -1339,7 +1253,6 @@ export default function App() {
   const [nacchoData, setNacchoData] = useState<any[]>([]);
   const [nacchoLoading, setNacchoLoading] = useState(false);
   const [nacchoError, setNacchoError] = useState('');
-  const nacchoLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
   const nacchoFetchRef = useRef<AbortController|null>(null);
   const [showDatasetBrowser, setShowDatasetBrowser] = useState(false);
   const [showProviderExplorerDrawer, setShowProviderExplorerDrawer] = useState(false);
@@ -2092,82 +2005,72 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[mapReady, metric, serviceInventoryEnabled]);
 
-  // ── NACCHO LHD layer: load + render on map bounds change ─────────────────
+  // ── NACCHO LHD layer: native Mapbox source + heatmap ───────────────────────
   useEffect(()=>{
-    const map = mapRef.current;
-    if (!map || !mapReady) return;
-    if (!showNacchoLayer) {
-      // Clear the layer when disabled
-      if (nacchoLayerRef.current) { nacchoLayerRef.current.destroy(); nacchoLayerRef.current = null; }
+    const map=mapRef.current;
+    if(!map||!mapReady) return;
+    if(!showNacchoLayer) {
+      clearProviderDataset('naccho');
       nacchoFetchRef.current?.abort();
-      nacchoFetchRef.current = null;
+      nacchoFetchRef.current=null;
       return;
     }
-    let timer: ReturnType<typeof setTimeout>|null = null;
-    const reload = () => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(async ()=>{
+    let timer:ReturnType<typeof setTimeout>|null=null;
+    const reload=()=>{
+      if(timer) clearTimeout(timer);
+      timer=setTimeout(async()=>{
         nacchoFetchRef.current?.abort();
-        const ac = new AbortController();
-        nacchoFetchRef.current = ac;
+        const ac=new AbortController();
+        nacchoFetchRef.current=ac;
         setNacchoLoading(true);
         setNacchoError('');
         try {
-          const bounds = map.getBounds();
-          const params = new URLSearchParams({
-            useBounds: 'true',
-            north: String(bounds.getNorth()),
-            south: String(bounds.getSouth()),
-            east: String(bounds.getEast()),
-            west: String(bounds.getWest()),
-            limit: '1000',
+          const bounds=map.getBounds();
+          const params=new URLSearchParams({
+            useBounds:'true',
+            north:String(bounds.getNorth()),south:String(bounds.getSouth()),
+            east:String(bounds.getEast()),west:String(bounds.getWest()),limit:'1000',
           });
-          const resp = await fetch(`/api/naccho-lhd?${params}`, { signal: ac.signal });
-          if (ac.signal.aborted) return;
-          const data = await resp.json().catch(()=>({providers:[]}));
-          if (ac.signal.aborted) return;
-          const providers = Array.isArray(data.providers) ? data.providers : [];
+          const resp=await fetch(`/api/naccho-lhd?${params}`,{signal:ac.signal});
+          if(ac.signal.aborted) return;
+          const data=await resp.json().catch(()=>({providers:[]}));
+          if(ac.signal.aborted) return;
+          const providers=Array.isArray(data.providers)?data.providers:[];
           setNacchoData(providers);
-          // Render on map
-          if (nacchoLayerRef.current) { nacchoLayerRef.current.destroy(); nacchoLayerRef.current = null; }
-          nacchoLayerRef.current = createProviderFieldLayer(map, providers, {
-            color: '#34d399',
-            glow: false,
-            cellPx: 52,
-            badgeLabel: 'Local Health Dept',
-            buildPopup: (p:any) => {
-              const services = Array.isArray(p.public_health_services) ? p.public_health_services : (p.services || []);
-              const svcHtml = services.length ? `<div style="font-size:9px;color:#6ee7b7;margin-top:4px;">${services.slice(0,5).join(', ')}</div>` : '';
+          renderProviderDataset('naccho',providers,{
+            baseColor:'#34d399',
+            glow:false,
+            buildPopup:(p:any)=>{
+              const services=Array.isArray(p.public_health_services)?p.public_health_services:(p.services||[]);
+              const svcHtml=services.length?`<div style="font-size:9px;color:#6ee7b7;margin-top:4px;">${services.slice(0,5).join(', ')}</div>`:'';
               return `<div style="font-family:Inter,sans-serif;padding:10px 12px;max-width:270px;">
                 <div style="font-size:12px;font-weight:700;color:#e2f0ff;">${p.name||'Local Health Department'}</div>
                 <div style="font-size:9px;font-family:'IBM Plex Mono',monospace;color:#34d399;letter-spacing:1px;text-transform:uppercase;margin:2px 0 4px;">NACCHO LHD Directory</div>
                 <div style="font-size:9px;color:#4a6888;margin-bottom:4px;">${[p.address,p.city,p.admin_area,p.country].filter(Boolean).join(', ')||'Address unavailable'}</div>
-                ${p.phone ? `<div style="font-size:9px;margin-bottom:3px;"><a href="tel:${p.phone}">${p.phone}</a></div>` : ''}
-                ${p.website ? `<div style="font-size:8.5px;margin-bottom:3px;"><a href="${p.website}" target="_blank" rel="noreferrer">${p.website}</a></div>` : ''}
+                ${p.phone?`<div style="font-size:9px;margin-bottom:3px;"><a href="tel:${p.phone}">${p.phone}</a></div>`:''}
+                ${p.website?`<div style="font-size:8.5px;margin-bottom:3px;"><a href="${p.website}" target="_blank" rel="noreferrer">${p.website}</a></div>`:''}
                 ${svcHtml}
                 <div style="font-size:8px;color:#94a3b8;margin-top:5px;border-top:1px solid rgba(255,255,255,0.08);padding-top:4px;">External directory record · not a confirmed service provider</div>
-                <div style="font-size:8px;color:#64748b;margin-top:2px;"><a href="https://www.naccho.org/membership/lhd-directory" target="_blank" rel="noreferrer">naccho.org/membership/lhd-directory</a></div>
               </div>`;
             },
           });
-        } catch (err:any) {
-          if (!ac.signal.aborted) setNacchoError(err?.message || 'NACCHO layer failed');
+        } catch(error:any) {
+          if(!ac.signal.aborted) setNacchoError(error?.message||'NACCHO layer failed');
         } finally {
-          if (!ac.signal.aborted) setNacchoLoading(false);
+          if(!ac.signal.aborted) setNacchoLoading(false);
         }
-      }, 400);
+      },400);
     };
     reload();
-    map.on('moveend', reload);
-    return ()=>{
-      if (timer) clearTimeout(timer);
-      map.off('moveend', reload);
+    map.on('moveend',reload);
+    return()=>{
+      if(timer) clearTimeout(timer);
+      map.off('moveend',reload);
       nacchoFetchRef.current?.abort();
-      nacchoFetchRef.current = null;
-      if (nacchoLayerRef.current) { nacchoLayerRef.current.destroy(); nacchoLayerRef.current = null; }
+      nacchoFetchRef.current=null;
+      clearProviderDataset('naccho');
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[mapReady, showNacchoLayer]);
+  },[mapReady,showNacchoLayer]);
 
   const activeToolRef = React.useRef(activeTool);
   React.useLayoutEffect(() => {
@@ -2474,133 +2377,115 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[uploadedClinics, showUploadedClinics, showGlowPoints]);
 
-  // ── BlueHive density field + provider points ──────────────────────────────
+  // ── BlueHive native heatmap + provider points ────────────────────────────
   useEffect(()=>{
-    const map = mapRef.current;
-    if (!map) return;
-    if (blueHiveLayerRef.current) { blueHiveLayerRef.current.destroy(); blueHiveLayerRef.current = null; }
-    if (!showBlueHive || blueHiveData.length===0) return;
-    blueHiveLayerRef.current = createProviderFieldLayer(map, blueHiveData, {
-      color: '#3b82f6',
-      glow: showGlowPoints,
-      getStyle: providerCategoryStyle,
-      badgeLabel: 'BlueHive providers',
-      buildPopup: (p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
-        <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||'Unnamed'}</div>
-        ${p.address_1?`<div style="font-size:9.5px;color:#4a6888"> ${p.address_1}${p.city?', '+p.city:''}${p.state?' '+p.state:''}${p.zip?' '+p.zip:''}</div>`:''}
-        ${p.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${p.phone}">${p.phone}</a></div>`:''}
-        ${p.website?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px"><a href="${p.website}" target="_blank" style="color:#93c5fd">${p.website}</a></div>`:''}
-        ${p.services?`<div style="font-size:8px;color:#3d5478;margin-top:3px">${p.services}</div>`:''}
-        <div style="margin-top:6px;display:flex;gap:5px">
-          <div style="width:8px;height:8px;border-radius:50%;background:#3b82f6;box-shadow:0 0 6px #3b82f6;flex-shrink:0;margin-top:2px"></div>
-          <span style="font-size:8.5px;color:#3d5478;font-family:'IBM Plex Mono',monospace">BLUEHIVE PROVIDER</span>
-        </div>
-      </div>`,
-    });
-    return ()=>{ if (blueHiveLayerRef.current) { blueHiveLayerRef.current.destroy(); blueHiveLayerRef.current = null; } };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[showBlueHive, blueHiveData, showGlowPoints]);
-
-  // ── Dentist density field + provider points ───────────────────────────────
-  useEffect(()=>{
-    const map = mapRef.current;
-    if (!map) return;
-    if (dentistLayerRef.current) { dentistLayerRef.current.destroy(); dentistLayerRef.current = null; }
-    if (!showDentists || dentistData.length===0) return;
-    dentistLayerRef.current = createProviderFieldLayer(map, dentistData, {
-      color: '#06b6d4',
-      glow: showGlowPoints,
-      getStyle: providerCategoryStyle,
-      badgeLabel: 'dentists',
-      buildPopup: (p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
-        <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||'Unnamed'}</div>
-        ${p.address_1?`<div style="font-size:9.5px;color:#4a6888"> ${p.address_1}${p.city?', '+p.city:''}${p.state?' '+p.state:''}${p.zip?' '+p.zip:''}</div>`:''}
-        ${p.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${p.phone}">${p.phone}</a></div>`:''}
-        ${p.npi?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px">NPI: <a href="${p.source_url}" target="_blank" style="color:#93c5fd">${p.npi}</a></div>`:''}
-        ${p.taxonomy_description?`<div style="font-size:8px;color:#3d5478;margin-top:3px">${p.taxonomy_description}</div>`:''}
-        <div style="margin-top:6px;display:flex;gap:5px">
-          <div style="width:8px;height:8px;border-radius:50%;background:#06b6d4;box-shadow:0 0 6px #06b6d4;flex-shrink:0;margin-top:2px"></div>
-          <span style="font-size:8.5px;color:#3d5478;font-family:'IBM Plex Mono',monospace">DENTIST</span>
-        </div>
-      </div>`,
-    });
-    return ()=>{ if (dentistLayerRef.current) { dentistLayerRef.current.destroy(); dentistLayerRef.current = null; } };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[showDentists, dentistData, showGlowPoints]);
-
-  // ── Service Presence density field + provider points ──────────────────────
-  useEffect(()=>{
-    const map = mapRef.current;
-    if (!map) return;
-    if (inventoryLayerRef.current) { inventoryLayerRef.current.destroy(); inventoryLayerRef.current = null; }
-    if (inventoryData.length===0) return;
-    const trustColor = (t:string)=>t==='verified'?'#34d399':t==='registry'?'#60a5fa':t==='directory'?'#a78bfa':'#94a3b8';
-    inventoryLayerRef.current = createProviderFieldLayer(map, inventoryData, {
-      color: '#10b981',
-      glow: showGlowPoints,
-      getStyle: providerCategoryStyle,
-      badgeLabel: 'Service presence providers',
-      buildPopup: (p:MapInventoryProvider)=>{
-        const tc = trustColor(p.trustTier);
-        return `<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:210px;max-width:280px;">
-        <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.name||'Unnamed'}</div>
-        ${p.address?`<div style="font-size:9.5px;color:#4a6888"> ${p.address}${p.city?', '+p.city:''}${p.state?' '+p.state:''}</div>`:''}
-        ${p.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${p.phone}">${p.phone}</a></div>`:''}
-        ${p.website?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px"><a href="${p.website}" target="_blank" style="color:#93c5fd">${p.website}</a></div>`:''}
-        ${p.npi?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px">NPI: <a href="https://npiregistry.cms.hhs.gov/provider-view/${p.npi}" target="_blank" style="color:#93c5fd">${p.npi}</a></div>`:''}
-        ${p.services.length>0?`<div style="font-size:8px;color:#3d5478;margin-top:3px">${p.services.join(', ')}</div>`:''}
-        <div style="margin-top:6px;display:flex;gap:5px;align-items:center">
-          <div style="width:8px;height:8px;border-radius:50%;background:${tc};box-shadow:0 0 6px ${tc};flex-shrink:0"></div>
-          <span style="font-size:8.5px;color:${tc};font-family:'IBM Plex Mono',monospace;text-transform:uppercase">${p.trustTier}</span>
-          ${p.coordinateStatus?`<span style="font-size:7.5px;color:#5d7a9e;margin-left:4px">${p.coordinateStatus}</span>`:''}
-        </div>
-      </div>`;
-      },
-    });
-    return ()=>{ if (inventoryLayerRef.current) { inventoryLayerRef.current.destroy(); inventoryLayerRef.current = null; } };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[inventoryData, showGlowPoints]);
-
-  // ── Full indexed provider density field + points ──────────────────────────
-  useEffect(()=>{
-    const map = mapRef.current;
-    if(!map) return;
-    if(indexedProviderLayerRef.current) { indexedProviderLayerRef.current.destroy(); indexedProviderLayerRef.current = null; }
-    if(!showIndexedProviders || indexedLayerData.length===0) return;
-    indexedProviderLayerRef.current = createProviderFieldLayer(map, indexedLayerData, {
-      color:'#10b981',
+    if(!showBlueHive || blueHiveData.length===0) {
+      clearProviderDataset('bluehive');
+      return;
+    }
+    renderProviderDataset('bluehive', blueHiveData, {
+      baseColor:'#3b82f6',
       glow:showGlowPoints,
-      getStyle: providerCategoryStyle,
-      badgeLabel:'Indexed providers',
+      getColor:(provider:any)=>providerCategoryStyle(provider).color,
       buildPopup:(p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
         <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||p.name||'Unnamed'}</div>
-        ${p.address_1?`<div style="font-size:9.5px;color:#4a6888">${p.address_1}${p.city?', '+p.city:''}${p.state?' '+p.state:''}</div>`:''}
+        ${p.address_1?`<div style="font-size:9.5px;color:#4a6888"> ${p.address_1}${p.city?', '+p.city:''}${p.state?' '+p.state:''}${p.zip?' '+p.zip:''}</div>`:''}
+        ${p.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${p.phone}">${p.phone}</a></div>`:''}
+        ${p.website?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px"><a href="${p.website}" target="_blank" rel="noreferrer" style="color:#93c5fd">${p.website}</a></div>`:''}
+        ${p.services?`<div style="font-size:8px;color:#3d5478;margin-top:3px">${p.services}</div>`:''}
+        <div style="margin-top:6px;font-size:8.5px;color:#3b82f6;font-family:'IBM Plex Mono',monospace">BLUEHIVE PROVIDER</div>
+      </div>`,
+    });
+    return ()=>clearProviderDataset('bluehive');
+  },[showBlueHive,blueHiveData,showGlowPoints]);
+
+  // ── Dentist native heatmap + provider points ─────────────────────────────
+  useEffect(()=>{
+    if(!showDentists || dentistData.length===0) {
+      clearProviderDataset('dentists');
+      return;
+    }
+    renderProviderDataset('dentists', dentistData, {
+      baseColor:'#06b6d4',
+      glow:showGlowPoints,
+      getColor:(provider:any)=>providerCategoryStyle(provider).color,
+      buildPopup:(p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
+        <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||p.name||'Unnamed'}</div>
+        ${p.address_1?`<div style="font-size:9.5px;color:#4a6888"> ${p.address_1}${p.city?', '+p.city:''}${p.state?' '+p.state:''}${p.zip?' '+p.zip:''}</div>`:''}
+        ${p.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${p.phone}">${p.phone}</a></div>`:''}
+        ${p.npi?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px">NPI: <a href="${p.source_url||'#'}" target="_blank" rel="noreferrer" style="color:#93c5fd">${p.npi}</a></div>`:''}
+        ${p.taxonomy_description?`<div style="font-size:8px;color:#3d5478;margin-top:3px">${p.taxonomy_description}</div>`:''}
+        <div style="margin-top:6px;font-size:8.5px;color:#06b6d4;font-family:'IBM Plex Mono',monospace">DENTIST</div>
+      </div>`,
+    });
+    return ()=>clearProviderDataset('dentists');
+  },[showDentists,dentistData,showGlowPoints]);
+
+  // ── Service Presence native heatmap + provider points ────────────────────
+  useEffect(()=>{
+    if(inventoryData.length===0) {
+      clearProviderDataset('inventory');
+      return;
+    }
+    const trustColor=(tier:string)=>tier==='verified'?'#34d399':tier==='registry'?'#60a5fa':tier==='directory'?'#a78bfa':'#94a3b8';
+    renderProviderDataset('inventory', inventoryData, {
+      baseColor:'#10b981',
+      glow:showGlowPoints,
+      getColor:(provider:MapInventoryProvider)=>providerCategoryStyle(provider).color,
+      buildPopup:(p:MapInventoryProvider)=>{
+        const tc=trustColor(p.trustTier);
+        return `<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:210px;max-width:280px;">
+          <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.name||'Unnamed'}</div>
+          ${p.address?`<div style="font-size:9.5px;color:#4a6888"> ${p.address}${p.city?', '+p.city:''}${p.state?' '+p.state:''}</div>`:''}
+          ${p.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${p.phone}">${p.phone}</a></div>`:''}
+          ${p.website?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px"><a href="${p.website}" target="_blank" rel="noreferrer" style="color:#93c5fd">${p.website}</a></div>`:''}
+          ${p.npi?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px">NPI: <a href="https://npiregistry.cms.hhs.gov/provider-view/${p.npi}" target="_blank" rel="noreferrer" style="color:#93c5fd">${p.npi}</a></div>`:''}
+          ${p.services.length>0?`<div style="font-size:8px;color:#3d5478;margin-top:3px">${p.services.join(', ')}</div>`:''}
+          <div style="margin-top:6px;display:flex;gap:5px;align-items:center"><span style="font-size:8.5px;color:${tc};font-family:'IBM Plex Mono',monospace;text-transform:uppercase">${p.trustTier}</span>${p.coordinateStatus?`<span style="font-size:7.5px;color:#5d7a9e;margin-left:4px">${p.coordinateStatus}</span>`:''}</div>
+        </div>`;
+      },
+    });
+    return ()=>clearProviderDataset('inventory');
+  },[inventoryData,showGlowPoints]);
+
+  // ── Full indexed providers: native heatmap + points ──────────────────────
+  useEffect(()=>{
+    if(!showIndexedProviders || indexedLayerData.length===0) {
+      clearProviderDataset('indexed');
+      return;
+    }
+    renderProviderDataset('indexed', indexedLayerData, {
+      baseColor:'#10b981',
+      glow:showGlowPoints,
+      getColor:(provider:any)=>providerCategoryStyle(provider).color,
+      buildPopup:(p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
+        <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||p.name||'Unnamed'}</div>
+        ${(p.address_1||p.address)?`<div style="font-size:9.5px;color:#4a6888">${p.address_1||p.address}${p.city?', '+p.city:''}${(p.state||p.admin_area)?' '+(p.state||p.admin_area):''}</div>`:''}
         ${p.phone?`<div style="font-size:9.5px;color:#67e8f9;margin-top:2px">${p.phone}</div>`:''}
         <div style="margin-top:6px;font-size:8.5px;color:#10b981;font-family:'IBM Plex Mono',monospace">INDEXED PROVIDER</div>
       </div>`,
     });
-    return ()=>{ if(indexedProviderLayerRef.current) { indexedProviderLayerRef.current.destroy(); indexedProviderLayerRef.current = null; } };
+    return ()=>clearProviderDataset('indexed');
   },[showIndexedProviders,indexedLayerData,showGlowPoints]);
 
-  // ── Persisted My Clinics density field + points ───────────────────────────
+  // ── Persisted My Clinics: native heatmap + points ────────────────────────
   useEffect(()=>{
-    const map = mapRef.current;
-    if(!map) return;
-    if(myClinicsLayerRef.current) { myClinicsLayerRef.current.destroy(); myClinicsLayerRef.current = null; }
-    if(!showMyClinicsLayer || myClinicsData.length===0) return;
-    myClinicsLayerRef.current = createProviderFieldLayer(map, myClinicsData, {
-      color:'#8b5cf6',
+    if(!showMyClinicsLayer || myClinicsData.length===0) {
+      clearProviderDataset('my-clinics');
+      return;
+    }
+    renderProviderDataset('my-clinics', myClinicsData, {
+      baseColor:'#8b5cf6',
       glow:showGlowPoints,
-      getStyle: providerCategoryStyle,
-      badgeLabel:'My Clinics',
+      getColor:(provider:any)=>providerCategoryStyle(provider).color,
       buildPopup:(p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
         <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||p.name||'Unnamed'}</div>
-        ${p.address_1?`<div style="font-size:9.5px;color:#4a6888">${p.address_1}${p.city?', '+p.city:''}${p.state?' '+p.state:''}</div>`:''}
+        ${(p.address_1||p.address)?`<div style="font-size:9.5px;color:#4a6888">${p.address_1||p.address}${p.city?', '+p.city:''}${(p.state||p.admin_area)?' '+(p.state||p.admin_area):''}</div>`:''}
         ${p.phone?`<div style="font-size:9.5px;color:#67e8f9;margin-top:2px">${p.phone}</div>`:''}
         <div style="margin-top:6px;font-size:8.5px;color:#8b5cf6;font-family:'IBM Plex Mono',monospace">MY CLINIC</div>
       </div>`,
     });
-    return ()=>{ if(myClinicsLayerRef.current) { myClinicsLayerRef.current.destroy(); myClinicsLayerRef.current = null; } };
+    return ()=>clearProviderDataset('my-clinics');
   },[showMyClinicsLayer,myClinicsData,showGlowPoints]);
 
   async function uploadClinicChunk(groupName:string, filename:string, rows:any[], chunkIndex:number, totalChunks:number, uploadSessionId:string, rowOffset:number) {

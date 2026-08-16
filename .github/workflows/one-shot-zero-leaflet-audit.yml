@@ -22,6 +22,16 @@ jobs:
       - run: corepack enable
       - name: Migrate persistent provider datasets to native Mapbox
         run: python occu-med-map/scripts/migrate-provider-datasets-native.py
+      - name: Fix upload-function section boundary
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('occu-med-map/src/App.tsx')
+          text = path.read_text()
+          broken = '  async function uploadClinicChunk  async function uploadClinicChunk'
+          if broken not in text:
+              raise SystemExit('expected duplicated uploadClinicChunk boundary was not found')
+          path.write_text(text.replace(broken, '  async function uploadClinicChunk', 1))
       - run: pnpm install --frozen-lockfile
       - name: Typecheck frontend
         run: pnpm --filter @workspace/occu-med-map typecheck

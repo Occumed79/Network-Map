@@ -1772,9 +1772,12 @@ export default function App() {
   const drawProviderPins = useCallback((providers: ProviderFeature[], fit = false) => {
     const map = mapRef.current;
     if(!map) return 0;
-    if(!providerExplorerLayerRef.current) providerExplorerLayerRef.current = L.layerGroup().addTo(map);
-    const layer = providerExplorerLayerRef.current;
-    layer.clearLayers();
+    // Provider Explorer owns a dynamic Mapbox compatibility root. Rebuild that
+    // root off-map so its first GeoJSON payload already contains the provider
+    // features and popup metadata. Mutating an already-attached empty root can
+    // leave the native source empty across browser engines.
+    providerExplorerLayerRef.current?.remove();
+    const layer = L.layerGroup();
     const drawable = providers.filter((provider): provider is ProviderFeature & {lat:number; lng:number} => typeof provider.lat === 'number' && typeof provider.lng === 'number');
     drawable.slice(0,1000).forEach(provider=>{
       const style = providerCategoryStyle(provider);
@@ -1783,6 +1786,8 @@ export default function App() {
         .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>${escapeHtml(provider.source)} · ${escapeHtml(provider.source_kind)}<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/>${escapeHtml(location)}${provider.website ? `<br/><a href="${escapeHtml(provider.website)}" target="_blank" rel="noreferrer">Website</a>` : ''}`)
         .addTo(layer);
     });
+    layer.addTo(map);
+    providerExplorerLayerRef.current = layer;
     if(fit && drawable.length) map.fitBounds(L.latLngBounds(drawable.map(provider=>[provider.lat,provider.lng] as [number,number])), { padding:[28,28], maxZoom: 11 });
     return Math.min(drawable.length,1000);
   },[]);

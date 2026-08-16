@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
 
+# Retry with the synchronization gate rewritten for the zero-MapScene contract.
 jobs:
   migrate:
     runs-on: ubuntu-latest

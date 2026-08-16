@@ -1,4 +1,4 @@
-name: One-shot remove MapScene lifecycle
+name: One-shot native Provider Explorer migration
 
 on:
   push:
@@ -20,8 +20,8 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable
-      - name: Remove scene lifecycle registry
-        run: python occu-med-map/scripts/remove-map-scene-lifecycle.py
+      - name: Migrate Provider Explorer rendering to native Mapbox
+        run: python occu-med-map/scripts/migrate-provider-explorer-native.py
       - run: pnpm install --frozen-lockfile
       - name: Typecheck frontend
         run: pnpm --filter @workspace/occu-med-map typecheck
@@ -29,14 +29,16 @@ jobs:
         run: pnpm --filter @workspace/occu-med-map build
       - name: Native synchronization hardening
         run: pnpm --filter @workspace/occu-med-map test:map-synchronization-hardening
+      - name: Provider Explorer hardening
+        run: pnpm --filter @workspace/occu-med-map test:provider-explorer-hardening
       - name: Inventory remaining compatibility
         working-directory: occu-med-map
         run: pnpm exec tsx scripts/zero-leaflet-architecture-audit.ts
-      - name: Commit validated lifecycle removal
+      - name: Commit validated native Provider Explorer migration
         run: |
-          rm -f occu-med-map/scripts/remove-map-scene-lifecycle.py
+          rm -f occu-med-map/scripts/migrate-provider-explorer-native.py
           git config user.name "Occumed79"
           git config user.email "Occumed79@users.noreply.github.com"
           git add -A
-          git commit -m "Remove MapScene lifecycle registry"
+          git commit -m "Render Provider Explorer with native Mapbox sources"
           git push origin HEAD:nuclear/remove-leaflet-compat

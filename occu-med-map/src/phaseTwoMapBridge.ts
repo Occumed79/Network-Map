@@ -1,5 +1,5 @@
-import MapScene from "./mapSceneRuntime";
-import { subscribeSceneRoots } from './mapSceneRuntime';
+import mapboxgl from "mapbox-gl";
+import { registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
 
 export type PhaseTwoMapSnapshot = {
   zoom: number;
@@ -13,15 +13,11 @@ export type PhaseTwoMapSnapshot = {
 
 declare global {
   interface Window {
-    __occumedPhaseTwoMap?: MapScene.Map;
+    __occumedPhaseTwoMap?: mapboxgl.Map;
   }
 }
 
-const INSTALL_KEY = '__occumedPhaseTwoMapBridgeInstalled';
-const REGISTERED_KEY = '__occumedPhaseTwoMapBridgeRegistered';
-const sceneRuntime = MapScene as typeof MapScene & Record<string, unknown>;
-
-function snapshot(map: MapScene.Map): PhaseTwoMapSnapshot {
+function snapshot(map: mapboxgl.Map): PhaseTwoMapSnapshot {
   const bounds = map.getBounds();
   return {
     zoom: map.getZoom(),
@@ -34,29 +30,28 @@ function snapshot(map: MapScene.Map): PhaseTwoMapSnapshot {
   };
 }
 
-function emitMapState(map: MapScene.Map, eventName: string): void {
+function emitMapState(map: mapboxgl.Map, eventName: string): void {
   window.dispatchEvent(new CustomEvent(eventName, { detail: snapshot(map) }));
 }
 
-function registerMap(map: MapScene.Map): void {
-  const registeredMap = map as MapScene.Map & Record<string, unknown>;
-  if (registeredMap[REGISTERED_KEY]) return;
-  registeredMap[REGISTERED_KEY] = true;
-
-  window.__occumedPhaseTwoMap = map;
-  emitMapState(map, 'occumed:p2-map-ready');
-  const emitChange = () => emitMapState(map, 'occumed:p2-map-change');
-  map.on('moveend zoomend resize', emitChange);
-  map.once('unload', () => {
-    map.off('moveend zoomend resize', emitChange);
-    if (window.__occumedPhaseTwoMap === map) delete window.__occumedPhaseTwoMap;
-  });
-}
-
-export function installPhaseTwoMapBridge(): void {
-  if (sceneRuntime[INSTALL_KEY]) return;
-  sceneRuntime[INSTALL_KEY] = true;
-  subscribeSceneRoots(registerMap);
-}
-
-installPhaseTwoMapBridge();
+registerMapboxMapInitializer({
+  id: "phase-two-map-bridge",
+  priority: 16,
+  initialize: (map) => {
+    window.__occumedPhaseTwoMap = map;
+    emitMapState(map, "occumed:p2-map-ready");
+    const emitChange = () => {
+      window.__occumedPhaseTwoMap = map;
+      emitMapState(map, "occumed:p2-map-change");
+    };
+    map.on("moveend", emitChange);
+    map.on("zoomend", emitChange);
+    map.on("resize", emitChange);
+    return () => {
+      map.off("moveend", emitChange);
+      map.off("zoomend", emitChange);
+      map.off("resize", emitChange);
+      if (window.__occumedPhaseTwoMap === map) delete window.__occumedPhaseTwoMap;
+    };
+  },
+});

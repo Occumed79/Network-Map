@@ -1,4 +1,4 @@
-name: One-shot native U.S. diagnostics cleanup
+name: One-shot diagnose U.S. diagnostics seam
 
 on:
   push:
@@ -6,10 +6,10 @@ on:
       - .github/workflows/one-shot-current-zero-leaflet-audit.yml
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  migrate:
+  diagnose:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,27 +20,25 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable
-      - name: Apply U.S. diagnostics native migration
-        run: python occu-med-map/scripts/migrate-us-diagnostics-native.py
-      - run: pnpm install --frozen-lockfile
-      - name: Typecheck frontend
-        run: pnpm --filter @workspace/occu-med-map typecheck
-      - name: Production build
-        run: pnpm --filter @workspace/occu-med-map build
-      - name: Native synchronization hardening
-        run: pnpm --filter @workspace/occu-med-map test:map-synchronization-hardening
-      - name: Provider Explorer hardening
-        run: pnpm --filter @workspace/occu-med-map test:provider-explorer-hardening
-      - name: General UI hardening
-        run: pnpm --filter @workspace/occu-med-map test:general-ui-hardening
-      - name: Zero-compat audit
-        working-directory: occu-med-map
-        run: pnpm exec tsx scripts/zero-leaflet-architecture-audit.ts
-      - name: Commit validated cleanup
+      - name: Temporarily bypass only the stateGeoRef self-check
+        shell: python
         run: |
-          rm -f occu-med-map/scripts/migrate-us-diagnostics-native.py
-          git config user.name "Occumed79"
-          git config user.email "Occumed79@users.noreply.github.com"
-          git add -A
-          git commit -m "Finish native U.S. diagnostics cleanup"
-          git push origin HEAD:nuclear/remove-leaflet-compat
+          from pathlib import Path
+          path = Path('occu-med-map/scripts/migrate-us-diagnostics-native.py')
+          text = path.read_text()
+          old = "for forbidden in ['stateGeoRef','cityLayerRef','customPinRef','tzLayerRef','popDensityLayerRef','savedRadiusLayerRef','labelLayerRef','buildStateLabels(']:"
+          new = "for forbidden in ['cityLayerRef','customPinRef','tzLayerRef','popDensityLayerRef','savedRadiusLayerRef','labelLayerRef','buildStateLabels(']:"
+          if old not in text:
+              raise SystemExit('stateGeoRef self-check anchor missing')
+          path.write_text(text.replace(old, new, 1))
+      - name: Apply migration in disposable workspace
+        run: python occu-med-map/scripts/migrate-us-diagnostics-native.py
+      - name: Print residual stateGeoRef
+        run: grep -n -C 8 'stateGeoRef' occu-med-map/src/App.tsx || true
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck transformed frontend
+        run: pnpm --filter @workspace/occu-med-map typecheck
+      - name: Audit transformed residue
+        if: always()
+        working-directory: occu-med-map
+        run: pnpm exec tsx scripts/zero-leaflet-architecture-audit.ts || true

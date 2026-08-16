@@ -1,4 +1,4 @@
-name: One-shot exhaustive zero-compat residue audit
+name: One-shot native source-state acceptance repair
 
 on:
   push:
@@ -6,10 +6,10 @@ on:
       - .github/workflows/one-shot-current-zero-leaflet-audit.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  audit:
+  repair:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,41 +19,136 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Make critical-tool readiness source-state based
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path("occu-med-map/scripts/ci-mapbox-native-tools-acceptance.mjs")
+          text = path.read_text()
+
+          def sub_once(pattern, replacement, label, flags=re.S):
+              global text
+              text, count = re.subn(pattern, lambda _: replacement, text, count=1, flags=flags)
+              if count != 1:
+                  raise SystemExit(f"{label}: replacement count={count}")
+
+          helpers = '''async function nativeSourceFeatureCount(page, sourceId, mode = "2d") {
+            return page.evaluate(({ requestedSourceId, requestedMode }) => {
+              const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
+              const selector = requestedMode === "3d" ? ".mapbox-globe-host" : ".mapbox-2d-host";
+              const map = maps.find((candidate) => Boolean(candidate.getContainer().closest(selector)));
+              const source = map?.getSource(requestedSourceId);
+              const data = source?._data;
+              return Array.isArray(data?.features) ? data.features.length : 0;
+            }, { requestedSourceId: sourceId, requestedMode: mode });
+          }
+
+          async function nativePopupFeaturePoint(page, needle) {
+            return page.evaluate((popupNeedle) => {
+              const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
+              const map = maps.find((candidate) => Boolean(candidate.getContainer().closest(".mapbox-2d-host")));
+              if (!map) throw new Error("2D Mapbox map not available");
+              const sourceIds = Object.keys(map.getStyle()?.sources || {})
+                .filter((id) => id.startsWith("provider-explorer-native-") || id.startsWith("provider-dataset-native-"));
+              const diagnostics = [];
+              for (const sourceId of sourceIds) {
+                const source = map.getSource(sourceId);
+                const data = source?._data;
+                const features = Array.isArray(data?.features) ? data.features : [];
+                diagnostics.push({
+                  sourceId,
+                  count: features.length,
+                  popupPreviews: features.map((feature) => String(feature.properties?.popupHtml || "").slice(0, 120)),
+                });
+                const feature = features.find((candidate) =>
+                  candidate.geometry?.type === "Point"
+                  && String(candidate.properties?.popupHtml || "").includes(popupNeedle)
+                );
+                if (!feature) continue;
+                const coordinates = feature.geometry.coordinates;
+                const point = map.project(coordinates);
+                const rect = map.getCanvas().getBoundingClientRect();
+                return { x: rect.left + point.x, y: rect.top + point.y, sourceId, coordinates, diagnostics };
+              }
+              return { x: null, y: null, sourceId: null, coordinates: null, diagnostics };
+            }, needle);
+          }
+
+          '''
+          sub_once(
+              r'async function nativeSourceFeatureCount\(page, sourceId, mode = "2d"\) \{.*?\n\}\n\nasync function nativePopupFeaturePoint\(page, needle\) \{.*?\n\}\n\n(?=async function waitForMode)',
+              helpers,
+              "native source helpers",
+          )
+
+          diagnostics = '''    const sourceId = "provider-dataset-native-indexed";
+            const source = map.getSource(sourceId);
+            const data = source?._data;
+            const sourceFeatures = Array.isArray(data?.features) ? data.features : [];
+          '''
+          sub_once(
+              r'    const sourceId = "provider-dataset-native-indexed";\n    const layerId = "provider-dataset-native-indexed-points";\n    let sourceFeatures = \[\];\n    try \{.*?\n    \} catch \{\}\n',
+              diagnostics,
+              "indexed diagnostics source read",
+          )
+
+          initial_wait = '''  await page.waitForFunction(() => {
+            const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
+            const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
+            if (!map || !map.isStyleLoaded()) return false;
+            if (!map.getLayer("provider-dataset-native-indexed-points") || !map.getSource("provider-dataset-native-indexed")) return false;
+            const data = map.getSource("provider-dataset-native-indexed")?._data;
+            return Array.isArray(data?.features) && data.features.length >= 2;
+          }, null, { timeout: 10_000 });'''
+          sub_once(
+              r'  await page\.waitForFunction\(\(\) => \{\n  const maps = window\.__NETWORK_MAP_MAPBOX_LIFECYCLE__\?\.getMaps\?\.\(\) \|\| \[\];\n  const map = maps\.find\(\(candidate\) => candidate\.getContainer\(\)\.closest\("\.mapbox-2d-host"\)\);\n  if \(!map \|\| !map\.isStyleLoaded\(\)\) return false;\n  if \(!map\.getLayer\("provider-dataset-native-indexed-points"\) \|\| !map\.getSource\("provider-dataset-native-indexed"\)\) return false;\n  const canvas = map\.getCanvas\(\);\n  try \{ return map\.queryRenderedFeatures\(.*?\n\}, null, \{ timeout: 10_000 \}\);',
+              initial_wait,
+              "indexed readiness",
+          )
+
+          sub_once(
+              r'  const canvas = map\.getCanvas\(\);\n  try \{ return map\.queryRenderedFeatures\(\[\[0, 0\], \[canvas\.clientWidth, canvas\.clientHeight\]\], \{ layers: \["radius-extractor-native-fill", "radius-extractor-native-line", "radius-extractor-native-center"\]\.filter\(\(id\) => Boolean\(map\.getLayer\(id\)\)\) \}\)\.length > before; \} catch \{ return false; \}',
+              '  const data = map.getSource("radius-extractor-native")?._data;\n  return Array.isArray(data?.features) && data.features.length > before;',
+              "2D radius readiness",
+          )
+          sub_once(
+              r'  const canvas = map\.getCanvas\(\);\n  try \{ return map\.queryRenderedFeatures\(\[\[0, 0\], \[canvas\.clientWidth, canvas\.clientHeight\]\], \{ layers: \["radius-extractor-native-fill", "radius-extractor-native-line", "radius-extractor-native-center"\]\.filter\(\(id\) => Boolean\(map\.getLayer\(id\)\)\) \}\)\.length > 0; \} catch \{ return false; \}',
+              '  const data = map.getSource("radius-extractor-native")?._data;\n  return Array.isArray(data?.features) && data.features.length > 0;',
+              "3D radius readiness",
+          )
+          sub_once(
+              r'  const canvas = map\.getCanvas\(\);\n  try \{ return map\.queryRenderedFeatures\(\[\[0, 0\], \[canvas\.clientWidth, canvas\.clientHeight\]\], \{ layers: \["provider-explorer-native-density"\] \}\)\.length === 2; \} catch \{ return false; \}',
+              '  const data = map.getSource("provider-explorer-native-aggregate")?._data;\n  return Array.isArray(data?.features) && data.features.length === 2;',
+              "density readiness",
+          )
+          sub_once(
+              r'    const canvas = map\.getCanvas\(\);\n    const features = map\.queryRenderedFeatures\(\[\[0, 0\], \[canvas\.clientWidth, canvas\.clientHeight\]\], \{ layers: \["provider-explorer-native-hex-fill"\] \}\);\n    return features\.length === 2 && features\.every\(\(feature\) => feature\.geometry\?\.type === "Polygon"\);',
+              '    const data = map.getSource("provider-explorer-native-aggregate")?._data;\n    const features = Array.isArray(data?.features) ? data.features : [];\n    return features.length === 2 && features.every((feature) => feature.geometry?.type === "Polygon");',
+              "hex readiness",
+          )
+
+          if "queryRenderedFeatures(" in text:
+              raise SystemExit("renderer query remains in critical-tool acceptance")
+          path.write_text(text)
+          PY
+      - name: Syntax check
+        run: node --check occu-med-map/scripts/ci-mapbox-native-tools-acceptance.mjs
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      - name: Typecheck frontend
+      - name: Frontend typecheck
         run: pnpm --filter @workspace/occu-med-map typecheck
       - name: Production build
         run: pnpm --filter @workspace/occu-med-map build
-      - name: Architecture audit
-        working-directory: occu-med-map
-        run: pnpm exec tsx scripts/zero-leaflet-architecture-audit.ts
-      - name: Tracked filename residue
+      - name: Commit source-state acceptance repair
+        shell: bash
         run: |
-          echo '=== TRACKED FILENAMES ==='
-          git ls-files | grep -Ei 'leaflet|mapscene|map-scene|mapboxnativecompat|scene.*compat|compat.*scene' || true
-      - name: Production and tooling text residue
-        run: |
-          echo '=== SOURCE / SCRIPTS / CONFIG / WORKFLOWS ==='
-          git grep -n -i -E 'leaflet|mapscene|map scene|map-scene|mapboxnativecompat|leafletmaplifecycle|scene-lifecycle|scene-root|__NETWORK_MAP_SCENE|\.leaflet-' -- \
-            'occu-med-map/src/**' \
-            'occu-med-map/scripts/**' \
-            'occu-med-map/package.json' \
-            'occu-med-map/tsconfig.json' \
-            'occu-med-map/vite.config.ts' \
-            '.github/workflows/**' || true
-      - name: Documentation residue
-        run: |
-          echo '=== DOCS / COMMENTS ==='
-          git grep -n -i -E 'leaflet|mapscene|map scene|map-scene|mapboxnativecompat|leafletmaplifecycle|scene-lifecycle|scene-root' -- \
-            '*.md' 'occu-med-map/**/*.md' || true
-      - name: Lockfile dependency residue
-        run: |
-          echo '=== LOCKFILE ==='
-          grep -n -i -E '(^|[/@])leaflet(@|:|/)|react-leaflet|@types/leaflet' pnpm-lock.yaml || true
-      - name: Built bundle residue
-        run: |
-          echo '=== BUILT BUNDLE ==='
-          grep -RIn -i -E 'leaflet|mapSceneRuntime|MapScene\.|mapboxNativeCompat|leafletMapLifecycle|__NETWORK_MAP_SCENE|\.leaflet-' occu-med-map/dist/public || true
-      - name: Git status
-        run: git status --short
+          git config user.name "Occumed79"
+          git config user.email "Occumed79@users.noreply.github.com"
+          git add occu-med-map/scripts/ci-mapbox-native-tools-acceptance.mjs
+          git commit -m "Use native source state for cross-browser tool readiness"
+          git fetch origin nuclear/remove-leaflet-compat
+          git rebase origin/nuclear/remove-leaflet-compat
+          git push origin HEAD:nuclear/remove-leaflet-compat

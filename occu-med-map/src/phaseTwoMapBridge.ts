@@ -17,8 +17,9 @@ declare global {
   }
 }
 
-function snapshot(map: mapboxgl.Map): PhaseTwoMapSnapshot {
+function snapshot(map: mapboxgl.Map): PhaseTwoMapSnapshot | null {
   const bounds = map.getBounds();
+  if (!bounds) return null;
   return {
     zoom: map.getZoom(),
     bounds: {
@@ -31,7 +32,9 @@ function snapshot(map: mapboxgl.Map): PhaseTwoMapSnapshot {
 }
 
 function emitMapState(map: mapboxgl.Map, eventName: string): void {
-  window.dispatchEvent(new CustomEvent(eventName, { detail: snapshot(map) }));
+  const detail = snapshot(map);
+  if (!detail) return;
+  window.dispatchEvent(new CustomEvent(eventName, { detail }));
 }
 
 registerMapboxMapInitializer({

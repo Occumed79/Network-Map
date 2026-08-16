@@ -78,7 +78,7 @@ function heatmapColor(baseColor: string): mapboxgl.Expression {
 }
 
 function ensureChannel(map: mapboxgl.Map, channel: ProviderDatasetChannel): void {
-  if (!map.getStyle()) return;
+  if (!map.isStyleLoaded()) return;
   const state = states.get(channel)!;
   const channelIds = ids(channel);
   const existing = map.getSource(channelIds.source) as mapboxgl.GeoJSONSource | undefined;
@@ -125,7 +125,7 @@ function updateChannel(channel: ProviderDatasetChannel): void {
   const state = states.get(channel)!;
   const channelIds = ids(channel);
   for (const map of getTrackedMapboxMaps()) {
-    if (!map.getStyle()) continue;
+    if (!map.isStyleLoaded()) continue;
     try {
       ensureChannel(map, channel);
       (map.getSource(channelIds.source) as mapboxgl.GeoJSONSource | undefined)?.setData(state.collection);

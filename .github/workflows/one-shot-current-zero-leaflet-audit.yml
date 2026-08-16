@@ -1,0 +1,36 @@
+name: One-shot current zero-compat audit
+
+on:
+  push:
+    paths:
+      - .github/workflows/one-shot-current-zero-leaflet-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: nuclear/remove-leaflet-compat
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck frontend
+        run: pnpm --filter @workspace/occu-med-map typecheck
+      - name: Production build
+        run: pnpm --filter @workspace/occu-med-map build
+      - name: Zero-compat audit
+        working-directory: occu-med-map
+        run: pnpm exec tsx scripts/zero-leaflet-architecture-audit.ts
+      - name: Search hard compatibility residue
+        run: |
+          echo '--- imports and symbols ---'
+          grep -RInE 'mapSceneRuntime|MapScene\.|__NETWORK_MAP_SCENE|leaflet|react-leaflet|@types/leaflet|canonicalMap' occu-med-map/src occu-med-map/package.json occu-med-map/tsconfig.json occu-med-map/vite.config.ts || true
+          echo '--- mapboxNativeCompat ---'
+          find occu-med-map -type f -iname '*compat*' -o -iname '*leaflet*' | sort

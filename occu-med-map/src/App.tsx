@@ -685,7 +685,10 @@ function createProviderFieldLayer(
   points: any[],
   opts: ProviderFieldRendererOptions,
 ): { group: L.LayerGroup; destroy: () => void } {
-  const group = L.layerGroup().addTo(map);
+  // Build the provider geometry before attaching the root so the first
+  // Mapbox GeoJSON source is never born empty. Provider API requests are already
+  // viewport-bounded, so the returned records are the authoritative render set.
+  const group = L.layerGroup();
   const cellPx = opts.cellPx ?? 54;
   const valid = points.filter(p => p && p.lat != null && p.lng != null && isValidCoord(p.lat, p.lng));
 
@@ -695,8 +698,10 @@ function createProviderFieldLayer(
     group.clearLayers();
     if (!valid.length) return;
     const zoom = map.getZoom();
-    const bounds = map.getBounds().pad(0.35);
-    const visible = valid.filter(p => bounds.contains([p.lat, p.lng] as L.LatLngTuple));
+    // Do not re-filter API-bounded providers through the temporary Leaflet-shaped
+    // camera facade. That second viewport gate could disagree with the native
+    // Mapbox camera and silently erase otherwise valid provider points.
+    const visible = valid;
 
     const cells = new Map<string, { sx: number; sy: number; count: number; colors: string[] }>();
     for (const p of visible) {
@@ -740,6 +745,7 @@ function createProviderFieldLayer(
   }
 
   render();
+  group.addTo(map);
   map.on('moveend zoomend', render);
   return {
     group,
@@ -1327,6 +1333,20 @@ export default function App() {
   const [showProviderExplorerDrawer, setShowProviderExplorerDrawer] = useState(false);
   const [datasetStatus, setDatasetStatus] = useState<Record<DatasetKey, DatasetLoadState>>(INITIAL_DATASET_STATUS);
   const datasetRequestsRef = useRef<Partial<Record<DatasetKey, Promise<void>>>>({});
+  const providerLayerVisibilityRef = useRef({
+    indexed: showIndexedProviders,
+    bluehive: showBlueHive,
+    dentists: showDentists,
+    myClinics: showMyClinicsLayer,
+  });
+  useLayoutEffect(() => {
+    providerLayerVisibilityRef.current = {
+      indexed: showIndexedProviders,
+      bluehive: showBlueHive,
+      dentists: showDentists,
+      myClinics: showMyClinicsLayer,
+    };
+  }, [showIndexedProviders, showBlueHive, showDentists, showMyClinicsLayer]);
   const providerExplorerLayerRef = useRef<L.LayerGroup | null>(null);
   const providerExplorerDensityLayerRef = useRef<L.LayerGroup | null>(null);
   const providerExplorerLiveLayerRef = useRef<L.LayerGroup | null>(null);
@@ -2060,10 +2080,11 @@ export default function App() {
     const refreshOnMove = () => {
       if(moveTimer) clearTimeout(moveTimer);
       moveTimer = setTimeout(()=>{
-        if(showIndexedProviders) void loadProviderDataset('indexed');
-        if(showBlueHive) void loadProviderDataset('bluehive');
-        if(showDentists) void loadProviderDataset('dentists');
-        if(showMyClinicsLayer) void loadProviderDataset('myClinics');
+        const visibility = providerLayerVisibilityRef.current;
+        if(visibility.indexed) void loadProviderDataset('indexed');
+        if(visibility.bluehive) void loadProviderDataset('bluehive');
+        if(visibility.dentists) void loadProviderDataset('dentists');
+        if(visibility.myClinics) void loadProviderDataset('myClinics');
       }, 300);
     };
 
@@ -3825,9 +3846,9 @@ export default function App() {
     else if(key==='bluehive') setShowBlueHive(checked);
     else if(key==='dentists') setShowDentists(checked);
     else setShowMyClinicsLayer(checked);
-    if(checked && !datasetStatus[key].loaded && !datasetStatus[key].loading) {
-      void loadProviderDataset(key);
-    }
+    // The per-toggle effects below are the single owner of initial loading.
+    // Keeping network ownership out of the UI event handler prevents duplicate
+    // requests racing the state transition that makes the layer visible.
   }
 
   function providerLayerStatus(key:DatasetKey, count:number, emptyMessage:string, visible:boolean) {

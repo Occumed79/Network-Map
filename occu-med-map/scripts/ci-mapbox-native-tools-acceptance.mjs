@@ -177,7 +177,13 @@ async function nativeSourceFeatureCount(page, sourceId, mode = "2d") {
     const selector = requestedMode === "3d" ? ".mapbox-globe-host" : ".mapbox-2d-host";
     const map = maps.find((candidate) => Boolean(candidate.getContainer().closest(selector)));
     if (!map || !map.getSource(requestedSourceId)) return 0;
-    try { return (map.querySourceFeatures(requestedSourceId) || []).length; } catch { return 0; }
+    const layers = (map.getStyle()?.layers || [])
+      .filter((layer) => layer.source === requestedSourceId && layer.type !== "heatmap")
+      .map((layer) => layer.id);
+    if (!layers.length) return 0;
+    const canvas = map.getCanvas();
+    try { return map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers }).length; }
+    catch { return 0; }
   }, { requestedSourceId: sourceId, requestedMode: mode });
 }
 
@@ -186,27 +192,23 @@ async function nativePopupFeaturePoint(page, needle) {
     const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
     const map = maps.find((candidate) => Boolean(candidate.getContainer().closest(".mapbox-2d-host")));
     if (!map) throw new Error("2D Mapbox map not available");
-    const sourceIds = Object.keys(map.getStyle()?.sources || {})
-      .filter((id) => id.startsWith("provider-explorer-native-") || id.startsWith("provider-dataset-native-"));
-    const diagnostics = [];
-    for (const sourceId of sourceIds) {
-      let features = [];
-      try { features = map.querySourceFeatures(sourceId) || []; } catch {}
-      diagnostics.push({
-        sourceId,
-        count: features.length,
-        popupPreviews: features.map((feature) => String(feature.properties?.popupHtml || "").slice(0, 120)),
-      });
-      const feature = features.find((candidate) =>
-        String(candidate.properties?.popupHtml || "").includes(popupNeedle)
-      );
-      if (!feature || feature.geometry?.type !== "Point") continue;
-      const coordinates = feature.geometry.coordinates;
-      const point = map.project(coordinates);
-      const rect = map.getCanvas().getBoundingClientRect();
-      return { x: rect.left + point.x, y: rect.top + point.y, sourceId, coordinates, diagnostics };
-    }
-    return { x: null, y: null, sourceId: null, coordinates: null, diagnostics };
+    const layers = (map.getStyle()?.layers || [])
+      .filter((layer) => layer.type === "circle" && (
+        String(layer.source || "").startsWith("provider-explorer-native-")
+        || String(layer.source || "").startsWith("provider-dataset-native-")
+      ))
+      .map((layer) => layer.id);
+    const canvas = map.getCanvas();
+    let features = [];
+    try { features = layers.length ? map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers }) : []; }
+    catch {}
+    const diagnostics = [{ layers, count: features.length, popupPreviews: features.map((feature) => String(feature.properties?.popupHtml || "").slice(0, 120)) }];
+    const feature = features.find((candidate) => String(candidate.properties?.popupHtml || "").includes(popupNeedle));
+    if (!feature || feature.geometry?.type !== "Point") return { x: null, y: null, sourceId: null, coordinates: null, diagnostics };
+    const coordinates = feature.geometry.coordinates;
+    const point = map.project(coordinates);
+    const rect = map.getCanvas().getBoundingClientRect();
+    return { x: rect.left + point.x, y: rect.top + point.y, sourceId: String(feature.source || ""), coordinates, diagnostics };
   }, needle);
 }
 
@@ -241,8 +243,12 @@ async function indexedProviderDiagnostics(page) {
       .filter((layer) => String(layer.id).startsWith("provider-dataset-native-indexed"))
       .map((layer) => ({ id: layer.id, type: layer.type, source: layer.source || null }));
     const sourceId = "provider-dataset-native-indexed";
+    const layerId = "provider-dataset-native-indexed-points";
     let sourceFeatures = [];
-    try { sourceFeatures = map.querySourceFeatures(sourceId) || []; } catch {}
+    try {
+      const canvas = map.getCanvas();
+      sourceFeatures = map.getLayer(layerId) ? map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers: [layerId] }) : [];
+    } catch {}
     return {
       lifecycle,
       indexedChecked: Boolean(toggle?.checked),
@@ -319,7 +325,8 @@ try {
   const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
   if (!map || !map.isStyleLoaded()) return false;
   if (!map.getLayer("provider-dataset-native-indexed-points") || !map.getSource("provider-dataset-native-indexed")) return false;
-  try { return (map.querySourceFeatures("provider-dataset-native-indexed") || []).length >= 2; } catch { return false; }
+  const canvas = map.getCanvas();
+  try { return map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers: ["provider-dataset-native-indexed-points"] }).length >= 2; } catch { return false; }
 }, null, { timeout: 10_000 });
 
   const beforeIndexedClick = await indexedProviderDiagnostics(page);
@@ -350,7 +357,8 @@ await page.waitForFunction((before) => {
   const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
   const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
   if (!map?.getLayer("radius-extractor-native-fill") || !map.getSource("radius-extractor-native")) return false;
-  try { return (map.querySourceFeatures("radius-extractor-native") || []).length > before; } catch { return false; }
+  const canvas = map.getCanvas();
+  try { return map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers: ["radius-extractor-native-fill", "radius-extractor-native-line", "radius-extractor-native-center"].filter((id) => Boolean(map.getLayer(id))) }).length > before; } catch { return false; }
 }, beforeRadiusFeatures, { timeout: 10_000 });
   await page.waitForFunction(() => /Center:\s*[-\d.]+,\s*[-\d.]+/.test(
     document.querySelector(".radius-extractor-card")?.textContent || ""
@@ -365,7 +373,8 @@ await page.waitForFunction((before) => {
   const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
   const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-globe-host"));
   if (!map?.getLayer("radius-extractor-native-fill") || !map.getSource("radius-extractor-native")) return false;
-  try { return (map.querySourceFeatures("radius-extractor-native") || []).length > 0; } catch { return false; }
+  const canvas = map.getCanvas();
+  try { return map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers: ["radius-extractor-native-fill", "radius-extractor-native-line", "radius-extractor-native-center"].filter((id) => Boolean(map.getLayer(id))) }).length > 0; } catch { return false; }
 }, null, { timeout: 10_000 });
 assert.ok(await nativeSourceFeatureCount(page, "radius-extractor-native", "3d") > 0, "3D Mapbox globe must receive the same native radius geometry");
   await page.locator(".map-dimension-toggle button[data-map-mode='2d']").evaluate((element) => element.click());
@@ -389,7 +398,8 @@ assert.ok(await nativeSourceFeatureCount(page, "radius-extractor-native", "3d") 
   const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
   const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
   if (!map?.getLayer("provider-explorer-native-density") || !map.getSource("provider-explorer-native-aggregate")) return false;
-  try { return (map.querySourceFeatures("provider-explorer-native-aggregate") || []).length === 2; } catch { return false; }
+  const canvas = map.getCanvas();
+  try { return map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers: ["provider-explorer-native-density"] }).length === 2; } catch { return false; }
 }, null, { timeout: 10_000 });
 const densityFeatureCount = await nativeSourceFeatureCount(page, "provider-explorer-native-aggregate", "2d");
 assert.equal(densityFeatureCount, 2, "Density cells must exist in the native Provider Explorer aggregate source");
@@ -401,7 +411,8 @@ await page.waitForFunction(() => {
   const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
   if (!map?.getLayer("provider-explorer-native-hex-fill") || !map.getSource("provider-explorer-native-aggregate")) return false;
   try {
-    const features = map.querySourceFeatures("provider-explorer-native-aggregate") || [];
+    const canvas = map.getCanvas();
+    const features = map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers: ["provider-explorer-native-hex-fill"] });
     return features.length === 2 && features.every((feature) => feature.geometry?.type === "Polygon");
   } catch { return false; }
 }, null, { timeout: 10_000 });

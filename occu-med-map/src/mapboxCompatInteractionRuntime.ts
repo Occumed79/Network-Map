@@ -157,8 +157,11 @@ registerMapboxMapInitializer({
   initialize: (map) => {
     const onClick = (event: mapboxgl.MapMouseEvent) => {
       const hit = findCompatPopupHit(map, event.point, event.lngLat);
-      if (!hit || hit.exactRenderedHit) return;
+      if (!hit) return;
 
+      // This owner is authoritative for compatibility popups. Delegated
+      // layer-click delivery can be inconsistent for dynamically replaced
+      // GeoJSON layers in WebKit, so both exact and near hits are handled here.
       markCompatibilityClickHandled(event.originalEvent);
       new mapboxgl.Popup({ closeButton: true, closeOnClick: true, maxWidth: "380px" })
         .setLngLat(hit.lngLat)

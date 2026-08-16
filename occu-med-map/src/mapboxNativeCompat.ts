@@ -1,5 +1,6 @@
 import mapboxgl from "mapbox-gl";
 import { getTrackedMapboxMaps, registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
+import { wasCompatibilityClickHandled } from "./mapboxCompatInteractionRuntime";
 
 /*
  * TEMPORARY MIGRATION FACADE
@@ -178,7 +179,7 @@ function bindSourceInteractions(map: mapboxgl.Map, root: L.Layer): void {
         target: layer,
       });
       const popup = layer.getPopup?.();
-      if (popup?.getContent?.()) {
+      if (popup?.getContent?.() && !wasCompatibilityClickHandled(event.originalEvent)) {
         popup.setLatLng?.(event.lngLat);
         popup.openOnNative(map, event.lngLat, layer);
       }

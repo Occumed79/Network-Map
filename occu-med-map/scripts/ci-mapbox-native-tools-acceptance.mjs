@@ -337,6 +337,9 @@ try {
     const count = (map?.getStyle()?.layers || []).filter((layer) => String(layer.id).startsWith("leaflet-compat-")).length;
     return count > before;
   }, beforeRadiusLayers, { timeout: 10_000 });
+  await page.waitForFunction(() => /Center:\s*[-\d.]+,\s*[-\d.]+/.test(
+    document.querySelector(".radius-extractor-card")?.textContent || ""
+  ), null, { timeout: 8_000 });
   const radiusCenterBefore = ((await radiusCard.textContent()) || "").match(/Center:\s*[-\d.]+,\s*[-\d.]+/)?.[0] || "";
   assert.ok(radiusCenterBefore, "Radius center must be visible after clicking the native Mapbox canvas");
 

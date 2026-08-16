@@ -85,6 +85,7 @@ jobs:
               "occu-med-map/scripts/ci-ui-acceptance.mjs",
               ".leaflet-popup,.mapboxgl-popup",
               ".mapboxgl-popup",
+              minimum=0,
           )
 
           cross = Path("occu-med-map/scripts/ci-cross-browser-acceptance.mjs")

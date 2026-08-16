@@ -4219,7 +4219,7 @@ export default function App() {
             </div>
           )}
           {(activeTool === 'radius')&&(
-            <div className="local-pop-card" style={{top: dropCenter ? 184 : 96, borderColor:'rgba(252,165,165,0.35)', boxShadow:'0 10px 30px rgba(239,68,68,0.16)'}}>
+            <div className="local-pop-card radius-extractor-card" style={{top: dropCenter ? 184 : 96, borderColor:'rgba(252,165,165,0.35)', boxShadow:'0 10px 30px rgba(239,68,68,0.16)'}}>
               <div className="local-pop-title" style={{color:'#fecaca'}}>Radius extractor</div>
               <div className="local-pop-meta" style={{marginBottom:8,color:'#fca5a5'}}>Click map to move the center point</div>
               <div style={{display:'grid',gap:6}}>

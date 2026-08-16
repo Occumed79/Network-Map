@@ -8,7 +8,7 @@ on:
 permissions:
   contents: write
 
-# Retry with the synchronization gate rewritten for the zero-MapScene contract.
+# Final zero-MapScene validation and commit gate.
 jobs:
   migrate:
     runs-on: ubuntu-latest
@@ -41,7 +41,7 @@ jobs:
         run: |
           test ! -e occu-med-map/src/mapSceneRuntime.ts
           test ! -e occu-med-map/src/features/networkMap/mapLayerHelpers.ts
-          ! grep -RInE 'from ["'"'].*mapSceneRuntime["'"']|MapScene\.|mapRef\.current|multiDropLayerRef' occu-med-map/src
+          ! grep -RInE 'mapSceneRuntime|MapScene\.|mapRef\.current|multiDropLayerRef' occu-med-map/src
       - name: Commit validated removal
         run: |
           rm -f occu-med-map/scripts/migrate-final-mapscene-root.py

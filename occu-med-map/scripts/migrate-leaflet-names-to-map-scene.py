@@ -32,7 +32,6 @@ write_generated(
          "This internal scene runtime is backed entirely by Mapbox GL. It owns temporary\n * scene/layer helpers used while the remaining call sites are converted to direct\n * Mapbox sources, layers, markers, popups, and camera APIs. It never creates a\n * second renderer."),
         ("namespace L {", "namespace MapScene {"),
         ("export default L;", "export default MapScene;"),
-        ("L.", "MapScene."),
         ("_leaflet_id", "_scene_id"),
         ("leaflet-compat-", "map-scene-"),
         ("leaflet-${position}", "map-scene-${position}"),
@@ -51,7 +50,6 @@ write_generated(
         ("LeafletMapInitializer", "MapSceneInitializer"),
         ("registerLeafletMapInitializer", "registerMapSceneInitializer"),
         ("getTrackedLeafletMaps", "getTrackedMapScenes"),
-        ("L.", "MapScene."),
         ("leafletRuntime", "mapSceneRuntime"),
         ("__occumedLeafletLifecycleFactoryPatched", "__occumedMapSceneLifecycleFactoryPatched"),
         ("__NETWORK_MAP_LEAFLET_LIFECYCLE__", "__NETWORK_MAP_SCENE_LIFECYCLE__"),
@@ -68,11 +66,22 @@ write_generated(
     "mapSceneInteractionDefaults.ts",
     [
         ('import L from "leaflet";', 'import MapScene from "./mapSceneRuntime";'),
-        ("L.", "MapScene."),
         ("Leaflet's", "The scene runtime's"),
         ("Leaflet waits", "The prior runtime waited"),
     ],
 )
+
+# Generated files may contain both property references (L.foo) and bare namespace
+# references (`L as typeof L`). Use a token-aware replacement so URL.* never
+# becomes URMapScene.*.
+for generated in [
+    SRC / "mapSceneRuntime.ts",
+    SRC / "mapSceneLifecycleRuntime.ts",
+    SRC / "mapSceneInteractionDefaults.ts",
+]:
+    text = generated.read_text()
+    text = re.sub(r"\bL\b", "MapScene", text)
+    generated.write_text(text)
 
 # Production source imports/call sites.
 for file in SRC.rglob("*"):
@@ -86,7 +95,6 @@ for file in SRC.rglob("*"):
         "mapSceneLifecycleRuntime.ts",
         "mapSceneInteractionDefaults.ts",
         "mapboxLeafletRuntime.ts",
-        "mapOverlaySynchronizationControllerRuntime.ts",
     }:
         continue
 
@@ -97,9 +105,11 @@ for file in SRC.rglob("*"):
 
     text = re.sub(r'import\s+L\s+from\s+["\']leaflet["\'];', f'import MapScene from "{scene_path}";', text)
     text = re.sub(r'import\s+type\s+L\s+from\s+["\']leaflet["\'];', f'import type MapScene from "{scene_path}";', text)
-    text = text.replace("L.", "MapScene.")
+    if "import MapScene from" in text or "import type MapScene from" in text:
+        text = re.sub(r"\bL\b", "MapScene", text)
     text = text.replace("MapScene.LeafletMouseEvent", "MapScene.MapPointerEvent")
     text = text.replace("MapScene.LeafletEvent", "MapScene.MapEvent")
+    text = text.replace("URMapScene.", "URL.")
 
     text = re.sub(r'(["\'])((?:\.\./|\./)*)leafletMapLifecycleRuntime(["\'])', lambda m: f'{m.group(1)}{lifecycle_path}{m.group(3)}', text)
     text = re.sub(r'(["\'])((?:\.\./|\./)*)leafletInteractionDefaults(["\'])', lambda m: f'{m.group(1)}{defaults_path}{m.group(3)}', text)
@@ -115,8 +125,8 @@ for file in SRC.rglob("*"):
     text = text.replace("canonical-leaflet-controller", "canonical-map-scene-controller")
     file.write_text(text)
 
-# Rename the drive-time files/functions so imports and diagnostics stop encoding
-# the removed engine in their public names.
+# Rename drive-time files/functions so imports and diagnostics stop encoding the
+# removed engine in their public names.
 renames = {
     SRC / "features/driveTime/leafletProviderAdapter.ts": SRC / "features/driveTime/mapSceneProviderAdapter.ts",
     SRC / "features/driveTime/leafletEtaRouteLayer.ts": SRC / "features/driveTime/mapSceneEtaRouteLayer.ts",
@@ -127,11 +137,13 @@ for old, new in renames.items():
         scene_path = rel_import(new, SRC / "mapSceneRuntime.ts")
         defaults_path = rel_import(new, SRC / "mapSceneInteractionDefaults.ts")
         text = re.sub(r'import\s+L\s+from\s+["\']leaflet["\'];', f'import MapScene from "{scene_path}";', text)
-        text = text.replace("L.", "MapScene.")
+        if "import MapScene from" in text:
+            text = re.sub(r"\bL\b", "MapScene", text)
         text = text.replace("leafletInteractionDefaults", Path(defaults_path).name)
         text = text.replace("installLeafletEtaRouteLayer", "installMapSceneEtaRouteLayer")
         text = text.replace("collectVisibleLeafletProviderCandidates", "collectVisibleMapSceneProviderCandidates")
         text = text.replace("leaflet:", "scene:")
+        text = text.replace("URMapScene.", "URL.")
         new.write_text(text)
         old.unlink()
 
@@ -145,6 +157,7 @@ for file in SRC.rglob("*"):
     text = text.replace("leafletEtaRouteLayer", "mapSceneEtaRouteLayer")
     text = text.replace("installLeafletEtaRouteLayer", "installMapSceneEtaRouteLayer")
     text = text.replace("collectVisibleLeafletProviderCandidates", "collectVisibleMapSceneProviderCandidates")
+    text = text.replace("URMapScene.", "URL.")
     file.write_text(text)
 
 # Remove the compiler/runtime redirect. From this point onward, a Leaflet import
@@ -160,15 +173,15 @@ text = vite.read_text()
 text = re.sub(r'\n\s*"leaflet":\s*path\.resolve\(import\.meta\.dirname,\s*"src/mapboxNativeCompat\.ts"\),?', "", text)
 vite.write_text(text)
 
-# Retired files. The old overlay mirror is not booted and the old tile runtime is
-# historical dead code; keeping them would preserve false Leaflet ownership.
+# Retired files. Keep the dormant overlay-sync controller for this first compiler
+# slice because it still owns a Window type declaration used by dualMapEngineRuntime;
+# it will be deleted in the controller-removal slice.
 for dead in [
     SRC / "mapboxNativeCompat.ts",
     SRC / "leafletMapLifecycleRuntime.ts",
     SRC / "leafletInteractionDefaults.ts",
     SRC / "leaflet-runtime-extensions.d.ts",
     SRC / "mapboxLeafletRuntime.ts",
-    SRC / "mapOverlaySynchronizationControllerRuntime.ts",
 ]:
     if dead.exists():
         dead.unlink()

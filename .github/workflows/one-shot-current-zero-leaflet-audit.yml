@@ -1,4 +1,4 @@
-name: One-shot inspect final MapScene call sites
+name: One-shot final MapScene root removal
 
 on:
   push:
@@ -6,33 +6,46 @@ on:
       - .github/workflows/one-shot-current-zero-leaflet-audit.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  inspect:
+  migrate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: nuclear/remove-leaflet-compat
           fetch-depth: 0
-      - name: App mapRef and multi-drop usages
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - name: Apply final MapScene root migration
+        run: python occu-med-map/scripts/migrate-final-mapscene-root.py
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck frontend
+        run: pnpm --filter @workspace/occu-med-map typecheck
+      - name: Production build
+        run: pnpm --filter @workspace/occu-med-map build
+      - name: Native synchronization hardening
+        run: pnpm --filter @workspace/occu-med-map test:map-synchronization-hardening
+      - name: Provider Explorer hardening
+        run: pnpm --filter @workspace/occu-med-map test:provider-explorer-hardening
+      - name: General UI hardening
+        run: pnpm --filter @workspace/occu-med-map test:general-ui-hardening
+      - name: Zero-compat audit
+        working-directory: occu-med-map
+        run: pnpm exec tsx scripts/zero-leaflet-architecture-audit.ts
+      - name: Verify runtime compatibility is physically gone
         run: |
-          echo '=== mapRef.current ==='
-          grep -n -C 5 'mapRef\.current' occu-med-map/src/App.tsx || true
-          echo '=== multiDropLayerRef ==='
-          grep -n -C 8 'multiDropLayerRef' occu-med-map/src/App.tsx || true
-          echo '=== direct MapScene in App ==='
-          grep -n -C 5 'MapScene\.' occu-med-map/src/App.tsx || true
-      - name: Helper call sites
+          test ! -e occu-med-map/src/mapSceneRuntime.ts
+          test ! -e occu-med-map/src/features/networkMap/mapLayerHelpers.ts
+          ! grep -RInE 'from ["'"'].*mapSceneRuntime["'"']|MapScene\.|mapRef\.current|multiDropLayerRef' occu-med-map/src
+      - name: Commit validated removal
         run: |
-          echo '=== mapLayerHelpers imports/callers ==='
-          grep -RIn -E 'mapLayerHelpers|setMapBasemap|clearLayerGroup|safeRemoveLayer|fitMarkers' occu-med-map/src --exclude='mapLayerHelpers.ts' || true
-          echo '=== mapServices imports/callers ==='
-          grep -RIn -E 'mapServices|createTileLayer|TILE_PROVIDERS|TileProviderKey' occu-med-map/src --exclude='mapServices.ts' || true
-      - name: Helper contents
-        run: |
-          echo '=== mapLayerHelpers.ts ==='
-          cat occu-med-map/src/features/networkMap/mapLayerHelpers.ts
-          echo '=== mapServices.ts ==='
-          cat occu-med-map/src/lib/mapServices.ts
+          rm -f occu-med-map/scripts/migrate-final-mapscene-root.py
+          git config user.name "Occumed79"
+          git config user.email "Occumed79@users.noreply.github.com"
+          git add -A
+          git commit -m "Remove final MapScene runtime ownership"
+          git push origin HEAD:nuclear/remove-leaflet-compat

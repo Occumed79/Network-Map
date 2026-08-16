@@ -1,4 +1,4 @@
-name: One-shot zero compatibility audit
+name: One-shot remove MapScene lifecycle
 
 on:
   push:
@@ -6,20 +6,37 @@ on:
       - .github/workflows/one-shot-zero-leaflet-audit.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  audit:
+  migrate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: nuclear/remove-leaflet-compat
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: corepack enable
+      - name: Remove scene lifecycle registry
+        run: python occu-med-map/scripts/remove-map-scene-lifecycle.py
       - run: pnpm install --frozen-lockfile
-      - name: Inventory remaining compatibility surface
+      - name: Typecheck frontend
+        run: pnpm --filter @workspace/occu-med-map typecheck
+      - name: Production build
+        run: pnpm --filter @workspace/occu-med-map build
+      - name: Native synchronization hardening
+        run: pnpm --filter @workspace/occu-med-map test:map-synchronization-hardening
+      - name: Inventory remaining compatibility
         working-directory: occu-med-map
         run: pnpm exec tsx scripts/zero-leaflet-architecture-audit.ts
+      - name: Commit validated lifecycle removal
+        run: |
+          rm -f occu-med-map/scripts/remove-map-scene-lifecycle.py
+          git config user.name "Occumed79"
+          git config user.email "Occumed79@users.noreply.github.com"
+          git add -A
+          git commit -m "Remove MapScene lifecycle registry"
+          git push origin HEAD:nuclear/remove-leaflet-compat

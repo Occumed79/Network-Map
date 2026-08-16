@@ -37,7 +37,7 @@ function sourceData(map: mapboxgl.Map, sourceId: string, collection: GeoJSON.Fea
 }
 
 function ensureLayers(map: mapboxgl.Map): void {
-  if (!map.getStyle()) return;
+  if (!map.isStyleLoaded()) return;
   sourceData(map, IDS.origin.source, collections.origin);
   sourceData(map, IDS.route.source, collections.route);
   sourceData(map, IDS.zones.source, collections.zones);
@@ -168,7 +168,7 @@ function ensureLayers(map: mapboxgl.Map): void {
 
 function update(channel: Channel): void {
   for (const map of getTrackedMapboxMaps()) {
-    if (!map.getStyle()) continue;
+    if (!map.isStyleLoaded()) continue;
     try {
       ensureLayers(map);
       const sourceId = IDS[channel].source;

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import MapScene from "./mapSceneRuntime";
+import { initializeDualMapEngines, cleanupDualMapEngines } from './dualMapEngineRuntime';
 import * as topojson from 'topojson-client';
 import * as XLSX from 'xlsx';
 import {
@@ -1673,10 +1674,11 @@ export default function App() {
     });
     map.doubleClickZoom.disable();
     mapRef.current = map;
+    void initializeDualMapEngines(mapDivRef.current, { center:[0,20], zoom:2 });
 
-    // This logical map object is supplied by the temporary Mapbox-native
-    // compatibility facade. No secondary renderer is created; both visible 2D and
-    // 3D surfaces are owned by Mapbox GL.
+    // The scene root below is only a temporary layer registry for call sites that
+    // have not yet moved to direct Mapbox sources. It no longer owns the camera,
+    // engine lifecycle, or 2D/3D synchronization.
 
     // City layer
     const cityLayer = MapScene.layerGroup().addTo(map);
@@ -1739,6 +1741,7 @@ export default function App() {
       window.removeEventListener('network-map:native-click', onNativeMapClick);
       window.removeEventListener('network-map:native-dblclick', onNativeMapDoubleClick);
       resizeObserver.disconnect();
+      cleanupDualMapEngines();
       map.remove();
       mapRef.current=null;
       cityLayerRef.current=null;

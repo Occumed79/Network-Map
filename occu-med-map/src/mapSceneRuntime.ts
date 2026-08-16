@@ -768,6 +768,7 @@ namespace MapScene {
     private zoom: number;
     private layers = new Set<Layer>();
     private removed = false;
+    private nativeEventDisposers: Array<() => void> = [];
     dragging = { enable() {}, disable() {}, enabled: () => true };
     scrollWheelZoom = { enable() {}, disable() {}, enabled: () => true };
     doubleClickZoom = { enable() {}, disable() {}, enabled: () => true };
@@ -784,6 +785,33 @@ namespace MapScene {
       this.center = normalizeLatLng(resolvedOptions.center || [20, 0]);
       this.zoom = Number(resolvedOptions.zoom ?? resolvedOptions.minZoom ?? 2);
       logicalMaps.add(this);
+
+      const onSceneClick = (rawEvent: Event) => {
+        const detail = (rawEvent as CustomEvent<{ lat:number; lng:number; originalEvent?: Event }>).detail;
+        if (!detail) return;
+        this.fire("click", { latlng: new LatLng(detail.lat, detail.lng), originalEvent: detail.originalEvent });
+      };
+      const onSceneDoubleClick = (rawEvent: Event) => {
+        const detail = (rawEvent as CustomEvent<{ lat:number; lng:number; originalEvent?: Event }>).detail;
+        if (!detail) return;
+        this.fire("dblclick", { latlng: new LatLng(detail.lat, detail.lng), originalEvent: detail.originalEvent });
+      };
+      const onNativeCamera = (rawEvent: Event) => {
+        const detail = (rawEvent as CustomEvent<{ lat:number; lng:number; zoom:number }>).detail;
+        if (!detail) return;
+        this.center = new LatLng(detail.lat, detail.lng);
+        this.zoom = Number(detail.zoom);
+        this.fire("moveend");
+        this.fire("zoomend");
+      };
+      window.addEventListener("network-map:scene-click", onSceneClick);
+      window.addEventListener("network-map:scene-dblclick", onSceneDoubleClick);
+      window.addEventListener("network-map:native-camera", onNativeCamera);
+      this.nativeEventDisposers.push(
+        () => window.removeEventListener("network-map:scene-click", onSceneClick),
+        () => window.removeEventListener("network-map:scene-dblclick", onSceneDoubleClick),
+        () => window.removeEventListener("network-map:native-camera", onNativeCamera),
+      );
       queueMicrotask(() => this.fire("load"));
     }
     getContainer(): HTMLElement { return this.container; }
@@ -866,6 +894,7 @@ namespace MapScene {
       this.removed = true;
       for (const layer of [...this.layers]) this.removeLayer(layer);
       logicalMaps.delete(this);
+      for (const dispose of this.nativeEventDisposers.splice(0)) dispose();
       this.fire("unload");
       this.off();
       return this;

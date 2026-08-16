@@ -171,22 +171,23 @@ async function mapCanvasClick(page, ratioX = 0.68, ratioY = 0.55, double = false
   else await page.mouse.click(point.x, point.y);
 }
 
-async function nativeCompatLayerCount(page, mode = "2d") {
-  return page.evaluate((requestedMode) => {
+async function nativeSourceFeatureCount(page, sourceId, mode = "2d") {
+  return page.evaluate(({ requestedSourceId, requestedMode }) => {
     const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
-    const map = maps.find((candidate) => Boolean(candidate.getContainer().closest(requestedMode === "3d" ? ".mapbox-globe-host" : ".mapbox-2d-host")));
-    if (!map) return -1;
-    return (map.getStyle()?.layers || []).filter((layer) => String(layer.id).startsWith("map-scene-")).length;
-  }, mode);
+    const selector = requestedMode === "3d" ? ".mapbox-globe-host" : ".mapbox-2d-host";
+    const map = maps.find((candidate) => Boolean(candidate.getContainer().closest(selector)));
+    if (!map || !map.getSource(requestedSourceId)) return 0;
+    try { return (map.querySourceFeatures(requestedSourceId) || []).length; } catch { return 0; }
+  }, { requestedSourceId: sourceId, requestedMode: mode });
 }
 
-async function compatPopupFeaturePoint(page, needle) {
+async function nativePopupFeaturePoint(page, needle) {
   return page.evaluate((popupNeedle) => {
     const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
     const map = maps.find((candidate) => Boolean(candidate.getContainer().closest(".mapbox-2d-host")));
     if (!map) throw new Error("2D Mapbox map not available");
     const sourceIds = Object.keys(map.getStyle()?.sources || {})
-      .filter((id) => id.startsWith("map-scene-") && id.endsWith("-source"));
+      .filter((id) => id.startsWith("provider-explorer-native-") || id.startsWith("provider-dataset-native-"));
     const diagnostics = [];
     for (const sourceId of sourceIds) {
       let features = [];
@@ -194,22 +195,16 @@ async function compatPopupFeaturePoint(page, needle) {
       diagnostics.push({
         sourceId,
         count: features.length,
-        popupPreviews: features.map((feature) => String(feature.properties?.__popupHtml || "").slice(0, 120)),
+        popupPreviews: features.map((feature) => String(feature.properties?.popupHtml || "").slice(0, 120)),
       });
       const feature = features.find((candidate) =>
-        String(candidate.properties?.__popupHtml || "").includes(popupNeedle)
+        String(candidate.properties?.popupHtml || "").includes(popupNeedle)
       );
       if (!feature || feature.geometry?.type !== "Point") continue;
       const coordinates = feature.geometry.coordinates;
       const point = map.project(coordinates);
       const rect = map.getCanvas().getBoundingClientRect();
-      return {
-        x: rect.left + point.x,
-        y: rect.top + point.y,
-        sourceId,
-        coordinates,
-        diagnostics,
-      };
+      return { x: rect.left + point.x, y: rect.top + point.y, sourceId, coordinates, diagnostics };
     }
     return { x: null, y: null, sourceId: null, coordinates: null, diagnostics };
   }, needle);
@@ -241,30 +236,13 @@ async function indexedProviderDiagnostics(page) {
     const toggle = document.querySelector('input[aria-label="Indexed Providers"]');
     const row = toggle?.closest(".workflow-layer");
     if (!map) return { lifecycle, noMap: true, indexedRow: row?.textContent || "" };
-
     const style = map.getStyle();
-    const compatLayers = (style?.layers || [])
-      .filter((layer) => String(layer.id).startsWith("map-scene-"))
+    const nativeLayers = (style?.layers || [])
+      .filter((layer) => String(layer.id).startsWith("provider-dataset-native-indexed"))
       .map((layer) => ({ id: layer.id, type: layer.type, source: layer.source || null }));
-    const compatSources = Object.keys(style?.sources || {})
-      .filter((id) => id.startsWith("map-scene-") && id.endsWith("-source"))
-      .map((id) => {
-        let features = [];
-        try { features = map.querySourceFeatures(id); } catch {}
-        return {
-          id,
-          count: features.length,
-          clinicOneCount: features.filter((feature) => String(feature.properties?.__popupHtml || "").includes("CI Indexed Clinic One")).length,
-          features: features.slice(0, 20).map((feature) => ({
-            geometry: feature.geometry,
-            compatLayerId: feature.properties?.__compatLayerId,
-            interactive: feature.properties?.__interactive,
-            popupHasClinicOne: String(feature.properties?.__popupHtml || "").includes("CI Indexed Clinic One"),
-            popupPreview: String(feature.properties?.__popupHtml || "").slice(0, 180),
-          })),
-        };
-      });
-
+    const sourceId = "provider-dataset-native-indexed";
+    let sourceFeatures = [];
+    try { sourceFeatures = map.querySourceFeatures(sourceId) || []; } catch {}
     return {
       lifecycle,
       indexedChecked: Boolean(toggle?.checked),
@@ -274,8 +252,11 @@ async function indexedProviderDiagnostics(page) {
       moving: map.isMoving(),
       center: { lng: map.getCenter().lng, lat: map.getCenter().lat },
       zoom: map.getZoom(),
-      compatLayers,
-      compatSources,
+      nativeLayers,
+      sourceId,
+      sourceFeatureCount: sourceFeatures.length,
+      clinicOneCount: sourceFeatures.filter((feature) => String(feature.properties?.popupHtml || "").includes("CI Indexed Clinic One")).length,
+      popupPreviews: sourceFeatures.slice(0, 20).map((feature) => String(feature.properties?.popupHtml || "").slice(0, 180)),
     };
   });
 }
@@ -334,19 +315,18 @@ try {
   ), null, { timeout: 15_000 });
   await waitForActiveMapIdle(page, "2d");
   await page.waitForFunction(() => {
-    const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
-    const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
-    if (!map || !map.isStyleLoaded()) return false;
-    return (map.getStyle()?.layers || []).some((layer) =>
-      layer.type === "circle" && String(layer.id).startsWith("map-scene-") && String(layer.id).endsWith("-points")
-    );
-  }, null, { timeout: 10_000 });
+  const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
+  const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
+  if (!map || !map.isStyleLoaded()) return false;
+  if (!map.getLayer("provider-dataset-native-indexed-points") || !map.getSource("provider-dataset-native-indexed")) return false;
+  try { return (map.querySourceFeatures("provider-dataset-native-indexed") || []).length >= 2; } catch { return false; }
+}, null, { timeout: 10_000 });
 
   const beforeIndexedClick = await indexedProviderDiagnostics(page);
   console.log("INDEXED_PROVIDER_DIAGNOSTICS_BEFORE_CLICK", JSON.stringify(beforeIndexedClick));
   assert.ok(
-    beforeIndexedClick.lifecycle?.initializers?.some((initializer) => initializer.id === "mapbox-compat-interaction-owner"),
-    "Mapbox compatibility interaction owner must be registered before provider clicks",
+    beforeIndexedClick.lifecycle?.initializers?.some((initializer) => initializer.id === "provider-dataset-native-map"),
+    "Native provider dataset interaction owner must be registered before provider clicks",
   );
 
   const indexedPoint = await active2dMapPoint(page, 0.4, 20.4);
@@ -359,19 +339,19 @@ try {
     throw error;
   }
 
-  const beforeRadiusLayers = await nativeCompatLayerCount(page, "2d");
-  const radiusButton = await clickByText(page, /Radius Tool/i);
-  await page.waitForFunction((button) => button.classList.contains("active"), await radiusButton.elementHandle(), { timeout: 5_000 });
-  await page.waitForFunction(() => window.__NETWORK_MAP_TOOL_STATE__?.getActiveTool?.() === "radius", null, { timeout: 5_000 });
-  await mapCanvasClick(page, 0.68, 0.55, false);
-  const radiusCard = page.locator(".local-pop-card:visible").filter({ hasText: "Radius extractor" }).first();
-  await radiusCard.waitFor({ state: "visible", timeout: 10_000 });
-  await page.waitForFunction((before) => {
-    const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
-    const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
-    const count = (map?.getStyle()?.layers || []).filter((layer) => String(layer.id).startsWith("map-scene-")).length;
-    return count > before;
-  }, beforeRadiusLayers, { timeout: 10_000 });
+  const beforeRadiusFeatures = await nativeSourceFeatureCount(page, "radius-extractor-native", "2d");
+const radiusButton = await clickByText(page, /Radius Tool/i);
+await page.waitForFunction((button) => button.classList.contains("active"), await radiusButton.elementHandle(), { timeout: 5_000 });
+await page.waitForFunction(() => window.__NETWORK_MAP_TOOL_STATE__?.getActiveTool?.() === "radius", null, { timeout: 5_000 });
+await mapCanvasClick(page, 0.68, 0.55, false);
+const radiusCard = page.locator(".local-pop-card:visible").filter({ hasText: "Radius extractor" }).first();
+await radiusCard.waitFor({ state: "visible", timeout: 10_000 });
+await page.waitForFunction((before) => {
+  const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
+  const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
+  if (!map?.getLayer("radius-extractor-native-fill") || !map.getSource("radius-extractor-native")) return false;
+  try { return (map.querySourceFeatures("radius-extractor-native") || []).length > before; } catch { return false; }
+}, beforeRadiusFeatures, { timeout: 10_000 });
   await page.waitForFunction(() => /Center:\s*[-\d.]+,\s*[-\d.]+/.test(
     document.querySelector(".radius-extractor-card")?.textContent || ""
   ), null, { timeout: 8_000 });
@@ -382,11 +362,12 @@ try {
   await waitForMode(page, "3d");
   await page.locator(".mapbox-globe-host .mapboxgl-canvas").waitFor({ state: "visible", timeout: 15_000 });
   await page.waitForFunction(() => {
-    const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
-    const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-globe-host"));
-    return (map?.getStyle()?.layers || []).some((layer) => String(layer.id).startsWith("map-scene-"));
-  }, null, { timeout: 10_000 });
-  assert.ok(await nativeCompatLayerCount(page, "3d") > 0, "3D Mapbox globe must receive the same logical overlay geometry");
+  const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
+  const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-globe-host"));
+  if (!map?.getLayer("radius-extractor-native-fill") || !map.getSource("radius-extractor-native")) return false;
+  try { return (map.querySourceFeatures("radius-extractor-native") || []).length > 0; } catch { return false; }
+}, null, { timeout: 10_000 });
+assert.ok(await nativeSourceFeatureCount(page, "radius-extractor-native", "3d") > 0, "3D Mapbox globe must receive the same native radius geometry");
   await page.locator(".map-dimension-toggle button[data-map-mode='2d']").evaluate((element) => element.click());
   await waitForMode(page, "2d");
   await page.waitForFunction(() => !document.querySelector(".dual-engine-vortex.active"), null, { timeout: 35_000 });
@@ -404,19 +385,34 @@ try {
   await clickByText(page, /^Density$/i, explorer);
   await page.locator(".provider-map-status").waitFor({ state: "visible", timeout: 5_000 });
   await page.waitForFunction(() => /density view.*17 matching records.*2 aggregated cells/i.test(document.querySelector(".provider-map-status")?.textContent || ""), null, { timeout: 10_000 });
-  const densityLayerCount = await nativeCompatLayerCount(page, "2d");
-  assert.ok(densityLayerCount > 0, "Density cells must exist as native Mapbox compatibility layers");
+  await page.waitForFunction(() => {
+  const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
+  const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
+  if (!map?.getLayer("provider-explorer-native-density") || !map.getSource("provider-explorer-native-aggregate")) return false;
+  try { return (map.querySourceFeatures("provider-explorer-native-aggregate") || []).length === 2; } catch { return false; }
+}, null, { timeout: 10_000 });
+const densityFeatureCount = await nativeSourceFeatureCount(page, "provider-explorer-native-aggregate", "2d");
+assert.equal(densityFeatureCount, 2, "Density cells must exist in the native Provider Explorer aggregate source");
 
   await clickByText(page, /Hex field/i, explorer);
   await page.waitForFunction(() => /hex view.*17 matching records.*2 aggregated cells/i.test(document.querySelector(".provider-map-status")?.textContent || ""), null, { timeout: 10_000 });
+await page.waitForFunction(() => {
+  const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
+  const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
+  if (!map?.getLayer("provider-explorer-native-hex-fill") || !map.getSource("provider-explorer-native-aggregate")) return false;
+  try {
+    const features = map.querySourceFeatures("provider-explorer-native-aggregate") || [];
+    return features.length === 2 && features.every((feature) => feature.geometry?.type === "Polygon");
+  } catch { return false; }
+}, null, { timeout: 10_000 });
 
   await clickByText(page, /8px points/i, explorer);
   await page.waitForFunction(() => /showing 1 visible pins of 1 matching records/i.test(document.querySelector(".provider-map-status")?.textContent || ""), null, { timeout: 10_000 });
   await waitForActiveMapIdle(page, "2d");
-  const providerPoint = await compatPopupFeaturePoint(page, "CI Stored Clinic");
+  const providerPoint = await nativePopupFeaturePoint(page, "CI Stored Clinic");
   assert.ok(
     providerPoint && Number.isFinite(providerPoint.x) && Number.isFinite(providerPoint.y),
-    `Stored Provider Explorer pin must exist in native Mapbox popup metadata: ${JSON.stringify(providerPoint?.diagnostics || [])}`
+    `Stored Provider Explorer pin must exist in native Provider Explorer popup metadata: ${JSON.stringify(providerPoint?.diagnostics || [])}`
   );
   console.log("STORED_PROVIDER_FEATURE_BEFORE_CLICK", JSON.stringify(providerPoint));
   await page.mouse.click(providerPoint.x, providerPoint.y);

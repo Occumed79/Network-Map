@@ -66,14 +66,6 @@ jobs:
               "",
           )
 
-          # The package no longer exposes a Leaflet lifecycle smoke, so the
-          # validation workflow must not invoke the deleted test.
-          replace(
-              ".github/workflows/validate.yml",
-              '      - name: Leaflet lifecycle\n        run: pnpm --filter @workspace/occu-med-map test:leaflet-map-lifecycle-hardening\n',
-              "",
-          )
-
           # Browser gates were still waiting for a deleted global lifecycle and
           # accepting deleted Leaflet DOM surfaces. Keep them native-Mapbox only.
           replace(
@@ -149,7 +141,7 @@ jobs:
           fi
           git config user.name "Occumed79"
           git config user.email "Occumed79@users.noreply.github.com"
-          git add occu-med-map/src occu-med-map/scripts .github/workflows/validate.yml
+          git add occu-med-map/src occu-med-map/scripts
           git commit -m "Repair native Mapbox startup and stale CI ownership gates"
           git fetch origin nuclear/remove-leaflet-compat
           git rebase origin/nuclear/remove-leaflet-compat

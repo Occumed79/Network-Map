@@ -1,5 +1,5 @@
 import MapScene from "./mapSceneRuntime";
-import { registerMapSceneInitializer } from "./mapSceneLifecycleRuntime";
+import { subscribeSceneRoots } from "./mapSceneRuntime";
 import { hasMapboxToken, mapboxDirections, mapboxIsochrone, mapboxReverseGeocode } from "./mapboxServices";
 
 type Point = { lat: number; lng: number; label?: string };
@@ -163,10 +163,8 @@ function installOnMap(map: MapScene.Map) {
 export function installMapboxAdvancedControls() {
   if (installed || !hasMapboxToken()) return;
   installed = true;
-  registerMapSceneInitializer({
-    id: "mapbox-advanced-controls",
-    priority: 90,
-    initialize: (map) => { window.setTimeout(() => installOnMap(map), 0); },
+  subscribeSceneRoots((map) => {
+    window.setTimeout(() => installOnMap(map), 0);
   });
 }
 

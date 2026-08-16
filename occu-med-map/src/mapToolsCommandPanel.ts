@@ -1,5 +1,5 @@
 import MapScene from "./mapSceneRuntime";
-import { registerMapSceneInitializer } from "./mapSceneLifecycleRuntime";
+import { subscribeSceneRoots } from "./mapSceneRuntime";
 import { hasMapboxToken, mapboxDirections, mapboxGeocode, mapboxIsochrone, mapboxReverseGeocode } from "./mapboxServices";
 import { registerMapToolsPanel } from "./mapToolsPanelRegistry";
 import { registerRuntimeOwner } from "./runtimeControllerRegistry";
@@ -394,17 +394,8 @@ export function installMapToolsCommandPanel(): void {
   if (installed || !hasMapboxToken()) return;
   if (!registerRuntimeOwner("map-tools-command-panel", "Authoritative Map Tools panel and core actions")) return;
   installed = true;
-  registerMapSceneInitializer({
-    id: "map-tools-command-panel",
-    priority: 40,
-    initialize: (map) => {
-      let cleanup: (() => void) | null = null;
-      const timer = window.setTimeout(() => { cleanup = installOnMap(map); }, 0);
-      return () => {
-        window.clearTimeout(timer);
-        cleanup?.();
-      };
-    },
+  subscribeSceneRoots((map) => {
+    window.setTimeout(() => { installOnMap(map); }, 0);
   });
 }
 

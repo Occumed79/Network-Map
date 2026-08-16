@@ -34,7 +34,7 @@ function activeEngine(): string {
   const bodyMode = document.body?.dataset?.mapEngine || document.documentElement.dataset.mapEngine;
   if (bodyMode) return bodyMode;
   const mapbox = document.querySelector(".mapboxgl-map");
-  return mapbox ? "mapbox" : "leaflet";
+  return mapbox ? "mapbox" : "none";
 }
 
 function snapshot() {

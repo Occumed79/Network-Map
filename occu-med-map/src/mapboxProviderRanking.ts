@@ -1,5 +1,5 @@
 import MapScene from "./mapSceneRuntime";
-import { registerMapSceneInitializer } from "./mapSceneLifecycleRuntime";
+import { subscribeSceneRoots } from "./mapSceneRuntime";
 import { hasMapboxToken, mapboxDirections, mapboxReverseGeocode } from "./mapboxServices";
 
 type Point = { lat: number; lng: number; label?: string };
@@ -206,10 +206,8 @@ function installOnMap(map: MapScene.Map): void {
 export function installMapboxProviderRanking(): void {
   if (installed || !hasMapboxToken()) return;
   installed = true;
-  registerMapSceneInitializer({
-    id: "mapbox-provider-ranking",
-    priority: 80,
-    initialize: (map) => { window.setTimeout(() => installOnMap(map), 0); },
+  subscribeSceneRoots((map) => {
+    window.setTimeout(() => installOnMap(map), 0);
   });
 }
 

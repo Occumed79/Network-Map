@@ -1,5 +1,5 @@
 import MapScene from "./mapSceneRuntime";
-import { registerMapSceneInitializer } from "./mapSceneLifecycleRuntime";
+import { subscribeSceneRoots } from "./mapSceneRuntime";
 
 let installed = false;
 let densityLayer: MapScene.LayerGroup | null = null;
@@ -94,10 +94,8 @@ function installOnMap(map: MapScene.Map): void {
 export function installProviderDensityField(): void {
   if (installed) return;
   installed = true;
-  registerMapSceneInitializer({
-    id: "provider-density-field",
-    priority: 70,
-    initialize: (map) => { window.setTimeout(() => installOnMap(map), 0); },
+  subscribeSceneRoots((map) => {
+    window.setTimeout(() => installOnMap(map), 0);
   });
 }
 

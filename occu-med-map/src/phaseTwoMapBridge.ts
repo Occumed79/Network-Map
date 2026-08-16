@@ -1,5 +1,5 @@
 import MapScene from "./mapSceneRuntime";
-import { registerMapSceneInitializer } from './mapSceneLifecycleRuntime';
+import { subscribeSceneRoots } from './mapSceneRuntime';
 
 export type PhaseTwoMapSnapshot = {
   zoom: number;
@@ -19,7 +19,7 @@ declare global {
 
 const INSTALL_KEY = '__occumedPhaseTwoMapBridgeInstalled';
 const REGISTERED_KEY = '__occumedPhaseTwoMapBridgeRegistered';
-const leafletRuntime = MapScene as typeof MapScene & Record<string, unknown>;
+const sceneRuntime = MapScene as typeof MapScene & Record<string, unknown>;
 
 function snapshot(map: MapScene.Map): PhaseTwoMapSnapshot {
   const bounds = map.getBounds();
@@ -54,13 +54,9 @@ function registerMap(map: MapScene.Map): void {
 }
 
 export function installPhaseTwoMapBridge(): void {
-  if (leafletRuntime[INSTALL_KEY]) return;
-  leafletRuntime[INSTALL_KEY] = true;
-  registerMapSceneInitializer({
-    id: 'phase-two-map-bridge',
-    priority: 0,
-    initialize: registerMap,
-  });
+  if (sceneRuntime[INSTALL_KEY]) return;
+  sceneRuntime[INSTALL_KEY] = true;
+  subscribeSceneRoots(registerMap);
 }
 
 installPhaseTwoMapBridge();

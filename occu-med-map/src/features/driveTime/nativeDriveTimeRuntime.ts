@@ -1,5 +1,5 @@
 import MapScene from "../../mapSceneRuntime";
-import { registerMapSceneInitializer } from "../../mapSceneLifecycleRuntime";
+import { subscribeSceneRoots } from "../../mapSceneRuntime";
 import { installMapSceneEtaRouteLayer } from "./mapSceneEtaRouteLayer";
 
 let installed = false;
@@ -15,10 +15,8 @@ function installOnMap(map: MapScene.Map): void {
 export function installNativeDriveTimeRuntime(): void {
   if (installed || !nativeDriveTimeEnabled()) return;
   installed = true;
-  registerMapSceneInitializer({
-    id: "native-drive-time",
-    priority: 60,
-    initialize: (map) => { window.setTimeout(() => installOnMap(map), 0); },
+  subscribeSceneRoots((map) => {
+    window.setTimeout(() => installOnMap(map), 0);
   });
 }
 

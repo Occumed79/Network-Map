@@ -1,6 +1,5 @@
 import { createRoot } from "react-dom/client";
 import "mapbox-gl/dist/mapbox-gl.css";
-import "./mapSceneLifecycleRuntime";
 import "./mapboxMapLifecycleRuntime";
 import "./mapboxSourcePipelineRuntime";
 import "./networkRequestPipelineRuntime";

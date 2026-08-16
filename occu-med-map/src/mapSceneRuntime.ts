@@ -14,6 +14,20 @@ import { wasCompatibilityClickHandled } from "./mapboxCompatInteractionRuntime";
 let nextId = 1;
 const allLayers = new globalThis.Map<number, MapScene.Layer>();
 const logicalMaps = new Set<MapScene.Map>();
+type SceneRootSubscriber = (map: MapScene.Map) => void;
+const sceneRootSubscribers = new Set<SceneRootSubscriber>();
+
+export function subscribeSceneRoots(subscriber: SceneRootSubscriber): () => void {
+  sceneRootSubscribers.add(subscriber);
+  for (const map of logicalMaps) queueMicrotask(() => subscriber(map));
+  return () => sceneRootSubscribers.delete(subscriber);
+}
+
+function announceSceneRoot(map: MapScene.Map): void {
+  for (const subscriber of sceneRootSubscribers) {
+    try { subscriber(map); } catch (error) { console.error("Map scene root subscriber failed", error); }
+  }
+}
 const boundLayerEvents = new WeakMap<mapboxgl.Map, Set<string>>();
 
 function uid(prefix: string): string {
@@ -785,6 +799,7 @@ namespace MapScene {
       this.center = normalizeLatLng(resolvedOptions.center || [20, 0]);
       this.zoom = Number(resolvedOptions.zoom ?? resolvedOptions.minZoom ?? 2);
       logicalMaps.add(this);
+      queueMicrotask(() => announceSceneRoot(this));
 
       const onSceneClick = (rawEvent: Event) => {
         const detail = (rawEvent as CustomEvent<{ lat:number; lng:number; originalEvent?: Event }>).detail;

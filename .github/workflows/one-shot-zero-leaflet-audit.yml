@@ -1,4 +1,4 @@
-name: One-shot native Radius and Live Finder migration
+name: One-shot remove dead scene runtimes
 
 on:
   push:
@@ -20,8 +20,42 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable
-      - name: Migrate Radius and Live Finder overlays to native Mapbox
-        run: python occu-med-map/scripts/migrate-radius-live-native.py
+      - name: Prove and remove dead scene runtimes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          root = Path('occu-med-map')
+          targets = [
+              root / 'src/mapboxAdvancedControls.ts',
+              root / 'src/mapboxProviderRanking.ts',
+              root / 'src/providerDensityField.ts',
+              root / 'src/mapSceneInteractionDefaults.ts',
+          ]
+          source_suffixes = {'.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'}
+          source_files = [p for p in root.rglob('*') if p.is_file() and p.suffix in source_suffixes]
+
+          for target in targets:
+              if not target.exists():
+                  raise SystemExit(f'missing expected dead runtime: {target}')
+              stem = target.stem
+              references = []
+              for candidate in source_files:
+                  if candidate == target:
+                      continue
+                  try:
+                      text = candidate.read_text(errors='ignore')
+                  except Exception:
+                      continue
+                  if stem in text:
+                      references.append(str(candidate))
+              if references:
+                  raise SystemExit(f'{target} is still referenced by: {references}')
+
+          for target in targets:
+              target.unlink()
+              print(f'removed dead runtime: {target}')
+          PY
       - run: pnpm install --frozen-lockfile
       - name: Typecheck frontend
         run: pnpm --filter @workspace/occu-med-map typecheck
@@ -34,11 +68,10 @@ jobs:
       - name: Inventory remaining compatibility
         working-directory: occu-med-map
         run: pnpm exec tsx scripts/zero-leaflet-architecture-audit.ts
-      - name: Commit validated native Radius and Live Finder migration
+      - name: Commit validated dead-runtime removal
         run: |
-          rm -f occu-med-map/scripts/migrate-radius-live-native.py
           git config user.name "Occumed79"
           git config user.email "Occumed79@users.noreply.github.com"
           git add -A
-          git commit -m "Render Radius and Live Finder with native Mapbox sources"
+          git commit -m "Delete dead scene compatibility runtimes"
           git push origin HEAD:nuclear/remove-leaflet-compat

@@ -1,12 +1,10 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import MapScene from "./mapSceneRuntime";
 import { ChevronLeft, ChevronRight, Layers3, ListFilter, LocateFixed, RefreshCw, Search, X } from 'lucide-react';
 import type { ProviderFeature } from './DatasetBrowser';
 import type { PhaseTwoMapSnapshot } from './phaseTwoMapBridge';
 import {
   buildViewportParams,
   effectiveVisualization,
-  gridCellBounds,
   providerMatchesTrustTier,
   sourceColor,
   uniqueProviders,
@@ -14,6 +12,12 @@ import {
   type PhaseTwoVisualization,
   type ViewportBounds,
 } from './phaseTwoLayerModel';
+import {
+  clearPhaseTwoOverlay,
+  renderPhaseTwoDensity,
+  renderPhaseTwoGrid,
+  renderPhaseTwoPins,
+} from './phaseTwoNativeMapRuntime';
 import './phase-two-shell.css';
 
 type PhaseTwoShellProps = {
@@ -78,6 +82,7 @@ function currentSnapshot(): PhaseTwoMapSnapshot | null {
   const map = window.__occumedPhaseTwoMap;
   if (!map) return null;
   const bounds = map.getBounds();
+  if (!bounds) return null;
   return {
     zoom: map.getZoom(),
     bounds: {
@@ -91,35 +96,6 @@ function currentSnapshot(): PhaseTwoMapSnapshot | null {
 
 function validCoordinate(provider: ProviderFeature): provider is ProviderFeature & { lat: number; lng: number } {
   return Number.isFinite(provider.lat) && Number.isFinite(provider.lng);
-}
-
-function createProviderPopup(provider: ProviderFeature): HTMLElement {
-  const root = document.createElement('div');
-  root.className = 'p2-provider-popup';
-
-  const name = document.createElement('strong');
-  name.textContent = provider.name || 'Provider';
-  root.appendChild(name);
-
-  const location = document.createElement('span');
-  location.textContent = [provider.address, provider.city, provider.admin_area, provider.country]
-    .filter(Boolean)
-    .join(', ') || 'Location unavailable';
-  root.appendChild(location);
-
-  const meta = document.createElement('span');
-  meta.textContent = `${provider.source || 'Unknown source'} · ${provider.trust_tier || provider.source_kind || 'unrated'}`;
-  root.appendChild(meta);
-
-  if (provider.website) {
-    const website = document.createElement('a');
-    website.href = provider.website;
-    website.target = '_blank';
-    website.rel = 'noreferrer';
-    website.textContent = 'Open website';
-    root.appendChild(website);
-  }
-  return root;
 }
 
 function modeLabel(mode: PhaseTwoVisualization): string {
@@ -152,7 +128,6 @@ export default function PhaseTwoShell({ children }: PhaseTwoShellProps) {
   const [warning, setWarning] = useState('');
   const [loading, setLoading] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
-  const overlayRef = useRef<MapScene.LayerGroup | null>(null);
   const requestRef = useRef<AbortController | null>(null);
   const refreshTimerRef = useRef<number | null>(null);
 
@@ -162,11 +137,7 @@ export default function PhaseTwoShell({ children }: PhaseTwoShellProps) {
   );
 
   const clearOverlay = useCallback(() => {
-    const map = window.__occumedPhaseTwoMap;
-    if (map && overlayRef.current) {
-      try { map.removeLayer(overlayRef.current); } catch { /* map may be unloading */ }
-    }
-    overlayRef.current = null;
+    clearPhaseTwoOverlay();
   }, []);
 
   const resetViewportResults = useCallback((nextStatus: string) => {
@@ -178,73 +149,17 @@ export default function PhaseTwoShell({ children }: PhaseTwoShellProps) {
     setStatus(nextStatus);
   }, [clearOverlay]);
 
-  const installOverlay = useCallback((layers: MapScene.Layer[]) => {
-    const map = window.__occumedPhaseTwoMap;
-    if (!map) return;
-    clearOverlay();
-    overlayRef.current = MapScene.layerGroup(layers).addTo(map);
-  }, [clearOverlay]);
-
   const drawPins = useCallback((rows: ProviderFeature[]) => {
-    const renderer = MapScene.canvas({ padding: 0.5 });
-    const layers = rows.filter(validCoordinate).map((provider) => {
-      const color = sourceColor(provider.source, provider.source_kind);
-      const marker = MapScene.circleMarker([provider.lat, provider.lng], {
-        renderer,
-        radius: 4,
-        weight: 1,
-        color: '#f8fbff',
-        opacity: 0.9,
-        fillColor: color,
-        fillOpacity: 0.9,
-      });
-      marker.bindTooltip(provider.name || 'Provider', { direction: 'top', opacity: 0.94 });
-      marker.bindPopup(createProviderPopup(provider), { maxWidth: 300 });
-      return marker;
-    });
-    installOverlay(layers);
-  }, [installOverlay]);
+    renderPhaseTwoPins(rows);
+  }, []);
 
   const drawDensity = useCallback((cells: Array<{ lat: number; lng: number; count: number }>) => {
-    const renderer = MapScene.canvas({ padding: 0.5 });
-    const layers = cells
-      .filter((cell) => Number.isFinite(cell.lat) && Number.isFinite(cell.lng) && cell.count > 0)
-      .map((cell) => {
-        const radius = Math.max(5, Math.min(32, 4 + Math.log2(cell.count + 1) * 3));
-        const marker = MapScene.circleMarker([cell.lat, cell.lng], {
-          renderer,
-          radius,
-          weight: 0,
-          fillColor: '#8b5cf6',
-          fillOpacity: Math.max(0.12, Math.min(0.58, 0.13 + Math.log10(cell.count + 1) * 0.13)),
-          interactive: true,
-        });
-        marker.bindTooltip(`${cell.count.toLocaleString()} providers`, { direction: 'top' });
-        return marker;
-      });
-    installOverlay(layers);
-  }, [installOverlay]);
+    renderPhaseTwoDensity(cells);
+  }, []);
 
   const drawGrid = useCallback((cells: Array<{ lat: number; lng: number; count: number }>, precision: number) => {
-    const renderer = MapScene.canvas({ padding: 0.5 });
-    const maxCount = Math.max(1, ...cells.map((cell) => cell.count));
-    const layers = cells
-      .filter((cell) => Number.isFinite(cell.lat) && Number.isFinite(cell.lng) && cell.count > 0)
-      .map((cell) => {
-        const ratio = Math.log1p(cell.count) / Math.log1p(maxCount);
-        const rectangle = MapScene.rectangle(gridCellBounds(cell.lat, cell.lng, precision), {
-          renderer,
-          color: '#c4b5fd',
-          weight: 0.6,
-          opacity: 0.55,
-          fillColor: '#7c3aed',
-          fillOpacity: 0.08 + ratio * 0.46,
-        });
-        rectangle.bindTooltip(`${cell.count.toLocaleString()} providers in grid cell`, { direction: 'top' });
-        return rectangle;
-      });
-    installOverlay(layers);
-  }, [installOverlay]);
+    renderPhaseTwoGrid(cells, precision);
+  }, []);
 
   const fetchAllPins = useCallback(async (
     current: PhaseTwoMapSnapshot,
@@ -427,7 +342,8 @@ export default function PhaseTwoShell({ children }: PhaseTwoShellProps) {
   const flyToProvider = (provider: ProviderFeature) => {
     if (!validCoordinate(provider)) return;
     const map = window.__occumedPhaseTwoMap;
-    map?.flyTo([provider.lat, provider.lng], Math.max(map.getZoom(), 13), { duration: 0.6 });
+    if (!map) return;
+    map.flyTo({ center: [provider.lng, provider.lat], zoom: Math.max(map.getZoom(), 13), duration: 600 });
   };
 
   const resetFilters = () => {

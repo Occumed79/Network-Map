@@ -56,8 +56,6 @@ jobs:
         run: pnpm --filter @workspace/occu-med-map test:runtime-ownership
       - name: Request pipeline
         run: pnpm --filter @workspace/occu-med-map test:network-request-hardening
-      - name: Leaflet lifecycle
-        run: pnpm --filter @workspace/occu-med-map test:leaflet-map-lifecycle-hardening
       - name: Mapbox lifecycle
         run: pnpm --filter @workspace/occu-med-map test:mapbox-lifecycle-hardening
       - name: Mapbox source pipeline

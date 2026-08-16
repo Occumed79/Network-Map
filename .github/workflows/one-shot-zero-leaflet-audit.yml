@@ -1,4 +1,4 @@
-name: One-shot zero Leaflet controller migration
+name: One-shot zero compatibility audit
 
 on:
   push:
@@ -6,37 +6,20 @@ on:
       - .github/workflows/one-shot-zero-leaflet-audit.yml
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  migrate:
+  audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: nuclear/remove-leaflet-compat
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: corepack enable
-      - name: Move dual-engine camera ownership to Mapbox
-        run: python occu-med-map/scripts/apply-native-camera-ownership.py
       - run: pnpm install --frozen-lockfile
-      - name: Typecheck frontend
-        run: pnpm --filter @workspace/occu-med-map typecheck
-      - name: Production build
-        run: pnpm --filter @workspace/occu-med-map build
-      - name: Map synchronization hardening
-        run: pnpm --filter @workspace/occu-med-map test:map-synchronization-hardening
-      - name: Inventory remaining architecture
+      - name: Inventory remaining compatibility surface
         working-directory: occu-med-map
         run: pnpm exec tsx scripts/zero-leaflet-architecture-audit.ts
-      - name: Commit validated controller removal
-        run: |
-          rm -f occu-med-map/scripts/apply-native-camera-ownership.py
-          git config user.name "Occumed79"
-          git config user.email "Occumed79@users.noreply.github.com"
-          git add -A
-          git commit -m "Make Mapbox authoritative for dual-engine camera state"
-          git push origin HEAD:nuclear/remove-leaflet-compat

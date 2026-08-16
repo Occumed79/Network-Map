@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import L from 'leaflet';
+import MapScene from "./mapSceneRuntime";
 import * as topojson from 'topojson-client';
 import * as XLSX from 'xlsx';
 import {
@@ -44,7 +44,7 @@ import { fetchMapInventory, type MapInventoryProvider } from './features/provide
 import { DriveTimeControlStrip } from './features/driveTime/DriveTimeControlStrip';
 import { ProviderEtaBadge } from './features/driveTime/ProviderEtaBadge';
 import { requestEtaRoute } from './features/driveTime/etaRouteEvents';
-import { liveResultsToEtaCandidates } from './features/driveTime/leafletProviderAdapter';
+import { liveResultsToEtaCandidates } from './features/driveTime/mapSceneProviderAdapter';
 import { useProviderEta } from './features/driveTime/useProviderEta';
 import './features/driveTime/driveTimeControls.css';
 import './features/driveTime/driveTimeBadge.css';
@@ -681,14 +681,14 @@ interface ProviderFieldRendererOptions {
 }
 
 function createProviderFieldLayer(
-  map: L.Map,
+  map: MapScene.Map,
   points: any[],
   opts: ProviderFieldRendererOptions,
-): { group: L.LayerGroup; destroy: () => void } {
+): { group: MapScene.LayerGroup; destroy: () => void } {
   // Build the provider geometry before attaching the root so the first
   // Mapbox GeoJSON source is never born empty. Provider API requests are already
   // viewport-bounded, so the returned records are the authoritative render set.
-  const group = L.layerGroup();
+  const group = MapScene.layerGroup();
   const cellPx = opts.cellPx ?? 54;
   const valid = points.filter(p => p && p.lat != null && p.lng != null && isValidCoord(p.lat, p.lng));
 
@@ -698,14 +698,14 @@ function createProviderFieldLayer(
     group.clearLayers();
     if (!valid.length) return;
     const zoom = map.getZoom();
-    // Do not re-filter API-bounded providers through the temporary Leaflet-shaped
+    // Do not re-filter API-bounded providers through the temporary scene
     // camera facade. That second viewport gate could disagree with the native
     // Mapbox camera and silently erase otherwise valid provider points.
     const visible = valid;
 
     const cells = new Map<string, { sx: number; sy: number; count: number; colors: string[] }>();
     for (const p of visible) {
-      const pt = map.project([p.lat, p.lng] as L.LatLngTuple, zoom);
+      const pt = map.project([p.lat, p.lng] as MapScene.LatLngTuple, zoom);
       const key = `${Math.floor(pt.x / cellPx)}:${Math.floor(pt.y / cellPx)}`;
       const c = cells.get(key);
       const style = styleFor(p);
@@ -714,10 +714,10 @@ function createProviderFieldLayer(
     }
 
     cells.forEach(c => {
-      const center = map.unproject([c.sx / c.count, c.sy / c.count] as L.PointTuple, zoom);
+      const center = map.unproject([c.sx / c.count, c.sy / c.count] as MapScene.PointTuple, zoom);
       const intensity = Math.min(1, Math.log2(c.count + 1) / 5);
       const dominantColor = c.colors[0] || opts.color;
-      group.addLayer(L.circleMarker(center, {
+      group.addLayer(MapScene.circleMarker(center, {
         radius: 10 + intensity * 30,
         stroke: false,
         fillColor: dominantColor,
@@ -729,7 +729,7 @@ function createProviderFieldLayer(
 
     for (const p of visible) {
       const style = styleFor(p);
-      const point = L.circleMarker([p.lat, p.lng], {
+      const point = MapScene.circleMarker([p.lat, p.lng], {
         radius: 4,
         color: 'rgba(255,255,255,.94)',
         weight: 1,
@@ -1175,24 +1175,24 @@ const MapToolsWorkspaceHost = React.memo(React.forwardRef<HTMLDivElement>(functi
 }));
 
 export default function App() {
-  const mapRef = useRef<L.Map|null>(null);
+  const mapRef = useRef<MapScene.Map|null>(null);
   const mapDivRef = useRef<HTMLDivElement>(null);
-  const stateGeoRef = useRef<L.GeoJSON|null>(null);
-  const cityLayerRef = useRef<L.LayerGroup|null>(null);
-  const customPinRef = useRef<L.Marker|null>(null);
+  const stateGeoRef = useRef<MapScene.GeoJSON|null>(null);
+  const cityLayerRef = useRef<MapScene.LayerGroup|null>(null);
+  const customPinRef = useRef<MapScene.Marker|null>(null);
   const radiusCircleRef = useRef<any>(null);
-  const tzLayerRef = useRef<L.LayerGroup|null>(null);
-  const liveGrpRef = useRef<L.LayerGroup|null>(null);
-  const liveCircleRef = useRef<L.Circle|null>(null);
-  const livePinRef = useRef<L.Marker|null>(null);
-  const dropCircleRef = useRef<L.Circle|null>(null);
-  const dropPinRef = useRef<L.Marker|null>(null);
-  const popDensityLayerRef = useRef<L.LayerGroup|null>(null);
-  const clinicLayerRef = useRef<L.LayerGroup|null>(null);
+  const tzLayerRef = useRef<MapScene.LayerGroup|null>(null);
+  const liveGrpRef = useRef<MapScene.LayerGroup|null>(null);
+  const liveCircleRef = useRef<MapScene.Circle|null>(null);
+  const livePinRef = useRef<MapScene.Marker|null>(null);
+  const dropCircleRef = useRef<MapScene.Circle|null>(null);
+  const dropPinRef = useRef<MapScene.Marker|null>(null);
+  const popDensityLayerRef = useRef<MapScene.LayerGroup|null>(null);
+  const clinicLayerRef = useRef<MapScene.LayerGroup|null>(null);
   const blueHiveLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
   const indexedProviderLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
   const myClinicsLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
-  const savedRadiusLayerRef = useRef<L.LayerGroup|null>(null);
+  const savedRadiusLayerRef = useRef<MapScene.LayerGroup|null>(null);
   const rawStateFeaturesRef = useRef<any[]>([]);
   const clinicFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1306,7 +1306,7 @@ export default function App() {
   const [pendingMarkerLabel, setPendingMarkerLabel] = useState('');
   const [pendingMarkerColor, setPendingMarkerColor] = useState('#ef4444');
   const [multiDropMode, setMultiDropMode] = useState(false);
-  const multiDropLayerRef = useRef<L.LayerGroup|null>(null);
+  const multiDropLayerRef = useRef<MapScene.LayerGroup|null>(null);
   const [showGlowPoints, setShowGlowPoints] = useState(false);
   const [showBlueHive, setShowBlueHive] = useState(false);
   const [blueHiveData, setBlueHiveData] = useState<any[]>([]);
@@ -1347,10 +1347,10 @@ export default function App() {
       myClinics: showMyClinicsLayer,
     };
   }, [showIndexedProviders, showBlueHive, showDentists, showMyClinicsLayer]);
-  const providerExplorerLayerRef = useRef<L.LayerGroup | null>(null);
-  const providerExplorerDensityLayerRef = useRef<L.LayerGroup | null>(null);
-  const providerExplorerLiveLayerRef = useRef<L.LayerGroup | null>(null);
-  const providerExplorerGapLayerRef = useRef<L.LayerGroup | null>(null);
+  const providerExplorerLayerRef = useRef<MapScene.LayerGroup | null>(null);
+  const providerExplorerDensityLayerRef = useRef<MapScene.LayerGroup | null>(null);
+  const providerExplorerLiveLayerRef = useRef<MapScene.LayerGroup | null>(null);
+  const providerExplorerGapLayerRef = useRef<MapScene.LayerGroup | null>(null);
   const providerExplorerRenderGenerationRef = useRef(0);
   const providerExplorerModeRef = useRef<ProviderExplorerMode>('density');
   const [providerExplorerFilters, setProviderExplorerFilters] = useState<ProviderExplorerFilters>(INITIAL_PROVIDER_EXPLORER_FILTERS);
@@ -1534,7 +1534,7 @@ export default function App() {
     if (dropCircleRef.current) { try { map.removeLayer(dropCircleRef.current); } catch {} }
     if (dropPinRef.current) { try { map.removeLayer(dropPinRef.current); } catch {} }
     const meters = Math.max(radiusMiles, 0.1) * 1609.34;
-    dropCircleRef.current = L.circle([lat, lng], {
+    dropCircleRef.current = MapScene.circle([lat, lng], {
       radius: meters,
       color: '#ef4444',
       weight: 2,
@@ -1543,8 +1543,8 @@ export default function App() {
       fillOpacity: 0.1,
       className: 'drop-radius-ring',
     }).addTo(map);
-    dropPinRef.current = L.marker([lat,lng], {
-      icon: L.divIcon({
+    dropPinRef.current = MapScene.marker([lat,lng], {
+      icon: MapScene.divIcon({
         className: '',
         html: '<div style="width:14px;height:14px;border-radius:50%;background:#ef4444;border:2px solid #fff;box-shadow:0 0 0 4px rgba(239,68,68,0.26),0 0 16px rgba(239,68,68,0.72);"></div>',
         iconSize:[14,14],
@@ -1666,7 +1666,7 @@ export default function App() {
   // ── Init Map ───────────────────────────────────────────────────────────────
   useEffect(()=>{
     if(mapRef.current||!mapDivRef.current) return;
-    const map = L.map(mapDivRef.current, {
+    const map = MapScene.map(mapDivRef.current, {
       center:[20,0],zoom:2,zoomControl:true,
       preferCanvas:true,
       attributionControl:false,
@@ -1675,22 +1675,22 @@ export default function App() {
     mapRef.current = map;
 
     // This logical map object is supplied by the temporary Mapbox-native
-    // compatibility facade. No Leaflet renderer is created; both visible 2D and
+    // compatibility facade. No secondary renderer is created; both visible 2D and
     // 3D surfaces are owned by Mapbox GL.
 
     // City layer
-    const cityLayer = L.layerGroup().addTo(map);
+    const cityLayer = MapScene.layerGroup().addTo(map);
     cityLayerRef.current = cityLayer;
 
     // Live layer
-    const liveGrp = L.layerGroup().addTo(map);
+    const liveGrp = MapScene.layerGroup().addTo(map);
     liveGrpRef.current = liveGrp;
 
     // Load GeoJSON only if US Diagnostics is already enabled
     if (showUsDiagnostics) loadStateGeo(map);
 
     // User-facing map tools consume Mapbox-native input directly. The temporary
-    // Leaflet-shaped facade remains only for legacy geometry/control APIs; Radius,
+    // scene facade remains only for legacy geometry/control APIs; Radius,
     // Coverage, and Live Finder no longer depend on its event bus.
     const onNativeMapClick = (rawEvent: Event) => {
       const detail = (rawEvent as CustomEvent<{ lat:number; lng:number; originalEvent?: Event }>).detail;
@@ -1784,25 +1784,25 @@ export default function App() {
     // features and popup metadata. Mutating an already-attached empty root can
     // leave the native source empty across browser engines.
     providerExplorerLayerRef.current?.remove();
-    const layer = L.layerGroup();
+    const layer = MapScene.layerGroup();
     const drawable = providers.filter((provider): provider is ProviderFeature & {lat:number; lng:number} => typeof provider.lat === 'number' && typeof provider.lng === 'number');
     drawable.slice(0,1000).forEach(provider=>{
       const style = providerCategoryStyle(provider);
       const location = [provider.address,provider.city,provider.admin_area,provider.country].filter(Boolean).join(', ');
-      L.circleMarker([provider.lat, provider.lng], { radius: 4, color: '#ffffff', weight: 1, fillColor: style.color, fillOpacity: 0.92, opacity: 0.95, className:'provider-point provider-point-glow' })
+      MapScene.circleMarker([provider.lat, provider.lng], { radius: 4, color: '#ffffff', weight: 1, fillColor: style.color, fillOpacity: 0.92, opacity: 0.95, className:'provider-point provider-point-glow' })
         .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>${escapeHtml(provider.source)} · ${escapeHtml(provider.source_kind)}<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/>${escapeHtml(location)}${provider.website ? `<br/><a href="${escapeHtml(provider.website)}" target="_blank" rel="noreferrer">Website</a>` : ''}`)
         .addTo(layer);
     });
     layer.addTo(map);
     providerExplorerLayerRef.current = layer;
-    if(fit && drawable.length) map.fitBounds(L.latLngBounds(drawable.map(provider=>[provider.lat,provider.lng] as [number,number])), { padding:[28,28], maxZoom: 11 });
+    if(fit && drawable.length) map.fitBounds(MapScene.latLngBounds(drawable.map(provider=>[provider.lat,provider.lng] as [number,number])), { padding:[28,28], maxZoom: 11 });
     return Math.min(drawable.length,1000);
   },[]);
 
   const drawProviderDensity = useCallback((cells: ProviderDensityCell[], mode: 'density'|'hex') => {
     const map = mapRef.current;
     if(!map) return 0;
-    if(!providerExplorerDensityLayerRef.current) providerExplorerDensityLayerRef.current = L.layerGroup().addTo(map);
+    if(!providerExplorerDensityLayerRef.current) providerExplorerDensityLayerRef.current = MapScene.layerGroup().addTo(map);
     const layer = providerExplorerDensityLayerRef.current;
     layer.clearLayers();
     const max = Math.max(1,...cells.map(cell=>Number(cell.count)||0));
@@ -1812,7 +1812,7 @@ export default function App() {
       const color = mode === 'hex' ? '#7c3aed' : '#0891b2';
       const pixelRadius = 10 + intensity * (mode === 'hex' ? 24 : 38);
       const field = mode === 'hex'
-        ? L.polygon(Array.from({length:6},(_,index)=>{
+        ? MapScene.polygon(Array.from({length:6},(_,index)=>{
             const center = map.project([cell.lat,cell.lng],map.getZoom());
             const angle = (Math.PI / 3) * index - Math.PI / 6;
             return map.unproject([center.x + Math.cos(angle) * pixelRadius,center.y + Math.sin(angle) * pixelRadius],map.getZoom());
@@ -1824,7 +1824,7 @@ export default function App() {
             opacity:0.42,
             className:'provider-density-field provider-hex-field',
           })
-        : L.circleMarker([cell.lat, cell.lng], {
+        : MapScene.circleMarker([cell.lat, cell.lng], {
             radius: pixelRadius,
             color,
             weight:0,
@@ -1842,7 +1842,7 @@ export default function App() {
   const drawProviderDotDensity = useCallback((cells: ProviderDensityCell[]) => {
     const map = mapRef.current;
     if(!map) return 0;
-    if(!providerExplorerDensityLayerRef.current) providerExplorerDensityLayerRef.current = L.layerGroup().addTo(map);
+    if(!providerExplorerDensityLayerRef.current) providerExplorerDensityLayerRef.current = MapScene.layerGroup().addTo(map);
     const layer = providerExplorerDensityLayerRef.current;
     layer.clearLayers();
     let rendered = 0;
@@ -1854,7 +1854,7 @@ export default function App() {
         const angle = (cellIndex * 0.73) + index * 2.399963;
         const distance = 3 + Math.sqrt(index + 1) * 4;
         const point = map.unproject([center.x + Math.cos(angle) * distance,center.y + Math.sin(angle) * distance],map.getZoom());
-        L.circleMarker(point, {
+        MapScene.circleMarker(point, {
           radius:2.25,
           stroke:false,
           fillColor:'#087f9a',
@@ -2002,7 +2002,7 @@ export default function App() {
   const renderProviderExplorerLiveLayer = useCallback(async () => {
     const map = mapRef.current;
     if(!map) return;
-    if(!providerExplorerLiveLayerRef.current) providerExplorerLiveLayerRef.current = L.layerGroup().addTo(map);
+    if(!providerExplorerLiveLayerRef.current) providerExplorerLiveLayerRef.current = MapScene.layerGroup().addTo(map);
     const layer = providerExplorerLiveLayerRef.current;
     layer.clearLayers();
     if(!providerExplorerLiveEnabled) return;
@@ -2010,7 +2010,7 @@ export default function App() {
     try { const resp = await fetch(`/api/provider-explorer/live?${providerExplorerParams({...providerExplorerFilters, includeLive:true}, 'live')}`); const data = await resp.json(); if(Array.isArray(data.providers) && data.providers.length) providers = data.providers as ProviderFeature[]; } catch {}
     providers.filter((provider): provider is ProviderFeature & {lat:number; lng:number}=>typeof provider.lat === 'number' && typeof provider.lng === 'number').slice(0,1000).forEach(provider=>{
       const style = providerCategoryStyle(provider);
-      const marker = L.circleMarker([provider.lat, provider.lng], { radius:4, color:'#ffffff', weight:1, fillColor:style.color, fillOpacity:.92, opacity:.95, className:'provider-point provider-point-glow' })
+      const marker = MapScene.circleMarker([provider.lat, provider.lng], { radius:4, color:'#ffffff', weight:1, fillColor:style.color, fillOpacity:.92, opacity:.95, className:'provider-point provider-point-glow' })
         .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>Live discovery · not stored<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/><button class="provider-popup-save" data-provider-id="${escapeHtml(provider.id)}">Save candidate</button>`)
         .addTo(layer);
       marker.on('popupopen', () => {
@@ -2029,7 +2029,7 @@ export default function App() {
   const compareProviderExplorerArea = useCallback(async (filters: ProviderExplorerFilters = providerExplorerFilters) => {
     const map = mapRef.current;
     if(!map) return;
-    if(!providerExplorerGapLayerRef.current) providerExplorerGapLayerRef.current = L.layerGroup().addTo(map);
+    if(!providerExplorerGapLayerRef.current) providerExplorerGapLayerRef.current = MapScene.layerGroup().addTo(map);
     const layer = providerExplorerGapLayerRef.current;
     layer.clearLayers();
     try {
@@ -2038,7 +2038,7 @@ export default function App() {
       const liveOnly = Array.isArray(data.live_only) ? data.live_only as ProviderFeature[] : [];
       liveOnly.filter((provider): provider is ProviderFeature & {lat:number; lng:number}=>typeof provider.lat === 'number' && typeof provider.lng === 'number').slice(0,500).forEach(provider=>{
         const style = providerCategoryStyle(provider);
-        L.circleMarker([provider.lat, provider.lng], { radius:4, color:'#ffffff', weight:1, fillColor:style.color, fillOpacity:.9, opacity:.98, className:'provider-point provider-point-gap' })
+        MapScene.circleMarker([provider.lat, provider.lng], { radius:4, color:'#ffffff', weight:1, fillColor:style.color, fillOpacity:.9, opacity:.98, className:'provider-point provider-point-gap' })
           .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>Live-only gap<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/>${escapeHtml(provider.match_reason || '')}`)
           .addTo(layer);
       });
@@ -2309,10 +2309,10 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[activeTool]);
 
-  const labelLayerRef = useRef<L.LayerGroup|null>(null);
+  const labelLayerRef = useRef<MapScene.LayerGroup|null>(null);
 
   // ── Load State GeoJSON ───────────────────────────────────────────────────
-  async function loadStateGeo(map:L.Map) {
+  async function loadStateGeo(map:MapScene.Map) {
     const urls = [
       '/states-10m.json',
       'https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json',
@@ -2328,7 +2328,7 @@ export default function App() {
           const id = String(f.properties.id||'').padStart(2,'0');
           f.properties.postal = FIPS2CODE[id]||NAME2CODE[(f.properties.name||'').toLowerCase()]||'';
         });
-        const stateGeo = L.geoJSON(gj,{
+        const stateGeo = MapScene.geoJSON(gj,{
           style:(f:any)=>sStyle(f?.properties?.postal||'',metric),
           onEachFeature:(f:any,layer:any)=>{
             const postal = f.properties.postal;
@@ -2336,7 +2336,7 @@ export default function App() {
               mouseover:(e:any)=>{ e.target.setStyle({weight:2,opacity:0.9}); },
               mouseout:(e:any)=>{ e.target.setStyle(sStyle(postal, metricRef.current)); },
               click:(e:any)=>{
-                L.popup({maxWidth:340,className:''})
+                MapScene.popup({maxWidth:340,className:''})
                   .setLatLng(e.latlng)
                   .setContent(buildStatePopup(postal))
                   .openOn(map);
@@ -2362,7 +2362,7 @@ export default function App() {
     }
   }
 
-  function sStyle(postal:string,m:string):L.PathOptions {
+  function sStyle(postal:string,m:string):MapScene.PathOptions {
     const d=SD[postal];
     if(!d) return{fillColor:'#0a1830',fillOpacity:0.38,weight:1,color:'rgba(99,179,237,0.15)',opacity:0.6};
     if(!showStateColorsRef.current) return {fillColor:'#11243f',fillOpacity:0.12,weight:1,color:'rgba(161,209,255,0.25)',opacity:0.8};
@@ -2489,8 +2489,8 @@ export default function App() {
     }
   }
 
-  function buildStateLabels(map:L.Map,stateGeo:L.GeoJSON) {
-    const labelGrp = L.layerGroup();
+  function buildStateLabels(map:MapScene.Map,stateGeo:MapScene.GeoJSON) {
+    const labelGrp = MapScene.layerGroup();
     stateGeo.eachLayer((layer:any)=>{
       const props = layer.feature?.properties;
       if(!props) return;
@@ -2498,12 +2498,12 @@ export default function App() {
       if(!postal) return;
       const rawCtr = layer.getBounds().getCenter();
       const [lat,lng] = STATE_CTR[postal]||[rawCtr.lat,rawCtr.lng];
-      const icon = L.divIcon({
+      const icon = MapScene.divIcon({
         className:'',
         html:`<div style="font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;color:#8aa4c4;text-shadow:0 1px 4px rgba(0,0,0,0.9),0 0 8px rgba(0,0,0,0.7);pointer-events:none;white-space:nowrap;letter-spacing:0.5px;">${postal}</div>`,
         iconSize:[0,0],iconAnchor:[10,7]
       });
-      const mk = L.marker([lat,lng],{icon,interactive:false,zIndexOffset:200});
+      const mk = MapScene.marker([lat,lng],{icon,interactive:false,zIndexOffset:200});
       labelGrp.addLayer(mk);
     });
     labelLayerRef.current = labelGrp;
@@ -2523,13 +2523,13 @@ export default function App() {
     }
     const features = rawStateFeaturesRef.current;
     if (!features.length) return;
-    const layers: L.Layer[] = [];
+    const layers: MapScene.Layer[] = [];
     features.forEach((f: any) => {
       const postal = f.properties?.postal;
       const pop = STATE_POP[postal];
       if (!pop) return;
       const color = densityColor(pop.density);
-      const lyr = L.geoJSON(f, {
+      const lyr = MapScene.geoJSON(f, {
         style: { fillColor: color, fillOpacity: 0.55, weight: 1, color: color, opacity: 0.6 },
       });
       lyr.bindTooltip(()=>{
@@ -2542,7 +2542,7 @@ export default function App() {
       },{sticky:true,direction:'top'});
       layers.push(lyr);
     });
-    const grp = L.layerGroup(layers).addTo(map);
+    const grp = MapScene.layerGroup(layers).addTo(map);
     popDensityLayerRef.current = grp;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[showPopDensity, stateGeoRevision]);
@@ -2553,11 +2553,11 @@ export default function App() {
     if (!map) return;
     if (clinicLayerRef.current) { map.removeLayer(clinicLayerRef.current); clinicLayerRef.current = null; }
     if (!showUploadedClinics || uploadedClinics.length===0) return;
-    const grp = L.layerGroup();
+    const grp = MapScene.layerGroup();
     uploadedClinics.forEach((c)=>{
       if (c.lat===null || c.lng===null) return;
       const col = c.color || '#f472b6';
-      const mk = L.circleMarker([c.lat, c.lng], {
+      const mk = MapScene.circleMarker([c.lat, c.lng], {
         radius:4,
         color:'#ffffff',
         weight:1,
@@ -2784,10 +2784,10 @@ export default function App() {
       savedRadiusLayerRef.current = null;
     }
     if(!savedRadii.length) return;
-    const grp = L.layerGroup();
+    const grp = MapScene.layerGroup();
     savedRadii.forEach((r, idx)=>{
       // Glow circle with colored ring
-      const circEl = L.circle([r.lat,r.lng],{
+      const circEl = MapScene.circle([r.lat,r.lng],{
         radius: Math.max(r.radiusMiles,0.1)*1609.34,
         color: r.color,
         weight: 2.5,
@@ -2803,8 +2803,8 @@ export default function App() {
         <div style="background:rgba(4,10,24,0.85);border:1.5px solid ${r.color};border-radius:8px;padding:2px 7px;font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;color:${r.color};white-space:nowrap;${showGlowPoints?`box-shadow:0 0 10px ${r.color}66,0 0 22px ${r.color}33;`:''}">${r.label||`Marker ${idx+1}`}</div>
         <div style="width:12px;height:12px;border-radius:50%;background:${r.color};border:2px solid #fff;${showGlowPoints?`box-shadow:0 0 0 3px ${r.color}55,0 0 16px ${r.color}bb;`:'box-shadow:0 0 0 2px rgba(255,255,255,0.5);'}"></div>
       </div>`;
-      L.marker([r.lat,r.lng],{
-        icon:L.divIcon({
+      MapScene.marker([r.lat,r.lng],{
+        icon:MapScene.divIcon({
           className:'',
           html:labelHtml,
           iconSize:[80,40],iconAnchor:[40,40],
@@ -2844,12 +2844,12 @@ export default function App() {
       // Scale dot by tier: 1=major metro large, 2=mid, 3/4=small
       const r = tier===1?9:tier===2?6:tier===3?4:3;
       const borderW = tier<=2 ? 2 : 1.5;
-      const icon = L.divIcon({
+      const icon = MapScene.divIcon({
         className:'',
         html:`<div style="width:${r*2}px;height:${r*2}px;border-radius:50%;background:${col};border:${borderW}px solid rgba(255,255,255,${tier===1?0.8:0.5});${showGlowPoints?`box-shadow:0 0 ${r+4}px ${col}55,0 1px 4px rgba(0,0,0,0.6);`:'box-shadow:0 0 0 1px rgba(255,255,255,0.2);'}cursor:pointer;"></div>`,
         iconSize:[r*2,r*2],iconAnchor:[r,r]
       });
-      const mk = L.marker([lat,lng],{icon,zIndexOffset:tier===1?300:tier===2?200:tier===3?100:50});
+      const mk = MapScene.marker([lat,lng],{icon,zIndexOffset:tier===1?300:tier===2?200:tier===3?100:50});
       mk.bindPopup(()=>buildCityPopup(loc,metricRef.current),{maxWidth:320,className:''});
       mk.bindTooltip(()=>`<div style="padding:5px 8px;font-family:'IBM Plex Mono',monospace">
         <span style="font-weight:700;color:#eef4ff">${name}, ${state}</span><br>
@@ -2870,7 +2870,7 @@ export default function App() {
     }
     if(tzLayerRef.current) return;
     if(!stateGeoRef.current) return;
-    const layers:L.Layer[]=[];
+    const layers:MapScene.Layer[]=[];
     const labelDone:Record<string,boolean>={};
     stateGeoRef.current.eachLayer((layer:any)=>{
       const props=layer.feature?.properties;
@@ -2879,7 +2879,7 @@ export default function App() {
       const tzIdx=(STATE_TZ as any)[postal];
       if(tzIdx===undefined) return;
       const info=TZ_INFO[tzIdx];
-      const poly=L.geoJSON(layer.feature,{
+      const poly=MapScene.geoJSON(layer.feature,{
         style:{color:info.color,weight:1.2,opacity:0.7,fillColor:info.color,fillOpacity:0.16},
         interactive:true
       });
@@ -2887,15 +2887,15 @@ export default function App() {
       layers.push(poly);
       const rawCtr=layer.getBounds().getCenter();
       const [lat,lng]=STATE_CTR[postal]||[rawCtr.lat,rawCtr.lng];
-      const stateIcon=L.divIcon({className:'',html:`<div style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;color:${info.color};text-shadow:0 0 6px rgba(0,0,0,0.9),0 1px 3px rgba(0,0,0,0.9);pointer-events:none;white-space:nowrap;letter-spacing:0.5px;">${postal}</div>`,iconSize:[0,0],iconAnchor:[10,7]});
-      layers.push(L.marker([lat,lng],{icon:stateIcon,interactive:false,zIndexOffset:200}));
+      const stateIcon=MapScene.divIcon({className:'',html:`<div style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;color:${info.color};text-shadow:0 0 6px rgba(0,0,0,0.9),0 1px 3px rgba(0,0,0,0.9);pointer-events:none;white-space:nowrap;letter-spacing:0.5px;">${postal}</div>`,iconSize:[0,0],iconAnchor:[10,7]});
+      layers.push(MapScene.marker([lat,lng],{icon:stateIcon,interactive:false,zIndexOffset:200}));
       if(!labelDone[info.abbr]&&info.abbr!=='AK'&&info.abbr!=='HI') {
         labelDone[info.abbr]=true;
-        const bigIcon=L.divIcon({className:'',html:`<div style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:700;color:${info.color};text-shadow:0 0 14px ${info.color},0 1px 6px rgba(0,0,0,0.95);letter-spacing:3px;pointer-events:none;white-space:nowrap;padding:2px 8px;border-radius:3px;background:rgba(4,12,26,0.55);border:1px solid ${info.color}44;">${info.abbr}</div>`,iconSize:[0,0],iconAnchor:[-4,10]});
-        layers.push(L.marker([info.labelLat,info.labelLng],{icon:bigIcon,interactive:false,zIndexOffset:-500}));
+        const bigIcon=MapScene.divIcon({className:'',html:`<div style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:700;color:${info.color};text-shadow:0 0 14px ${info.color},0 1px 6px rgba(0,0,0,0.95);letter-spacing:3px;pointer-events:none;white-space:nowrap;padding:2px 8px;border-radius:3px;background:rgba(4,12,26,0.55);border:1px solid ${info.color}44;">${info.abbr}</div>`,iconSize:[0,0],iconAnchor:[-4,10]});
+        layers.push(MapScene.marker([info.labelLat,info.labelLng],{icon:bigIcon,interactive:false,zIndexOffset:-500}));
       }
     });
-    tzLayerRef.current=L.layerGroup(layers).addTo(map);
+    tzLayerRef.current=MapScene.layerGroup(layers).addTo(map);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[showTZ, stateGeoRevision]);
 
@@ -2925,9 +2925,9 @@ export default function App() {
       try{ map.removeLayer(radiusCircleRef.current); }catch(e){}
       radiusCircleRef.current=null;
     }
-    const circle=L.circle([lat,lng],{radius:70*1609.34,color:'#00d4ff',opacity:1,weight:3,dashArray:'10 6',fillColor:'#00d4ff',fillOpacity:0.07,interactive:false}).addTo(map);
-    const lbl=L.marker([lat,lng],{
-      icon:L.divIcon({className:'',html:`<div style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;color:#00d4ff;white-space:nowrap;pointer-events:none;margin-top:-26px;margin-left:8px;text-shadow:0 0 8px rgba(0,212,255,0.8),0 1px 4px rgba(0,0,0,0.9)">70mi radius</div>`,iconSize:[0,0]}),
+    const circle=MapScene.circle([lat,lng],{radius:70*1609.34,color:'#00d4ff',opacity:1,weight:3,dashArray:'10 6',fillColor:'#00d4ff',fillOpacity:0.07,interactive:false}).addTo(map);
+    const lbl=MapScene.marker([lat,lng],{
+      icon:MapScene.divIcon({className:'',html:`<div style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;color:#00d4ff;white-space:nowrap;pointer-events:none;margin-top:-26px;margin-left:8px;text-shadow:0 0 8px rgba(0,212,255,0.8),0 1px 4px rgba(0,0,0,0.9)">70mi radius</div>`,iconSize:[0,0]}),
       interactive:false,zIndexOffset:-100
     }).addTo(map);
     (circle as any)._label=lbl;
@@ -3132,8 +3132,8 @@ export default function App() {
     const map=mapRef.current;
     if(!map) return;
     if(customPinRef.current) map.removeLayer(customPinRef.current);
-    const icon=L.divIcon({className:'',html:`<div style="position:relative;width:28px;height:28px;"><div style="width:20px;height:20px;border-radius:50% 50% 50% 0;background:${color};border:2px solid white;transform:rotate(-45deg);box-shadow:0 2px 8px rgba(0,0,0,0.5);position:absolute;top:0;left:4px;"></div><div style="width:6px;height:6px;border-radius:50%;background:white;position:absolute;top:6px;left:11px;z-index:2;"></div></div>`,iconSize:[28,28],iconAnchor:[14,24]});
-    const mk=L.marker([lat,lng],{icon}).addTo(map);
+    const icon=MapScene.divIcon({className:'',html:`<div style="position:relative;width:28px;height:28px;"><div style="width:20px;height:20px;border-radius:50% 50% 50% 0;background:${color};border:2px solid white;transform:rotate(-45deg);box-shadow:0 2px 8px rgba(0,0,0,0.5);position:absolute;top:0;left:4px;"></div><div style="width:6px;height:6px;border-radius:50%;background:white;position:absolute;top:6px;left:11px;z-index:2;"></div></div>`,iconSize:[28,28],iconAnchor:[14,24]});
+    const mk=MapScene.marker([lat,lng],{icon}).addTo(map);
     mk.bindTooltip(`<div style="padding:5px 8px;font-size:11px;font-weight:600;color:#eef4ff">${label}</div>`,{permanent:false});
     customPinRef.current=mk;
   }
@@ -3143,7 +3143,7 @@ export default function App() {
     if(!map) return;
     map.flyTo([lat,lng],9,{duration:1.2});
     drawRadiusCircle(lat,lng);
-    L.popup({closeButton:true,maxWidth:240})
+    MapScene.popup({closeButton:true,maxWidth:240})
       .setLatLng([lat,lng])
       .setContent(`<div style="font-family:'Inter',sans-serif;padding:4px 2px"><div style="font-size:13px;font-weight:700;color:#cdd9f0">${name}, ${state}</div><div style="font-size:10px;color:#3d5478;margin-top:2px">${MLBL[examKey]}: <span style="color:${DCOL[score]};font-weight:600">${DLBL[score]}</span></div></div>`)
       .openOn(map);
@@ -3327,8 +3327,8 @@ export default function App() {
 
     if(liveCircleRef.current) { try{map.removeLayer(liveCircleRef.current);}catch(e){} }
     if(livePinRef.current) { try{map.removeLayer(livePinRef.current);}catch(e){} }
-    liveCircleRef.current=L.circle([lat,lng],{radius:liveRadius*1609.34,color:'#22d3ee',weight:1.5,opacity:0.45,dashArray:'7 5',fillColor:'#06b6d4',fillOpacity:0.03,interactive:false}).addTo(map);
-    livePinRef.current=L.marker([lat,lng],{icon:L.divIcon({className:'',html:'<div style="width:14px;height:14px;border-radius:50%;background:#06b6d4;border:2.5px solid #fff;box-shadow:0 0 0 4px rgba(6,182,212,0.28),0 0 14px rgba(6,182,212,0.6);"></div>',iconSize:[14,14],iconAnchor:[7,7]}),zIndexOffset:3000,interactive:false}).addTo(map);
+    liveCircleRef.current=MapScene.circle([lat,lng],{radius:liveRadius*1609.34,color:'#22d3ee',weight:1.5,opacity:0.45,dashArray:'7 5',fillColor:'#06b6d4',fillOpacity:0.03,interactive:false}).addTo(map);
+    livePinRef.current=MapScene.marker([lat,lng],{icon:MapScene.divIcon({className:'',html:'<div style="width:14px;height:14px;border-radius:50%;background:#06b6d4;border:2.5px solid #fff;box-shadow:0 0 0 4px rgba(6,182,212,0.28),0 0 14px rgba(6,182,212,0.6);"></div>',iconSize:[14,14],iconAnchor:[7,7]}),zIndexOffset:3000,interactive:false}).addTo(map);
 
     try {
     const backendParams=new URLSearchParams({
@@ -3592,7 +3592,7 @@ export default function App() {
       if((p as any).coordinateStatus==='unverified') return;
       const lat=p.lat;
       const lng=p.lng;
-      const mk=L.circleMarker([lat,lng],{
+      const mk=MapScene.circleMarker([lat,lng],{
         radius:4,
         color:'#ffffff',
         weight:1,
@@ -3639,7 +3639,7 @@ export default function App() {
     markerRows.forEach((r:any)=>{
       const c=CATS[r.cat]||CATS.clinic;
       const gmUrl=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name+(r.addr?' '+r.addr:''))}`;
-      const mk=L.circleMarker([r.lat,r.lng],{radius:4,color:'#ffffff',weight:1,fillColor:c.col,fillOpacity:.92,opacity:.98,className:showGlowPoints?'provider-point provider-point-glow':'provider-point'});
+      const mk=MapScene.circleMarker([r.lat,r.lng],{radius:4,color:'#ffffff',weight:1,fillColor:c.col,fillOpacity:.92,opacity:.98,className:showGlowPoints?'provider-point provider-point-glow':'provider-point'});
       mk.bindTooltip(c.lbl,{direction:'top',offset:[0,-5]});
       mk.bindPopup(`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:190px;">
         <div style="margin-bottom:6px;"><div style="font-size:12.5px;font-weight:700;color:#e2f0ff;line-height:1.3">${r.name}</div>
@@ -3726,8 +3726,8 @@ export default function App() {
     setAddrSuggestions([]);
     // Drop a temporary "you are here" pin
     if (customPinRef.current) { try { map.removeLayer(customPinRef.current); } catch {} }
-    customPinRef.current = L.marker([lLat, lLng], {
-      icon: L.divIcon({
+    customPinRef.current = MapScene.marker([lLat, lLng], {
+      icon: MapScene.divIcon({
         className: '',
         html: `<div style="width:16px;height:16px;border-radius:50%;background:#7bd7ff;border:2.5px solid #fff;box-shadow:0 0 0 4px rgba(123,215,255,0.30),0 0 18px rgba(123,215,255,0.8);"></div>`,
         iconSize:[16,16], iconAnchor:[8,8]

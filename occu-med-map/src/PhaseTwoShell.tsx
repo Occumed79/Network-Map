@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import L from 'leaflet';
+import MapScene from "./mapSceneRuntime";
 import { ChevronLeft, ChevronRight, Layers3, ListFilter, LocateFixed, RefreshCw, Search, X } from 'lucide-react';
 import type { ProviderFeature } from './DatasetBrowser';
 import type { PhaseTwoMapSnapshot } from './phaseTwoMapBridge';
@@ -152,7 +152,7 @@ export default function PhaseTwoShell({ children }: PhaseTwoShellProps) {
   const [warning, setWarning] = useState('');
   const [loading, setLoading] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
-  const overlayRef = useRef<L.LayerGroup | null>(null);
+  const overlayRef = useRef<MapScene.LayerGroup | null>(null);
   const requestRef = useRef<AbortController | null>(null);
   const refreshTimerRef = useRef<number | null>(null);
 
@@ -178,18 +178,18 @@ export default function PhaseTwoShell({ children }: PhaseTwoShellProps) {
     setStatus(nextStatus);
   }, [clearOverlay]);
 
-  const installOverlay = useCallback((layers: L.Layer[]) => {
+  const installOverlay = useCallback((layers: MapScene.Layer[]) => {
     const map = window.__occumedPhaseTwoMap;
     if (!map) return;
     clearOverlay();
-    overlayRef.current = L.layerGroup(layers).addTo(map);
+    overlayRef.current = MapScene.layerGroup(layers).addTo(map);
   }, [clearOverlay]);
 
   const drawPins = useCallback((rows: ProviderFeature[]) => {
-    const renderer = L.canvas({ padding: 0.5 });
+    const renderer = MapScene.canvas({ padding: 0.5 });
     const layers = rows.filter(validCoordinate).map((provider) => {
       const color = sourceColor(provider.source, provider.source_kind);
-      const marker = L.circleMarker([provider.lat, provider.lng], {
+      const marker = MapScene.circleMarker([provider.lat, provider.lng], {
         renderer,
         radius: 4,
         weight: 1,
@@ -206,12 +206,12 @@ export default function PhaseTwoShell({ children }: PhaseTwoShellProps) {
   }, [installOverlay]);
 
   const drawDensity = useCallback((cells: Array<{ lat: number; lng: number; count: number }>) => {
-    const renderer = L.canvas({ padding: 0.5 });
+    const renderer = MapScene.canvas({ padding: 0.5 });
     const layers = cells
       .filter((cell) => Number.isFinite(cell.lat) && Number.isFinite(cell.lng) && cell.count > 0)
       .map((cell) => {
         const radius = Math.max(5, Math.min(32, 4 + Math.log2(cell.count + 1) * 3));
-        const marker = L.circleMarker([cell.lat, cell.lng], {
+        const marker = MapScene.circleMarker([cell.lat, cell.lng], {
           renderer,
           radius,
           weight: 0,
@@ -226,13 +226,13 @@ export default function PhaseTwoShell({ children }: PhaseTwoShellProps) {
   }, [installOverlay]);
 
   const drawGrid = useCallback((cells: Array<{ lat: number; lng: number; count: number }>, precision: number) => {
-    const renderer = L.canvas({ padding: 0.5 });
+    const renderer = MapScene.canvas({ padding: 0.5 });
     const maxCount = Math.max(1, ...cells.map((cell) => cell.count));
     const layers = cells
       .filter((cell) => Number.isFinite(cell.lat) && Number.isFinite(cell.lng) && cell.count > 0)
       .map((cell) => {
         const ratio = Math.log1p(cell.count) / Math.log1p(maxCount);
-        const rectangle = L.rectangle(gridCellBounds(cell.lat, cell.lng, precision), {
+        const rectangle = MapScene.rectangle(gridCellBounds(cell.lat, cell.lng, precision), {
           renderer,
           color: '#c4b5fd',
           weight: 0.6,

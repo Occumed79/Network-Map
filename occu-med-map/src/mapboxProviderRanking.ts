@@ -1,14 +1,14 @@
-import L from "leaflet";
-import { registerLeafletMapInitializer } from "./leafletMapLifecycleRuntime";
+import MapScene from "./mapSceneRuntime";
+import { registerMapSceneInitializer } from "./mapSceneLifecycleRuntime";
 import { hasMapboxToken, mapboxDirections, mapboxReverseGeocode } from "./mapboxServices";
 
 type Point = { lat: number; lng: number; label?: string };
-type Candidate = Point & { layer: L.Layer; straightMiles: number; name: string };
+type Candidate = Point & { layer: MapScene.Layer; straightMiles: number; name: string };
 type RankedCandidate = Candidate & { driveMiles: number; driveMinutes: number; coordinates: Array<[number, number]> };
 
 let installed = false;
 let origin: Point | null = null;
-let rankLayer: L.LayerGroup | null = null;
+let rankLayer: MapScene.LayerGroup | null = null;
 let statusNode: HTMLDivElement | null = null;
 let resultsNode: HTMLDivElement | null = null;
 let latestRankings: RankedCandidate[] = [];
@@ -27,9 +27,9 @@ function setStatus(text: string): void {
   if (statusNode) statusNode.textContent = text;
 }
 
-function markerLabel(layer: L.Layer, fallback: string): string {
-  const tooltip = (layer as L.Marker).getTooltip?.();
-  const popup = (layer as L.Marker).getPopup?.();
+function markerLabel(layer: MapScene.Layer, fallback: string): string {
+  const tooltip = (layer as MapScene.Marker).getTooltip?.();
+  const popup = (layer as MapScene.Marker).getPopup?.();
   const tooltipContent = tooltip?.getContent?.();
   const popupContent = popup?.getContent?.();
   const raw = typeof tooltipContent === "string" ? tooltipContent : typeof popupContent === "string" ? popupContent : fallback;
@@ -37,11 +37,11 @@ function markerLabel(layer: L.Layer, fallback: string): string {
   return stripped.slice(0, 70) || fallback;
 }
 
-function collectVisibleCandidates(map: L.Map, currentOrigin: Point): Candidate[] {
+function collectVisibleCandidates(map: MapScene.Map, currentOrigin: Point): Candidate[] {
   const bounds = map.getBounds().pad(0.1);
   const rows: Candidate[] = [];
-  map.eachLayer((layer: L.Layer) => {
-    const maybeMarker = layer as L.Marker & { getLatLng?: () => L.LatLng };
+  map.eachLayer((layer: MapScene.Layer) => {
+    const maybeMarker = layer as MapScene.Marker & { getLatLng?: () => MapScene.LatLng };
     if (typeof maybeMarker.getLatLng !== "function") return;
     const latLng = maybeMarker.getLatLng();
     if (!bounds.contains(latLng)) return;
@@ -53,7 +53,7 @@ function collectVisibleCandidates(map: L.Map, currentOrigin: Point): Candidate[]
   return rows.sort((a, b) => a.straightMiles - b.straightMiles).slice(0, 8);
 }
 
-function clearRanking(map: L.Map): void {
+function clearRanking(map: MapScene.Map): void {
   latestRankings = [];
   if (rankLayer) {
     map.removeLayer(rankLayer);
@@ -63,11 +63,11 @@ function clearRanking(map: L.Map): void {
   setStatus("ETA ranking cleared.");
 }
 
-function drawRankedRoute(map: L.Map, row: RankedCandidate): void {
+function drawRankedRoute(map: MapScene.Map, row: RankedCandidate): void {
   if (rankLayer) map.removeLayer(rankLayer);
-  const line = L.polyline(row.coordinates, { color: "#7c3aed", weight: 5, opacity: 0.86 });
-  const end = L.circleMarker([row.lat, row.lng], { radius: 6, color: "#4c1d95", fillColor: "#ffffff", fillOpacity: 1, weight: 2 });
-  rankLayer = L.layerGroup([line, end]).addTo(map);
+  const line = MapScene.polyline(row.coordinates, { color: "#7c3aed", weight: 5, opacity: 0.86 });
+  const end = MapScene.circleMarker([row.lat, row.lng], { radius: 6, color: "#4c1d95", fillColor: "#ffffff", fillOpacity: 1, weight: 2 });
+  rankLayer = MapScene.layerGroup([line, end]).addTo(map);
   map.fitBounds(line.getBounds(), { padding: [38, 38] });
   setStatus(`${row.name}: ${Math.round(row.driveMinutes)} min / ${row.driveMiles.toFixed(1)} mi`);
 }
@@ -92,7 +92,7 @@ async function copyRanking(): Promise<void> {
   }
 }
 
-function renderRankings(map: L.Map, rankings: RankedCandidate[]): void {
+function renderRankings(map: MapScene.Map, rankings: RankedCandidate[]): void {
   if (!resultsNode) return;
   resultsNode.innerHTML = "";
   rankings.forEach((row, index) => {
@@ -113,7 +113,7 @@ function renderRankings(map: L.Map, rankings: RankedCandidate[]): void {
   });
 }
 
-async function rankVisibleProviders(map: L.Map): Promise<void> {
+async function rankVisibleProviders(map: MapScene.Map): Promise<void> {
   const currentOrigin = origin;
   if (!currentOrigin) {
     setStatus("Click the map to set an origin first.");
@@ -144,12 +144,12 @@ async function rankVisibleProviders(map: L.Map): Promise<void> {
   setStatus(`Ranked ${ranked.length} routed pins. Click a row to draw the route.`);
 }
 
-function addRankingControl(map: L.Map): void {
-  const control = new L.Control({ position: "bottomleft" });
+function addRankingControl(map: MapScene.Map): void {
+  const control = new MapScene.Control({ position: "bottomleft" });
   control.onAdd = () => {
-    const box = L.DomUtil.create("div", "occumed-eta-ranking");
-    L.DomEvent.disableClickPropagation(box);
-    L.DomEvent.disableScrollPropagation(box);
+    const box = MapScene.DomUtil.create("div", "occumed-eta-ranking");
+    MapScene.DomEvent.disableClickPropagation(box);
+    MapScene.DomEvent.disableScrollPropagation(box);
 
     const title = document.createElement("div");
     title.className = "occumed-basemap-title";
@@ -188,9 +188,9 @@ function addRankingControl(map: L.Map): void {
   control.addTo(map);
 }
 
-function installOnMap(map: L.Map): void {
+function installOnMap(map: MapScene.Map): void {
   addRankingControl(map);
-  map.on("click", async (event: L.LeafletMouseEvent) => {
+  map.on("click", async (event: MapScene.MapPointerEvent) => {
     const point = { lat: event.latlng.lat, lng: event.latlng.lng };
     try {
       const place = await mapboxReverseGeocode(point);
@@ -206,7 +206,7 @@ function installOnMap(map: L.Map): void {
 export function installMapboxProviderRanking(): void {
   if (installed || !hasMapboxToken()) return;
   installed = true;
-  registerLeafletMapInitializer({
+  registerMapSceneInitializer({
     id: "mapbox-provider-ranking",
     priority: 80,
     initialize: (map) => { window.setTimeout(() => installOnMap(map), 0); },

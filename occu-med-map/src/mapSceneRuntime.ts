@@ -3,22 +3,17 @@ import { getTrackedMapboxMaps, registerMapboxMapInitializer } from "./mapboxMapL
 import { wasCompatibilityClickHandled } from "./mapboxCompatInteractionRuntime";
 
 /*
- * TEMPORARY MIGRATION FACADE
+ * MAPBOX SCENE RUNTIME
  * --------------------------
- * Network Map was born as a Leaflet app, then Mapbox GL became the visible 2D
- * and 3D renderer. This module preserves the small Leaflet-shaped API surface
- * still used by legacy application code while rendering every geometry through
- * native Mapbox GL sources/layers/markers. It is NOT Leaflet and it does not
- * create a hidden map renderer.
- *
- * The facade exists so we can remove the Leaflet runtime immediately without a
- * risky 5k-line App.tsx rewrite. Call sites can then be migrated incrementally
- * to direct Mapbox APIs and this file can ultimately disappear as well.
+ * This internal scene runtime is backed entirely by Mapbox GL. It owns temporary
+ * scene/layer helpers used while the remaining call sites are converted to direct
+ * Mapbox sources, layers, markers, popups, and camera APIs. It never creates a
+ * second renderer.
  */
 
 let nextId = 1;
-const allLayers = new globalThis.Map<number, L.Layer>();
-const logicalMaps = new Set<L.Map>();
+const allLayers = new globalThis.Map<number, MapScene.Layer>();
+const logicalMaps = new Set<MapScene.Map>();
 const boundLayerEvents = new WeakMap<mapboxgl.Map, Set<string>>();
 
 function uid(prefix: string): string {
@@ -50,10 +45,10 @@ function eachNativeMap(callback: (map: mapboxgl.Map) => void): void {
   for (const map of getTrackedMapboxMaps()) callback(map);
 }
 
-function normalizeLatLng(value: L.LatLngExpression): L.LatLng {
-  if (value instanceof L.LatLng) return value;
-  if (Array.isArray(value)) return new L.LatLng(Number(value[0]), Number(value[1]));
-  return new L.LatLng(Number((value as any).lat), Number((value as any).lng ?? (value as any).lon));
+function normalizeLatLng(value: MapScene.LatLngExpression): MapScene.LatLng {
+  if (value instanceof MapScene.LatLng) return value;
+  if (Array.isArray(value)) return new MapScene.LatLng(Number(value[0]), Number(value[1]));
+  return new MapScene.LatLng(Number((value as any).lat), Number((value as any).lng ?? (value as any).lon));
 }
 
 function flattenCoordinates(value: unknown, output: Array<[number, number]>): void {
@@ -65,20 +60,20 @@ function flattenCoordinates(value: unknown, output: Array<[number, number]>): vo
   for (const child of value) flattenCoordinates(child, output);
 }
 
-function boundsFromGeoJSON(geojson: GeoJSON.GeoJSON): L.LatLngBounds {
+function boundsFromGeoJSON(geojson: GeoJSON.GeoJSON): MapScene.LatLngBounds {
   const points: Array<[number, number]> = [];
   if ((geojson as any).coordinates) flattenCoordinates((geojson as any).coordinates, points);
   if (geojson.type === "Feature") flattenCoordinates((geojson.geometry as any)?.coordinates, points);
   if (geojson.type === "FeatureCollection") {
     for (const feature of geojson.features) flattenCoordinates((feature.geometry as any)?.coordinates, points);
   }
-  if (!points.length) return new L.LatLngBounds([-85, -180], [85, 180]);
+  if (!points.length) return new MapScene.LatLngBounds([-85, -180], [85, 180]);
   let south = 90, north = -90, west = 180, east = -180;
   for (const [lng, lat] of points) {
     south = Math.min(south, lat); north = Math.max(north, lat);
     west = Math.min(west, lng); east = Math.max(east, lng);
   }
-  return new L.LatLngBounds([south, west], [north, east]);
+  return new MapScene.LatLngBounds([south, west], [north, east]);
 }
 
 function geodesicCircle(lat: number, lng: number, radiusMeters: number): GeoJSON.Polygon {
@@ -115,13 +110,13 @@ function styleProperties(options: Record<string, any> = {}): Record<string, unkn
   };
 }
 
-function layerFeature(layer: L.Layer): GeoJSON.Feature | null {
+function layerFeature(layer: MapScene.Layer): GeoJSON.Feature | null {
   return layer.toGeoJSON?.() as GeoJSON.Feature | null;
 }
 
-function sourceIds(layer: L.Layer) {
+function sourceIds(layer: MapScene.Layer) {
   const root = layer.renderRoot();
-  const stem = `leaflet-compat-${root._leaflet_id}`;
+  const stem = `map-scene-${root._scene_id}`;
   return {
     source: `${stem}-source`,
     fill: `${stem}-fills`,
@@ -137,21 +132,21 @@ function safeRemoveMapboxSource(map: mapboxgl.Map, id: string): void {
   try { if (map.getSource(id)) map.removeSource(id); } catch {}
 }
 
-function featureCollectionForRoot(root: L.Layer): GeoJSON.FeatureCollection {
+function featureCollectionForRoot(root: MapScene.Layer): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
-  const add = (layer: L.Layer) => {
-    if (layer instanceof L.LayerGroup) {
+  const add = (layer: MapScene.Layer) => {
+    if (layer instanceof MapScene.LayerGroup) {
       layer.eachLayer((child) => add(child));
       return;
     }
-    if (layer instanceof L.Marker && !(layer instanceof L.CircleMarker)) return;
+    if (layer instanceof MapScene.Marker && !(layer instanceof MapScene.CircleMarker)) return;
     const feature = layerFeature(layer);
     if (!feature) return;
     const style = styleProperties((layer as any).options || {});
     feature.properties = {
       ...(feature.properties || {}),
       ...style,
-      __compatLayerId: layer._leaflet_id,
+      __compatLayerId: layer._scene_id,
       __popupHtml: layer.getPopup?.()?.getContent?.() || "",
       __tooltipHtml: layer.getTooltip?.()?.getContent?.() || "",
     };
@@ -161,7 +156,7 @@ function featureCollectionForRoot(root: L.Layer): GeoJSON.FeatureCollection {
   return { type: "FeatureCollection", features };
 }
 
-function bindSourceInteractions(map: mapboxgl.Map, root: L.Layer): void {
+function bindSourceInteractions(map: mapboxgl.Map, root: MapScene.Layer): void {
   const ids = sourceIds(root);
   let set = boundLayerEvents.get(map);
   if (!set) { set = new Set(); boundLayerEvents.set(map, set); }
@@ -174,7 +169,7 @@ function bindSourceInteractions(map: mapboxgl.Map, root: L.Layer): void {
       const layer = allLayers.get(id);
       if (!layer || (layer as any).options?.interactive === false) return;
       layer.fire("click", {
-        latlng: new L.LatLng(event.lngLat.lat, event.lngLat.lng),
+        latlng: new MapScene.LatLng(event.lngLat.lat, event.lngLat.lng),
         originalEvent: event.originalEvent,
         target: layer,
       });
@@ -190,7 +185,7 @@ function bindSourceInteractions(map: mapboxgl.Map, root: L.Layer): void {
       const id = Number(feature?.properties?.__compatLayerId || 0);
       const layer = allLayers.get(id);
       if (!layer || (layer as any).options?.interactive === false) return;
-      const latlng = new L.LatLng(event.lngLat.lat, event.lngLat.lng);
+      const latlng = new MapScene.LatLng(event.lngLat.lat, event.lngLat.lng);
       layer.fire("mouseover", { latlng, originalEvent: event.originalEvent, target: layer });
       layer.fire("mouseenter", { latlng, originalEvent: event.originalEvent, target: layer });
       const tooltip = layer.getTooltip?.();
@@ -202,7 +197,7 @@ function bindSourceInteractions(map: mapboxgl.Map, root: L.Layer): void {
       const id = Number(feature?.properties?.__compatLayerId || 0);
       const layer = allLayers.get(id);
       if (layer) {
-        const latlng = event.lngLat ? new L.LatLng(event.lngLat.lat, event.lngLat.lng) : layer.defaultLatLng();
+        const latlng = event.lngLat ? new MapScene.LatLng(event.lngLat.lat, event.lngLat.lng) : layer.defaultLatLng();
         layer.fire("mouseout", { latlng, originalEvent: event.originalEvent, target: layer });
         layer.fire("mouseleave", { latlng, originalEvent: event.originalEvent, target: layer });
         layer.getTooltip?.()?.close();
@@ -216,7 +211,7 @@ function bindSourceInteractions(map: mapboxgl.Map, root: L.Layer): void {
   }
 }
 
-function renderVectorRoot(root: L.Layer, native: mapboxgl.Map, preparedCollection?: GeoJSON.FeatureCollection): void {
+function renderVectorRoot(root: MapScene.Layer, native: mapboxgl.Map, preparedCollection?: GeoJSON.FeatureCollection): void {
   if (!native.isStyleLoaded()) return;
   const ids = sourceIds(root);
   const collection = preparedCollection || featureCollectionForRoot(root);
@@ -271,7 +266,7 @@ function renderVectorRoot(root: L.Layer, native: mapboxgl.Map, preparedCollectio
   bindSourceInteractions(native, root);
 }
 
-function cleanupVectorRoot(root: L.Layer, native: mapboxgl.Map): void {
+function cleanupVectorRoot(root: MapScene.Layer, native: mapboxgl.Map): void {
   const ids = sourceIds(root);
   safeRemoveMapboxLayer(native, ids.point);
   safeRemoveMapboxLayer(native, ids.line);
@@ -279,7 +274,7 @@ function cleanupVectorRoot(root: L.Layer, native: mapboxgl.Map): void {
   safeRemoveMapboxSource(native, ids.source);
 }
 
-const pendingVectorRefreshRoots = new Set<L.Layer>();
+const pendingVectorRefreshRoots = new Set<MapScene.Layer>();
 let vectorRefreshScheduled = false;
 
 function flushVectorRefreshes(): void {
@@ -301,7 +296,7 @@ function flushVectorRefreshes(): void {
   }
 }
 
-function refreshRoot(root: L.Layer): void {
+function refreshRoot(root: MapScene.Layer): void {
   pendingVectorRefreshRoots.add(root);
   if (vectorRefreshScheduled) return;
   vectorRefreshScheduled = true;
@@ -317,7 +312,7 @@ function renderLogicalMap(native: mapboxgl.Map): void {
 }
 
 registerMapboxMapInitializer({
-  id: "mapbox-native-leaflet-compat",
+  id: "mapbox-native-scene",
   priority: 5,
   initialize: (native) => {
     const sync = () => renderLogicalMap(native);
@@ -333,7 +328,7 @@ registerMapboxMapInitializer({
   },
 });
 
-namespace L {
+namespace MapScene {
   export type LatLngTuple = [number, number];
   export type PointTuple = [number, number];
   export type LatLngExpression = LatLng | LatLngTuple | { lat: number; lng: number } | { lat: number; lon: number };
@@ -346,9 +341,9 @@ namespace L {
   export type MarkerOptions = Record<string, any>;
   export type PolylineOptions = PathOptions;
   export type GeoJSONOptions = Record<string, any>;
-  export type LeafletMouseEvent = any;
-  export type LeafletEvent = any;
-  export type LeafletEventHandlerFn = (event: any) => void;
+  export type MapPointerEvent = any;
+  export type MapEvent = any;
+  export type MapEventHandlerFn = (event: any) => void;
 
   export class Point {
     constructor(public x: number, public y: number) {}
@@ -437,8 +432,8 @@ namespace L {
   }
 
   class Evented {
-    private handlers = new globalThis.Map<string, Set<LeafletEventHandlerFn>>();
-    on(types: string | Record<string, LeafletEventHandlerFn>, fn?: LeafletEventHandlerFn): this {
+    private handlers = new globalThis.Map<string, Set<MapEventHandlerFn>>();
+    on(types: string | Record<string, MapEventHandlerFn>, fn?: MapEventHandlerFn): this {
       if (typeof types === "object") {
         for (const [type, handler] of Object.entries(types)) this.on(type, handler);
         return this;
@@ -450,7 +445,7 @@ namespace L {
       }
       return this;
     }
-    off(types?: string | Record<string, LeafletEventHandlerFn>, fn?: LeafletEventHandlerFn): this {
+    off(types?: string | Record<string, MapEventHandlerFn>, fn?: MapEventHandlerFn): this {
       if (!types) { this.handlers.clear(); return this; }
       if (typeof types === "object") {
         for (const [type, handler] of Object.entries(types)) this.off(type, handler);
@@ -461,7 +456,7 @@ namespace L {
       }
       return this;
     }
-    once(types: string, fn: LeafletEventHandlerFn): this {
+    once(types: string, fn: MapEventHandlerFn): this {
       const wrapped = (event: any) => { this.off(types, wrapped); fn(event); };
       return this.on(types, wrapped);
     }
@@ -507,7 +502,7 @@ namespace L {
     openOnNative(native: mapboxgl.Map, at: LatLngExpression | mapboxgl.LngLat, layer?: Layer): this {
       this.close();
       const ll = normalizeLatLng(at as any);
-      const popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, closeOnMove: false, offset: 8, maxWidth: "280px", className: "leaflet-compat-tooltip" })
+      const popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, closeOnMove: false, offset: 8, maxWidth: "280px", className: "map-scene-tooltip" })
         .setLngLat([ll.lng, ll.lat]);
       const content = this.getContent();
       if (content instanceof HTMLElement) popup.setDOMContent(content); else popup.setHTML(String(content || ""));
@@ -519,13 +514,13 @@ namespace L {
   }
 
   export class Layer extends Evented {
-    readonly _leaflet_id = nextId++;
+    readonly _scene_id = nextId++;
     _map: Map | null = null;
     _parent: LayerGroup | null = null;
     options: Record<string, any>;
     private popupValue: Popup | null = null;
     private tooltipValue: Tooltip | null = null;
-    constructor(options: Record<string, any> = {}) { super(); this.options = options; allLayers.set(this._leaflet_id, this); }
+    constructor(options: Record<string, any> = {}) { super(); this.options = options; allLayers.set(this._scene_id, this); }
     addTo(target: Map | LayerGroup): this { target.addLayer(this); return this; }
     remove(): this { this._map?.removeLayer(this); return this; }
     bindPopup(content: Content, options: Record<string, any> = {}): this { this.popupValue = new Popup(options, this).setContent(content); this.touch(); return this; }
@@ -562,7 +557,7 @@ namespace L {
       this.layers.add(layer); layer._parent = this; if (this._map) layer._attach(this._map); this.touch(); return this;
     }
     removeLayer(layer: Layer | number): this {
-      const target = typeof layer === "number" ? [...this.layers].find((item) => item._leaflet_id === layer) : layer;
+      const target = typeof layer === "number" ? [...this.layers].find((item) => item._scene_id === layer) : layer;
       if (target) { this.layers.delete(target); target._parent = null; target._detach(); this.touch(); }
       return this;
     }
@@ -750,7 +745,7 @@ namespace L {
           host.appendChild(corner);
         }
         const wrapper = document.createElement("div");
-        wrapper.className = `leaflet-compat-control leaflet-${position}`;
+        wrapper.className = `map-scene-control map-scene-${position}`;
         wrapper.style.pointerEvents = "auto";
         wrapper.appendChild(content);
         corner.appendChild(wrapper);
@@ -922,4 +917,4 @@ namespace L {
   };
 }
 
-export default L;
+export default MapScene;

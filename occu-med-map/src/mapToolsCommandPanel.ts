@@ -1,5 +1,5 @@
-import L from "leaflet";
-import { registerLeafletMapInitializer } from "./leafletMapLifecycleRuntime";
+import MapScene from "./mapSceneRuntime";
+import { registerMapSceneInitializer } from "./mapSceneLifecycleRuntime";
 import { hasMapboxToken, mapboxDirections, mapboxGeocode, mapboxIsochrone, mapboxReverseGeocode } from "./mapboxServices";
 import { registerMapToolsPanel } from "./mapToolsPanelRegistry";
 import { registerRuntimeOwner } from "./runtimeControllerRegistry";
@@ -10,10 +10,10 @@ type RankedPin = Point & { name: string; driveMiles: number; driveMinutes: numbe
 const mapboxToken = import.meta.env.VITE_MAPBOX_TOKEN || "";
 let installed = false;
 let origin: Point | null = null;
-let searchMarker: L.Marker | null = null;
-let routeLayer: L.LayerGroup | null = null;
-let zoneLayer: L.GeoJSON | null = null;
-let densityLayer: L.LayerGroup | null = null;
+let searchMarker: MapScene.Marker | null = null;
+let routeLayer: MapScene.LayerGroup | null = null;
+let zoneLayer: MapScene.GeoJSON | null = null;
+let densityLayer: MapScene.LayerGroup | null = null;
 let densityEnabled = false;
 let statusNode: HTMLDivElement | null = null;
 let etaResultsNode: HTMLDivElement | null = null;
@@ -36,9 +36,9 @@ function mapboxTileUrl(style: string): string {
   return url.toString().replaceAll("%7B", "{").replaceAll("%7D", "}");
 }
 
-function updateBasemap(map: L.Map, style: string): void {
+function updateBasemap(map: MapScene.Map, style: string): void {
   map.eachLayer((layer) => {
-    const tile = layer as L.TileLayer & { setUrl?: (url: string) => void };
+    const tile = layer as MapScene.TileLayer & { setUrl?: (url: string) => void };
     if (typeof tile.setUrl === "function") tile.setUrl(mapboxTileUrl(style));
   });
 }
@@ -53,8 +53,8 @@ function milesBetween(a: Point, b: Point): number {
   return 2 * radiusMiles * Math.asin(Math.sqrt(h));
 }
 
-function markerLabel(layer: L.Layer, fallback: string): string {
-  const marker = layer as L.Marker;
+function markerLabel(layer: MapScene.Layer, fallback: string): string {
+  const marker = layer as MapScene.Marker;
   const tooltip = marker.getTooltip?.();
   const popup = marker.getPopup?.();
   const tooltipContent = tooltip?.getContent?.();
@@ -71,11 +71,11 @@ function emitEtaRankings(): void {
   window.dispatchEvent(new CustomEvent("occumed:provider-eta-rankings", { detail: latestRankings }));
 }
 
-function setOrigin(map: L.Map, point: Point): void {
+function setOrigin(map: MapScene.Map, point: Point): void {
   origin = point;
   if (searchMarker) map.removeLayer(searchMarker);
-  searchMarker = L.marker([point.lat, point.lng], {
-    icon: L.divIcon({
+  searchMarker = MapScene.marker([point.lat, point.lng], {
+    icon: MapScene.divIcon({
       className: "",
       html: '<div class="occumed-mapbox-origin-dot"></div>',
       iconSize: [22, 22],
@@ -87,7 +87,7 @@ function setOrigin(map: L.Map, point: Point): void {
   emitOriginChanged();
 }
 
-async function searchPlace(map: L.Map, input: HTMLInputElement): Promise<void> {
+async function searchPlace(map: MapScene.Map, input: HTMLInputElement): Promise<void> {
   const query = input.value.trim();
   if (!query) return;
   setStatus("Searching Mapbox...");
@@ -103,7 +103,7 @@ async function searchPlace(map: L.Map, input: HTMLInputElement): Promise<void> {
   }
 }
 
-function clearRoutes(map: L.Map): void {
+function clearRoutes(map: MapScene.Map): void {
   if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
   if (zoneLayer) { map.removeLayer(zoneLayer); zoneLayer = null; }
   latestRankings = [];
@@ -112,15 +112,15 @@ function clearRoutes(map: L.Map): void {
   setStatus("Routes and zones cleared.");
 }
 
-async function drawRoute(map: L.Map, target: Point): Promise<void> {
+async function drawRoute(map: MapScene.Map, target: Point): Promise<void> {
   if (!origin) { setStatus("Set an origin first."); return; }
   setStatus("Loading Mapbox route...");
   try {
     if (routeLayer) map.removeLayer(routeLayer);
     const route = await mapboxDirections(origin, target, "driving-traffic");
-    const line = L.polyline(route.coordinates, { color: "#2563eb", weight: 5, opacity: 0.88 });
-    const end = L.circleMarker([target.lat, target.lng], { radius: 6, color: "#1e3a8a", fillColor: "#ffffff", fillOpacity: 1, weight: 2 });
-    routeLayer = L.layerGroup([line, end]).addTo(map);
+    const line = MapScene.polyline(route.coordinates, { color: "#2563eb", weight: 5, opacity: 0.88 });
+    const end = MapScene.circleMarker([target.lat, target.lng], { radius: 6, color: "#1e3a8a", fillColor: "#ffffff", fillOpacity: 1, weight: 2 });
+    routeLayer = MapScene.layerGroup([line, end]).addTo(map);
     map.fitBounds(line.getBounds(), { padding: [38, 38] });
     setStatus(`${target.label || "Provider"}: ${route.distanceMiles.toFixed(1)} mi / ${Math.round(route.durationMinutes)} min.`);
   } catch (err: any) {
@@ -128,13 +128,13 @@ async function drawRoute(map: L.Map, target: Point): Promise<void> {
   }
 }
 
-async function drawZones(map: L.Map): Promise<void> {
+async function drawZones(map: MapScene.Map): Promise<void> {
   if (!origin) { setStatus("Set an origin first."); return; }
   setStatus("Loading 15/30/45/60 minute zones...");
   try {
     if (zoneLayer) map.removeLayer(zoneLayer);
     const data = await mapboxIsochrone(origin, [15, 30, 45, 60], "driving");
-    zoneLayer = L.geoJSON(data, {
+    zoneLayer = MapScene.geoJSON(data, {
       style: (feature: any) => {
         const contour = Number(feature?.properties?.contour || 15);
         const rank = [15, 30, 45, 60].indexOf(contour);
@@ -148,11 +148,11 @@ async function drawZones(map: L.Map): Promise<void> {
   }
 }
 
-function visibleMarkerCandidates(map: L.Map, currentOrigin: Point) {
+function visibleMarkerCandidates(map: MapScene.Map, currentOrigin: Point) {
   const bounds = map.getBounds().pad(0.1);
   const rows: Array<Point & { name: string; straightMiles: number }> = [];
-  map.eachLayer((layer: L.Layer) => {
-    const marker = layer as L.Marker & { getLatLng?: () => L.LatLng };
+  map.eachLayer((layer: MapScene.Layer) => {
+    const marker = layer as MapScene.Marker & { getLatLng?: () => MapScene.LatLng };
     if (typeof marker.getLatLng !== "function") return;
     const latLng = marker.getLatLng();
     if (!bounds.contains(latLng)) return;
@@ -164,7 +164,7 @@ function visibleMarkerCandidates(map: L.Map, currentOrigin: Point) {
   return rows.sort((a, b) => a.straightMiles - b.straightMiles).slice(0, 8);
 }
 
-function renderRankings(map: L.Map, rows: RankedPin[]): void {
+function renderRankings(map: MapScene.Map, rows: RankedPin[]): void {
   if (!etaResultsNode) return;
   etaResultsNode.innerHTML = "";
   rows.forEach((row, index) => {
@@ -185,7 +185,7 @@ function renderRankings(map: L.Map, rows: RankedPin[]): void {
   });
 }
 
-async function rankVisiblePins(map: L.Map): Promise<void> {
+async function rankVisiblePins(map: MapScene.Map): Promise<void> {
   if (!origin) { setStatus("Set an origin first."); return; }
   const candidates = visibleMarkerCandidates(map, origin);
   if (candidates.length === 0) { setStatus("No visible provider pins found to rank."); return; }
@@ -219,11 +219,11 @@ async function copyEta(): Promise<void> {
   }
 }
 
-function visibleMarkerPoints(map: L.Map): L.LatLng[] {
+function visibleMarkerPoints(map: MapScene.Map): MapScene.LatLng[] {
   const bounds = map.getBounds().pad(0.15);
-  const rows: L.LatLng[] = [];
-  map.eachLayer((layer: L.Layer) => {
-    const marker = layer as L.Marker & { getLatLng?: () => L.LatLng };
+  const rows: MapScene.LatLng[] = [];
+  map.eachLayer((layer: MapScene.Layer) => {
+    const marker = layer as MapScene.Marker & { getLatLng?: () => MapScene.LatLng };
     if (typeof marker.getLatLng !== "function") return;
     const point = marker.getLatLng();
     if (bounds.contains(point)) rows.push(point);
@@ -231,12 +231,12 @@ function visibleMarkerPoints(map: L.Map): L.LatLng[] {
   return rows;
 }
 
-function drawDensity(map: L.Map): void {
+function drawDensity(map: MapScene.Map): void {
   if (densityLayer) { map.removeLayer(densityLayer); densityLayer = null; }
   if (!densityEnabled) return;
   const points = visibleMarkerPoints(map);
   const radius = Math.max(1200, Math.min(18000, 52000 / Math.max(1, map.getZoom())));
-  densityLayer = L.layerGroup(points.slice(0, 250).map((point) => L.circle(point, {
+  densityLayer = MapScene.layerGroup(points.slice(0, 250).map((point) => MapScene.circle(point, {
     radius,
     color: "#0ea5e9",
     weight: 0,
@@ -265,14 +265,14 @@ function section(label: string): HTMLDivElement {
   return node;
 }
 
-function addCommandPanel(map: L.Map): { control: L.Control; cleanup: () => void } {
-  const control = new L.Control({ position: "bottomleft" });
+function addCommandPanel(map: MapScene.Map): { control: MapScene.Control; cleanup: () => void } {
+  const control = new MapScene.Control({ position: "bottomleft" });
   let unregisterPanel: (() => void) | null = null;
 
   control.onAdd = () => {
-    const box = L.DomUtil.create("div", "occumed-map-tools-panel");
-    L.DomEvent.disableClickPropagation(box);
-    L.DomEvent.disableScrollPropagation(box);
+    const box = MapScene.DomUtil.create("div", "occumed-map-tools-panel");
+    MapScene.DomEvent.disableClickPropagation(box);
+    MapScene.DomEvent.disableScrollPropagation(box);
 
     const title = document.createElement("div");
     title.className = "occumed-basemap-title";
@@ -354,10 +354,10 @@ function addCommandPanel(map: L.Map): { control: L.Control; cleanup: () => void 
   };
 }
 
-function installOnMap(map: L.Map): () => void {
+function installOnMap(map: MapScene.Map): () => void {
   const panel = addCommandPanel(map);
 
-  const onMapClick = async (event: L.LeafletMouseEvent) => {
+  const onMapClick = async (event: MapScene.MapPointerEvent) => {
     const point = { lat: event.latlng.lat, lng: event.latlng.lng };
     if (event.originalEvent?.altKey) {
       await drawRoute(map, point);
@@ -394,7 +394,7 @@ export function installMapToolsCommandPanel(): void {
   if (installed || !hasMapboxToken()) return;
   if (!registerRuntimeOwner("map-tools-command-panel", "Authoritative Map Tools panel and core actions")) return;
   installed = true;
-  registerLeafletMapInitializer({
+  registerMapSceneInitializer({
     id: "map-tools-command-panel",
     priority: 40,
     initialize: (map) => {

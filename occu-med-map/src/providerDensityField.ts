@@ -1,8 +1,8 @@
-import L from "leaflet";
-import { registerLeafletMapInitializer } from "./leafletMapLifecycleRuntime";
+import MapScene from "./mapSceneRuntime";
+import { registerMapSceneInitializer } from "./mapSceneLifecycleRuntime";
 
 let installed = false;
-let densityLayer: L.LayerGroup | null = null;
+let densityLayer: MapScene.LayerGroup | null = null;
 let statusNode: HTMLDivElement | null = null;
 let densityEnabled = false;
 
@@ -10,11 +10,11 @@ function setStatus(text: string): void {
   if (statusNode) statusNode.textContent = text;
 }
 
-function visibleMarkerPoints(map: L.Map): L.LatLng[] {
+function visibleMarkerPoints(map: MapScene.Map): MapScene.LatLng[] {
   const bounds = map.getBounds().pad(0.15);
-  const rows: L.LatLng[] = [];
-  map.eachLayer((layer: L.Layer) => {
-    const marker = layer as L.Marker & { getLatLng?: () => L.LatLng };
+  const rows: MapScene.LatLng[] = [];
+  map.eachLayer((layer: MapScene.Layer) => {
+    const marker = layer as MapScene.Marker & { getLatLng?: () => MapScene.LatLng };
     if (typeof marker.getLatLng !== "function") return;
     const point = marker.getLatLng();
     if (!bounds.contains(point)) return;
@@ -23,7 +23,7 @@ function visibleMarkerPoints(map: L.Map): L.LatLng[] {
   return rows;
 }
 
-function drawDensity(map: L.Map): void {
+function drawDensity(map: MapScene.Map): void {
   if (densityLayer) {
     map.removeLayer(densityLayer);
     densityLayer = null;
@@ -32,7 +32,7 @@ function drawDensity(map: L.Map): void {
   const points = visibleMarkerPoints(map);
   const zoom = map.getZoom();
   const radius = Math.max(1200, Math.min(18000, 52000 / Math.max(1, zoom)));
-  const layers = points.slice(0, 250).map((point) => L.circle(point, {
+  const layers = points.slice(0, 250).map((point) => MapScene.circle(point, {
     radius,
     color: "#0ea5e9",
     weight: 0,
@@ -40,16 +40,16 @@ function drawDensity(map: L.Map): void {
     fillOpacity: 0.055,
     interactive: false,
   }));
-  densityLayer = L.layerGroup(layers).addTo(map);
+  densityLayer = MapScene.layerGroup(layers).addTo(map);
   setStatus(`Density field: ${points.length} visible pins sampled.`);
 }
 
-function addControl(map: L.Map): void {
-  const control = new L.Control({ position: "bottomleft" });
+function addControl(map: MapScene.Map): void {
+  const control = new MapScene.Control({ position: "bottomleft" });
   control.onAdd = () => {
-    const box = L.DomUtil.create("div", "occumed-density-control");
-    L.DomEvent.disableClickPropagation(box);
-    L.DomEvent.disableScrollPropagation(box);
+    const box = MapScene.DomUtil.create("div", "occumed-density-control");
+    MapScene.DomEvent.disableClickPropagation(box);
+    MapScene.DomEvent.disableScrollPropagation(box);
 
     const title = document.createElement("div");
     title.className = "occumed-basemap-title";
@@ -84,7 +84,7 @@ function addControl(map: L.Map): void {
   control.addTo(map);
 }
 
-function installOnMap(map: L.Map): void {
+function installOnMap(map: MapScene.Map): void {
   addControl(map);
   map.on("moveend zoomend", () => {
     if (densityEnabled) drawDensity(map);
@@ -94,7 +94,7 @@ function installOnMap(map: L.Map): void {
 export function installProviderDensityField(): void {
   if (installed) return;
   installed = true;
-  registerLeafletMapInitializer({
+  registerMapSceneInitializer({
     id: "provider-density-field",
     priority: 70,
     initialize: (map) => { window.setTimeout(() => installOnMap(map), 0); },

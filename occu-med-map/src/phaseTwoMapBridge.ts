@@ -1,5 +1,5 @@
-import L from 'leaflet';
-import { registerLeafletMapInitializer } from './leafletMapLifecycleRuntime';
+import MapScene from "./mapSceneRuntime";
+import { registerMapSceneInitializer } from './mapSceneLifecycleRuntime';
 
 export type PhaseTwoMapSnapshot = {
   zoom: number;
@@ -13,15 +13,15 @@ export type PhaseTwoMapSnapshot = {
 
 declare global {
   interface Window {
-    __occumedPhaseTwoMap?: L.Map;
+    __occumedPhaseTwoMap?: MapScene.Map;
   }
 }
 
 const INSTALL_KEY = '__occumedPhaseTwoMapBridgeInstalled';
 const REGISTERED_KEY = '__occumedPhaseTwoMapBridgeRegistered';
-const leafletRuntime = L as typeof L & Record<string, unknown>;
+const leafletRuntime = MapScene as typeof MapScene & Record<string, unknown>;
 
-function snapshot(map: L.Map): PhaseTwoMapSnapshot {
+function snapshot(map: MapScene.Map): PhaseTwoMapSnapshot {
   const bounds = map.getBounds();
   return {
     zoom: map.getZoom(),
@@ -34,12 +34,12 @@ function snapshot(map: L.Map): PhaseTwoMapSnapshot {
   };
 }
 
-function emitMapState(map: L.Map, eventName: string): void {
+function emitMapState(map: MapScene.Map, eventName: string): void {
   window.dispatchEvent(new CustomEvent(eventName, { detail: snapshot(map) }));
 }
 
-function registerMap(map: L.Map): void {
-  const registeredMap = map as L.Map & Record<string, unknown>;
+function registerMap(map: MapScene.Map): void {
+  const registeredMap = map as MapScene.Map & Record<string, unknown>;
   if (registeredMap[REGISTERED_KEY]) return;
   registeredMap[REGISTERED_KEY] = true;
 
@@ -56,7 +56,7 @@ function registerMap(map: L.Map): void {
 export function installPhaseTwoMapBridge(): void {
   if (leafletRuntime[INSTALL_KEY]) return;
   leafletRuntime[INSTALL_KEY] = true;
-  registerLeafletMapInitializer({
+  registerMapSceneInitializer({
     id: 'phase-two-map-bridge',
     priority: 0,
     initialize: registerMap,

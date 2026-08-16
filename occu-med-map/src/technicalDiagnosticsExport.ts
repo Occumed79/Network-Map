@@ -51,7 +51,7 @@ async function snapshot(): Promise<Record<string, unknown>> {
     uiIntegrity: safeValue(runtime.__NETWORK_MAP_GENERAL_UI__?.lastResult || runtime.__NETWORK_MAP_GENERAL_UI__?.audit?.() || null),
     sidebarIntegrity: safeValue(runtime.__NETWORK_MAP_UI_INTEGRITY__?.lastResult || runtime.__NETWORK_MAP_UI_INTEGRITY__?.audit?.() || null),
     mapPerformance: safeValue(runtime.__NETWORK_MAP_PERFORMANCE__?.snapshot?.() || null),
-    leafletLifecycle: safeValue(runtime.__NETWORK_MAP_LEAFLET_LIFECYCLE__?.getDiagnostics?.() || null),
+    sceneLifecycle: safeValue(runtime.__NETWORK_MAP_SCENE_LIFECYCLE__?.getDiagnostics?.() || null),
     mapboxLifecycle: safeValue(runtime.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getDiagnostics?.() || null),
     mapboxSources: safeValue(runtime.__NETWORK_MAP_MAPBOX_SOURCE_PIPELINE__?.getDiagnostics?.() || null),
     networkPipeline: safeValue(runtime.__NETWORK_MAP_NETWORK_PIPELINE__?.getDiagnostics?.() || runtime.__NETWORK_MAP_NETWORK_REQUESTS__?.snapshot?.() || null),

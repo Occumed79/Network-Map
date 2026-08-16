@@ -1,4 +1,4 @@
-import L from "leaflet";
+import MapScene from "./mapSceneRuntime";
 import { registerNetworkRequestMiddleware } from "./networkRequestPipelineRuntime";
 
 const PATCH_FLAG = "__occumedProviderExplorerLayerStabilityPatched";
@@ -27,12 +27,12 @@ type GroupState = {
   requestId: number | null;
   requestSettled: boolean;
   expectedCellCount: number | null;
-  stagedLayers: L.Layer[];
+  stagedLayers: MapScene.Layer[];
   fallbackClearTimer: number | null;
   commitTimer: number | null;
 };
 
-type StableLayerGroup = L.LayerGroup & {
+type StableLayerGroup = MapScene.LayerGroup & {
   __occumedAggregateGroup?: boolean;
   __occumedAggregateState?: GroupState;
 };
@@ -160,11 +160,11 @@ function hasVisibleLayers(group: StableLayerGroup): boolean {
 }
 
 function installLayerTransactions(): void {
-  const prototype = L.LayerGroup.prototype as any;
+  const prototype = MapScene.LayerGroup.prototype as any;
   if (prototype[PATCH_FLAG]) return;
 
-  const originalAddLayer = prototype.addLayer as (this: L.LayerGroup, layer: L.Layer) => L.LayerGroup;
-  const originalClearLayers = prototype.clearLayers as (this: L.LayerGroup) => L.LayerGroup;
+  const originalAddLayer = prototype.addLayer as (this: MapScene.LayerGroup, layer: MapScene.Layer) => MapScene.LayerGroup;
+  const originalClearLayers = prototype.clearLayers as (this: MapScene.LayerGroup) => MapScene.LayerGroup;
 
   function commitGroup(group: StableLayerGroup, reason: string): void {
     const state = groupState(group);
@@ -391,7 +391,7 @@ function installLayerTransactions(): void {
     });
   }
 
-  prototype.addLayer = function patchedAddLayer(this: StableLayerGroup, layer: L.Layer): L.LayerGroup {
+  prototype.addLayer = function patchedAddLayer(this: StableLayerGroup, layer: MapScene.Layer): MapScene.LayerGroup {
     if (isAggregateLayer(layer)) {
       this.__occumedAggregateGroup = true;
       aggregateGroups.add(this);
@@ -410,7 +410,7 @@ function installLayerTransactions(): void {
     return this;
   };
 
-  prototype.clearLayers = function patchedClearLayers(this: StableLayerGroup): L.LayerGroup {
+  prototype.clearLayers = function patchedClearLayers(this: StableLayerGroup): MapScene.LayerGroup {
     if (!this.__occumedAggregateGroup || (!hasVisibleLayers(this) && !this.__occumedAggregateState?.replacing)) {
       return originalClearLayers.call(this);
     }

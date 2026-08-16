@@ -1,17 +1,17 @@
-import L from "leaflet";
+import MapScene from "./mapSceneRuntime";
 import { mapboxDirections, mapboxGeocode } from "./mapboxServices";
 import { registerMapToolsSection } from "./mapToolsPanelRegistry";
 import { registerRuntimeOwner } from "./runtimeControllerRegistry";
 
 type Point = { lat: number; lng: number; label?: string };
 
-let activeMap: L.Map | null = null;
+let activeMap: MapScene.Map | null = null;
 let activePanel: HTMLElement | null = null;
 let fromPoint: Point | null = null;
 let toPoint: Point | null = null;
-let fromMarker: L.Marker | null = null;
-let toMarker: L.Marker | null = null;
-let routeLayer: L.LayerGroup | null = null;
+let fromMarker: MapScene.Marker | null = null;
+let toMarker: MapScene.Marker | null = null;
+let routeLayer: MapScene.LayerGroup | null = null;
 
 function status(text: string): void {
   const scope = activePanel || document;
@@ -24,9 +24,9 @@ function inputFor(target: "from" | "to"): HTMLInputElement | null {
   return (activePanel || document).querySelector<HTMLInputElement>(`.occumed-route-${target}`);
 }
 
-function markerIcon(kind: "from" | "to"): L.DivIcon {
+function markerIcon(kind: "from" | "to"): MapScene.DivIcon {
   const label = kind === "from" ? "A" : "B";
-  return L.divIcon({
+  return MapScene.divIcon({
     className: "",
     html: `<div class="occumed-route-marker ${kind}" aria-hidden="true">${label}</div>`,
     iconSize: [26, 26],
@@ -34,27 +34,27 @@ function markerIcon(kind: "from" | "to"): L.DivIcon {
   });
 }
 
-function removeLayerIfPresent(map: L.Map, layer: L.Layer | null): void {
+function removeLayerIfPresent(map: MapScene.Map, layer: MapScene.Layer | null): void {
   if (layer && map.hasLayer(layer)) map.removeLayer(layer);
 }
 
-function setPoint(map: L.Map, target: "from" | "to", point: Point): void {
+function setPoint(map: MapScene.Map, target: "from" | "to", point: Point): void {
   const input = inputFor(target);
   if (input) input.value = point.label || `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`;
 
   if (target === "from") {
     fromPoint = point;
     removeLayerIfPresent(map, fromMarker);
-    fromMarker = L.marker([point.lat, point.lng], { icon: markerIcon("from"), zIndexOffset: 7200 }).addTo(map);
+    fromMarker = MapScene.marker([point.lat, point.lng], { icon: markerIcon("from"), zIndexOffset: 7200 }).addTo(map);
     window.dispatchEvent(new CustomEvent("occumed:map-origin-changed", { detail: point }));
   } else {
     toPoint = point;
     removeLayerIfPresent(map, toMarker);
-    toMarker = L.marker([point.lat, point.lng], { icon: markerIcon("to"), zIndexOffset: 7100 }).addTo(map);
+    toMarker = MapScene.marker([point.lat, point.lng], { icon: markerIcon("to"), zIndexOffset: 7100 }).addTo(map);
   }
 }
 
-async function geocodeInput(map: L.Map, target: "from" | "to"): Promise<Point | null> {
+async function geocodeInput(map: MapScene.Map, target: "from" | "to"): Promise<Point | null> {
   const input = inputFor(target);
   const query = input?.value.trim() || "";
   if (!query) {
@@ -76,27 +76,27 @@ async function geocodeInput(map: L.Map, target: "from" | "to"): Promise<Point | 
   return point;
 }
 
-function clearRouteOnly(map: L.Map): void {
+function clearRouteOnly(map: MapScene.Map): void {
   removeLayerIfPresent(map, routeLayer);
   routeLayer = null;
 }
 
-async function drawRoute(map: L.Map, start: Point, end: Point): Promise<void> {
+async function drawRoute(map: MapScene.Map, start: Point, end: Point): Promise<void> {
   status("Loading route…");
   clearRouteOnly(map);
   const route = await mapboxDirections(start, end, "driving-traffic");
-  const line = L.polyline(route.coordinates, {
+  const line = MapScene.polyline(route.coordinates, {
     color: "#2563eb",
     weight: 6,
     opacity: 0.92,
     className: "occumed-from-to-route",
   });
-  routeLayer = L.layerGroup([line]).addTo(map);
+  routeLayer = MapScene.layerGroup([line]).addTo(map);
   map.fitBounds(line.getBounds(), { padding: [44, 44] });
   status(`${route.distanceMiles.toFixed(1)} mi · ${Math.round(route.durationMinutes)} min with traffic`);
 }
 
-async function routeFromInputs(map: L.Map): Promise<void> {
+async function routeFromInputs(map: MapScene.Map): Promise<void> {
   try {
     const start = fromPoint || await geocodeInput(map, "from");
     if (!start) return;
@@ -108,7 +108,7 @@ async function routeFromInputs(map: L.Map): Promise<void> {
   }
 }
 
-function clearPlanner(map: L.Map): void {
+function clearPlanner(map: MapScene.Map): void {
   clearRouteOnly(map);
   removeLayerIfPresent(map, fromMarker);
   removeLayerIfPresent(map, toMarker);
@@ -123,7 +123,7 @@ function clearPlanner(map: L.Map): void {
   status("Enter a starting location and destination.");
 }
 
-function swapPlanner(map: L.Map): void {
+function swapPlanner(map: MapScene.Map): void {
   const previousFrom = fromPoint;
   const previousTo = toPoint;
   const fromText = inputFor("from")?.value || "";
@@ -170,7 +170,7 @@ function actionButton(label: string, className: string, onClick: () => void): HT
   return button;
 }
 
-function mountRoutePlanner(panel: HTMLElement, map: L.Map): () => void {
+function mountRoutePlanner(panel: HTMLElement, map: MapScene.Map): () => void {
   activeMap = map;
   activePanel = panel;
 

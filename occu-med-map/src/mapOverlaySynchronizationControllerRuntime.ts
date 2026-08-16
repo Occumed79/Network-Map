@@ -1,5 +1,5 @@
-import L from "leaflet";
-import { registerLeafletMapInitializer } from "./leafletMapLifecycleRuntime";
+import MapScene from "./mapSceneRuntime";
+import { registerMapSceneInitializer } from "./mapSceneLifecycleRuntime";
 import { registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
 import {
   getMapboxSourcePipelineDiagnostics,
@@ -50,7 +50,7 @@ declare global {
   }
 }
 
-let canonicalMap: L.Map | null = null;
+let canonicalMap: MapScene.Map | null = null;
 let syncTimer: number | null = null;
 let emptyReleaseTimer: number | null = null;
 let revision = 0;
@@ -153,7 +153,7 @@ function runSync(forceEmpty: boolean): void {
   emit("applied", { trackedMapCount: trackedMaps.size });
 }
 
-function buildCollection(map: L.Map): { collection: GeoJSON.FeatureCollection; capped: boolean } {
+function buildCollection(map: MapScene.Map): { collection: GeoJSON.FeatureCollection; capped: boolean } {
   const features: GeoJSON.Feature[] = [];
   const seen = new Set<number>();
   let capped = false;
@@ -161,15 +161,15 @@ function buildCollection(map: L.Map): { collection: GeoJSON.FeatureCollection; c
   const visit = (layer: any): void => {
     if (!layer || capped) return;
     if (
-      layer instanceof L.TileLayer
-      || layer instanceof L.GridLayer
-      || layer instanceof L.ImageOverlay
-      || layer instanceof L.Popup
-      || layer instanceof L.Tooltip
+      layer instanceof MapScene.TileLayer
+      || layer instanceof MapScene.GridLayer
+      || layer instanceof MapScene.ImageOverlay
+      || layer instanceof MapScene.Popup
+      || layer instanceof MapScene.Tooltip
     ) return;
 
-    if (layer instanceof L.LayerGroup) {
-      layer.eachLayer((child: L.Layer) => visit(child));
+    if (layer instanceof MapScene.LayerGroup) {
+      layer.eachLayer((child: MapScene.Layer) => visit(child));
       return;
     }
 
@@ -183,7 +183,7 @@ function buildCollection(map: L.Map): { collection: GeoJSON.FeatureCollection; c
     if (features.length >= MAX_MIRRORED_FEATURES) capped = true;
   };
 
-  map.eachLayer((layer: L.Layer) => visit(layer));
+  map.eachLayer((layer: MapScene.Layer) => visit(layer));
   return {
     collection: { type: "FeatureCollection", features },
     capped,
@@ -202,7 +202,7 @@ function leafletToGeoJsonFeature(layer: any): GeoJSON.Feature | null {
     pointRadius: Math.max(4, Number(options.radius || 4) * 1.15),
   };
 
-  if (layer instanceof L.Circle) {
+  if (layer instanceof MapScene.Circle) {
     const center = layer.getLatLng();
     return geoJsonFeature(
       { type: "Polygon", coordinates: [geodesicRing(center.lat, center.lng, layer.getRadius())] },
@@ -210,12 +210,12 @@ function leafletToGeoJsonFeature(layer: any): GeoJSON.Feature | null {
     );
   }
 
-  if (layer instanceof L.CircleMarker || layer instanceof L.Marker) {
+  if (layer instanceof MapScene.CircleMarker || layer instanceof MapScene.Marker) {
     const center = layer.getLatLng();
     return geoJsonFeature({ type: "Point", coordinates: [center.lng, center.lat] }, properties);
   }
 
-  if (layer instanceof L.Polygon) {
+  if (layer instanceof MapScene.Polygon) {
     const rings: number[][][] = [];
     collectCoordinatePaths(layer.getLatLngs(), rings);
     return rings.length
@@ -223,7 +223,7 @@ function leafletToGeoJsonFeature(layer: any): GeoJSON.Feature | null {
       : null;
   }
 
-  if (layer instanceof L.Polyline) {
+  if (layer instanceof MapScene.Polyline) {
     const paths: number[][][] = [];
     collectCoordinatePaths(layer.getLatLngs(), paths);
     if (!paths.length) return null;
@@ -255,7 +255,7 @@ function popupHtmlFor(layer: any): string {
 function collectCoordinatePaths(value: any, output: number[][][]): void {
   if (!Array.isArray(value) || value.length === 0) return;
   if (typeof value[0]?.lat === "number" && typeof value[0]?.lng === "number") {
-    output.push(value.map((point: L.LatLng) => [point.lng, point.lat]));
+    output.push(value.map((point: MapScene.LatLng) => [point.lng, point.lat]));
     return;
   }
   value.forEach((child: any) => collectCoordinatePaths(child, output));
@@ -289,7 +289,7 @@ function clampNumber(value: unknown, fallback: number): number {
   return Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed)) : fallback;
 }
 
-function bindCanonicalMap(map: L.Map): void {
+function bindCanonicalMap(map: MapScene.Map): void {
   canonicalMap = map;
   const refresh = () => markDirty("leaflet-layer-change");
   map.on("layeradd layerremove overlayadd overlayremove", refresh);
@@ -478,7 +478,7 @@ registerMapboxSourceDataMiddleware({
   priority: 10,
   allowWrite: (context) => context.writer === "initial" || context.writer === "overlay-synchronization",
 });
-registerLeafletMapInitializer({
+registerMapSceneInitializer({
   id: "overlay-synchronization",
   priority: 30,
   initialize: bindCanonicalMap,

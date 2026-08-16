@@ -1,13 +1,13 @@
-import L from "leaflet";
+import MapScene from "./mapSceneRuntime";
 import { registerRuntimeOwner } from "./runtimeControllerRegistry";
 
-export type LeafletMapInitializer = {
+export type MapSceneInitializer = {
   id: string;
   priority?: number;
-  initialize: (map: L.Map) => void | (() => void);
+  initialize: (map: MapScene.Map) => void | (() => void);
 };
 
-type RegisteredInitializer = Required<Pick<LeafletMapInitializer, "id" | "initialize">> & {
+type RegisteredInitializer = Required<Pick<MapSceneInitializer, "id" | "initialize">> & {
   priority: number;
   sequence: number;
 };
@@ -21,18 +21,18 @@ type LifecycleDiagnostics = {
 
 declare global {
   interface Window {
-    __NETWORK_MAP_LEAFLET_LIFECYCLE__?: {
-      getMaps: () => L.Map[];
+    __NETWORK_MAP_SCENE_LIFECYCLE__?: {
+      getMaps: () => MapScene.Map[];
       getDiagnostics: () => LifecycleDiagnostics;
     };
   }
 }
 
-const PATCH_FLAG = "__occumedLeafletLifecycleFactoryPatched";
-const leafletRuntime = L as typeof L & Record<string, unknown>;
+const PATCH_FLAG = "__occumedMapSceneLifecycleFactoryPatched";
+const mapSceneRuntime = MapScene as typeof MapScene & Record<string, unknown>;
 const initializers = new Map<string, RegisteredInitializer>();
-const maps = new Set<L.Map>();
-const executedByMap = new WeakMap<L.Map, Map<string, (() => void) | null>>();
+const maps = new Set<MapScene.Map>();
+const executedByMap = new WeakMap<MapScene.Map, Map<string, (() => void) | null>>();
 let sequence = 0;
 let initializationErrors = 0;
 
@@ -43,7 +43,7 @@ function orderedInitializers(): RegisteredInitializer[] {
 }
 
 function emit(phase: string, detail: Record<string, unknown> = {}): void {
-  window.dispatchEvent(new CustomEvent("network-map:leaflet-lifecycle", {
+  window.dispatchEvent(new CustomEvent("network-map:scene-lifecycle", {
     detail: {
       phase,
       mapCount: maps.size,
@@ -53,7 +53,7 @@ function emit(phase: string, detail: Record<string, unknown> = {}): void {
   }));
 }
 
-function initializeMapWith(map: L.Map, initializer: RegisteredInitializer): void {
+function initializeMapWith(map: MapScene.Map, initializer: RegisteredInitializer): void {
   let executed = executedByMap.get(map);
   if (!executed) {
     executed = new Map();
@@ -69,7 +69,7 @@ function initializeMapWith(map: L.Map, initializer: RegisteredInitializer): void
   } catch (error) {
     initializationErrors += 1;
     executed.delete(initializer.id);
-    console.error("Leaflet initializer failed: " + initializer.id, error);
+    console.error("Map scene initializer failed: " + initializer.id, error);
     emit("initializer-error", {
       id: initializer.id,
       error: error instanceof Error ? error.message : String(error),
@@ -77,7 +77,7 @@ function initializeMapWith(map: L.Map, initializer: RegisteredInitializer): void
   }
 }
 
-function cleanupMap(map: L.Map): void {
+function cleanupMap(map: MapScene.Map): void {
   const executed = executedByMap.get(map);
   if (executed) {
     for (const [id, cleanup] of [...executed.entries()].reverse()) {
@@ -85,7 +85,7 @@ function cleanupMap(map: L.Map): void {
       try {
         cleanup();
       } catch (error) {
-        console.warn("Leaflet initializer cleanup failed: " + id, error);
+        console.warn("Map scene initializer cleanup failed: " + id, error);
       }
     }
     executed.clear();
@@ -94,7 +94,7 @@ function cleanupMap(map: L.Map): void {
   emit("map-unloaded");
 }
 
-function trackMap(map: L.Map): L.Map {
+function trackMap(map: MapScene.Map): MapScene.Map {
   if (maps.has(map)) return map;
   maps.add(map);
   executedByMap.set(map, new Map());
@@ -105,16 +105,16 @@ function trackMap(map: L.Map): L.Map {
 }
 
 function installFactoryOwner(): void {
-  if (leafletRuntime[PATCH_FLAG]) return;
-  const nativeMapFactory = L.map.bind(L);
-  (L as any).map = (...args: Parameters<typeof L.map>): L.Map => trackMap(nativeMapFactory(...args));
-  leafletRuntime[PATCH_FLAG] = true;
+  if (mapSceneRuntime[PATCH_FLAG]) return;
+  const nativeMapFactory = MapScene.map.bind(MapScene);
+  (MapScene as any).map = (...args: Parameters<typeof MapScene.map>): MapScene.Map => trackMap(nativeMapFactory(...args));
+  mapSceneRuntime[PATCH_FLAG] = true;
 }
 
-export function registerLeafletMapInitializer(initializer: LeafletMapInitializer): () => void {
+export function registerMapSceneInitializer(initializer: MapSceneInitializer): () => void {
   const id = initializer.id.trim();
-  if (!id) throw new Error("Leaflet map initializer requires a stable id");
-  if (initializers.has(id)) throw new Error("Leaflet map initializer is already registered: " + id);
+  if (!id) throw new Error("Map scene initializer requires a stable id");
+  if (initializers.has(id)) throw new Error("Map scene initializer is already registered: " + id);
 
   const registered: RegisteredInitializer = {
     id,
@@ -133,7 +133,7 @@ export function registerLeafletMapInitializer(initializer: LeafletMapInitializer
       const executed = executedByMap.get(map);
       const cleanup = executed?.get(id);
       if (cleanup) {
-        try { cleanup(); } catch (error) { console.warn("Leaflet initializer cleanup failed: " + id, error); }
+        try { cleanup(); } catch (error) { console.warn("Map scene initializer cleanup failed: " + id, error); }
       }
       executed?.delete(id);
     }
@@ -141,15 +141,15 @@ export function registerLeafletMapInitializer(initializer: LeafletMapInitializer
   };
 }
 
-export function getTrackedLeafletMaps(): L.Map[] {
+export function getTrackedMapScenes(): MapScene.Map[] {
   return [...maps];
 }
 
-if (registerRuntimeOwner("leaflet-map-lifecycle", "Authoritative Leaflet map lifecycle and initializer registry")) {
+if (registerRuntimeOwner("map-scene-lifecycle", "Mapbox scene lifecycle and initializer registry")) {
   installFactoryOwner();
 
-  window.__NETWORK_MAP_LEAFLET_LIFECYCLE__ = {
-    getMaps: getTrackedLeafletMaps,
+  window.__NETWORK_MAP_SCENE_LIFECYCLE__ = {
+    getMaps: getTrackedMapScenes,
     getDiagnostics: () => ({
       mapCount: maps.size,
       initializerCount: initializers.size,

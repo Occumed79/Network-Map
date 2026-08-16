@@ -1,9 +1,9 @@
-import L from "leaflet";
+import MapScene from "../../mapSceneRuntime";
 import { listenForEtaRoute } from "./etaRouteEvents";
 import type { EtaProviderRanking } from "./providerEtaTypes";
 
-export function installLeafletEtaRouteLayer(map: L.Map): () => void {
-  let routeLayer: L.LayerGroup | null = null;
+export function installMapSceneEtaRouteLayer(map: MapScene.Map): () => void {
+  let routeLayer: MapScene.LayerGroup | null = null;
 
   function clear(): void {
     if (!routeLayer) return;
@@ -14,19 +14,19 @@ export function installLeafletEtaRouteLayer(map: L.Map): () => void {
   function draw(row: EtaProviderRanking): void {
     if (row.routeCoordinates.length < 2) return;
     clear();
-    const line = L.polyline(row.routeCoordinates, {
+    const line = MapScene.polyline(row.routeCoordinates, {
       color: "#7c3aed",
       weight: 5,
       opacity: 0.88,
     });
-    const end = L.circleMarker([row.lat, row.lng], {
+    const end = MapScene.circleMarker([row.lat, row.lng], {
       radius: 6,
       color: "#4c1d95",
       fillColor: "#ffffff",
       fillOpacity: 1,
       weight: 2,
     });
-    routeLayer = L.layerGroup([line, end]).addTo(map);
+    routeLayer = MapScene.layerGroup([line, end]).addTo(map);
     map.fitBounds(line.getBounds(), { padding: [38, 38] });
   }
 

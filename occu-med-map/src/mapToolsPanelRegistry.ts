@@ -1,10 +1,10 @@
-import type L from "leaflet";
+import type MapScene from "./mapSceneRuntime";
 import { registerRuntimeOwner } from "./runtimeControllerRegistry";
 
 export type MapToolsPanelSection = {
   id: string;
   priority?: number;
-  mount: (panel: HTMLElement, map: L.Map) => void | (() => void);
+  mount: (panel: HTMLElement, map: MapScene.Map) => void | (() => void);
 };
 
 type RegisteredSection = {
@@ -16,7 +16,7 @@ type RegisteredSection = {
 
 type PanelRecord = {
   panel: HTMLElement;
-  map: L.Map;
+  map: MapScene.Map;
   mounted: Map<string, (() => void) | null>;
 };
 
@@ -75,7 +75,7 @@ export function registerMapToolsSection(section: MapToolsPanelSection): () => vo
   };
 }
 
-export function registerMapToolsPanel(panel: HTMLElement, map: L.Map): () => void {
+export function registerMapToolsPanel(panel: HTMLElement, map: MapScene.Map): () => void {
   const existing = [...panels].find((record) => record.panel === panel);
   if (existing) return () => undefined;
 

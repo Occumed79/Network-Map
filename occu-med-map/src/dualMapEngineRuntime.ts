@@ -1,5 +1,5 @@
-import L from "leaflet";
-import { registerLeafletMapInitializer } from "./leafletMapLifecycleRuntime";
+import MapScene from "./mapSceneRuntime";
+import { registerMapSceneInitializer } from "./mapSceneLifecycleRuntime";
 import { registerMapboxMap, unregisterMapboxMap } from "./mapboxMapLifecycleRuntime";
 import { findCompatPopupHit, wasCompatibilityClickHandled } from "./mapboxCompatInteractionRuntime";
 import mapboxgl from "mapbox-gl";
@@ -24,7 +24,7 @@ const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || import.meta.env.VITE_M
 const MAPBOX_2D_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN_2 || "";
 const MAP_LOAD_TIMEOUT_MS = 30_000;
 
-let canonicalMap: L.Map | null = null;
+let canonicalMap: MapScene.Map | null = null;
 let currentMode: MapMode = "2d";
 let mapWrap: HTMLElement | null = null;
 let mapbox2dHost: HTMLDivElement | null = null;
@@ -40,7 +40,7 @@ let lastEngineDrivenLeafletMove = 0;
 let mapResizeObserver: ResizeObserver | null = null;
 let mapResizeFrame = 0;
 
-registerLeafletMapInitializer({
+registerMapSceneInitializer({
   id: "dual-map-engine",
   priority: 10,
   initialize: (map) => {
@@ -49,13 +49,13 @@ registerLeafletMapInitializer({
   },
 });
 
-async function initializeDualEngines(map: L.Map): Promise<void> {
+async function initializeDualEngines(map: MapScene.Map): Promise<void> {
   const mapContainer = map.getContainer();
   mapWrap = mapContainer.parentElement;
   if (!mapWrap || mapWrap.classList.contains("dual-engine-map-shell")) return;
 
   mapWrap.classList.add("dual-engine-map-shell");
-  mapContainer.classList.add("canonical-leaflet-controller");
+  mapContainer.classList.add("canonical-map-scene-controller");
 
   mapbox2dHost = document.createElement("div");
   mapbox2dHost.className = "mapbox-2d-host";
@@ -387,7 +387,7 @@ function installMapboxInteractions(instance: mapboxgl.Map, mode: MapMode): void 
       detail: { lat: event.lngLat.lat, lng: event.lngLat.lng, originalEvent: event.originalEvent, mode },
     }));
     canonicalMap.fire("click", {
-      latlng: L.latLng(event.lngLat.lat, event.lngLat.lng),
+      latlng: MapScene.latLng(event.lngLat.lat, event.lngLat.lng),
       originalEvent: event.originalEvent,
     });
   });
@@ -399,7 +399,7 @@ function installMapboxInteractions(instance: mapboxgl.Map, mode: MapMode): void 
       detail: { lat: event.lngLat.lat, lng: event.lngLat.lng, originalEvent: event.originalEvent, mode },
     }));
     canonicalMap.fire("dblclick", {
-      latlng: L.latLng(event.lngLat.lat, event.lngLat.lng),
+      latlng: MapScene.latLng(event.lngLat.lat, event.lngLat.lng),
       originalEvent: event.originalEvent,
     });
   });
@@ -450,7 +450,7 @@ function syncLeafletCameraFromMapbox(instance: mapboxgl.Map, mode: MapMode): voi
   const rawZoom = Number(instance.getZoom());
   const zoom = mode === "3d" ? leafletZoomFromGlobe(rawZoom) : rawZoom;
   lastEngineDrivenLeafletMove = Date.now();
-  const logicalMap = canonicalMap as L.Map & { _setViewFromNative?: (center: L.LatLngExpression, zoom: number) => void };
+  const logicalMap = canonicalMap as MapScene.Map & { _setViewFromNative?: (center: MapScene.LatLngExpression, zoom: number) => void };
   const normalizedZoom = Math.max(2, Math.min(17, zoom));
   if (typeof logicalMap._setViewFromNative === "function") {
     logicalMap._setViewFromNative([center.lat, center.lng], normalizedZoom);

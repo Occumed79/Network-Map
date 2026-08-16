@@ -27,7 +27,7 @@ const OVERLAY_SELECTOR = [
   ".command-search-results",
   ".local-pop-card",
   ".tz-legend",
-  ".leaflet-popup",
+  ".mapboxgl-popup",
   ".mapboxgl-popup",
   ".modal-backdrop.open .modal-box",
   ".pdf-modal-wrap",
@@ -147,11 +147,11 @@ function handleVisibilityChange(): void {
 
 function mutationTouchesAuditedSurface(mutation: MutationRecord): boolean {
   const target = mutation.target instanceof Element ? mutation.target : null;
-  if (target?.closest(".app-wrap, .command-header, .app-body, .occumed-sidebar-workspace-host, .modal-backdrop, .modal-box, .pdf-modal-wrap, .leaflet-popup, .mapboxgl-popup, .command-search-results, .local-pop-card, .tz-legend")) return true;
+  if (target?.closest(".app-wrap, .command-header, .app-body, .occumed-sidebar-workspace-host, .modal-backdrop, .modal-box, .pdf-modal-wrap, .mapboxgl-popup, .mapboxgl-popup, .command-search-results, .local-pop-card, .tz-legend")) return true;
   return Array.from(mutation.addedNodes).some((node) =>
     node instanceof Element
-      && Boolean(node.matches(".modal-backdrop, .modal-box, .pdf-modal-wrap, .leaflet-popup, .mapboxgl-popup, .command-search-results, .local-pop-card, .tz-legend")
-        || node.querySelector(".modal-backdrop, .modal-box, .pdf-modal-wrap, .leaflet-popup, .mapboxgl-popup, .command-search-results, .local-pop-card, .tz-legend")),
+      && Boolean(node.matches(".modal-backdrop, .modal-box, .pdf-modal-wrap, .mapboxgl-popup, .mapboxgl-popup, .command-search-results, .local-pop-card, .tz-legend")
+        || node.querySelector(".modal-backdrop, .modal-box, .pdf-modal-wrap, .mapboxgl-popup, .mapboxgl-popup, .command-search-results, .local-pop-card, .tz-legend")),
   );
 }
 

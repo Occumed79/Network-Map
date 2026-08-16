@@ -1,5 +1,5 @@
-import L from "leaflet";
-import { registerLeafletMapInitializer } from "./leafletMapLifecycleRuntime";
+import MapScene from "./mapSceneRuntime";
+import { registerMapSceneInitializer } from "./mapSceneLifecycleRuntime";
 import { hasMapboxToken, mapboxDirections, mapboxIsochrone, mapboxReverseGeocode } from "./mapboxServices";
 
 type Point = { lat: number; lng: number; label?: string };
@@ -7,8 +7,8 @@ type TravelMode = "driving-traffic" | "driving" | "walking";
 
 let installed = false;
 let origin: Point | null = null;
-let routeLayer: L.LayerGroup | null = null;
-let zoneLayer: L.GeoJSON | null = null;
+let routeLayer: MapScene.LayerGroup | null = null;
+let zoneLayer: MapScene.GeoJSON | null = null;
 let mode: TravelMode = "driving-traffic";
 let zonePreset = [15, 30, 45, 60];
 let statusNode: HTMLDivElement | null = null;
@@ -21,7 +21,7 @@ function zoneMode(): "driving" | "walking" {
   return mode === "walking" ? "walking" : "driving";
 }
 
-function clearLayers(map: L.Map) {
+function clearLayers(map: MapScene.Map) {
   if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
   if (zoneLayer) { map.removeLayer(zoneLayer); zoneLayer = null; }
 }
@@ -31,14 +31,14 @@ async function setOriginFromPoint(point: Point) {
   setStatus(`Origin ready: ${point.label || point.lat.toFixed(4) + ", " + point.lng.toFixed(4)}`);
 }
 
-async function routeTo(map: L.Map, target: Point) {
+async function routeTo(map: MapScene.Map, target: Point) {
   if (!origin) { setStatus("Set an origin first by clicking the map."); return; }
   setStatus(`Loading ${mode} route...`);
   try {
     if (routeLayer) map.removeLayer(routeLayer);
     const route = await mapboxDirections(origin, target, mode);
-    const line = L.polyline(route.coordinates, { color: "#0f766e", weight: 5, opacity: 0.86 });
-    routeLayer = L.layerGroup([line]).addTo(map);
+    const line = MapScene.polyline(route.coordinates, { color: "#0f766e", weight: 5, opacity: 0.86 });
+    routeLayer = MapScene.layerGroup([line]).addTo(map);
     map.fitBounds(line.getBounds(), { padding: [38, 38] });
     setStatus(`${mode}: ${route.distanceMiles.toFixed(1)} mi / ${Math.round(route.durationMinutes)} min`);
   } catch (err: any) {
@@ -46,13 +46,13 @@ async function routeTo(map: L.Map, target: Point) {
   }
 }
 
-async function drawZones(map: L.Map) {
+async function drawZones(map: MapScene.Map) {
   if (!origin) { setStatus("Set an origin first by clicking the map."); return; }
   setStatus(`Loading ${zonePreset.join("/")} min zones...`);
   try {
     if (zoneLayer) map.removeLayer(zoneLayer);
     const data = await mapboxIsochrone(origin, zonePreset, zoneMode());
-    zoneLayer = L.geoJSON(data, {
+    zoneLayer = MapScene.geoJSON(data, {
       style: (feature: any) => {
         const contour = Number(feature?.properties?.contour || zonePreset[0]);
         const index = Math.max(0, zonePreset.indexOf(contour));
@@ -66,12 +66,12 @@ async function drawZones(map: L.Map) {
   }
 }
 
-function addControl(map: L.Map) {
-  const control = new L.Control({ position: "bottomleft" });
+function addControl(map: MapScene.Map) {
+  const control = new MapScene.Control({ position: "bottomleft" });
   control.onAdd = () => {
-    const box = L.DomUtil.create("div", "occumed-mapbox-advanced");
-    L.DomEvent.disableClickPropagation(box);
-    L.DomEvent.disableScrollPropagation(box);
+    const box = MapScene.DomUtil.create("div", "occumed-mapbox-advanced");
+    MapScene.DomEvent.disableClickPropagation(box);
+    MapScene.DomEvent.disableScrollPropagation(box);
 
     const title = document.createElement("div");
     title.className = "occumed-basemap-title";
@@ -143,9 +143,9 @@ function addControl(map: L.Map) {
   control.addTo(map);
 }
 
-function installOnMap(map: L.Map) {
+function installOnMap(map: MapScene.Map) {
   addControl(map);
-  map.on("click", async (event: L.LeafletMouseEvent) => {
+  map.on("click", async (event: MapScene.MapPointerEvent) => {
     const point = { lat: event.latlng.lat, lng: event.latlng.lng };
     if (event.originalEvent?.altKey) {
       await routeTo(map, point);
@@ -163,7 +163,7 @@ function installOnMap(map: L.Map) {
 export function installMapboxAdvancedControls() {
   if (installed || !hasMapboxToken()) return;
   installed = true;
-  registerLeafletMapInitializer({
+  registerMapSceneInitializer({
     id: "mapbox-advanced-controls",
     priority: 90,
     initialize: (map) => { window.setTimeout(() => installOnMap(map), 0); },

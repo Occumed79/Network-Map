@@ -1,4 +1,4 @@
-import L from 'leaflet';
+import MapScene from "../mapSceneRuntime";
 
 export type TileProviderKey =
   | 'osm'
@@ -92,9 +92,9 @@ export const TILE_GROUPS: Record<string, TileProviderKey[]> = {
   Free: ['osm', 'carto_light', 'carto_dark', 'carto_voyager', 'opentopo', 'stadia_smooth', 'stadia_dark', 'stadia_outdoors'],
 };
 
-export function createTileLayer(key: TileProviderKey): L.TileLayer {
+export function createTileLayer(key: TileProviderKey): MapScene.TileLayer {
   const provider = TILE_PROVIDERS[key] || TILE_PROVIDERS.osm;
-  return L.tileLayer(provider.url, {
+  return MapScene.tileLayer(provider.url, {
     attribution: provider.attribution,
     maxZoom: provider.maxZoom || 19,
     className: provider.className,

@@ -16,6 +16,12 @@ type ChannelState = {
   glow: boolean;
 };
 
+type DatasetHit = {
+  coordinates: [number, number];
+  popupHtml: string;
+  distance: number;
+};
+
 const CHANNELS: ProviderDatasetChannel[] = ["bluehive", "dentists", "inventory", "indexed", "my-clinics", "naccho", "uploaded"];
 const states = new Map<ProviderDatasetChannel, ChannelState>();
 for (const channel of CHANNELS) {
@@ -129,6 +135,7 @@ function updateChannel(channel: ProviderDatasetChannel): void {
     try {
       ensureChannel(map, channel);
       (map.getSource(channelIds.source) as mapboxgl.GeoJSONSource | undefined)?.setData(state.collection);
+      map.triggerRepaint();
     } catch (error) {
       console.warn(`Provider dataset ${channel} update failed`, error);
     }
@@ -182,21 +189,53 @@ function markHandled(originalEvent: unknown): void {
   }
 }
 
-function hit(map: mapboxgl.Map, point: mapboxgl.Point): mapboxgl.MapboxGeoJSONFeature | null {
+function renderedHit(map: mapboxgl.Map, point: mapboxgl.Point): DatasetHit | null {
   const layers = CHANNELS.map((channel) => ids(channel).points).filter((layer) => Boolean(map.getLayer(layer)));
   if (!layers.length) return null;
-  const box: [[number, number], [number, number]] = [[point.x - 10, point.y - 10], [point.x + 10, point.y + 10]];
+  const box: [[number, number], [number, number]] = [[point.x - 12, point.y - 12], [point.x + 12, point.y + 12]];
   try {
-    return map.queryRenderedFeatures(box, { layers })
-      .filter((feature) => String(feature.properties?.popupHtml || "").trim())
+    const feature = map.queryRenderedFeatures(box, { layers })
+      .filter((candidate) => candidate.geometry.type === "Point" && String(candidate.properties?.popupHtml || "").trim())
       .sort((left, right) => {
-        const leftPoint = left.geometry.type === "Point" ? map.project(left.geometry.coordinates as [number, number]) : point;
-        const rightPoint = right.geometry.type === "Point" ? map.project(right.geometry.coordinates as [number, number]) : point;
+        const leftPoint = map.project(left.geometry.type === "Point" ? left.geometry.coordinates as [number, number] : map.unproject(point));
+        const rightPoint = map.project(right.geometry.type === "Point" ? right.geometry.coordinates as [number, number] : map.unproject(point));
         return Math.hypot(leftPoint.x - point.x, leftPoint.y - point.y) - Math.hypot(rightPoint.x - point.x, rightPoint.y - point.y);
-      })[0] || null;
+      })[0];
+    if (!feature || feature.geometry.type !== "Point") return null;
+    const projected = map.project(feature.geometry.coordinates as [number, number]);
+    return {
+      coordinates: feature.geometry.coordinates as [number, number],
+      popupHtml: String(feature.properties?.popupHtml || ""),
+      distance: Math.hypot(projected.x - point.x, projected.y - point.y),
+    };
   } catch {
     return null;
   }
+}
+
+function stateHit(map: mapboxgl.Map, point: mapboxgl.Point, maxDistance = 16): DatasetHit | null {
+  let nearest: DatasetHit | null = null;
+  for (const channel of CHANNELS) {
+    const channelIds = ids(channel);
+    if (!map.getLayer(channelIds.points) || !map.getSource(channelIds.source)) continue;
+    const state = states.get(channel);
+    if (!state) continue;
+    for (const feature of state.collection.features) {
+      if (feature.geometry.type !== "Point") continue;
+      const popupHtml = String(feature.properties?.popupHtml || "").trim();
+      if (!popupHtml) continue;
+      const coordinates = feature.geometry.coordinates as [number, number];
+      const projected = map.project(coordinates);
+      const distance = Math.hypot(projected.x - point.x, projected.y - point.y);
+      if (distance > maxDistance || (nearest && nearest.distance <= distance)) continue;
+      nearest = { coordinates, popupHtml, distance };
+    }
+  }
+  return nearest;
+}
+
+function hit(map: mapboxgl.Map, point: mapboxgl.Point): DatasetHit | null {
+  return renderedHit(map, point) || stateHit(map, point);
 }
 
 registerMapboxMapInitializer({
@@ -206,11 +245,11 @@ registerMapboxMapInitializer({
     const apply = () => CHANNELS.forEach((channel) => ensureChannel(map, channel));
     const click = (event: mapboxgl.MapMouseEvent) => {
       const feature = hit(map, event.point);
-      if (!feature || feature.geometry.type !== "Point") return;
+      if (!feature) return;
       markHandled(event.originalEvent);
       new mapboxgl.Popup({ closeButton: true, closeOnClick: true, maxWidth: "320px" })
-        .setLngLat(feature.geometry.coordinates as [number, number])
-        .setHTML(String(feature.properties?.popupHtml || ""))
+        .setLngLat(feature.coordinates)
+        .setHTML(feature.popupHtml)
         .addTo(map);
     };
     map.on("style.load", apply);

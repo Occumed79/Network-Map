@@ -1,0 +1,43 @@
+name: One-shot Explorer feature-click and transition wait fix
+
+on:
+  push:
+    paths:
+      - .github/workflows/one-shot-explorer-click-transition-wait-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: nuclear/mapbox-native-runtime
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - name: Apply acceptance hardening
+        run: python occu-med-map/scripts/apply-explorer-feature-click-and-transition-wait-fix.py
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck frontend
+        run: pnpm --filter @workspace/occu-med-map typecheck
+      - name: Provider Explorer hardening
+        run: pnpm --filter @workspace/occu-med-map test:provider-explorer-hardening
+      - name: Map synchronization hardening
+        run: pnpm --filter @workspace/occu-med-map test:map-synchronization-hardening
+      - name: Mapbox lifecycle hardening
+        run: pnpm --filter @workspace/occu-med-map test:leaflet-map-lifecycle-hardening
+      - name: Build frontend
+        run: pnpm --filter @workspace/occu-med-map build
+      - name: Commit validated acceptance hardening
+        run: |
+          git config user.name "Occumed79"
+          git config user.email "Occumed79@users.noreply.github.com"
+          git add occu-med-map/scripts/ci-mapbox-native-tools-acceptance.mjs
+          git commit -m "Harden native Explorer click and transition acceptance"
+          git push origin HEAD:nuclear/mapbox-native-runtime

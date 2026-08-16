@@ -1,4 +1,4 @@
-name: One-shot remove dead scene runtimes
+name: One-shot native provider dataset migration
 
 on:
   push:
@@ -20,42 +20,8 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable
-      - name: Prove and remove dead scene runtimes
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          root = Path('occu-med-map')
-          targets = [
-              root / 'src/mapboxAdvancedControls.ts',
-              root / 'src/mapboxProviderRanking.ts',
-              root / 'src/providerDensityField.ts',
-              root / 'src/mapSceneInteractionDefaults.ts',
-          ]
-          source_suffixes = {'.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'}
-          source_files = [p for p in root.rglob('*') if p.is_file() and p.suffix in source_suffixes]
-
-          for target in targets:
-              if not target.exists():
-                  raise SystemExit(f'missing expected dead runtime: {target}')
-              stem = target.stem
-              references = []
-              for candidate in source_files:
-                  if candidate == target:
-                      continue
-                  try:
-                      text = candidate.read_text(errors='ignore')
-                  except Exception:
-                      continue
-                  if stem in text:
-                      references.append(str(candidate))
-              if references:
-                  raise SystemExit(f'{target} is still referenced by: {references}')
-
-          for target in targets:
-              target.unlink()
-              print(f'removed dead runtime: {target}')
-          PY
+      - name: Migrate persistent provider datasets to native Mapbox
+        run: python occu-med-map/scripts/migrate-provider-datasets-native.py
       - run: pnpm install --frozen-lockfile
       - name: Typecheck frontend
         run: pnpm --filter @workspace/occu-med-map typecheck
@@ -68,10 +34,11 @@ jobs:
       - name: Inventory remaining compatibility
         working-directory: occu-med-map
         run: pnpm exec tsx scripts/zero-leaflet-architecture-audit.ts
-      - name: Commit validated dead-runtime removal
+      - name: Commit validated provider dataset migration
         run: |
+          rm -f occu-med-map/scripts/migrate-provider-datasets-native.py
           git config user.name "Occumed79"
           git config user.email "Occumed79@users.noreply.github.com"
           git add -A
-          git commit -m "Delete dead scene compatibility runtimes"
+          git commit -m "Render persistent provider datasets with native Mapbox"
           git push origin HEAD:nuclear/remove-leaflet-compat

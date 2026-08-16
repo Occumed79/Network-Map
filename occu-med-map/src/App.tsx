@@ -72,6 +72,14 @@ import {
   clearProviderDataset,
   renderProviderDataset,
 } from './providerDatasetNativeMapRuntime';
+import {
+  clearNativeDiagnosticChannel,
+  flyNativeMap,
+  openNativeMapPopup,
+  renderSavedRadiusOverlays,
+  setNativeAddressPin,
+  setNativeDiagnosticCollection,
+} from './usDiagnosticsNativeMapRuntime';
 
 const NATIVE_DRIVE_TIME_ENABLED = import.meta.env.VITE_NATIVE_DRIVE_TIME === 'true';
 
@@ -1114,12 +1122,6 @@ const MapToolsWorkspaceHost = React.memo(React.forwardRef<HTMLDivElement>(functi
 export default function App() {
   const mapRef = useRef<MapScene.Map|null>(null);
   const mapDivRef = useRef<HTMLDivElement>(null);
-  const stateGeoRef = useRef<MapScene.GeoJSON|null>(null);
-  const cityLayerRef = useRef<MapScene.LayerGroup|null>(null);
-  const customPinRef = useRef<MapScene.Marker|null>(null);
-  const tzLayerRef = useRef<MapScene.LayerGroup|null>(null);
-  const popDensityLayerRef = useRef<MapScene.LayerGroup|null>(null);
-  const savedRadiusLayerRef = useRef<MapScene.LayerGroup|null>(null);
   const rawStateFeaturesRef = useRef<any[]>([]);
   const clinicFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1573,12 +1575,8 @@ export default function App() {
     // have not yet moved to direct Mapbox sources. It no longer owns the camera,
     // engine lifecycle, or 2D/3D synchronization.
 
-    // City layer
-    const cityLayer = MapScene.layerGroup().addTo(map);
-    cityLayerRef.current = cityLayer;
-
-    // Load GeoJSON only if US Diagnostics is already enabled
-    if (showUsDiagnostics) loadStateGeo(map);
+    // Load U.S. diagnostic GeoJSON only if the diagnostics workspace is enabled.
+    if (showUsDiagnostics) void loadStateGeo();
 
     // User-facing map tools consume Mapbox-native input directly. The temporary
     // scene facade remains only for legacy geometry/control APIs; Radius,
@@ -1633,7 +1631,6 @@ export default function App() {
       cleanupDualMapEngines();
       map.remove();
       mapRef.current=null;
-      cityLayerRef.current=null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
@@ -2102,60 +2099,26 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[activeTool]);
 
-  const labelLayerRef = useRef<MapScene.LayerGroup|null>(null);
 
-  // ── Load State GeoJSON ───────────────────────────────────────────────────
-  async function loadStateGeo(map:MapScene.Map) {
-    const urls = [
-      '/states-10m.json',
-      'https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json',
-      'https://unpkg.com/us-atlas@3/states-10m.json',
-    ];
-    for(const url of urls) {
-      try {
-        const r = await fetch(url);
-        if(!r.ok) continue;
-        const topo = await r.json();
-        const gj = topojson.feature(topo, topo.objects.states) as any;
-        gj.features.forEach((f:any)=>{
-          const id = String(f.properties.id||'').padStart(2,'0');
-          f.properties.postal = FIPS2CODE[id]||NAME2CODE[(f.properties.name||'').toLowerCase()]||'';
-        });
-        const stateGeo = MapScene.geoJSON(gj,{
-          style:(f:any)=>sStyle(f?.properties?.postal||'',metric),
-          onEachFeature:(f:any,layer:any)=>{
-            const postal = f.properties.postal;
-            layer.on({
-              mouseover:(e:any)=>{ e.target.setStyle({weight:2,opacity:0.9}); },
-              mouseout:(e:any)=>{ e.target.setStyle(sStyle(postal, metricRef.current)); },
-              click:(e:any)=>{
-                MapScene.popup({maxWidth:340,className:''})
-                  .setLatLng(e.latlng)
-                  .setContent(buildStatePopup(postal))
-                  .openOn(map);
-              }
-            });
-            layer.bindTooltip(()=>{
-              const d=SD[postal];
-              if(!d) return postal;
-              const v=getVal(d,metricRef.current);
-              return `<div style="padding:5px 8px;font-family:'IBM Plex Mono',monospace">
-                <span style="font-weight:700;font-size:11px;color:#eef4ff">${postal}</span>&nbsp;
-                <span style="font-size:9px;color:${DCOL[v]};font-weight:700">${DLBL[v]}</span>
-              </div>`;
-            },{sticky:true,direction:'top'});
-          }
-        }).addTo(map);
-        stateGeoRef.current = stateGeo;
-        rawStateFeaturesRef.current = gj.features;
-        buildStateLabels(map, stateGeo);
-        setStateGeoRevision(value=>value+1);
-        break;
-      } catch(e) { console.warn('GeoJSON load error',e); }
-    }
+  // ── Load / render U.S. state diagnostics with native Mapbox sources ────────
+  function featureCenter(feature:any): [number,number] {
+    const coords:number[][]=[];
+    const walk=(value:any)=>{
+      if(!Array.isArray(value)) return;
+      if(value.length>=2 && typeof value[0]==='number' && typeof value[1]==='number') {
+        coords.push([Number(value[0]),Number(value[1])]);
+        return;
+      }
+      value.forEach(walk);
+    };
+    walk(feature?.geometry?.coordinates);
+    if(!coords.length) return [0,0];
+    const lngs=coords.map(point=>point[0]);
+    const lats=coords.map(point=>point[1]);
+    return [(Math.min(...lats)+Math.max(...lats))/2,(Math.min(...lngs)+Math.max(...lngs))/2];
   }
 
-  function sStyle(postal:string,m:string):MapScene.PathOptions {
+  function sStyle(postal:string,m:string) {
     const d=SD[postal];
     if(!d) return{fillColor:'#0a1830',fillOpacity:0.38,weight:1,color:'rgba(99,179,237,0.15)',opacity:0.6};
     if(!showStateColorsRef.current) return {fillColor:'#11243f',fillOpacity:0.12,weight:1,color:'rgba(161,209,255,0.25)',opacity:0.8};
@@ -2164,27 +2127,79 @@ export default function App() {
     return{fillColor:col,fillOpacity:0.25,weight:1,color:col,opacity:0.45};
   }
 
-  const metricRef = useRef(metric);
-  useEffect(()=>{ metricRef.current=metric; },[metric]);
-  useEffect(()=>{
-    if(!stateGeoRef.current) return;
-    stateGeoRef.current.setStyle((f:any)=>sStyle(f?.properties?.postal||'',metricRef.current));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[showStateColors]);
+  function renderStateDiagnostics() {
+    const features=rawStateFeaturesRef.current;
+    if(!features.length) {
+      clearNativeDiagnosticChannel('states');
+      return;
+    }
+    const rendered:any[]=[];
+    features.forEach((feature:any)=>{
+      const postal=feature.properties?.postal||'';
+      const style=sStyle(postal,metricRef.current);
+      const d=SD[postal];
+      const value=d?getVal(d,metricRef.current):0;
+      rendered.push({
+        ...feature,
+        properties:{
+          ...feature.properties,
+          fillColor:style.fillColor,
+          fillOpacity:style.fillOpacity,
+          lineColor:style.color,
+          lineOpacity:style.opacity,
+          lineWidth:style.weight,
+          popupHtml:buildStatePopup(postal),
+          tooltipHtml:d?`<div style="padding:5px 8px;font-family:'IBM Plex Mono',monospace"><span style="font-weight:700;font-size:11px;color:#eef4ff">${postal}</span>&nbsp;<span style="font-size:9px;color:${DCOL[value]};font-weight:700">${DLBL[value]}</span></div>`:postal,
+        },
+      });
+      const fallback=featureCenter(feature);
+      const [lat,lng]=STATE_CTR[postal]||fallback;
+      if(postal) rendered.push({
+        type:'Feature',
+        geometry:{type:'Point',coordinates:[lng,lat]},
+        properties:{kind:'label',label:postal,labelColor:'#8aa4c4',labelSize:9,hidden:!showLabelsRef.current},
+      });
+    });
+    setNativeDiagnosticCollection('states',{type:'FeatureCollection',features:rendered} as any);
+  }
 
-  // Load / remove state GeoJSON when US Diagnostics toggles
+  async function loadStateGeo() {
+    const urls = [
+      '/states-10m.json',
+      'https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json',
+      'https://unpkg.com/us-atlas@3/states-10m.json',
+    ];
+    for(const url of urls) {
+      try {
+        const r=await fetch(url);
+        if(!r.ok) continue;
+        const topo=await r.json();
+        const gj=topojson.feature(topo,topo.objects.states) as any;
+        gj.features.forEach((f:any)=>{
+          const id=String(f.properties.id||'').padStart(2,'0');
+          f.properties.postal=FIPS2CODE[id]||NAME2CODE[(f.properties.name||'').toLowerCase()]||'';
+        });
+        rawStateFeaturesRef.current=gj.features;
+        renderStateDiagnostics();
+        setStateGeoRevision(value=>value+1);
+        break;
+      } catch(error) { console.warn('GeoJSON load error',error); }
+    }
+  }
+
+  const metricRef=useRef(metric);
+  useEffect(()=>{ metricRef.current=metric; renderStateDiagnostics(); },[metric]);
+  useEffect(()=>{ showStateColorsRef.current=showStateColors; renderStateDiagnostics(); },[showStateColors]);
+
   useEffect(()=>{
-    const map = mapRef.current;
-    if(!map) return;
-    if(showUsDiagnostics && !stateGeoRef.current) {
-      void loadStateGeo(map);
+    if(showUsDiagnostics && !rawStateFeaturesRef.current.length) {
+      void loadStateGeo();
     } else if(!showUsDiagnostics) {
-      if(stateGeoRef.current) {
-        try { map.removeLayer(stateGeoRef.current); } catch(e){}
-        stateGeoRef.current = null;
-      }
-      if(labelLayerRef.current) { try{ map.removeLayer(labelLayerRef.current); }catch(e){} labelLayerRef.current = null; }
-      rawStateFeaturesRef.current = [];
+      rawStateFeaturesRef.current=[];
+      clearNativeDiagnosticChannel('states');
+      clearNativeDiagnosticChannel('population');
+      clearNativeDiagnosticChannel('cities');
+      clearNativeDiagnosticChannel('timezones');
       setShowLabels(false);
       setShowTZ(false);
       setShowPopDensity(false);
@@ -2282,62 +2297,36 @@ export default function App() {
     }
   }
 
-  function buildStateLabels(map:MapScene.Map,stateGeo:MapScene.GeoJSON) {
-    const labelGrp = MapScene.layerGroup();
-    stateGeo.eachLayer((layer:any)=>{
-      const props = layer.feature?.properties;
-      if(!props) return;
-      const postal = props.postal;
-      if(!postal) return;
-      const rawCtr = layer.getBounds().getCenter();
-      const [lat,lng] = STATE_CTR[postal]||[rawCtr.lat,rawCtr.lng];
-      const icon = MapScene.divIcon({
-        className:'',
-        html:`<div style="font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;color:#8aa4c4;text-shadow:0 1px 4px rgba(0,0,0,0.9),0 0 8px rgba(0,0,0,0.7);pointer-events:none;white-space:nowrap;letter-spacing:0.5px;">${postal}</div>`,
-        iconSize:[0,0],iconAnchor:[10,7]
-      });
-      const mk = MapScene.marker([lat,lng],{icon,interactive:false,zIndexOffset:200});
-      labelGrp.addLayer(mk);
-    });
-    labelLayerRef.current = labelGrp;
-    if(showLabelsRef.current) labelGrp.addTo(map);
-    return labelGrp;
-  }
 
-  // ── Population density overlay ─────────────────────────────────────────────
-  const showPopDensityRef = useRef(showPopDensity);
-  useEffect(()=>{ showPopDensityRef.current = showPopDensity; },[showPopDensity]);
+  // ── Population density overlay: native Mapbox polygons ────────────────────
+  const showPopDensityRef=useRef(showPopDensity);
+  useEffect(()=>{ showPopDensityRef.current=showPopDensity; },[showPopDensity]);
   useEffect(()=>{
-    const map = mapRef.current;
-    if (!map) return;
-    if (!showPopDensity) {
-      if (popDensityLayerRef.current) { map.removeLayer(popDensityLayerRef.current); popDensityLayerRef.current = null; }
+    if(!showPopDensity) {
+      clearNativeDiagnosticChannel('population');
       return;
     }
-    const features = rawStateFeaturesRef.current;
-    if (!features.length) return;
-    const layers: MapScene.Layer[] = [];
-    features.forEach((f: any) => {
-      const postal = f.properties?.postal;
-      const pop = STATE_POP[postal];
-      if (!pop) return;
-      const color = densityColor(pop.density);
-      const lyr = MapScene.geoJSON(f, {
-        style: { fillColor: color, fillOpacity: 0.55, weight: 1, color: color, opacity: 0.6 },
-      });
-      lyr.bindTooltip(()=>{
-        return `<div style="padding:5px 8px;font-family:'IBM Plex Mono',monospace;font-size:10px">
-          <span style="font-weight:700;color:#eef4ff">${postal}</span>
-          <span style="color:${color};margin-left:6px;font-weight:700">${densityLabel(pop.density)}</span><br/>
-          <span style="color:#67e8f9">${Math.round(pop.density).toLocaleString()}/mi²</span>
-          <span style="color:#3d5478;margin-left:6px">${pop.pop.toLocaleString()}</span>
-        </div>`;
-      },{sticky:true,direction:'top'});
-      layers.push(lyr);
+    const features=rawStateFeaturesRef.current;
+    if(!features.length) return;
+    const rendered=features.flatMap((feature:any)=>{
+      const postal=feature.properties?.postal;
+      const pop=STATE_POP[postal];
+      if(!pop) return [];
+      const color=densityColor(pop.density);
+      return [{
+        ...feature,
+        properties:{
+          ...feature.properties,
+          fillColor:color,
+          fillOpacity:0.55,
+          lineColor:color,
+          lineOpacity:0.6,
+          lineWidth:1,
+          tooltipHtml:`<div style="padding:5px 8px;font-family:'IBM Plex Mono',monospace;font-size:10px"><span style="font-weight:700;color:#eef4ff">${postal}</span><span style="color:${color};margin-left:6px;font-weight:700">${densityLabel(pop.density)}</span><br/><span style="color:#67e8f9">${Math.round(pop.density).toLocaleString()}/mi²</span><span style="color:#3d5478;margin-left:6px">${pop.pop.toLocaleString()}</span></div>`,
+        },
+      }];
     });
-    const grp = MapScene.layerGroup(layers).addTo(map);
-    popDensityLayerRef.current = grp;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    setNativeDiagnosticCollection('population',{type:'FeatureCollection',features:rendered} as any);
   },[showPopDensity, stateGeoRevision]);
 
   // ── Uploaded clinic pins: native Mapbox source ─────────────────────────────
@@ -2530,148 +2519,92 @@ export default function App() {
     }
   }
 
-  const showLabelsRef = useRef(showLabels);
+  const showLabelsRef=useRef(showLabels);
   useEffect(()=>{
-    showLabelsRef.current = showLabels;
-    const map = mapRef.current;
-    const lyr = labelLayerRef.current;
-    if(!map||!lyr) return;
-    if(showLabels) lyr.addTo(map); else map.removeLayer(lyr);
-  },[showLabels]);
+    showLabelsRef.current=showLabels;
+    renderStateDiagnostics();
+  },[showLabels,stateGeoRevision]);
 
   useEffect(()=>{
-    const map = mapRef.current;
-    if(!map) return;
-    if(savedRadiusLayerRef.current) {
-      try { map.removeLayer(savedRadiusLayerRef.current); } catch {}
-      savedRadiusLayerRef.current = null;
-    }
-    if(!savedRadii.length) return;
-    const grp = MapScene.layerGroup();
-    savedRadii.forEach((r, idx)=>{
-      // Glow circle with colored ring
-      const circEl = MapScene.circle([r.lat,r.lng],{
-        radius: Math.max(r.radiusMiles,0.1)*1609.34,
-        color: r.color,
-        weight: 2.5,
-        opacity: 0.92,
-        fillColor: r.color,
-        fillOpacity: 0.07,
-        dashArray: '10 6',
-        interactive: false,
-        className: showGlowPoints ? 'drop-radius-ring' : '',
-      }).addTo(grp);
-      // Label + dot marker
-      const labelHtml = `<div style="display:flex;flex-direction:column;align-items:center;gap:3px;pointer-events:none;">
-        <div style="background:rgba(4,10,24,0.85);border:1.5px solid ${r.color};border-radius:8px;padding:2px 7px;font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;color:${r.color};white-space:nowrap;${showGlowPoints?`box-shadow:0 0 10px ${r.color}66,0 0 22px ${r.color}33;`:''}">${r.label||`Marker ${idx+1}`}</div>
-        <div style="width:12px;height:12px;border-radius:50%;background:${r.color};border:2px solid #fff;${showGlowPoints?`box-shadow:0 0 0 3px ${r.color}55,0 0 16px ${r.color}bb;`:'box-shadow:0 0 0 2px rgba(255,255,255,0.5);'}"></div>
-      </div>`;
-      MapScene.marker([r.lat,r.lng],{
-        icon:MapScene.divIcon({
-          className:'',
-          html:labelHtml,
-          iconSize:[80,40],iconAnchor:[40,40],
-        }),
-        interactive:true,
-        zIndexOffset: 2800 - idx,
-      }).bindPopup(`<div class="pi"><div class="pt">${r.label||'Marker'}</div><div class="ps">${r.radiusMiles} mi radius</div><div class="pg"><div><div class="psl">Lat</div><div class="psv">${r.lat.toFixed(4)}</div></div><div><div class="psl">Lng</div><div class="psv">${r.lng.toFixed(4)}</div></div></div></div>`,{maxWidth:240}).addTo(grp);
-    });
-    grp.addTo(map);
-    savedRadiusLayerRef.current = grp;
-  },[savedRadii, showGlowPoints]);
+    renderSavedRadiusOverlays(savedRadii,showGlowPoints);
+    return ()=>renderSavedRadiusOverlays([],showGlowPoints);
+  },[savedRadii,showGlowPoints]);
 
-  // ── Re-style states when metric changes ─────────────────────────────────
+  // ── City markers: native Mapbox points ───────────────────────────────────
   useEffect(()=>{
-    if(!stateGeoRef.current) return;
-    stateGeoRef.current.setStyle((f:any)=>sStyle(f?.properties?.postal||'',metric));
-  },[metric]);
-
-  // ── City markers ─────────────────────────────────────────────────────────
-  useEffect(()=>{
-    const map = mapRef.current;
-    const cityLayer = cityLayerRef.current;
-    if(!map||!cityLayer) return;
-    cityLayer.clearLayers();
-    if(!showCityDots) return; // blank map mode
-
-    // Show ALL cities — only apply difficulty filter if one is active
-    const visibleLocs = LOCS.filter(loc=>{
-      if(filterDiff!==null && getVal(loc,metric)!==filterDiff) return false;
-      return true;
-    });
-
-    for(const loc of visibleLocs) {
-      const [name,state,lat,lng,tier]=loc;
-      const v = getVal(loc,metric);
-      const col = DCOL[v];
-      // Scale dot by tier: 1=major metro large, 2=mid, 3/4=small
-      const r = tier===1?9:tier===2?6:tier===3?4:3;
-      const borderW = tier<=2 ? 2 : 1.5;
-      const icon = MapScene.divIcon({
-        className:'',
-        html:`<div style="width:${r*2}px;height:${r*2}px;border-radius:50%;background:${col};border:${borderW}px solid rgba(255,255,255,${tier===1?0.8:0.5});${showGlowPoints?`box-shadow:0 0 ${r+4}px ${col}55,0 1px 4px rgba(0,0,0,0.6);`:'box-shadow:0 0 0 1px rgba(255,255,255,0.2);'}cursor:pointer;"></div>`,
-        iconSize:[r*2,r*2],iconAnchor:[r,r]
-      });
-      const mk = MapScene.marker([lat,lng],{icon,zIndexOffset:tier===1?300:tier===2?200:tier===3?100:50});
-      mk.bindPopup(()=>buildCityPopup(loc,metricRef.current),{maxWidth:320,className:''});
-      mk.bindTooltip(()=>`<div style="padding:5px 8px;font-family:'IBM Plex Mono',monospace">
-        <span style="font-weight:700;color:#eef4ff">${name}, ${state}</span><br>
-        <span style="font-size:9px;color:${DCOL[getVal(loc,metricRef.current)]}">${DLBL[getVal(loc,metricRef.current)]}</span>
-      </div>`,{sticky:false,direction:'top'});
-      cityLayer.addLayer(mk);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[metric,filterDiff,mapReady,showGlowPoints,showCityDots]);
-
-  // ── Timezone layer ────────────────────────────────────────────────────────
-  useEffect(()=>{
-    const map = mapRef.current;
-    if(!map) return;
-    if(!showTZ) {
-      if(tzLayerRef.current) { map.removeLayer(tzLayerRef.current); tzLayerRef.current=null; }
+    if(!showCityDots) {
+      clearNativeDiagnosticChannel('cities');
       return;
     }
-    if(tzLayerRef.current) return;
-    if(!stateGeoRef.current) return;
-    const layers:MapScene.Layer[]=[];
+    const visibleLocs=LOCS.filter(loc=>filterDiff===null || getVal(loc,metric)===filterDiff);
+    const features=visibleLocs.map((loc:any)=>{
+      const [name,state,lat,lng,tier]=loc;
+      const value=getVal(loc,metric);
+      const color=DCOL[value];
+      const radius=tier===1?9:tier===2?6:tier===3?4:3;
+      return {
+        type:'Feature',
+        geometry:{type:'Point',coordinates:[lng,lat]},
+        properties:{
+          color,
+          radius,
+          strokeWidth:tier<=2?2:1.5,
+          strokeColor:tier===1?'rgba(255,255,255,0.8)':'rgba(255,255,255,0.55)',
+          blur:showGlowPoints?0.12:0,
+          popupHtml:buildCityPopup(loc,metricRef.current),
+          tooltipHtml:`<div style="padding:5px 8px;font-family:'IBM Plex Mono',monospace"><span style="font-weight:700;color:#eef4ff">${name}, ${state}</span><br/><span style="font-size:9px;color:${DCOL[getVal(loc,metricRef.current)]}">${DLBL[getVal(loc,metricRef.current)]}</span></div>`,
+        },
+      };
+    });
+    setNativeDiagnosticCollection('cities',{type:'FeatureCollection',features} as any);
+  },[metric,filterDiff,mapReady,showGlowPoints,showCityDots]);
+
+  // ── Time-zone overlay: native Mapbox polygons + labels ───────────────────
+  useEffect(()=>{
+    if(!showTZ) {
+      clearNativeDiagnosticChannel('timezones');
+      return;
+    }
+    const features=rawStateFeaturesRef.current;
+    if(!features.length) return;
+    const rendered:any[]=[];
     const labelDone:Record<string,boolean>={};
-    stateGeoRef.current.eachLayer((layer:any)=>{
-      const props=layer.feature?.properties;
-      if(!props) return;
-      const postal=props.postal||'';
+    features.forEach((feature:any)=>{
+      const postal=feature.properties?.postal||'';
       const tzIdx=(STATE_TZ as any)[postal];
       if(tzIdx===undefined) return;
       const info=TZ_INFO[tzIdx];
-      const poly=MapScene.geoJSON(layer.feature,{
-        style:{color:info.color,weight:1.2,opacity:0.7,fillColor:info.color,fillOpacity:0.16},
-        interactive:true
+      rendered.push({
+        ...feature,
+        properties:{
+          ...feature.properties,
+          fillColor:info.color,
+          fillOpacity:0.16,
+          lineColor:info.color,
+          lineOpacity:0.7,
+          lineWidth:1.2,
+          tooltipHtml:`<div style="padding:5px 8px;font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700;color:${info.color}">${info.name} Time<br/><span style="font-size:10px;color:#aac">${info.abbr} · ${info.utc}</span></div>`,
+        },
       });
-      poly.bindTooltip(`<div style="padding:5px 8px;font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700;color:${info.color}">${info.name} Time<br><span style="font-size:10px;color:#aac">${info.abbr} · ${info.utc}</span></div>`,{direction:'top'});
-      layers.push(poly);
-      const rawCtr=layer.getBounds().getCenter();
-      const [lat,lng]=STATE_CTR[postal]||[rawCtr.lat,rawCtr.lng];
-      const stateIcon=MapScene.divIcon({className:'',html:`<div style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;color:${info.color};text-shadow:0 0 6px rgba(0,0,0,0.9),0 1px 3px rgba(0,0,0,0.9);pointer-events:none;white-space:nowrap;letter-spacing:0.5px;">${postal}</div>`,iconSize:[0,0],iconAnchor:[10,7]});
-      layers.push(MapScene.marker([lat,lng],{icon:stateIcon,interactive:false,zIndexOffset:200}));
+      const fallback=featureCenter(feature);
+      const [lat,lng]=STATE_CTR[postal]||fallback;
+      rendered.push({type:'Feature',geometry:{type:'Point',coordinates:[lng,lat]},properties:{kind:'label',label:postal,labelColor:info.color,labelSize:10}});
       if(!labelDone[info.abbr]&&info.abbr!=='AK'&&info.abbr!=='HI') {
         labelDone[info.abbr]=true;
-        const bigIcon=MapScene.divIcon({className:'',html:`<div style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:700;color:${info.color};text-shadow:0 0 14px ${info.color},0 1px 6px rgba(0,0,0,0.95);letter-spacing:3px;pointer-events:none;white-space:nowrap;padding:2px 8px;border-radius:3px;background:rgba(4,12,26,0.55);border:1px solid ${info.color}44;">${info.abbr}</div>`,iconSize:[0,0],iconAnchor:[-4,10]});
-        layers.push(MapScene.marker([info.labelLat,info.labelLng],{icon:bigIcon,interactive:false,zIndexOffset:-500}));
+        rendered.push({type:'Feature',geometry:{type:'Point',coordinates:[info.labelLng,info.labelLat]},properties:{kind:'label',label:info.abbr,labelColor:info.color,labelSize:13}});
       }
     });
-    tzLayerRef.current=MapScene.layerGroup(layers).addTo(map);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    setNativeDiagnosticCollection('timezones',{type:'FeatureCollection',features:rendered} as any);
   },[showTZ, stateGeoRevision]);
 
   // ── View presets ─────────────────────────────────────────────────────────
   function flyToView(v:'world'|'us'|'east'|'central'|'west') {
     setView(v);
-    const map=mapRef.current;
-    if(!map) return;
-    if(v==='world') map.flyTo([20,0],2,{duration:1});
-    else if(v==='us') map.flyTo([38.5,-96],4,{duration:1});
-    else if(v==='east') map.flyTo([38,-79],5.5,{duration:1});
-    else if(v==='central') map.flyTo([38.5,-96],5,{duration:1});
-    else if(v==='west') map.flyTo([40,-118],5.5,{duration:1});
+    if(v==='world') flyNativeMap(20,0,2,1000);
+    else if(v==='us') flyNativeMap(38.5,-96,4,1000);
+    else if(v==='east') flyNativeMap(38,-79,5.5,1000);
+    else if(v==='central') flyNativeMap(38.5,-96,5,1000);
+    else if(v==='west') flyNativeMap(40,-118,5.5,1000);
   }
 
   // ── Radius circle ─────────────────────────────────────────────────────────
@@ -2873,24 +2806,17 @@ export default function App() {
   }
 
   function placeCustomPin(lat:number,lng:number,label:string,color:string) {
-    const map=mapRef.current;
-    if(!map) return;
-    if(customPinRef.current) map.removeLayer(customPinRef.current);
-    const icon=MapScene.divIcon({className:'',html:`<div style="position:relative;width:28px;height:28px;"><div style="width:20px;height:20px;border-radius:50% 50% 50% 0;background:${color};border:2px solid white;transform:rotate(-45deg);box-shadow:0 2px 8px rgba(0,0,0,0.5);position:absolute;top:0;left:4px;"></div><div style="width:6px;height:6px;border-radius:50%;background:white;position:absolute;top:6px;left:11px;z-index:2;"></div></div>`,iconSize:[28,28],iconAnchor:[14,24]});
-    const mk=MapScene.marker([lat,lng],{icon}).addTo(map);
-    mk.bindTooltip(`<div style="padding:5px 8px;font-size:11px;font-weight:600;color:#eef4ff">${label}</div>`,{permanent:false});
-    customPinRef.current=mk;
+    setNativeAddressPin({
+      lat,lng,color,
+      tooltipHtml:`<div style="padding:5px 8px;font-size:11px;font-weight:600;color:#eef4ff">${escapeHtml(label)}</div>`,
+      popupHtml:`<div class="pi"><div class="pt">${escapeHtml(label)}</div></div>`,
+    });
   }
 
   function flyToNearer(lat:number,lng:number,name:string,state:string,score:number,examKey:string) {
-    const map=mapRef.current;
-    if(!map) return;
-    map.flyTo([lat,lng],9,{duration:1.2});
+    flyNativeMap(lat,lng,9,1200);
     drawRadiusCircle(lat,lng);
-    MapScene.popup({closeButton:true,maxWidth:240})
-      .setLatLng([lat,lng])
-      .setContent(`<div style="font-family:'Inter',sans-serif;padding:4px 2px"><div style="font-size:13px;font-weight:700;color:#cdd9f0">${name}, ${state}</div><div style="font-size:10px;color:#3d5478;margin-top:2px">${MLBL[examKey]}: <span style="color:${DCOL[score]};font-weight:600">${DLBL[score]}</span></div></div>`)
-      .openOn(map);
+    openNativeMapPopup(lat,lng,`<div style="font-family:'Inter',sans-serif;padding:4px 2px"><div style="font-size:13px;font-weight:700;color:#cdd9f0">${escapeHtml(name)}, ${escapeHtml(state)}</div><div style="font-size:10px;color:#3d5478;margin-top:2px">${escapeHtml(MLBL[examKey])}: <span style="color:${DCOL[score]};font-weight:600">${DLBL[score]}</span></div></div>`,'240px');
   }
 
   function pinCity(idx:number) {
@@ -3434,20 +3360,12 @@ export default function App() {
     if (!map) return;
     const lLat = parseFloat(lat);
     const lLng = parseFloat(lon);
-    map.flyTo([lLat, lLng], 13, { duration: 1.2 });
+    flyNativeMap(lLat,lLng,13,1200);
     setAddrSearch(name.split(',').slice(0,2).join(','));
     setAddrSuggestions([]);
-    // Drop a temporary "you are here" pin
-    if (customPinRef.current) { try { map.removeLayer(customPinRef.current); } catch {} }
-    customPinRef.current = MapScene.marker([lLat, lLng], {
-      icon: MapScene.divIcon({
-        className: '',
-        html: `<div style="width:16px;height:16px;border-radius:50%;background:#7bd7ff;border:2.5px solid #fff;box-shadow:0 0 0 4px rgba(123,215,255,0.30),0 0 18px rgba(123,215,255,0.8);"></div>`,
-        iconSize:[16,16], iconAnchor:[8,8]
-      }),
-      zIndexOffset: 5000,
-    }).addTo(map);
-    customPinRef.current.bindPopup(`<div class="pi"><div class="pt">${name.split(',')[0]}</div><div class="ps">Address Search Result</div></div>`,{maxWidth:260}).openPopup();
+    const popupHtml=`<div class="pi"><div class="pt">${escapeHtml(name.split(',')[0])}</div><div class="ps">Address Search Result</div></div>`;
+    setNativeAddressPin({lat:lLat,lng:lLng,color:'#7bd7ff',popupHtml});
+    openNativeMapPopup(lLat,lLng,popupHtml,'260px');
     setLocalPopInfo(null);
     setDropCenter({ lat: lLat, lng: lLng });
     setActiveTool('liveFinder');
@@ -3606,7 +3524,7 @@ export default function App() {
 
   const selectedService = SERVICE_PRESENCE_OPTIONS.find(service=>service.key===metric) || SERVICE_PRESENCE_OPTIONS[0];
   const hasRadiusCenter = !!dropCenter || (lastRadiusLatRef.current!==null && lastRadiusLngRef.current!==null);
-  const usLayerStatus = showUsDiagnostics ? (stateGeoRef.current ? 'Available' : 'Loading U.S. map data…') : 'Enable U.S. Diagnostics first';
+  const usLayerStatus = showUsDiagnostics ? (rawStateFeaturesRef.current.length ? 'Available' : 'Loading U.S. map data…') : 'Enable U.S. Diagnostics first';
   const activeProviderSourceCount = [showIndexedProviders,showBlueHive,showDentists,showMyClinicsLayer].filter(Boolean).length;
   const loadedProviderCount = indexedLayerData.length + blueHiveData.length + dentistData.length + myClinicsData.length;
   const toggleSection = (section:string) => setCollapsedSections(prev=>({...prev,[section]:!prev[section]}));

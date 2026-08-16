@@ -11,7 +11,7 @@ import "./routePlannerControlsRuntime";
 import "./providerLocationFinderRuntime";
 import "./providerTypeNormalizationRuntime";
 import { switchMapModeWithTransition } from "./dualMapTransitionRuntime";
-import "./providerExplorerStabilityRuntime";
+import "./providerExplorerRequestStabilityRuntime";
 // Source selection is user-facing state, not optional telemetry. Install its
 // change listener before React mounts so a fast user toggle can never be
 // overwritten later by a lazily loaded default-selection restore.

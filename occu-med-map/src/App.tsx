@@ -51,6 +51,14 @@ import './features/driveTime/driveTimeControls.css';
 import './features/driveTime/driveTimeBadge.css';
 import DatasetBrowser, { filterSummary, type DatasetKey, type DatasetLoadState, type ProviderFeature, type ProviderExplorerFilters } from './DatasetBrowser';
 import { fetchProviderLayer } from './providerLayerRequestRuntime';
+import {
+  clearProviderExplorerNative,
+  renderProviderExplorerPins,
+  renderProviderExplorerDensity,
+  renderProviderExplorerDotDensity,
+  renderProviderExplorerLive,
+  renderProviderExplorerGaps,
+} from './providerExplorerNativeMapRuntime';
 
 const NATIVE_DRIVE_TIME_ENABLED = import.meta.env.VITE_NATIVE_DRIVE_TIME === 'true';
 
@@ -1348,10 +1356,6 @@ export default function App() {
       myClinics: showMyClinicsLayer,
     };
   }, [showIndexedProviders, showBlueHive, showDentists, showMyClinicsLayer]);
-  const providerExplorerLayerRef = useRef<MapScene.LayerGroup | null>(null);
-  const providerExplorerDensityLayerRef = useRef<MapScene.LayerGroup | null>(null);
-  const providerExplorerLiveLayerRef = useRef<MapScene.LayerGroup | null>(null);
-  const providerExplorerGapLayerRef = useRef<MapScene.LayerGroup | null>(null);
   const providerExplorerRenderGenerationRef = useRef(0);
   const providerExplorerModeRef = useRef<ProviderExplorerMode>('density');
   const [providerExplorerFilters, setProviderExplorerFilters] = useState<ProviderExplorerFilters>(INITIAL_PROVIDER_EXPLORER_FILTERS);
@@ -1769,106 +1773,28 @@ export default function App() {
   },[getProviderExplorerBounds]);
 
   const clearProviderExplorerMap = useCallback(() => {
-    // Invalidate every in-flight map render before clearing so a stale response
-    // can never repopulate or replace a newer/cleared Explorer visualization.
     providerExplorerRenderGenerationRef.current += 1;
-    providerExplorerLayerRef.current?.remove();
-    providerExplorerLayerRef.current = null;
-    providerExplorerDensityLayerRef.current?.clearLayers();
-    providerExplorerLiveLayerRef.current?.clearLayers();
-    providerExplorerGapLayerRef.current?.clearLayers();
+    clearProviderExplorerNative();
   },[]);
 
   const drawProviderPins = useCallback((providers: ProviderFeature[], fit = false) => {
-    const map = mapRef.current;
-    if(!map) return 0;
-    // Provider Explorer owns a dynamic Mapbox compatibility root. Rebuild that
-    // root off-map so its first GeoJSON payload already contains the provider
-    // features and popup metadata. Mutating an already-attached empty root can
-    // leave the native source empty across browser engines.
-    providerExplorerLayerRef.current?.remove();
-    const layer = MapScene.layerGroup();
-    const drawable = providers.filter((provider): provider is ProviderFeature & {lat:number; lng:number} => typeof provider.lat === 'number' && typeof provider.lng === 'number');
-    drawable.slice(0,1000).forEach(provider=>{
-      const style = providerCategoryStyle(provider);
-      const location = [provider.address,provider.city,provider.admin_area,provider.country].filter(Boolean).join(', ');
-      MapScene.circleMarker([provider.lat, provider.lng], { radius: 4, color: '#ffffff', weight: 1, fillColor: style.color, fillOpacity: 0.92, opacity: 0.95, className:'provider-point provider-point-glow' })
-        .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>${escapeHtml(provider.source)} · ${escapeHtml(provider.source_kind)}<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/>${escapeHtml(location)}${provider.website ? `<br/><a href="${escapeHtml(provider.website)}" target="_blank" rel="noreferrer">Website</a>` : ''}`)
-        .addTo(layer);
+    return renderProviderExplorerPins(providers, {
+      fit,
+      color: (provider) => providerCategoryStyle(provider).color,
+      popupHtml: (provider) => {
+        const style = providerCategoryStyle(provider);
+        const location = [provider.address,provider.city,provider.admin_area,provider.country].filter(Boolean).join(', ');
+        return `<strong>${escapeHtml(provider.name)}</strong><br/>${escapeHtml(provider.source)} · ${escapeHtml(provider.source_kind)}<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/>${escapeHtml(location)}${provider.website ? `<br/><a href="${escapeHtml(provider.website)}" target="_blank" rel="noreferrer">Website</a>` : ''}`;
+      },
     });
-    layer.addTo(map);
-    providerExplorerLayerRef.current = layer;
-    if(fit && drawable.length) map.fitBounds(MapScene.latLngBounds(drawable.map(provider=>[provider.lat,provider.lng] as [number,number])), { padding:[28,28], maxZoom: 11 });
-    return Math.min(drawable.length,1000);
   },[]);
 
   const drawProviderDensity = useCallback((cells: ProviderDensityCell[], mode: 'density'|'hex') => {
-    const map = mapRef.current;
-    if(!map) return 0;
-    if(!providerExplorerDensityLayerRef.current) providerExplorerDensityLayerRef.current = MapScene.layerGroup().addTo(map);
-    const layer = providerExplorerDensityLayerRef.current;
-    layer.clearLayers();
-    const max = Math.max(1,...cells.map(cell=>Number(cell.count)||0));
-    cells.forEach(cell=>{
-      const count = Number(cell.count) || 0;
-      const intensity = Math.max(0.18, Math.log(count + 1) / Math.log(max + 1));
-      const color = mode === 'hex' ? '#7c3aed' : '#0891b2';
-      const pixelRadius = 10 + intensity * (mode === 'hex' ? 24 : 38);
-      const field = mode === 'hex'
-        ? MapScene.polygon(Array.from({length:6},(_,index)=>{
-            const center = map.project([cell.lat,cell.lng],map.getZoom());
-            const angle = (Math.PI / 3) * index - Math.PI / 6;
-            return map.unproject([center.x + Math.cos(angle) * pixelRadius,center.y + Math.sin(angle) * pixelRadius],map.getZoom());
-          }), {
-            color,
-            weight:1.25,
-            fillColor:color,
-            fillOpacity:Math.min(0.3,0.07 + intensity * 0.2),
-            opacity:0.42,
-            className:'provider-density-field provider-hex-field',
-          })
-        : MapScene.circleMarker([cell.lat, cell.lng], {
-            radius: pixelRadius,
-            color,
-            weight:0,
-            fillColor:color,
-            fillOpacity:Math.min(0.36,0.08 + intensity * 0.24),
-            opacity:0.48,
-            className:'provider-density-field',
-          });
-      field.bindTooltip(`${count.toLocaleString()} matching providers`, { direction:'top', opacity:0.92 });
-      field.addTo(layer);
-    });
-    return cells.length;
+    return renderProviderExplorerDensity(cells, mode);
   },[]);
 
   const drawProviderDotDensity = useCallback((cells: ProviderDensityCell[]) => {
-    const map = mapRef.current;
-    if(!map) return 0;
-    if(!providerExplorerDensityLayerRef.current) providerExplorerDensityLayerRef.current = MapScene.layerGroup().addTo(map);
-    const layer = providerExplorerDensityLayerRef.current;
-    layer.clearLayers();
-    let rendered = 0;
-    cells.forEach((cell,cellIndex)=>{
-      const count = Math.max(1,Number(cell.count)||1);
-      const dotCount = Math.min(14,Math.max(1,Math.ceil(Math.log2(count + 1))));
-      const center = map.project([cell.lat,cell.lng],map.getZoom());
-      for(let index=0;index<dotCount;index++) {
-        const angle = (cellIndex * 0.73) + index * 2.399963;
-        const distance = 3 + Math.sqrt(index + 1) * 4;
-        const point = map.unproject([center.x + Math.cos(angle) * distance,center.y + Math.sin(angle) * distance],map.getZoom());
-        MapScene.circleMarker(point, {
-          radius:2.25,
-          stroke:false,
-          fillColor:'#087f9a',
-          fillOpacity:0.54,
-          interactive:false,
-          className:'provider-dot-density-point',
-        }).addTo(layer);
-        rendered++;
-      }
-    });
-    return rendered;
+    return renderProviderExplorerDotDensity(cells);
   },[]);
 
   const renderProviderExplorerMap = useCallback(async (mode: ProviderExplorerMode = providerExplorerModeRef.current, filters: ProviderExplorerFilters = providerExplorerFilters) => {
@@ -1881,12 +1807,9 @@ export default function App() {
     // A new density-only visualization can hide old pins immediately. A pin
     // refresh keeps the last good provider root visible until its replacement
     // payload is ready, eliminating the empty-source window during fetches.
-    if(mode !== 'pins' && mode !== 'density-pins') {
-      providerExplorerLayerRef.current?.remove();
-      providerExplorerLayerRef.current = null;
-    }
+    if(mode !== 'pins' && mode !== 'density-pins') clearProviderExplorerNative(['pins']);
     if(mode !== 'density' && mode !== 'hex' && mode !== 'density-pins' && mode !== 'dot-density') {
-      providerExplorerDensityLayerRef.current?.clearLayers();
+      clearProviderExplorerNative(['aggregate','dots']);
     }
 
     const isCurrent = () => generation === providerExplorerRenderGenerationRef.current;
@@ -2003,47 +1926,39 @@ export default function App() {
   }
 
   const renderProviderExplorerLiveLayer = useCallback(async () => {
-    const map = mapRef.current;
-    if(!map) return;
-    if(!providerExplorerLiveLayerRef.current) providerExplorerLiveLayerRef.current = MapScene.layerGroup().addTo(map);
-    const layer = providerExplorerLiveLayerRef.current;
-    layer.clearLayers();
-    if(!providerExplorerLiveEnabled) return;
+    if(!providerExplorerLiveEnabled) {
+      clearProviderExplorerNative(['live']);
+      return;
+    }
     let providers = mapLiveResultsAsProviderFeatures();
-    try { const resp = await fetch(`/api/provider-explorer/live?${providerExplorerParams({...providerExplorerFilters, includeLive:true}, 'live')}`); const data = await resp.json(); if(Array.isArray(data.providers) && data.providers.length) providers = data.providers as ProviderFeature[]; } catch {}
-    providers.filter((provider): provider is ProviderFeature & {lat:number; lng:number}=>typeof provider.lat === 'number' && typeof provider.lng === 'number').slice(0,1000).forEach(provider=>{
-      const style = providerCategoryStyle(provider);
-      const marker = MapScene.circleMarker([provider.lat, provider.lng], { radius:4, color:'#ffffff', weight:1, fillColor:style.color, fillOpacity:.92, opacity:.95, className:'provider-point provider-point-glow' })
-        .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>Live discovery · not stored<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/><button class="provider-popup-save" data-provider-id="${escapeHtml(provider.id)}">Save candidate</button>`)
-        .addTo(layer);
-      marker.on('popupopen', () => {
-        const button = marker.getPopup()?.getElement()?.querySelector<HTMLButtonElement>('.provider-popup-save');
-        button?.addEventListener('click', event => {
-          event.preventDefault();
-          void saveProviderExplorerCandidate(provider);
-          marker.closePopup();
-        }, { once:true });
-      });
+    try {
+      const resp = await fetch(`/api/provider-explorer/live?${providerExplorerParams({...providerExplorerFilters, includeLive:true}, 'live')}`);
+      const data = await resp.json();
+      if(Array.isArray(data.providers) && data.providers.length) providers = data.providers as ProviderFeature[];
+    } catch {}
+    const rendered = renderProviderExplorerLive(providers, {
+      color: (provider) => providerCategoryStyle(provider).color,
+      popupHtml: (provider) => {
+        const style = providerCategoryStyle(provider);
+        return `<strong>${escapeHtml(provider.name)}</strong><br/>Live discovery · not stored<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/><button class="provider-popup-save" data-provider-id="${escapeHtml(provider.id)}">Save candidate</button>`;
+      },
+      onAction: (provider) => { void saveProviderExplorerCandidate(provider); },
     });
-    setProviderExplorerStatus(prev=>`${prev} · live layer: ${providers.length.toLocaleString()} not-stored results`);
+    setProviderExplorerStatus(prev=>`${prev} · live layer: ${rendered.toLocaleString()} not-stored results`);
   },[mapLiveResultsAsProviderFeatures, providerExplorerLiveEnabled, providerExplorerFilters, providerExplorerParams]);
 
 
   const compareProviderExplorerArea = useCallback(async (filters: ProviderExplorerFilters = providerExplorerFilters) => {
-    const map = mapRef.current;
-    if(!map) return;
-    if(!providerExplorerGapLayerRef.current) providerExplorerGapLayerRef.current = MapScene.layerGroup().addTo(map);
-    const layer = providerExplorerGapLayerRef.current;
-    layer.clearLayers();
     try {
       const resp = await fetch(`/api/provider-explorer/compare?${providerExplorerParams({...filters, includeLive:true}, 'compare')}`);
       const data = await resp.json();
       const liveOnly = Array.isArray(data.live_only) ? data.live_only as ProviderFeature[] : [];
-      liveOnly.filter((provider): provider is ProviderFeature & {lat:number; lng:number}=>typeof provider.lat === 'number' && typeof provider.lng === 'number').slice(0,500).forEach(provider=>{
-        const style = providerCategoryStyle(provider);
-        MapScene.circleMarker([provider.lat, provider.lng], { radius:4, color:'#ffffff', weight:1, fillColor:style.color, fillOpacity:.9, opacity:.98, className:'provider-point provider-point-gap' })
-          .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>Live-only gap<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/>${escapeHtml(provider.match_reason || '')}`)
-          .addTo(layer);
+      renderProviderExplorerGaps(liveOnly, {
+        color: (provider) => providerCategoryStyle(provider).color,
+        popupHtml: (provider) => {
+          const style = providerCategoryStyle(provider);
+          return `<strong>${escapeHtml(provider.name)}</strong><br/>Live-only gap<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/>${escapeHtml(provider.match_reason || '')}`;
+        },
       });
       setProviderExplorerStatus(`compare · stored ${Number(data.stored_count||0).toLocaleString()} · live ${Number(data.live_count||0).toLocaleString()} · live-only gaps ${liveOnly.length.toLocaleString()}`);
     } catch(error) {

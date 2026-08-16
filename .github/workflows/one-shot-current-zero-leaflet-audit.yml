@@ -1,4 +1,4 @@
-name: One-shot native Phase Two migration
+name: One-shot inspect final MapScene call sites
 
 on:
   push:
@@ -6,45 +6,33 @@ on:
       - .github/workflows/one-shot-current-zero-leaflet-audit.yml
 
 permissions:
-  contents: write
+  contents: read
 
-# Native Phase Two retry after Mapbox bounds and GeoJSON type fixes.
 jobs:
-  migrate:
+  inspect:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: nuclear/remove-leaflet-compat
           fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: corepack enable
-      - name: Apply native Phase Two migration
-        run: python occu-med-map/scripts/migrate-phase-two-native.py
-      - run: pnpm install --frozen-lockfile
-      - name: Typecheck frontend
-        run: pnpm --filter @workspace/occu-med-map typecheck
-      - name: Production build
-        run: pnpm --filter @workspace/occu-med-map build
-      - name: Native synchronization hardening
-        run: pnpm --filter @workspace/occu-med-map test:map-synchronization-hardening
-      - name: Provider Explorer hardening
-        run: pnpm --filter @workspace/occu-med-map test:provider-explorer-hardening
-      - name: General UI hardening
-        run: pnpm --filter @workspace/occu-med-map test:general-ui-hardening
-      - name: Zero-compat audit
-        working-directory: occu-med-map
-        run: pnpm exec tsx scripts/zero-leaflet-architecture-audit.ts
-      - name: Verify Phase Two compatibility is gone
+      - name: App mapRef and multi-drop usages
         run: |
-          ! grep -n -E 'MapScene|mapSceneRuntime|subscribeSceneRoots' occu-med-map/src/PhaseTwoShell.tsx occu-med-map/src/phaseTwoMapBridge.ts
-      - name: Commit validated migration
+          echo '=== mapRef.current ==='
+          grep -n -C 5 'mapRef\.current' occu-med-map/src/App.tsx || true
+          echo '=== multiDropLayerRef ==='
+          grep -n -C 8 'multiDropLayerRef' occu-med-map/src/App.tsx || true
+          echo '=== direct MapScene in App ==='
+          grep -n -C 5 'MapScene\.' occu-med-map/src/App.tsx || true
+      - name: Helper call sites
         run: |
-          rm -f occu-med-map/scripts/migrate-phase-two-native.py
-          git config user.name "Occumed79"
-          git config user.email "Occumed79@users.noreply.github.com"
-          git add -A
-          git commit -m "Render Phase Two with native Mapbox"
-          git push origin HEAD:nuclear/remove-leaflet-compat
+          echo '=== mapLayerHelpers imports/callers ==='
+          grep -RIn -E 'mapLayerHelpers|setMapBasemap|clearLayerGroup|safeRemoveLayer|fitMarkers' occu-med-map/src --exclude='mapLayerHelpers.ts' || true
+          echo '=== mapServices imports/callers ==='
+          grep -RIn -E 'mapServices|createTileLayer|TILE_PROVIDERS|TileProviderKey' occu-med-map/src --exclude='mapServices.ts' || true
+      - name: Helper contents
+        run: |
+          echo '=== mapLayerHelpers.ts ==='
+          cat occu-med-map/src/features/networkMap/mapLayerHelpers.ts
+          echo '=== mapServices.ts ==='
+          cat occu-med-map/src/lib/mapServices.ts

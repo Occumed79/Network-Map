@@ -1,0 +1,22 @@
+name: One-shot Indexed Providers lifecycle audit
+
+on:
+  push:
+    paths:
+      - .github/workflows/one-shot-indexed-lifecycle-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: nuclear/mapbox-native-runtime
+      - name: Dump Indexed Providers lifecycle
+        run: |
+          grep -n -C 35 -E 'showIndexedProviders|indexedLayerData|indexedProviderLayerRef|setIndexedLayerData' occu-med-map/src/App.tsx || true
+          echo '=== provider request runtime imports/calls ==='
+          grep -n -C 15 -E 'fetchProviderLayer|providerLayerRequest|loadProviderDataset' occu-med-map/src/App.tsx || true

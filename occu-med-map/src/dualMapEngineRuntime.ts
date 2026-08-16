@@ -41,6 +41,10 @@ let mapResizeFrame = 0;
 let initialized = false;
 let sharedCamera: SharedCamera = { lng: 0, lat: 20, zoom2d: 2 };
 
+export function getActiveMapboxMap(): mapboxgl.Map | null {
+  return currentMode === "3d" ? mapboxGlobeMap : mapbox2dMap;
+}
+
 export async function initializeDualMapEngines(container: HTMLElement, initial: InitialCamera = {}): Promise<void> {
   if (initialized) return;
   initialized = true;
@@ -270,6 +274,7 @@ async function createMapboxMap(mode: MapMode): Promise<void> {
     pitchWithRotate: !is2d,
   });
   registerMapboxMap(instance, { mode });
+  instance.doubleClickZoom.disable();
 
   if (is2d) mapbox2dMap = instance;
   else mapboxGlobeMap = instance;

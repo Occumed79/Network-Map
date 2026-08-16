@@ -1,5 +1,3 @@
-import MapScene from "../mapSceneRuntime";
-
 export type TileProviderKey =
   | 'osm'
   | 'carto_light'
@@ -91,15 +89,6 @@ export const TILE_PROVIDERS: Record<TileProviderKey, TileProvider> = {
 export const TILE_GROUPS: Record<string, TileProviderKey[]> = {
   Free: ['osm', 'carto_light', 'carto_dark', 'carto_voyager', 'opentopo', 'stadia_smooth', 'stadia_dark', 'stadia_outdoors'],
 };
-
-export function createTileLayer(key: TileProviderKey): MapScene.TileLayer {
-  const provider = TILE_PROVIDERS[key] || TILE_PROVIDERS.osm;
-  return MapScene.tileLayer(provider.url, {
-    attribution: provider.attribution,
-    maxZoom: provider.maxZoom || 19,
-    className: provider.className,
-  });
-}
 
 export type GeocodeSource = 'Nominatim' | 'Photon';
 export type GeocodeResult = {

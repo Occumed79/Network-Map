@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import MapScene from "./mapSceneRuntime";
-import { initializeDualMapEngines, cleanupDualMapEngines } from './dualMapEngineRuntime';
+import { initializeDualMapEngines, cleanupDualMapEngines, getActiveMapboxMap } from './dualMapEngineRuntime';
 import * as topojson from 'topojson-client';
 import * as XLSX from 'xlsx';
 import {
@@ -1120,7 +1119,6 @@ const MapToolsWorkspaceHost = React.memo(React.forwardRef<HTMLDivElement>(functi
 }));
 
 export default function App() {
-  const mapRef = useRef<MapScene.Map|null>(null);
   const mapDivRef = useRef<HTMLDivElement>(null);
   const rawStateFeaturesRef = useRef<any[]>([]);
   const clinicFileInputRef = useRef<HTMLInputElement>(null);
@@ -1235,7 +1233,6 @@ export default function App() {
   const [pendingMarkerLabel, setPendingMarkerLabel] = useState('');
   const [pendingMarkerColor, setPendingMarkerColor] = useState('#ef4444');
   const [multiDropMode, setMultiDropMode] = useState(false);
-  const multiDropLayerRef = useRef<MapScene.LayerGroup|null>(null);
   const [showGlowPoints, setShowGlowPoints] = useState(false);
   const [showBlueHive, setShowBlueHive] = useState(false);
   const [blueHiveData, setBlueHiveData] = useState<any[]>([]);
@@ -1561,26 +1558,19 @@ export default function App() {
 
   // ── Init Map ───────────────────────────────────────────────────────────────
   useEffect(()=>{
-    if(mapRef.current||!mapDivRef.current) return;
-    const map = MapScene.map(mapDivRef.current, {
-      center:[20,0],zoom:2,zoomControl:true,
-      preferCanvas:true,
-      attributionControl:false,
-    });
-    map.doubleClickZoom.disable();
-    mapRef.current = map;
-    void initializeDualMapEngines(mapDivRef.current, { center:[0,20], zoom:2 });
+    if(!mapDivRef.current || getActiveMapboxMap()) return;
+    let disposed = false;
 
-    // The scene root below is only a temporary layer registry for call sites that
-    // have not yet moved to direct Mapbox sources. It no longer owns the camera,
-    // engine lifecycle, or 2D/3D synchronization.
+    void initializeDualMapEngines(mapDivRef.current, { center:[0,20], zoom:2 })
+      .then(()=>{ if(!disposed) setMapReady(true); })
+      .catch((error)=>{
+        console.error('Native Mapbox initialization failed', error);
+        if(!disposed) setMapReady(false);
+      });
 
     // Load U.S. diagnostic GeoJSON only if the diagnostics workspace is enabled.
     if (showUsDiagnostics) void loadStateGeo();
 
-    // User-facing map tools consume Mapbox-native input directly. The temporary
-    // scene facade remains only for legacy geometry/control APIs; Radius,
-    // Coverage, and Live Finder no longer depend on its event bus.
     const onNativeMapClick = (rawEvent: Event) => {
       const detail = (rawEvent as CustomEvent<{ lat:number; lng:number; originalEvent?: Event }>).detail;
       if (!detail) return;
@@ -1616,30 +1606,21 @@ export default function App() {
     window.addEventListener('network-map:native-click', onNativeMapClick);
     window.addEventListener('network-map:native-dblclick', onNativeMapDoubleClick);
 
-    setMapReady(true);
-
-    // Use ResizeObserver to keep map size in sync with container dimensions
-    const resizeObserver = new ResizeObserver(() => {
-      map.invalidateSize();
-    });
-    resizeObserver.observe(mapDivRef.current);
-
     return ()=>{
+      disposed = true;
       window.removeEventListener('network-map:native-click', onNativeMapClick);
       window.removeEventListener('network-map:native-dblclick', onNativeMapDoubleClick);
-      resizeObserver.disconnect();
       cleanupDualMapEngines();
-      map.remove();
-      mapRef.current=null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
 
   const getProviderExplorerBounds = useCallback(() => {
-    const map = mapRef.current;
+    const map = getActiveMapboxMap();
     if(!map) return null;
     const bounds = map.getBounds();
+    if(!bounds) return null;
     return { north: bounds.getNorth(), south: bounds.getSouth(), east: bounds.getEast(), west: bounds.getWest() };
   },[]);
 
@@ -1680,7 +1661,7 @@ export default function App() {
   },[]);
 
   const renderProviderExplorerMap = useCallback(async (mode: ProviderExplorerMode = providerExplorerModeRef.current, filters: ProviderExplorerFilters = providerExplorerFilters) => {
-    const map = mapRef.current;
+    const map = getActiveMapboxMap();
     if(!map) return;
     const generation = ++providerExplorerRenderGenerationRef.current;
     providerExplorerModeRef.current = mode;
@@ -1861,13 +1842,15 @@ export default function App() {
       try {
         const params = new URLSearchParams({limit:'1000',page:'1'});
         if(key==='myClinics' && masterProviderTypeFilter) params.set('clinic_type', masterProviderTypeFilter);
-        const map = mapRef.current;
+        const map = getActiveMapboxMap();
         if(map) {
           const bounds = map.getBounds();
-          params.set('north',String(bounds.getNorth()));
-          params.set('south',String(bounds.getSouth()));
-          params.set('east',String(bounds.getEast()));
-          params.set('west',String(bounds.getWest()));
+          if(bounds) {
+            params.set('north',String(bounds.getNorth()));
+            params.set('south',String(bounds.getSouth()));
+            params.set('east',String(bounds.getEast()));
+            params.set('west',String(bounds.getWest()));
+          }
         }
         const response = await fetchProviderLayer(`/api/provider-layers/${sourceByKey[key]}?${params.toString()}`);
         const data = await response.json().catch(()=>null);
@@ -1900,8 +1883,7 @@ export default function App() {
   },[masterProviderTypeFilter]);
 
   useEffect(()=>{
-    const map = mapRef.current;
-    if(!map || !mapReady) return;
+    if(!mapReady) return;
     let moveTimer: ReturnType<typeof setTimeout>|null = null;
     let startupTimers: ReturnType<typeof setTimeout>[] = [];
 
@@ -1932,11 +1914,11 @@ export default function App() {
       startupTimers.push(setTimeout(()=>{ void loadProviderDataset(key); }, index * STAGGER_MS));
     });
 
-    map.on('moveend', refreshOnMove);
+    window.addEventListener('network-map:native-camera', refreshOnMove);
     return ()=>{
       if(moveTimer) clearTimeout(moveTimer);
       startupTimers.forEach(clearTimeout);
-      map.off('moveend', refreshOnMove);
+      window.removeEventListener('network-map:native-camera', refreshOnMove);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[mapReady]);
@@ -1950,15 +1932,16 @@ export default function App() {
 
   // ── Map Inventory: load indexed providers from Neon on map load + pan/zoom ──
   useEffect(()=>{
-    const map = mapRef.current;
-    if (!map || !mapReady || !serviceInventoryEnabled) return;
+    if (!mapReady || !serviceInventoryEnabled) return;
 
     let debounceTimer: ReturnType<typeof setTimeout>|null = null;
 
     function loadInventory(){
       if(debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(()=>{
-        const bounds = map!.getBounds();
+        const activeMap = getActiveMapboxMap();
+        const bounds = activeMap?.getBounds();
+        if(!bounds) return;
         if(inventoryFetchRef.current) inventoryFetchRef.current.abort();
         const ac = new AbortController();
         inventoryFetchRef.current = ac;
@@ -1991,10 +1974,10 @@ export default function App() {
     loadInventory();
 
     // Reload on pan/zoom
-    map.on('moveend', loadInventory);
+    window.addEventListener('network-map:native-camera', loadInventory);
 
     return ()=>{
-      map.off('moveend', loadInventory);
+      window.removeEventListener('network-map:native-camera', loadInventory);
       if(debounceTimer) clearTimeout(debounceTimer);
       if(inventoryFetchRef.current) inventoryFetchRef.current.abort();
     };
@@ -2003,8 +1986,7 @@ export default function App() {
 
   // ── NACCHO LHD layer: native Mapbox source + heatmap ───────────────────────
   useEffect(()=>{
-    const map=mapRef.current;
-    if(!map||!mapReady) return;
+    if(!mapReady) return;
     if(!showNacchoLayer) {
       clearProviderDataset('naccho');
       nacchoFetchRef.current?.abort();
@@ -2021,7 +2003,9 @@ export default function App() {
         setNacchoLoading(true);
         setNacchoError('');
         try {
-          const bounds=map.getBounds();
+          const activeMap=getActiveMapboxMap();
+          const bounds=activeMap?.getBounds();
+          if(!bounds) return;
           const params=new URLSearchParams({
             useBounds:'true',
             north:String(bounds.getNorth()),south:String(bounds.getSouth()),
@@ -2058,10 +2042,10 @@ export default function App() {
       },400);
     };
     reload();
-    map.on('moveend',reload);
+    window.addEventListener('network-map:native-camera',reload);
     return()=>{
       if(timer) clearTimeout(timer);
-      map.off('moveend',reload);
+      window.removeEventListener('network-map:native-camera',reload);
       nacchoFetchRef.current?.abort();
       nacchoFetchRef.current=null;
       clearProviderDataset('naccho');
@@ -2673,8 +2657,8 @@ export default function App() {
     const nearbyData=LOCS.filter(l=>l!==match&&l[4]<=2).map(l=>{const dist=approxMiles(l[2],l[3],lat,lng);return{name:l[0],state:l[1],dist,v:getVal(l,rpExam)};}).filter(l=>l.dist<250&&l.dist>0).sort((a,b)=>a.dist-b.dist).slice(0,4);
     const rd:ReportData={locName:`${name}, ${state}`,stateCode:state,examKey:rpExam,scores,nearby:nearbyData,recommendation:v,isGeo:false,prov,wait,tier,queryCity:name,queryState:state,isIntl:false,lat,lng};
     setLastReportData(rd);
-    const map=mapRef.current;
-    if(map) { map.flyTo([lat,lng],tier<=2?9:11,{duration:1.2}); drawRadiusCircle(lat,lng); }
+    flyNativeMap(lat,lng,tier<=2?9:11,1200);
+    drawRadiusCircle(lat,lng);
     placeCustomPin(lat,lng,`${name}, ${state}`,col);
     setDriveLocA(a=>{ setDriveLocB(a||null); return {name:`${name}, ${state}`,lat,lng}; });
     const provData=countProvidersInRadius(lat,lng,rpExam);
@@ -2718,8 +2702,8 @@ export default function App() {
     const nearbyData=LOCS.filter(l=>l[4]<=2).map(l=>{const dist=approxMiles(l[2],l[3],lat,lng);return{name:l[0],state:l[1],dist,v:getVal(l,rpExam)};}).filter(l=>l.dist<250&&l.dist>0).sort((a,b)=>a.dist-b.dist).slice(0,4);
     const rd:ReportData={locName:`${city||display}${state?', '+state:''}`,stateCode:state||'',examKey:rpExam,scores,nearby:nearbyData,recommendation:v,isGeo:true,prov:stD?stD.prov:null,wait:stD?stD.wait:null,tier:null,queryCity:city||display,queryState:state||'',isIntl:false,lat,lng};
     setLastReportData(rd);
-    const map=mapRef.current;
-    if(map){ map.flyTo([lat,lng],11,{duration:1.2}); drawRadiusCircle(lat,lng); }
+    flyNativeMap(lat,lng,11,1200);
+    drawRadiusCircle(lat,lng);
     placeCustomPin(lat,lng,`${city}${zip?', '+zip:''}`,col);
     setDriveLocA(a=>{ setDriveLocB(a||null); return {name:`${city}, ${state}`,lat,lng}; });
     const provData=countProvidersInRadius(lat,lng,rpExam);
@@ -2766,8 +2750,8 @@ export default function App() {
     const label=`${city||display}${state?', '+state:''}`;
     const rd:ReportData={locName:label,stateCode:state||'',examKey:rpExam,scores:[],nearby:[],recommendation:0,isGeo:true,prov:null,wait:null,tier:null,queryCity:city||display,queryState:state||'',isIntl:true,lat,lng};
     setLastReportData(rd);
-    const map=mapRef.current;
-    if(map){ map.flyTo([lat,lng],11,{duration:1.2}); drawRadiusCircle(lat,lng); }
+    flyNativeMap(lat,lng,11,1200);
+    drawRadiusCircle(lat,lng);
     placeCustomPin(lat,lng,`${city||display}${zip?', '+zip:''}`,'#89d4fe');
     setDriveLocA(a=>{ setDriveLocB(a||null); return {name:label,lat,lng}; });
     // Kick off a live search immediately so the user gets real provider data.
@@ -2964,7 +2948,7 @@ export default function App() {
     googlePlacesTrigger?:'address_search'|'live_finder_double_click'|'explicit_google',
   ) {
     const categoryForSearch = categoryOverride || liveBackendCategoryRef.current;
-    const map=mapRef.current;
+    const map=getActiveMapboxMap();
     if(!map) return;
     if(NATIVE_DRIVE_TIME_ENABLED) providerEta.clear();
     const validCoordinates = Number.isFinite(lat) && Number.isFinite(lng)
@@ -3356,7 +3340,7 @@ export default function App() {
     }, 380);
   }
   function jumpToAddr(lat: string, lon: string, name: string) {
-    const map = mapRef.current;
+    const map = getActiveMapboxMap();
     if (!map) return;
     const lLat = parseFloat(lat);
     const lLng = parseFloat(lon);

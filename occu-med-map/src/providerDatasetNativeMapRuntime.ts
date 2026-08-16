@@ -1,7 +1,7 @@
 import mapboxgl from "mapbox-gl";
 import { getTrackedMapboxMaps, registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
 
-export type ProviderDatasetChannel = "bluehive" | "dentists" | "inventory" | "indexed" | "my-clinics" | "naccho";
+export type ProviderDatasetChannel = "bluehive" | "dentists" | "inventory" | "indexed" | "my-clinics" | "naccho" | "uploaded";
 
 type DatasetRenderOptions<T> = {
   baseColor: string;
@@ -16,7 +16,7 @@ type ChannelState = {
   glow: boolean;
 };
 
-const CHANNELS: ProviderDatasetChannel[] = ["bluehive", "dentists", "inventory", "indexed", "my-clinics", "naccho"];
+const CHANNELS: ProviderDatasetChannel[] = ["bluehive", "dentists", "inventory", "indexed", "my-clinics", "naccho", "uploaded"];
 const states = new Map<ProviderDatasetChannel, ChannelState>();
 for (const channel of CHANNELS) {
   states.set(channel, {

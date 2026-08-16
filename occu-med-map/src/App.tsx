@@ -1119,7 +1119,6 @@ export default function App() {
   const customPinRef = useRef<MapScene.Marker|null>(null);
   const tzLayerRef = useRef<MapScene.LayerGroup|null>(null);
   const popDensityLayerRef = useRef<MapScene.LayerGroup|null>(null);
-  const clinicLayerRef = useRef<MapScene.LayerGroup|null>(null);
   const savedRadiusLayerRef = useRef<MapScene.LayerGroup|null>(null);
   const rawStateFeaturesRef = useRef<any[]>([]);
   const clinicFileInputRef = useRef<HTMLInputElement>(null);
@@ -2341,40 +2340,28 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[showPopDensity, stateGeoRevision]);
 
-  // ── Uploaded clinic pins ───────────────────────────────────────────────────
+  // ── Uploaded clinic pins: native Mapbox source ─────────────────────────────
   useEffect(()=>{
-    const map = mapRef.current;
-    if (!map) return;
-    if (clinicLayerRef.current) { map.removeLayer(clinicLayerRef.current); clinicLayerRef.current = null; }
-    if (!showUploadedClinics || uploadedClinics.length===0) return;
-    const grp = MapScene.layerGroup();
-    uploadedClinics.forEach((c)=>{
-      if (c.lat===null || c.lng===null) return;
-      const col = c.color || '#f472b6';
-      const mk = MapScene.circleMarker([c.lat, c.lng], {
-        radius:4,
-        color:'#ffffff',
-        weight:1,
-        fillColor:col,
-        fillOpacity:.92,
-        opacity:.98,
-        className:showGlowPoints?'provider-point provider-point-glow':'provider-point',
-      });
-      mk.bindPopup(`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:170px;">
-        <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${c.name}</div>
-        ${c.address?`<div style="font-size:9.5px;color:#4a6888"> ${c.address}${c.city?', '+c.city:''}${c.state?' '+c.state:''}${c.zip?' '+c.zip:''}</div>`:''}
-        ${c.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${c.phone}">${c.phone}</a></div>`:''}
-        ${c.notes?`<div style="font-size:9px;color:#3d5478;margin-top:3px">${c.notes}</div>`:''}
-        <div style="margin-top:6px;display:flex;gap:5px">
-          <div style="width:8px;height:8px;border-radius:50%;background:${col};box-shadow:0 0 6px ${col};flex-shrink:0;margin-top:2px"></div>
-          <span style="font-size:8.5px;color:#3d5478;font-family:'IBM Plex Mono',monospace">UPLOADED CLINIC</span>
-        </div>
-      </div>`);
-      grp.addLayer(mk);
+    if(!showUploadedClinics || uploadedClinics.length===0) {
+      clearProviderDataset('uploaded');
+      return;
+    }
+    renderProviderDataset('uploaded', uploadedClinics, {
+      baseColor:'#f472b6',
+      glow:showGlowPoints,
+      getColor:(clinic)=>clinic.color || '#f472b6',
+      buildPopup:(c)=>{
+        const col=c.color||'#f472b6';
+        return `<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:170px;">
+          <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${escapeHtml(c.name)}</div>
+          ${c.address?`<div style="font-size:9.5px;color:#4a6888">${escapeHtml(c.address)}${c.city?', '+escapeHtml(c.city):''}${c.state?' '+escapeHtml(c.state):''}${c.zip?' '+escapeHtml(c.zip):''}</div>`:''}
+          ${c.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${escapeHtml(c.phone)}">${escapeHtml(c.phone)}</a></div>`:''}
+          ${c.notes?`<div style="font-size:9px;color:#3d5478;margin-top:3px">${escapeHtml(c.notes)}</div>`:''}
+          <div style="margin-top:6px;display:flex;gap:5px"><div style="width:8px;height:8px;border-radius:50%;background:${col};box-shadow:0 0 6px ${col};flex-shrink:0;margin-top:2px"></div><span style="font-size:8.5px;color:#3d5478;font-family:'IBM Plex Mono',monospace">UPLOADED CLINIC</span></div>
+        </div>`;
+      },
     });
-    grp.addTo(map);
-    clinicLayerRef.current = grp;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    return ()=>clearProviderDataset('uploaded');
   },[uploadedClinics, showUploadedClinics, showGlowPoints]);
 
   // ── BlueHive native heatmap + provider points ────────────────────────────

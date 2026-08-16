@@ -18,6 +18,34 @@ if anchor not in text:
     raise SystemExit('Phase Two CSS import anchor missing')
 text = text.replace(anchor, native_import, 1)
 
+# Mapbox getBounds() is nullable while the old facade guaranteed a bounds object.
+old_snapshot = """  const bounds = map.getBounds();
+  return {
+    zoom: map.getZoom(),
+    bounds: {
+      north: bounds.getNorth(),
+      south: bounds.getSouth(),
+      east: bounds.getEast(),
+      west: bounds.getWest(),
+    },
+  };
+"""
+new_snapshot = """  const bounds = map.getBounds();
+  if (!bounds) return null;
+  return {
+    zoom: map.getZoom(),
+    bounds: {
+      north: bounds.getNorth(),
+      south: bounds.getSouth(),
+      east: bounds.getEast(),
+      west: bounds.getWest(),
+    },
+  };
+"""
+if old_snapshot not in text:
+    raise SystemExit('Phase Two snapshot anchor missing')
+text = text.replace(old_snapshot, new_snapshot, 1)
+
 # Old popup DOM factory is now owned by the native renderer.
 start = text.index('function createProviderPopup(')
 end = text.index('\nfunction modeLabel(', start)
@@ -30,6 +58,15 @@ end = text.index('\n  const fetchAllPins = useCallback(', start)
 replacement = """  const clearOverlay = useCallback(() => {
     clearPhaseTwoOverlay();
   }, []);
+
+  const resetViewportResults = useCallback((nextStatus: string) => {
+    clearOverlay();
+    setProviders([]);
+    setTotal(0);
+    setListHasMore(false);
+    setWarning('');
+    setStatus(nextStatus);
+  }, [clearOverlay]);
 
   const drawPins = useCallback((rows: ProviderFeature[]) => {
     renderPhaseTwoPins(rows);

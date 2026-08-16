@@ -1,4 +1,4 @@
-name: One-shot native U.S. diagnostics migration
+name: One-shot native Map Tools migration
 
 on:
   push:
@@ -20,8 +20,8 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable
-      - name: Migrate U.S. diagnostics overlays to native Mapbox
-        run: python occu-med-map/scripts/migrate-us-diagnostics-native.py
+      - name: Migrate Map Tools and From-To routing to native Mapbox
+        run: python occu-med-map/scripts/migrate-map-tools-native.py
       - run: pnpm install --frozen-lockfile
       - name: Typecheck frontend
         run: pnpm --filter @workspace/occu-med-map typecheck
@@ -36,11 +36,11 @@ jobs:
       - name: Inventory remaining compatibility
         working-directory: occu-med-map
         run: pnpm exec tsx scripts/zero-leaflet-architecture-audit.ts
-      - name: Commit validated U.S. diagnostics migration
+      - name: Commit validated native Map Tools migration
         run: |
-          rm -f occu-med-map/scripts/migrate-us-diagnostics-native.py
+          rm -f occu-med-map/scripts/migrate-map-tools-native.py
           git config user.name "Occumed79"
           git config user.email "Occumed79@users.noreply.github.com"
           git add -A
-          git commit -m "Render U.S. diagnostics overlays with native Mapbox"
+          git commit -m "Run Map Tools directly on native Mapbox"
           git push origin HEAD:nuclear/remove-leaflet-compat

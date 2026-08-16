@@ -1,5 +1,4 @@
 import mapboxgl from "mapbox-gl";
-import type { Feature, FeatureCollection, Point, Polygon } from "geojson";
 import type { ProviderFeature } from "./DatasetBrowser";
 import { registerMapboxMapInitializer, getTrackedMapboxMaps } from "./mapboxMapLifecycleRuntime";
 import { sourceColor } from "./phaseTwoLayerModel";
@@ -15,10 +14,10 @@ type DensityCell = { lat: number; lng: number; count: number };
 
 type RuntimeState = {
   mode: PhaseTwoMode;
-  collection: FeatureCollection;
+  collection: GeoJSON.FeatureCollection;
 };
 
-const EMPTY: FeatureCollection = { type: "FeatureCollection", features: [] };
+const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
 const state: RuntimeState = { mode: "none", collection: EMPTY };
 
 function htmlEscape(value: unknown): string {
@@ -168,7 +167,7 @@ export function clearPhaseTwoOverlay(): void {
 }
 
 export function renderPhaseTwoPins(rows: ProviderFeature[]): void {
-  const features: Array<Feature<Point>> = rows
+  const features: Array<GeoJSON.Feature<GeoJSON.Point>> = rows
     .filter((provider): provider is ProviderFeature & { lat: number; lng: number } => Number.isFinite(provider.lat) && Number.isFinite(provider.lng))
     .map((provider) => ({
       type: "Feature",
@@ -185,7 +184,7 @@ export function renderPhaseTwoPins(rows: ProviderFeature[]): void {
 }
 
 export function renderPhaseTwoDensity(cells: DensityCell[]): void {
-  const features: Array<Feature<Point>> = cells
+  const features: Array<GeoJSON.Feature<GeoJSON.Point>> = cells
     .filter((cell) => Number.isFinite(cell.lat) && Number.isFinite(cell.lng) && cell.count > 0)
     .map((cell) => {
       const radius = Math.max(5, Math.min(32, 4 + Math.log2(cell.count + 1) * 3));
@@ -211,7 +210,7 @@ export function renderPhaseTwoGrid(cells: DensityCell[], precision: number): voi
   const step = 10 ** -safePrecision;
   const half = step / 2;
   const maxCount = Math.max(1, ...cells.map((cell) => cell.count));
-  const features: Array<Feature<Polygon>> = cells
+  const features: Array<GeoJSON.Feature<GeoJSON.Polygon>> = cells
     .filter((cell) => Number.isFinite(cell.lat) && Number.isFinite(cell.lng) && cell.count > 0)
     .map((cell) => {
       const ratio = Math.log1p(cell.count) / Math.log1p(maxCount);

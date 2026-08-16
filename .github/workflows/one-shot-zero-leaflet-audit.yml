@@ -20,6 +20,18 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable
+      - name: Repair U.S. diagnostics channel typing
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('occu-med-map/src/usDiagnosticsNativeMapRuntime.ts')
+          text = path.read_text()
+          old = '''const collections: Record<Channel, GeoJSON.FeatureCollection> = Object.fromEntries(\n  CHANNELS.map((channel) => [channel, { type: "FeatureCollection", features: [] }]),\n) as Record<Channel, GeoJSON.FeatureCollection>;'''
+          new = '''const collections: Record<Channel, GeoJSON.FeatureCollection> = {\n  states: { type: "FeatureCollection", features: [] },\n  population: { type: "FeatureCollection", features: [] },\n  cities: { type: "FeatureCollection", features: [] },\n  timezones: { type: "FeatureCollection", features: [] },\n  saved: { type: "FeatureCollection", features: [] },\n  address: { type: "FeatureCollection", features: [] },\n};'''
+          if old not in text:
+              raise SystemExit('U.S. diagnostics typing anchor missing or already changed')
+          path.write_text(text.replace(old, new, 1))
+          PY
       - name: Migrate Map Tools and From-To routing to native Mapbox
         run: python occu-med-map/scripts/migrate-map-tools-native.py
       - run: pnpm install --frozen-lockfile

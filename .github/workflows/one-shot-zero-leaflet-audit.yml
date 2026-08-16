@@ -1,4 +1,4 @@
-name: One-shot native Provider Explorer migration
+name: One-shot native Radius and Live Finder migration
 
 on:
   push:
@@ -20,8 +20,8 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable
-      - name: Migrate Provider Explorer rendering to native Mapbox
-        run: python occu-med-map/scripts/migrate-provider-explorer-native.py
+      - name: Migrate Radius and Live Finder overlays to native Mapbox
+        run: python occu-med-map/scripts/migrate-radius-live-native.py
       - run: pnpm install --frozen-lockfile
       - name: Typecheck frontend
         run: pnpm --filter @workspace/occu-med-map typecheck
@@ -34,11 +34,11 @@ jobs:
       - name: Inventory remaining compatibility
         working-directory: occu-med-map
         run: pnpm exec tsx scripts/zero-leaflet-architecture-audit.ts
-      - name: Commit validated native Provider Explorer migration
+      - name: Commit validated native Radius and Live Finder migration
         run: |
-          rm -f occu-med-map/scripts/migrate-provider-explorer-native.py
+          rm -f occu-med-map/scripts/migrate-radius-live-native.py
           git config user.name "Occumed79"
           git config user.email "Occumed79@users.noreply.github.com"
           git add -A
-          git commit -m "Render Provider Explorer with native Mapbox sources"
+          git commit -m "Render Radius and Live Finder with native Mapbox sources"
           git push origin HEAD:nuclear/remove-leaflet-compat

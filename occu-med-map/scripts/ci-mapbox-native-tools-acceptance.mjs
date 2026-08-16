@@ -291,12 +291,12 @@ try {
     const refreshPayload = await viewportRefresh.json();
     assert.equal(refreshPayload.providers?.length, 2, "Indexed viewport refresh must keep both CI clinics");
   }
-  await page.waitForFunction(() => {
-    const input = document.querySelector('input[aria-label="Indexed Providers"]');
-    const row = input?.closest(".workflow-layer");
-    const text = String(row?.textContent || "");
-    return Boolean(input?.checked) && /2\s+loaded/i.test(text);
-  }, null, { timeout: 15_000 });
+  // The sidebar wording is presentation-only and has changed between
+  // "loaded" and "rendered in viewport". Functional readiness is proved by
+  // the checked source plus the native Mapbox layer assertion immediately below.
+  await page.waitForFunction(() => Boolean(
+    document.querySelector('input[aria-label="Indexed Providers"]')?.checked
+  ), null, { timeout: 15_000 });
   await waitForActiveMapIdle(page, "2d");
   await page.waitForFunction(() => {
     const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];

@@ -175,7 +175,7 @@ replace_section(
     return ()=>clearProviderDataset('my-clinics');
   },[showMyClinicsLayer,myClinicsData,showGlowPoints]);
 
-  async function uploadClinicChunk'''
+'''
 )
 
 # NACCHO keeps the same viewport fetch behavior but writes directly to a stable Mapbox source.

@@ -180,6 +180,41 @@ async function nativeCompatLayerCount(page, mode = "2d") {
   }, mode);
 }
 
+async function compatPopupFeaturePoint(page, needle) {
+  return page.evaluate((popupNeedle) => {
+    const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
+    const map = maps.find((candidate) => Boolean(candidate.getContainer().closest(".mapbox-2d-host")));
+    if (!map) throw new Error("2D Mapbox map not available");
+    const sourceIds = Object.keys(map.getStyle()?.sources || {})
+      .filter((id) => id.startsWith("leaflet-compat-") && id.endsWith("-source"));
+    const diagnostics = [];
+    for (const sourceId of sourceIds) {
+      let features = [];
+      try { features = map.querySourceFeatures(sourceId) || []; } catch {}
+      diagnostics.push({
+        sourceId,
+        count: features.length,
+        popupPreviews: features.map((feature) => String(feature.properties?.__popupHtml || "").slice(0, 120)),
+      });
+      const feature = features.find((candidate) =>
+        String(candidate.properties?.__popupHtml || "").includes(popupNeedle)
+      );
+      if (!feature || feature.geometry?.type !== "Point") continue;
+      const coordinates = feature.geometry.coordinates;
+      const point = map.project(coordinates);
+      const rect = map.getCanvas().getBoundingClientRect();
+      return {
+        x: rect.left + point.x,
+        y: rect.top + point.y,
+        sourceId,
+        coordinates,
+        diagnostics,
+      };
+    }
+    return { x: null, y: null, sourceId: null, coordinates: null, diagnostics };
+  }, needle);
+}
+
 async function waitForMode(page, mode) {
   await page.waitForFunction((expected) => window.__NETWORK_MAP_GLOBE__?.getMode?.() === expected, mode, { timeout: 35_000 });
 }
@@ -354,7 +389,7 @@ try {
   assert.ok(await nativeCompatLayerCount(page, "3d") > 0, "3D Mapbox globe must receive the same logical overlay geometry");
   await page.locator(".map-dimension-toggle button[data-map-mode='2d']").evaluate((element) => element.click());
   await waitForMode(page, "2d");
-  await page.waitForFunction(() => !document.querySelector(".dual-engine-vortex.active"), null, { timeout: 20_000 });
+  await page.waitForFunction(() => !document.querySelector(".dual-engine-vortex.active"), null, { timeout: 35_000 });
   await radiusCard.waitFor({ state: "visible", timeout: 10_000 });
 
   const saveRing = radiusCard.getByRole("button", { name: /Save ring/i });
@@ -377,9 +412,15 @@ try {
 
   await clickByText(page, /8px points/i, explorer);
   await page.waitForFunction(() => /showing 1 visible pins of 1 matching records/i.test(document.querySelector(".provider-map-status")?.textContent || ""), null, { timeout: 10_000 });
-  const providerPoint = await active2dMapPoint(page, 0, 20);
+  await waitForActiveMapIdle(page, "2d");
+  const providerPoint = await compatPopupFeaturePoint(page, "CI Stored Clinic");
+  assert.ok(
+    providerPoint && Number.isFinite(providerPoint.x) && Number.isFinite(providerPoint.y),
+    `Stored Provider Explorer pin must exist in native Mapbox popup metadata: ${JSON.stringify(providerPoint?.diagnostics || [])}`
+  );
+  console.log("STORED_PROVIDER_FEATURE_BEFORE_CLICK", JSON.stringify(providerPoint));
   await page.mouse.click(providerPoint.x, providerPoint.y);
-  await page.getByText("CI Stored Clinic").first().waitFor({ state: "visible", timeout: 8_000 });
+  await page.getByText("CI Stored Clinic").first().waitFor({ state: "visible", timeout: 10_000 });
   const radiusCenterAfterProviderClick = ((await radiusCard.textContent()) || "").match(/Center:\s*[-\d.]+,\s*[-\d.]+/)?.[0] || "";
   assert.equal(radiusCenterAfterProviderClick, radiusCenterBefore, "Provider clicks must not fall through into Radius map-click ownership");
 

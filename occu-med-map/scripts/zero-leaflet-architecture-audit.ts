@@ -25,6 +25,9 @@ const rules: Array<[string, RegExp]> = [
   ["leaflet-controller", /canonicalMap\s*:\s*L\.Map|syncMapboxCameraFromLeaflet|syncLeafletCameraFromMapbox|lastEngineDrivenLeafletMove/],
   ["leaflet-symbol", /\bL\.(?:map|Map|Layer|LayerGroup|FeatureGroup|Marker|CircleMarker|Circle|Polyline|Polygon|GeoJSON|LatLng|LatLngBounds|Popup|Tooltip|Control|GridLayer|TileLayer|latLng|latLngBounds|layerGroup|featureGroup|marker|circleMarker|circle|polyline|polygon|geoJSON|popup|tooltip|control|tileLayer)\b/],
   ["leaflet-name", /leaflet/i],
+  ["scene-runtime-import", /from\s+["'][^"']*mapSceneRuntime["']/],
+  ["scene-lifecycle", /mapSceneLifecycleRuntime|registerMapSceneInitializer|getTrackedMapScenes|__NETWORK_MAP_SCENE_LIFECYCLE__/],
+  ["scene-symbol", /\bMapScene\.(?:map|Map|Layer|LayerGroup|FeatureGroup|Marker|CircleMarker|Circle|Polyline|Polygon|GeoJSON|LatLng|LatLngBounds|Popup|Tooltip|Control|GridLayer|TileLayer|latLng|latLngBounds|layerGroup|featureGroup|marker|circleMarker|circle|polyline|polygon|geoJSON|popup|tooltip|control|tileLayer)\b/],
 ];
 
 for (const absolute of filesUnder(srcRoot)) {
@@ -42,11 +45,11 @@ for (const absolute of filesUnder(srcRoot)) {
 const byKind = new Map<string, number>();
 for (const finding of findings) byKind.set(finding.kind, (byKind.get(finding.kind) || 0) + 1);
 
-console.log("Zero-Leaflet architecture audit");
+console.log("Zero-Leaflet / zero-compat architecture audit");
 console.log(`Production source findings: ${findings.length}`);
 for (const [kind, count] of [...byKind.entries()].sort()) console.log(`  ${kind}: ${count}`);
 for (const finding of findings) console.log(`${finding.kind}\t${finding.file}:${finding.line}\t${finding.text}`);
 
-// This starts as an inventory gate while the migration is in progress. The final
-// migration commit flips this to a hard failure if any production finding remains.
+// Inventory-only while the migration is active. The final commit flips this to
+// hard failure if any production compatibility finding remains.
 process.exitCode = 0;

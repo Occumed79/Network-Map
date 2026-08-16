@@ -22,11 +22,11 @@ function sourceFiles(directory: string): string[] {
 const main = source("src/main.tsx");
 const pipeline = source("src/networkRequestPipelineRuntime.ts");
 const admin = source("src/adminApiRuntime.ts");
-const providerExplorer = source("src/providerExplorerStabilityRuntime.ts");
+const providerExplorer = source("src/providerExplorerRequestStabilityRuntime.ts");
 
 const pipelineImport = main.indexOf('import "./networkRequestPipelineRuntime";');
 const adminImport = main.indexOf('import "./adminApiRuntime";');
-const providerExplorerImport = main.indexOf('import "./providerExplorerStabilityRuntime";');
+const providerExplorerImport = main.indexOf('import "./providerExplorerRequestStabilityRuntime";');
 assert.ok(pipelineImport >= 0, "request pipeline must be imported");
 assert.ok(adminImport > pipelineImport, "admin middleware must register after pipeline installation");
 assert.ok(providerExplorerImport > pipelineImport, "Provider Explorer middleware must register after pipeline installation");
@@ -41,7 +41,7 @@ assert.match(pipeline, /__NETWORK_MAP_REQUEST_PIPELINE__/, "pipeline must expose
 assert.match(admin, /registerNetworkRequestMiddleware\("admin-auth"/, "admin authentication must register as middleware");
 assert.match(admin, /, 100\);/, "admin authentication priority must remain explicit");
 assert.doesNotMatch(admin, /window\.fetch\s*=/, "admin authentication must not replace fetch");
-assert.match(providerExplorer, /registerNetworkRequestMiddleware\("provider-explorer-stability"/, "Provider Explorer must register as middleware");
+assert.match(providerExplorer, /registerNetworkRequestMiddleware\("provider-explorer-request-stability"/, "Provider Explorer must register as middleware");
 assert.match(providerExplorer, /, 200\);/, "Provider Explorer cancellation priority must remain explicit");
 assert.doesNotMatch(providerExplorer, /window\.fetch\s*=/, "Provider Explorer must not replace fetch");
 

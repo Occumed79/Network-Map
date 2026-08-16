@@ -1,4 +1,4 @@
-name: One-shot Provider Explorer native root lifecycle fix
+name: One-shot Provider Explorer request ownership fix
 
 on:
   push:
@@ -21,8 +21,8 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable
-      - name: Apply Provider Explorer native root fix
-        run: python occu-med-map/scripts/apply-provider-explorer-native-root-fix.py
+      - name: Apply Provider Explorer request ownership fix
+        run: python occu-med-map/scripts/apply-provider-explorer-request-ownership-fix.py
       - run: pnpm install --frozen-lockfile
       - name: Typecheck frontend
         run: pnpm --filter @workspace/occu-med-map typecheck
@@ -34,10 +34,10 @@ jobs:
         run: pnpm --filter @workspace/occu-med-map test:leaflet-map-lifecycle-hardening
       - name: Build frontend
         run: pnpm --filter @workspace/occu-med-map build
-      - name: Commit validated Provider Explorer fix
+      - name: Commit validated Provider Explorer ownership fix
         run: |
           git config user.name "Occumed79"
           git config user.email "Occumed79@users.noreply.github.com"
           git add occu-med-map/src/App.tsx
-          git commit -m "Fix Provider Explorer pins on native Mapbox"
+          git commit -m "Fix Provider Explorer render ownership race"
           git push origin HEAD:nuclear/mapbox-native-runtime

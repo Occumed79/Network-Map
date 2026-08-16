@@ -29,6 +29,13 @@ jobs:
           path = Path("occu-med-map/scripts/ci-mapbox-native-tools-acceptance.mjs")
           text = path.read_text()
 
+          def replace_once(old, new, label):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected 1 marker, found {count}")
+              text = text.replace(old, new, 1)
+
           helper_pattern = re.compile(
               r'async function nativeSourceFeatureCount\(page, sourceId, mode = "2d"\) \{.*?\n\}\n\nasync function nativePopupFeaturePoint\(page, needle\) \{.*?\n\}\n\n(?=async function waitForMode)',
               re.S,
@@ -45,10 +52,7 @@ jobs:
               if (!layers.length) return 0;
               const canvas = map.getCanvas();
               try {
-                return map.queryRenderedFeatures(
-                  [[0, 0], [canvas.clientWidth, canvas.clientHeight]],
-                  { layers },
-                ).length;
+                return map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers }).length;
               } catch { return 0; }
             }, { requestedSourceId: sourceId, requestedMode: mode });
           }
@@ -77,22 +81,14 @@ jobs:
                 count: features.length,
                 popupPreviews: features.map((feature) => String(feature.properties?.popupHtml || "").slice(0, 120)),
               }];
-              const feature = features.find((candidate) =>
-                String(candidate.properties?.popupHtml || "").includes(popupNeedle)
-              );
+              const feature = features.find((candidate) => String(candidate.properties?.popupHtml || "").includes(popupNeedle));
               if (!feature || feature.geometry?.type !== "Point") {
                 return { x: null, y: null, sourceId: null, coordinates: null, diagnostics };
               }
               const coordinates = feature.geometry.coordinates;
               const point = map.project(coordinates);
               const rect = map.getCanvas().getBoundingClientRect();
-              return {
-                x: rect.left + point.x,
-                y: rect.top + point.y,
-                sourceId: String(feature.source || ""),
-                coordinates,
-                diagnostics,
-              };
+              return { x: rect.left + point.x, y: rect.top + point.y, sourceId: String(feature.source || ""), coordinates, diagnostics };
             }, needle);
           }
 
@@ -101,94 +97,56 @@ jobs:
           if count != 1:
               raise SystemExit(f"native helper replacement count={count}")
 
-          old_indexed = '''  await page.waitForFunction(() => {
-            const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
-            const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
-            if (!map || !map.isStyleLoaded()) return false;
-            if (!map.getLayer("provider-dataset-native-indexed-points") || !map.getSource("provider-dataset-native-indexed")) return false;
-            try { return (map.querySourceFeatures("provider-dataset-native-indexed") || []).length >= 2; } catch { return false; }
-          }, null, { timeout: 10_000 });'''
-          new_indexed = '''  await page.waitForFunction(() => {
-            const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
-            const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
-            const layerId = "provider-dataset-native-indexed-points";
-            if (!map || !map.isStyleLoaded() || !map.getLayer(layerId) || !map.getSource("provider-dataset-native-indexed")) return false;
-            const canvas = map.getCanvas();
-            try {
-              return map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers: [layerId] }).length >= 2;
-            } catch { return false; }
-          }, null, { timeout: 10_000 });'''
-          if old_indexed not in text:
-              raise SystemExit("indexed rendered readiness marker not found")
-          text = text.replace(old_indexed, new_indexed, 1)
+          replace_once(
+              '  try { return (map.querySourceFeatures("provider-dataset-native-indexed") || []).length >= 2; } catch { return false; }',
+              '  const canvas = map.getCanvas();\n  try { return map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers: ["provider-dataset-native-indexed-points"] }).length >= 2; } catch { return false; }',
+              "indexed readiness",
+          )
 
-          old_diag = '''    const sourceId = "provider-dataset-native-indexed";
-            let sourceFeatures = [];
-            try { sourceFeatures = map.querySourceFeatures(sourceId) || []; } catch {}'''
-          new_diag = '''    const sourceId = "provider-dataset-native-indexed";
-            const layerId = "provider-dataset-native-indexed-points";
-            let sourceFeatures = [];
-            try {
-              const canvas = map.getCanvas();
-              sourceFeatures = map.getLayer(layerId)
-                ? map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers: [layerId] })
-                : [];
-            } catch {}'''
-          if old_diag not in text:
-              raise SystemExit("indexed diagnostics marker not found")
-          text = text.replace(old_diag, new_diag, 1)
+          diag_pattern = re.compile(
+              r'(?P<i>^[ \t]*)const sourceId = "provider-dataset-native-indexed";\n(?P=i)let sourceFeatures = \[\];\n(?P=i)try \{ sourceFeatures = map\.querySourceFeatures\(sourceId\) \|\| \[\]; \} catch \{\}',
+              re.M,
+          )
+          def diag_replacement(match):
+              i = match.group('i')
+              return (
+                  f'{i}const sourceId = "provider-dataset-native-indexed";\n'
+                  f'{i}const layerId = "provider-dataset-native-indexed-points";\n'
+                  f'{i}let sourceFeatures = [];\n'
+                  f'{i}try {{\n'
+                  f'{i}  const canvas = map.getCanvas();\n'
+                  f'{i}  sourceFeatures = map.getLayer(layerId)\n'
+                  f'{i}    ? map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], {{ layers: [layerId] }})\n'
+                  f'{i}    : [];\n'
+                  f'{i}}} catch {{}}'
+              )
+          text, count = diag_pattern.subn(diag_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f"indexed diagnostics replacement count={count}")
 
-          old_radius = '''  try { return (map.querySourceFeatures("radius-extractor-native") || []).length > before; } catch { return false; }'''
-          new_radius = '''  const canvas = map.getCanvas();
-            try {
-              return map.queryRenderedFeatures(
-                [[0, 0], [canvas.clientWidth, canvas.clientHeight]],
-                { layers: ["radius-extractor-native-fill", "radius-extractor-native-line", "radius-extractor-native-center"].filter((id) => Boolean(map.getLayer(id))) },
-              ).length > before;
-            } catch { return false; }'''
-          if text.count(old_radius) != 1:
-              raise SystemExit(f"2D radius marker count={text.count(old_radius)}")
-          text = text.replace(old_radius, new_radius, 1)
-
-          old_radius_3d = '''  try { return (map.querySourceFeatures("radius-extractor-native") || []).length > 0; } catch { return false; }'''
-          new_radius_3d = '''  const canvas = map.getCanvas();
-            try {
-              return map.queryRenderedFeatures(
-                [[0, 0], [canvas.clientWidth, canvas.clientHeight]],
-                { layers: ["radius-extractor-native-fill", "radius-extractor-native-line", "radius-extractor-native-center"].filter((id) => Boolean(map.getLayer(id))) },
-              ).length > 0;
-            } catch { return false; }'''
-          if text.count(old_radius_3d) != 1:
-              raise SystemExit(f"3D radius marker count={text.count(old_radius_3d)}")
-          text = text.replace(old_radius_3d, new_radius_3d, 1)
-
-          old_density = '''    try { return (map.querySourceFeatures("provider-explorer-native-aggregate") || []).length === 2; } catch { return false; }'''
-          new_density = '''    const canvas = map.getCanvas();
-              try {
-                return map.queryRenderedFeatures(
-                  [[0, 0], [canvas.clientWidth, canvas.clientHeight]],
-                  { layers: ["provider-explorer-native-density"] },
-                ).length === 2;
-              } catch { return false; }'''
-          if text.count(old_density) != 1:
-              raise SystemExit(f"density marker count={text.count(old_density)}")
-          text = text.replace(old_density, new_density, 1)
-
-          old_hex = '''      const features = map.querySourceFeatures("provider-explorer-native-aggregate") || [];
-              return features.length === 2 && features.every((feature) => feature.geometry?.type === "Polygon");'''
-          new_hex = '''      const canvas = map.getCanvas();
-              const features = map.queryRenderedFeatures(
-                [[0, 0], [canvas.clientWidth, canvas.clientHeight]],
-                { layers: ["provider-explorer-native-hex-fill"] },
-              );
-              return features.length === 2 && features.every((feature) => feature.geometry?.type === "Polygon");'''
-          if text.count(old_hex) != 1:
-              raise SystemExit(f"hex marker count={text.count(old_hex)}")
-          text = text.replace(old_hex, new_hex, 1)
+          replace_once(
+              '  try { return (map.querySourceFeatures("radius-extractor-native") || []).length > before; } catch { return false; }',
+              '  const canvas = map.getCanvas();\n  try { return map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers: ["radius-extractor-native-fill", "radius-extractor-native-line", "radius-extractor-native-center"].filter((id) => Boolean(map.getLayer(id))) }).length > before; } catch { return false; }',
+              "2D radius readiness",
+          )
+          replace_once(
+              '  try { return (map.querySourceFeatures("radius-extractor-native") || []).length > 0; } catch { return false; }',
+              '  const canvas = map.getCanvas();\n  try { return map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers: ["radius-extractor-native-fill", "radius-extractor-native-line", "radius-extractor-native-center"].filter((id) => Boolean(map.getLayer(id))) }).length > 0; } catch { return false; }',
+              "3D radius readiness",
+          )
+          replace_once(
+              '    try { return (map.querySourceFeatures("provider-explorer-native-aggregate") || []).length === 2; } catch { return false; }',
+              '    const canvas = map.getCanvas();\n    try { return map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers: ["provider-explorer-native-density"] }).length === 2; } catch { return false; }',
+              "density readiness",
+          )
+          replace_once(
+              '      const features = map.querySourceFeatures("provider-explorer-native-aggregate") || [];\n      return features.length === 2 && features.every((feature) => feature.geometry?.type === "Polygon");',
+              '      const canvas = map.getCanvas();\n      const features = map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers: ["provider-explorer-native-hex-fill"] });\n      return features.length === 2 && features.every((feature) => feature.geometry?.type === "Polygon");',
+              "hex readiness",
+          )
 
           if "querySourceFeatures(" in text:
               raise SystemExit("querySourceFeatures remains in native critical-tools acceptance")
-
           path.write_text(text)
           PY
       - name: Syntax check
@@ -199,10 +157,6 @@ jobs:
           git config user.name "Occumed79"
           git config user.email "Occumed79@users.noreply.github.com"
           git add occu-med-map/scripts/ci-mapbox-native-tools-acceptance.mjs
-          if git diff --cached --quiet; then
-            echo "No test changes required."
-            exit 0
-          fi
           git commit -m "Assert rendered native Mapbox features in browser acceptance"
           git fetch origin nuclear/remove-leaflet-compat
           git rebase origin/nuclear/remove-leaflet-compat

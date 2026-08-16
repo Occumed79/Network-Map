@@ -45,6 +45,7 @@ jobs:
               raise SystemExit('U.S. status stale-ref anchor missing')
           text = text.replace(old, new, 1)
           text = text.replace('},[showPopDensity,stateGeoRevision]);', '},[showPopDensity, stateGeoRevision]);', 1)
+          text = text.replace('},[showTZ,stateGeoRevision]);', '},[showTZ, stateGeoRevision]);', 1)
           path.write_text(text)
       - run: pnpm install --frozen-lockfile
       - name: Typecheck frontend

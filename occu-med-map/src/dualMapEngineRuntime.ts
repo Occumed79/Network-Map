@@ -1,10 +1,10 @@
-import MapScene from "./mapSceneRuntime";
-import { registerMapSceneInitializer } from "./mapSceneLifecycleRuntime";
 import { registerMapboxMap, unregisterMapboxMap } from "./mapboxMapLifecycleRuntime";
 import { findCompatPopupHit, wasCompatibilityClickHandled } from "./mapboxCompatInteractionRuntime";
 import mapboxgl from "mapbox-gl";
 
 type MapMode = "2d" | "3d";
+type InitialCamera = { center?: [number, number]; zoom?: number };
+type SharedCamera = { lng: number; lat: number; zoom2d: number };
 
 declare global {
   interface Window {
@@ -16,16 +16,16 @@ declare global {
   }
 }
 
-// Keep the bundled Mapbox GL instance available to the existing optional
-// hardening runtimes. This prevents a second CDN copy of Mapbox from loading.
+// Keep the bundled Mapbox GL instance available to optional hardening runtimes.
+// Both visible surfaces use this exact package instance.
 (window as any).mapboxgl = mapboxgl;
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || import.meta.env.VITE_MAPBOX_ACCESS_TOKEN || "";
 const MAPBOX_2D_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN_2 || "";
 const MAP_LOAD_TIMEOUT_MS = 30_000;
 
-let canonicalMap: MapScene.Map | null = null;
 let currentMode: MapMode = "2d";
+let mapContainer: HTMLElement | null = null;
 let mapWrap: HTMLElement | null = null;
 let mapbox2dHost: HTMLDivElement | null = null;
 let mapboxGlobeHost: HTMLDivElement | null = null;
@@ -36,26 +36,31 @@ let mapbox2dViewPromise: Promise<void> | null = null;
 let mapboxGlobeViewPromise: Promise<void> | null = null;
 let mapbox2dMap: mapboxgl.Map | null = null;
 let mapboxGlobeMap: mapboxgl.Map | null = null;
-let lastEngineDrivenLeafletMove = 0;
 let mapResizeObserver: ResizeObserver | null = null;
 let mapResizeFrame = 0;
+let initialized = false;
+let sharedCamera: SharedCamera = { lng: 0, lat: 20, zoom2d: 2 };
 
-registerMapSceneInitializer({
-  id: "dual-map-engine",
-  priority: 10,
-  initialize: (map) => {
-    canonicalMap = map;
-    map.whenReady(() => { void initializeDualEngines(map); });
-  },
-});
+export async function initializeDualMapEngines(container: HTMLElement, initial: InitialCamera = {}): Promise<void> {
+  if (initialized) return;
+  initialized = true;
+  mapContainer = container;
+  const center = initial.center || [0, 20];
+  sharedCamera = {
+    lng: Number(center[0]) || 0,
+    lat: Number(center[1]) || 0,
+    zoom2d: Number.isFinite(Number(initial.zoom)) ? Number(initial.zoom) : 2,
+  };
 
-async function initializeDualEngines(map: MapScene.Map): Promise<void> {
-  const mapContainer = map.getContainer();
-  mapWrap = mapContainer.parentElement;
-  if (!mapWrap || mapWrap.classList.contains("dual-engine-map-shell")) return;
+  mapWrap = container.parentElement;
+  if (!mapWrap) {
+    initialized = false;
+    throw new Error("Mapbox map wrapper did not initialize");
+  }
+  if (mapWrap.classList.contains("dual-engine-map-shell")) return;
 
   mapWrap.classList.add("dual-engine-map-shell");
-  mapContainer.classList.add("canonical-map-scene-controller");
+  container.classList.add("map-scene-layer-host");
 
   mapbox2dHost = document.createElement("div");
   mapbox2dHost.className = "mapbox-2d-host";
@@ -86,15 +91,13 @@ async function initializeDualEngines(map: MapScene.Map): Promise<void> {
   statusNode = toggleControl.querySelector(".map-dimension-status");
 
   mapWrap.append(mapbox2dHost, mapboxGlobeHost, toggleControl);
-  map.on("moveend zoomend", onCanonicalViewChanged);
-  map.once("unload", cleanupDualEngines);
   observeMapSize();
 
   try {
     await ensureMapbox2d();
     mapWrap.classList.add("visible-engine-ready");
-    requestOverlaySync();
     setStatus("Mapbox 2D active");
+    emitCameraState(mapbox2dMap, "2d");
   } catch (error) {
     console.error("Mapbox 2D map failed", error);
     showMapbox2dError(error);
@@ -111,8 +114,8 @@ function showMapbox2dError(error: unknown): void {
     mapbox2dHost.innerHTML = loadingMarkup("Starting Mapbox 2D map", "Loading the Mapbox streets basemap…");
     setStatus("Retrying Mapbox 2D…", "loading");
     void ensureMapbox2d().then(() => {
-      requestOverlaySync();
       setStatus("Mapbox 2D active");
+      emitCameraState(mapbox2dMap, "2d");
     }).catch((nextError) => {
       showMapbox2dError(nextError);
       setStatus(`Mapbox 2D unavailable · ${errorMessage(nextError)}`, "error");
@@ -166,14 +169,13 @@ function updateToggle(): void {
 }
 
 async function setMode(nextMode: MapMode): Promise<void> {
-  if (!canonicalMap || !mapWrap || !mapbox2dHost || !mapboxGlobeHost) return;
+  if (!mapWrap || !mapbox2dHost || !mapboxGlobeHost) return;
   if (nextMode === currentMode && (nextMode === "2d" ? mapbox2dMap : mapboxGlobeMap)) return;
+
+  captureCamera(currentMode === "2d" ? mapbox2dMap : mapboxGlobeMap, currentMode);
 
   if (nextMode === "3d") {
     setStatus("Loading Mapbox 3D…", "loading");
-
-    // Make the globe host measurable before Mapbox creates its canvas. Creating
-    // a WebGL map inside a hidden container can leave a zero-sized canvas.
     mapWrap.classList.add("mapbox-globe-active", "mapbox-globe-loading");
     mapbox2dHost.setAttribute("aria-hidden", "true");
     mapboxGlobeHost.setAttribute("aria-hidden", "false");
@@ -185,8 +187,7 @@ async function setMode(nextMode: MapMode): Promise<void> {
       mapWrap.classList.remove("mapbox-globe-loading");
       updateToggle();
       mapboxGlobeMap?.resize();
-      syncMapboxCameraFromLeaflet(false, "3d");
-      requestOverlaySync();
+      applySharedCamera(mapboxGlobeMap, "3d", false);
       setStatus("Mapbox 3D globe active");
       return;
     } catch (error) {
@@ -208,8 +209,7 @@ async function setMode(nextMode: MapMode): Promise<void> {
   mapboxGlobeHost.setAttribute("aria-hidden", "true");
   updateToggle();
   mapbox2dMap?.resize();
-  syncMapboxCameraFromLeaflet(false, "2d");
-  requestOverlaySync();
+  applySharedCamera(mapbox2dMap, "2d", false);
   setStatus("Mapbox 2D active");
 }
 
@@ -250,17 +250,15 @@ async function createMapboxMap(mode: MapMode): Promise<void> {
   const token = is2d ? MAPBOX_2D_TOKEN : MAPBOX_TOKEN;
   const host = is2d ? mapbox2dHost : mapboxGlobeHost;
   if (!token) throw new Error(is2d ? "VITE_MAPBOX_TOKEN_2 is not configured" : "VITE_MAPBOX_TOKEN is not configured");
-  if (!host || !canonicalMap) throw new Error("Mapbox map host did not initialize");
+  if (!host) throw new Error("Mapbox map host did not initialize");
 
-  const center = canonicalMap.getCenter();
-  const leafletZoom = canonicalMap.getZoom();
   const instance = new mapboxgl.Map({
     container: host,
     accessToken: token,
     style: is2d ? "mapbox://styles/mapbox/streets-v12" : "mapbox://styles/mapbox/standard",
     projection: is2d ? "mercator" : "globe",
-    center: [center.lng, center.lat],
-    zoom: is2d ? leafletZoom : globeZoomFromLeaflet(leafletZoom),
+    center: [sharedCamera.lng, sharedCamera.lat],
+    zoom: is2d ? sharedCamera.zoom2d : globeZoomFromMapZoom(sharedCamera.zoom2d),
     pitch: is2d ? 0 : 24,
     bearing: is2d ? 0 : -12,
     minZoom: is2d ? 1 : 0.55,
@@ -280,20 +278,19 @@ async function createMapboxMap(mode: MapMode): Promise<void> {
   instance.scrollZoom.setWheelZoomRate(1 / 600);
   instance.scrollZoom.setZoomRate(1 / 180);
 
-  if (!is2d) {
-    instance.on("style.load", () => configureGlobe(instance));
-  }
+  if (!is2d) instance.on("style.load", () => configureGlobe(instance));
 
   await waitForMapReady(instance, is2d ? "Mapbox 2D map" : "Mapbox 3D globe");
 
   if (!is2d) configureGlobe(instance);
   installMapboxInteractions(instance, mode);
-  requestOverlaySync();
   host.classList.add("ready", "engine-render-ready");
   host.querySelectorAll<HTMLElement>(":scope > .dual-engine-loading").forEach((node) => node.remove());
 
   instance.on("moveend", () => {
-    if (currentMode === mode) syncLeafletCameraFromMapbox(instance, mode);
+    if (currentMode !== mode) return;
+    captureCamera(instance, mode);
+    emitCameraState(instance, mode);
   });
 }
 
@@ -346,14 +343,13 @@ function waitForMapReady(instance: mapboxgl.Map, label: string): Promise<void> {
     instance.on("load", onReady);
     instance.on("style.load", onReady);
     instance.on("error", onError);
-
     if (instance.loaded() || instance.isStyleLoaded()) queueMicrotask(onReady);
   });
 }
 
 function installMapboxInteractions(instance: mapboxgl.Map, mode: MapMode): void {
   instance.on("click", (event) => {
-    if (currentMode !== mode || !canonicalMap) return;
+    if (currentMode !== mode) return;
     const layers = ["network-points", "network-lines", "network-fills"].filter((id) => Boolean(instance.getLayer(id)));
     const features = layers.length ? instance.queryRenderedFeatures(event.point, { layers }) : [];
     const html = String(features[0]?.properties?.popupHtml || "");
@@ -362,17 +358,9 @@ function installMapboxInteractions(instance: mapboxgl.Map, mode: MapMode): void 
       return;
     }
 
-    // Tiny provider circles can miss Mapbox's exact rendered-feature query by a
-    // few CSS pixels (especially under device-pixel-ratio/WebKit transforms).
-    // The compatibility interaction owner falls back to a small rendered/source
-    // hit radius. Any popup-capable compatibility feature owns the click and must
-    // never fall through into Radius, Map Tools, or Live Finder map-click logic.
     const compatibilityPopupHit = findCompatPopupHit(instance, event.point, event.lngLat);
     if (compatibilityPopupHit || wasCompatibilityClickHandled(event.originalEvent)) return;
 
-    // Keep exact ownership for other legacy interactive shapes that have no
-    // popup contract of their own. Non-interactive density/radius geometry does
-    // not block generic map tools.
     const overlayHit = instance.queryRenderedFeatures(event.point).some((feature) => {
       const layerId = String(feature.layer?.id || "");
       const properties = feature.properties || {};
@@ -383,85 +371,74 @@ function installMapboxInteractions(instance: mapboxgl.Map, mode: MapMode): void 
     });
     if (overlayHit) return;
 
-    window.dispatchEvent(new CustomEvent("network-map:native-click", {
-      detail: { lat: event.lngLat.lat, lng: event.lngLat.lng, originalEvent: event.originalEvent, mode },
-    }));
-    canonicalMap.fire("click", {
-      latlng: MapScene.latLng(event.lngLat.lat, event.lngLat.lng),
-      originalEvent: event.originalEvent,
-    });
+    const detail = { lat: event.lngLat.lat, lng: event.lngLat.lng, originalEvent: event.originalEvent, mode };
+    window.dispatchEvent(new CustomEvent("network-map:native-click", { detail }));
+    window.dispatchEvent(new CustomEvent("network-map:scene-click", { detail }));
   });
 
   instance.on("dblclick", (event) => {
-    if (currentMode !== mode || !canonicalMap) return;
+    if (currentMode !== mode) return;
     event.preventDefault();
-    window.dispatchEvent(new CustomEvent("network-map:native-dblclick", {
-      detail: { lat: event.lngLat.lat, lng: event.lngLat.lng, originalEvent: event.originalEvent, mode },
-    }));
-    canonicalMap.fire("dblclick", {
-      latlng: MapScene.latLng(event.lngLat.lat, event.lngLat.lng),
-      originalEvent: event.originalEvent,
-    });
+    const detail = { lat: event.lngLat.lat, lng: event.lngLat.lng, originalEvent: event.originalEvent, mode };
+    window.dispatchEvent(new CustomEvent("network-map:native-dblclick", { detail }));
+    window.dispatchEvent(new CustomEvent("network-map:scene-dblclick", { detail }));
   });
 }
 
-function requestOverlaySync(): void {
-  const sync = window.__NETWORK_MAP_OVERLAY_SYNC__?.sync;
-  if (typeof sync === "function") sync();
-}
-
-function onCanonicalViewChanged(): void {
-  if (Date.now() - lastEngineDrivenLeafletMove < 450) return;
-  syncMapboxCameraFromLeaflet(false, currentMode);
-}
-
-function globeZoomFromLeaflet(zoom: number): number {
+function globeZoomFromMapZoom(zoom: number): number {
   const safeZoom = Number.isFinite(zoom) ? zoom : 2;
   return Math.max(0.75, safeZoom - (safeZoom <= 4 ? 0.75 : 0.35));
 }
 
-function leafletZoomFromGlobe(zoom: number): number {
+function mapZoomFromGlobe(zoom: number): number {
   const safeZoom = Number.isFinite(zoom) ? zoom : 1.25;
   return safeZoom + (safeZoom <= 3.25 ? 0.75 : 0.35);
 }
 
-function syncMapboxCameraFromLeaflet(animate: boolean, mode: MapMode): void {
-  const instance = mode === "2d" ? mapbox2dMap : mapboxGlobeMap;
-  if (!instance || !canonicalMap || currentMode !== mode) return;
-  const center = canonicalMap.getCenter();
-  const camera: mapboxgl.CameraOptions & mapboxgl.AnimationOptions = {
-    center: [center.lng, center.lat],
-    zoom: mode === "2d" ? canonicalMap.getZoom() : globeZoomFromLeaflet(canonicalMap.getZoom()),
-  };
-  if (mode === "3d") {
-    camera.pitch = 24;
-    camera.bearing = -12;
-  } else {
-    camera.pitch = 0;
-    camera.bearing = 0;
-  }
-  if (animate) instance.easeTo({ ...camera, duration: 650 });
-  else instance.jumpTo(camera);
-}
-
-function syncLeafletCameraFromMapbox(instance: mapboxgl.Map, mode: MapMode): void {
-  if (!canonicalMap) return;
+function captureCamera(instance: mapboxgl.Map | null, mode: MapMode): void {
+  if (!instance) return;
   const center = instance.getCenter();
   const rawZoom = Number(instance.getZoom());
-  const zoom = mode === "3d" ? leafletZoomFromGlobe(rawZoom) : rawZoom;
-  lastEngineDrivenLeafletMove = Date.now();
-  const logicalMap = canonicalMap as MapScene.Map & { _setViewFromNative?: (center: MapScene.LatLngExpression, zoom: number) => void };
-  const normalizedZoom = Math.max(2, Math.min(17, zoom));
-  if (typeof logicalMap._setViewFromNative === "function") {
-    logicalMap._setViewFromNative([center.lat, center.lng], normalizedZoom);
-  } else {
-    canonicalMap.setView([center.lat, center.lng], normalizedZoom, { animate: false });
-  }
+  sharedCamera = {
+    lng: center.lng,
+    lat: center.lat,
+    zoom2d: Math.max(1, Math.min(17, mode === "3d" ? mapZoomFromGlobe(rawZoom) : rawZoom)),
+  };
+}
+
+function applySharedCamera(instance: mapboxgl.Map | null, mode: MapMode, animate: boolean): void {
+  if (!instance) return;
+  const camera: mapboxgl.CameraOptions & mapboxgl.AnimationOptions = {
+    center: [sharedCamera.lng, sharedCamera.lat],
+    zoom: mode === "2d" ? sharedCamera.zoom2d : globeZoomFromMapZoom(sharedCamera.zoom2d),
+    pitch: mode === "3d" ? 24 : 0,
+    bearing: mode === "3d" ? -12 : 0,
+  };
+  if (animate) instance.easeTo({ ...camera, duration: 650 });
+  else instance.jumpTo(camera);
+  emitCameraState(instance, mode);
+}
+
+function emitCameraState(instance: mapboxgl.Map | null, mode: MapMode): void {
+  if (!instance) return;
+  const center = instance.getCenter();
+  const zoom2d = mode === "3d" ? mapZoomFromGlobe(Number(instance.getZoom())) : Number(instance.getZoom());
+  window.dispatchEvent(new CustomEvent("network-map:native-camera", {
+    detail: { lat: center.lat, lng: center.lng, zoom: zoom2d, mode },
+  }));
+}
+
+function syncActiveCamera(): void {
+  const instance = currentMode === "2d" ? mapbox2dMap : mapboxGlobeMap;
+  captureCamera(instance, currentMode);
+  emitCameraState(instance, currentMode);
+  instance?.resize();
 }
 
 function destroyMapbox2dView(): void {
   const instance = mapbox2dMap;
   mapbox2dMap = null;
+  mapbox2dViewPromise = null;
   if (instance) {
     unregisterMapboxMap(instance);
     instance.remove();
@@ -472,6 +449,7 @@ function destroyMapbox2dView(): void {
 function destroyMapboxGlobeView(): void {
   const instance = mapboxGlobeMap;
   mapboxGlobeMap = null;
+  mapboxGlobeViewPromise = null;
   if (instance) {
     unregisterMapboxMap(instance);
     instance.remove();
@@ -483,26 +461,31 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "unknown error";
 }
 
-function cleanupDualEngines(): void {
+export function cleanupDualMapEngines(): void {
   window.cancelAnimationFrame(mapResizeFrame);
   mapResizeObserver?.disconnect();
   mapResizeObserver = null;
   destroyMapbox2dView();
   destroyMapboxGlobeView();
+  toggleControl?.remove();
+  mapbox2dHost?.remove();
+  mapboxGlobeHost?.remove();
+  mapContainer?.classList.remove("map-scene-layer-host");
+  mapWrap?.classList.remove("dual-engine-map-shell", "visible-engine-ready", "mapbox-globe-active", "mapbox-globe-loading");
+  mapContainer = null;
   mapWrap = null;
   mapbox2dHost = null;
   mapboxGlobeHost = null;
   toggleControl = null;
   statusNode = null;
-  canonicalMap = null;
+  currentMode = "2d";
+  initialized = false;
 }
 
 window.__NETWORK_MAP_GLOBE__ = {
   getMode: () => currentMode,
   setMode,
-  sync: requestOverlaySync,
+  sync: syncActiveCamera,
 };
 
-window.addEventListener("beforeunload", cleanupDualEngines);
-
-export {};
+window.addEventListener("beforeunload", cleanupDualMapEngines);

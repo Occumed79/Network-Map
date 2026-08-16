@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
 
+# Native Phase Two retry after Mapbox bounds and GeoJSON type fixes.
 jobs:
   migrate:
     runs-on: ubuntu-latest

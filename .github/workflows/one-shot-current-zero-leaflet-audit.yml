@@ -29,17 +29,13 @@ jobs:
           path = Path("occu-med-map/scripts/ci-mapbox-native-tools-acceptance.mjs")
           text = path.read_text()
 
-          def replace_once(old, new, label):
+          def sub_once(pattern, replacement, label, flags=re.M):
               global text
-              count = text.count(old)
+              text, count = re.subn(pattern, replacement, text, count=1, flags=flags)
               if count != 1:
-                  raise SystemExit(f"{label}: expected 1 marker, found {count}")
-              text = text.replace(old, new, 1)
+                  raise SystemExit(f"{label}: replacement count={count}")
 
-          helper_pattern = re.compile(
-              r'async function nativeSourceFeatureCount\(page, sourceId, mode = "2d"\) \{.*?\n\}\n\nasync function nativePopupFeaturePoint\(page, needle\) \{.*?\n\}\n\n(?=async function waitForMode)',
-              re.S,
-          )
+          helper_pattern = r'async function nativeSourceFeatureCount\(page, sourceId, mode = "2d"\) \{.*?\n\}\n\nasync function nativePopupFeaturePoint\(page, needle\) \{.*?\n\}\n\n(?=async function waitForMode)'
           helper_replacement = '''async function nativeSourceFeatureCount(page, sourceId, mode = "2d") {
             return page.evaluate(({ requestedSourceId, requestedMode }) => {
               const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
@@ -51,9 +47,8 @@ jobs:
                 .map((layer) => layer.id);
               if (!layers.length) return 0;
               const canvas = map.getCanvas();
-              try {
-                return map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers }).length;
-              } catch { return 0; }
+              try { return map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers }).length; }
+              catch { return 0; }
             }, { requestedSourceId: sourceId, requestedMode: mode });
           }
 
@@ -63,28 +58,18 @@ jobs:
               const map = maps.find((candidate) => Boolean(candidate.getContainer().closest(".mapbox-2d-host")));
               if (!map) throw new Error("2D Mapbox map not available");
               const layers = (map.getStyle()?.layers || [])
-                .filter((layer) =>
-                  layer.type === "circle"
-                  && (String(layer.source || "").startsWith("provider-explorer-native-")
-                    || String(layer.source || "").startsWith("provider-dataset-native-"))
-                )
+                .filter((layer) => layer.type === "circle" && (
+                  String(layer.source || "").startsWith("provider-explorer-native-")
+                  || String(layer.source || "").startsWith("provider-dataset-native-")
+                ))
                 .map((layer) => layer.id);
               const canvas = map.getCanvas();
               let features = [];
-              try {
-                features = layers.length
-                  ? map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers })
-                  : [];
-              } catch {}
-              const diagnostics = [{
-                layers,
-                count: features.length,
-                popupPreviews: features.map((feature) => String(feature.properties?.popupHtml || "").slice(0, 120)),
-              }];
+              try { features = layers.length ? map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers }) : []; }
+              catch {}
+              const diagnostics = [{ layers, count: features.length, popupPreviews: features.map((feature) => String(feature.properties?.popupHtml || "").slice(0, 120)) }];
               const feature = features.find((candidate) => String(candidate.properties?.popupHtml || "").includes(popupNeedle));
-              if (!feature || feature.geometry?.type !== "Point") {
-                return { x: null, y: null, sourceId: null, coordinates: null, diagnostics };
-              }
+              if (!feature || feature.geometry?.type !== "Point") return { x: null, y: null, sourceId: null, coordinates: null, diagnostics };
               const coordinates = feature.geometry.coordinates;
               const point = map.project(coordinates);
               const rect = map.getCanvas().getBoundingClientRect();
@@ -93,57 +78,41 @@ jobs:
           }
 
           '''
-          text, count = helper_pattern.subn(lambda _: helper_replacement, text, count=1)
-          if count != 1:
-              raise SystemExit(f"native helper replacement count={count}")
+          sub_once(helper_pattern, lambda _: helper_replacement, "native helpers", flags=re.S)
 
-          replace_once(
-              '  try { return (map.querySourceFeatures("provider-dataset-native-indexed") || []).length >= 2; } catch { return false; }',
-              '  const canvas = map.getCanvas();\n  try { return map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers: ["provider-dataset-native-indexed-points"] }).length >= 2; } catch { return false; }',
-              "indexed readiness",
-          )
-
-          diag_pattern = re.compile(
-              r'(?P<i>^[ \t]*)const sourceId = "provider-dataset-native-indexed";\n(?P=i)let sourceFeatures = \[\];\n(?P=i)try \{ sourceFeatures = map\.querySourceFeatures\(sourceId\) \|\| \[\]; \} catch \{\}',
-              re.M,
-          )
-          def diag_replacement(match):
+          def rendered_return(match, layer_expr, comparison):
               i = match.group('i')
-              return (
-                  f'{i}const sourceId = "provider-dataset-native-indexed";\n'
-                  f'{i}const layerId = "provider-dataset-native-indexed-points";\n'
-                  f'{i}let sourceFeatures = [];\n'
-                  f'{i}try {{\n'
-                  f'{i}  const canvas = map.getCanvas();\n'
-                  f'{i}  sourceFeatures = map.getLayer(layerId)\n'
-                  f'{i}    ? map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], {{ layers: [layerId] }})\n'
-                  f'{i}    : [];\n'
-                  f'{i}}} catch {{}}'
-              )
-          text, count = diag_pattern.subn(diag_replacement, text, count=1)
-          if count != 1:
-              raise SystemExit(f"indexed diagnostics replacement count={count}")
+              return f'{i}const canvas = map.getCanvas();\n{i}try {{ return map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], {{ layers: {layer_expr} }}).length {comparison}; }} catch {{ return false; }}'
 
-          replace_once(
-              '  try { return (map.querySourceFeatures("radius-extractor-native") || []).length > before; } catch { return false; }',
-              '  const canvas = map.getCanvas();\n  try { return map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers: ["radius-extractor-native-fill", "radius-extractor-native-line", "radius-extractor-native-center"].filter((id) => Boolean(map.getLayer(id))) }).length > before; } catch { return false; }',
-              "2D radius readiness",
-          )
-          replace_once(
-              '  try { return (map.querySourceFeatures("radius-extractor-native") || []).length > 0; } catch { return false; }',
-              '  const canvas = map.getCanvas();\n  try { return map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers: ["radius-extractor-native-fill", "radius-extractor-native-line", "radius-extractor-native-center"].filter((id) => Boolean(map.getLayer(id))) }).length > 0; } catch { return false; }',
-              "3D radius readiness",
-          )
-          replace_once(
-              '    try { return (map.querySourceFeatures("provider-explorer-native-aggregate") || []).length === 2; } catch { return false; }',
-              '    const canvas = map.getCanvas();\n    try { return map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers: ["provider-explorer-native-density"] }).length === 2; } catch { return false; }',
-              "density readiness",
-          )
-          replace_once(
-              '      const features = map.querySourceFeatures("provider-explorer-native-aggregate") || [];\n      return features.length === 2 && features.every((feature) => feature.geometry?.type === "Polygon");',
-              '      const canvas = map.getCanvas();\n      const features = map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], { layers: ["provider-explorer-native-hex-fill"] });\n      return features.length === 2 && features.every((feature) => feature.geometry?.type === "Polygon");',
-              "hex readiness",
-          )
+          pattern = r'(?P<i>^[ \t]*)try \{ return \(map\.querySourceFeatures\("provider-dataset-native-indexed"\) \|\| \[\]\)\.length >= 2; \} catch \{ return false; \}'
+          sub_once(pattern, lambda m: rendered_return(m, '["provider-dataset-native-indexed-points"]', '>= 2'), "indexed readiness")
+
+          diag_pattern = r'(?P<i>^[ \t]*)const sourceId = "provider-dataset-native-indexed";\n(?P=i)let sourceFeatures = \[\];\n(?P=i)try \{ sourceFeatures = map\.querySourceFeatures\(sourceId\) \|\| \[\]; \} catch \{\}'
+          def diag_repl(m):
+              i = m.group('i')
+              return f'''{i}const sourceId = "provider-dataset-native-indexed";
+          {i}const layerId = "provider-dataset-native-indexed-points";
+          {i}let sourceFeatures = [];
+          {i}try {{
+          {i}  const canvas = map.getCanvas();
+          {i}  sourceFeatures = map.getLayer(layerId) ? map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], {{ layers: [layerId] }}) : [];
+          {i}}} catch {{}}'''.replace('\n          ', '\n')
+          sub_once(diag_pattern, diag_repl, "indexed diagnostics")
+
+          pattern = r'(?P<i>^[ \t]*)try \{ return \(map\.querySourceFeatures\("radius-extractor-native"\) \|\| \[\]\)\.length > before; \} catch \{ return false; \}'
+          sub_once(pattern, lambda m: rendered_return(m, '["radius-extractor-native-fill", "radius-extractor-native-line", "radius-extractor-native-center"].filter((id) => Boolean(map.getLayer(id)))', '> before'), "2D radius")
+
+          pattern = r'(?P<i>^[ \t]*)try \{ return \(map\.querySourceFeatures\("radius-extractor-native"\) \|\| \[\]\)\.length > 0; \} catch \{ return false; \}'
+          sub_once(pattern, lambda m: rendered_return(m, '["radius-extractor-native-fill", "radius-extractor-native-line", "radius-extractor-native-center"].filter((id) => Boolean(map.getLayer(id)))', '> 0'), "3D radius")
+
+          pattern = r'(?P<i>^[ \t]*)try \{ return \(map\.querySourceFeatures\("provider-explorer-native-aggregate"\) \|\| \[\]\)\.length === 2; \} catch \{ return false; \}'
+          sub_once(pattern, lambda m: rendered_return(m, '["provider-explorer-native-density"]', '=== 2'), "density")
+
+          hex_pattern = r'(?P<i>^[ \t]*)const features = map\.querySourceFeatures\("provider-explorer-native-aggregate"\) \|\| \[\];\n(?P=i)return features\.length === 2 && features\.every\(\(feature\) => feature\.geometry\?\.type === "Polygon"\);'
+          def hex_repl(m):
+              i = m.group('i')
+              return f'{i}const canvas = map.getCanvas();\n{i}const features = map.queryRenderedFeatures([[0, 0], [canvas.clientWidth, canvas.clientHeight]], {{ layers: ["provider-explorer-native-hex-fill"] }});\n{i}return features.length === 2 && features.every((feature) => feature.geometry?.type === "Polygon");'
+          sub_once(hex_pattern, hex_repl, "hex")
 
           if "querySourceFeatures(" in text:
               raise SystemExit("querySourceFeatures remains in native critical-tools acceptance")

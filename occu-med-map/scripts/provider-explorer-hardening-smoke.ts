@@ -11,39 +11,52 @@ function source(relativePath: string): string {
 }
 
 const main = source("src/main.tsx");
-const stability = source("src/providerExplorerStabilityRuntime.ts");
+const app = source("src/App.tsx");
+const nativeMap = source("src/providerExplorerNativeMapRuntime.ts");
+const requestStability = source("src/providerExplorerRequestStabilityRuntime.ts");
 const providerFinder = source("src/providerLocationFinderRuntime.ts");
-const compat = source("src/mapboxNativeCompat.ts");
 
 const pipelineImport = main.indexOf('import "./networkRequestPipelineRuntime";');
-const dualMapImport = main.indexOf('import "./dualMapEngineRuntime";');
-const stabilityImport = main.indexOf('import "./providerExplorerStabilityRuntime";');
+const stabilityImport = main.indexOf('import "./providerExplorerRequestStabilityRuntime";');
 const appImport = main.indexOf('import App from "./App";');
 
 assert.ok(pipelineImport >= 0, "unified request pipeline must be imported");
-assert.ok(dualMapImport > pipelineImport, "request pipeline must initialize before map request middleware");
-assert.ok(stabilityImport > dualMapImport, "Provider Explorer stability must load after the dual-map runtime");
-assert.ok(appImport > stabilityImport, "Provider Explorer stability guards must load before React mounts App");
-assert.doesNotMatch(main, /mapOverlaySynchronizationControllerRuntime/, "Provider Explorer must not depend on the retired Leaflet overlay mirror");
-assert.doesNotMatch(main, /providerExplorerLayerStabilityRuntime/, "fetch-patching Provider Explorer runtime must remain retired");
-assert.doesNotMatch(main, /completeProviderPinMirrorRuntime/, "legacy complete-pin mirror must remain retired");
-assert.doesNotMatch(main, /providerExplorerMapboxCommitGuardRuntime/, "legacy Mapbox commit guard must remain retired");
+assert.ok(stabilityImport > pipelineImport, "Provider Explorer request stability must initialize after the shared request pipeline");
+assert.ok(appImport > stabilityImport, "Provider Explorer request guards must load before React mounts App");
+assert.doesNotMatch(main, /providerExplorerStabilityRuntime/, "retired LayerGroup transaction runtime must remain deleted");
+assert.doesNotMatch(main, /mapOverlaySynchronizationControllerRuntime/, "Provider Explorer must not depend on retired overlay mirroring");
+assert.doesNotMatch(main, /completeProviderPinMirrorRuntime|providerExplorerMapboxCommitGuardRuntime|providerExplorerLayerStabilityRuntime/, "legacy Provider Explorer mirror/commit guards must remain retired");
 
-assert.match(stability, /stagedLayers:\s*L\.Layer\[\]/, "aggregate replacements must retain a staging buffer during migration");
-assert.match(stability, /Superseded by a newer Provider Explorer/, "latest-request-wins cancellation must remain enabled");
-assert.match(stability, /REQUEST_TIMEOUT_MS\s*=\s*25_000/, "Provider Explorer visual requests must retain a finite timeout");
-assert.match(stability, /Ignored stale Provider Explorer/, "stale responses must be rejected before drawing");
-assert.match(stability, /activeAggregateDrawRequestId/, "nested draw clears must preserve the active aggregate transaction");
-assert.match(stability, /commitGroup\(group, "explicit-clear"\)/, "switching away from aggregate mode must still clear intentionally");
-assert.match(stability, /registerNetworkRequestMiddleware\("provider-explorer-stability"/, "Provider Explorer must register with the shared request pipeline");
-assert.doesNotMatch(stability, /window\.fetch\s*=/, "Provider Explorer must not own window.fetch");
-assert.doesNotMatch(stability, /text\.includes\("8px points"\)/, "hardening must not depend on visible button labels");
-assert.doesNotMatch(stability, /text\.includes\("clear filters"\)/, "hardening must not depend on visible button labels");
+assert.match(app, /renderProviderExplorerPins/, "App must send Provider Explorer pins to the native renderer");
+assert.match(app, /renderProviderExplorerDensity/, "App must send Provider Explorer density and hex data to the native renderer");
+assert.match(app, /renderProviderExplorerDotDensity/, "App must send dot-density data to the native renderer");
+assert.match(app, /renderProviderExplorerLive/, "App must send live discovery results to the native renderer");
+assert.match(app, /renderProviderExplorerGaps/, "App must send comparison gaps to the native renderer");
+assert.match(app, /clearProviderExplorerNative/, "App must clear stable native sources instead of LayerGroups");
+assert.doesNotMatch(app, /providerExplorer(?:Layer|DensityLayer|LiveLayer|GapLayer)Ref/, "Provider Explorer must not retain scene LayerGroup refs");
 
-assert.match(providerFinder, /map\.addSource\(SOURCE_ID/, "provider result pins must render through a native Mapbox source");
-assert.match(providerFinder, /map\.addLayer\(/, "provider result pins must render through a native Mapbox layer");
-assert.match(providerFinder, /source\?\.setData\(collection\)/, "Provider Explorer results must update the native Mapbox source directly");
-assert.match(compat, /native\.on\("style\.load"/, "transitional Mapbox-native layers must rehydrate after style changes");
-assert.doesNotMatch(compat, /from ["']leaflet["']/, "transitional Provider Explorer rendering must not import Leaflet");
+assert.match(nativeMap, /registerMapboxMapInitializer\(/, "native Provider Explorer renderer must attach through the Mapbox lifecycle");
+assert.match(nativeMap, /map\.addSource\(/, "native Provider Explorer renderer must own Mapbox GeoJSON sources");
+assert.match(nativeMap, /map\.addLayer\(/, "native Provider Explorer renderer must own Mapbox layers");
+assert.match(nativeMap, /source\.setData\(collection\)/, "native Provider Explorer refreshes must update stable sources with setData");
+assert.match(nativeMap, /provider-explorer-native-pins/, "pins must use a stable native source/layer id");
+assert.match(nativeMap, /provider-explorer-native-aggregate/, "density and hex must use a stable native aggregate source");
+assert.match(nativeMap, /provider-explorer-native-dot-density/, "dot density must use a stable native source");
+assert.match(nativeMap, /provider-explorer-native-live/, "live results must use a stable native source");
+assert.match(nativeMap, /provider-explorer-native-gaps/, "gap results must use a stable native source");
+assert.match(nativeMap, /map\.fitBounds\(/, "pin fitting must use native Mapbox camera APIs");
+assert.match(nativeMap, /map\.queryRenderedFeatures\(/, "provider popup ownership must use native Mapbox hit testing");
+assert.match(nativeMap, /new mapboxgl\.Popup/, "provider popups must be native Mapbox popups");
+assert.doesNotMatch(nativeMap, /mapSceneRuntime|MapScene\.|LayerGroup/, "native Provider Explorer renderer must not depend on compatibility geometry");
 
-console.log("Provider Explorer Mapbox-native hardening smoke test passed.");
+assert.match(requestStability, /REQUEST_TIMEOUT_MS\s*=\s*25_000/, "Provider Explorer requests must retain a finite timeout");
+assert.match(requestStability, /Superseded by a newer Provider Explorer/, "latest-request-wins cancellation must remain enabled");
+assert.match(requestStability, /Ignored stale Provider Explorer/, "stale responses must be rejected before drawing");
+assert.match(requestStability, /registerNetworkRequestMiddleware\("provider-explorer-request-stability"/, "Provider Explorer must remain on the shared request pipeline");
+assert.doesNotMatch(requestStability, /window\.fetch\s*=/, "Provider Explorer must never own window.fetch");
+assert.doesNotMatch(requestStability, /mapSceneRuntime|MapScene\.|LayerGroup|stagedLayers|commitGroup/, "request stability must not patch rendering primitives");
+
+assert.match(providerFinder, /map\.addSource\(SOURCE_ID/, "Provider Location Finder must continue using its native Mapbox source");
+assert.match(providerFinder, /map\.addLayer\(/, "Provider Location Finder must continue using its native Mapbox layer");
+
+console.log("Provider Explorer native Mapbox hardening smoke test passed.");

@@ -117,7 +117,7 @@ function ensureAreaLayers(
 }
 
 function ensureLayers(map: mapboxgl.Map): void {
-  if (!map.getStyle()) return;
+  if (!map.isStyleLoaded()) return;
   ensureAreaLayers(map, IDS.drop, collections.drop);
   ensureAreaLayers(map, IDS.reference, collections.reference);
   ensureAreaLayers(map, IDS.search, collections.search);
@@ -140,7 +140,7 @@ function ensureLayers(map: mapboxgl.Map): void {
 
 function update(channel: Channel): void {
   for (const map of getTrackedMapboxMaps()) {
-    if (!map.getStyle()) continue;
+    if (!map.isStyleLoaded()) continue;
     try {
       ensureLayers(map);
       const sourceId = IDS[channel].source;

@@ -176,7 +176,7 @@ async function nativeCompatLayerCount(page, mode = "2d") {
     const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
     const map = maps.find((candidate) => Boolean(candidate.getContainer().closest(requestedMode === "3d" ? ".mapbox-globe-host" : ".mapbox-2d-host")));
     if (!map) return -1;
-    return (map.getStyle()?.layers || []).filter((layer) => String(layer.id).startsWith("leaflet-compat-")).length;
+    return (map.getStyle()?.layers || []).filter((layer) => String(layer.id).startsWith("map-scene-")).length;
   }, mode);
 }
 
@@ -186,7 +186,7 @@ async function compatPopupFeaturePoint(page, needle) {
     const map = maps.find((candidate) => Boolean(candidate.getContainer().closest(".mapbox-2d-host")));
     if (!map) throw new Error("2D Mapbox map not available");
     const sourceIds = Object.keys(map.getStyle()?.sources || {})
-      .filter((id) => id.startsWith("leaflet-compat-") && id.endsWith("-source"));
+      .filter((id) => id.startsWith("map-scene-") && id.endsWith("-source"));
     const diagnostics = [];
     for (const sourceId of sourceIds) {
       let features = [];
@@ -244,10 +244,10 @@ async function indexedProviderDiagnostics(page) {
 
     const style = map.getStyle();
     const compatLayers = (style?.layers || [])
-      .filter((layer) => String(layer.id).startsWith("leaflet-compat-"))
+      .filter((layer) => String(layer.id).startsWith("map-scene-"))
       .map((layer) => ({ id: layer.id, type: layer.type, source: layer.source || null }));
     const compatSources = Object.keys(style?.sources || {})
-      .filter((id) => id.startsWith("leaflet-compat-") && id.endsWith("-source"))
+      .filter((id) => id.startsWith("map-scene-") && id.endsWith("-source"))
       .map((id) => {
         let features = [];
         try { features = map.querySourceFeatures(id); } catch {}
@@ -338,7 +338,7 @@ try {
     const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
     if (!map || !map.isStyleLoaded()) return false;
     return (map.getStyle()?.layers || []).some((layer) =>
-      layer.type === "circle" && String(layer.id).startsWith("leaflet-compat-") && String(layer.id).endsWith("-points")
+      layer.type === "circle" && String(layer.id).startsWith("map-scene-") && String(layer.id).endsWith("-points")
     );
   }, null, { timeout: 10_000 });
 
@@ -369,7 +369,7 @@ try {
   await page.waitForFunction((before) => {
     const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
     const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
-    const count = (map?.getStyle()?.layers || []).filter((layer) => String(layer.id).startsWith("leaflet-compat-")).length;
+    const count = (map?.getStyle()?.layers || []).filter((layer) => String(layer.id).startsWith("map-scene-")).length;
     return count > before;
   }, beforeRadiusLayers, { timeout: 10_000 });
   await page.waitForFunction(() => /Center:\s*[-\d.]+,\s*[-\d.]+/.test(
@@ -384,7 +384,7 @@ try {
   await page.waitForFunction(() => {
     const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
     const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-globe-host"));
-    return (map?.getStyle()?.layers || []).some((layer) => String(layer.id).startsWith("leaflet-compat-"));
+    return (map?.getStyle()?.layers || []).some((layer) => String(layer.id).startsWith("map-scene-"));
   }, null, { timeout: 10_000 });
   assert.ok(await nativeCompatLayerCount(page, "3d") > 0, "3D Mapbox globe must receive the same logical overlay geometry");
   await page.locator(".map-dimension-toggle button[data-map-mode='2d']").evaluate((element) => element.click());

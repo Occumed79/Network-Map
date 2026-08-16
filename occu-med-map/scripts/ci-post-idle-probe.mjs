@@ -169,7 +169,7 @@ mark("audit-returned", JSON.stringify(audit));
 
 mark("overlay-start");
 const overlays = await page.evaluate(() => Array.from(document.querySelectorAll(
-  ".command-search-results,.local-pop-card,.tz-legend,.modal-box,.pdf-modal-wrap,.leaflet-popup,.mapboxgl-popup",
+  ".command-search-results,.local-pop-card,.tz-legend,.modal-box,.pdf-modal-wrap,.mapboxgl-popup",
 )).map(element => {
   const rect = element.getBoundingClientRect();
   const style = getComputedStyle(element);

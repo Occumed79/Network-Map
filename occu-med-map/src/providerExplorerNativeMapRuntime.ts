@@ -65,7 +65,7 @@ function addPointLayer(map: mapboxgl.Map, id: string, source: string, radius = 4
 }
 
 function ensureLayers(map: mapboxgl.Map): void {
-  if (!map.getStyle()) return;
+  if (!map.isStyleLoaded()) return;
   sourceData(map, IDS.pins.source, collections.pins);
   sourceData(map, IDS.aggregate.source, collections.aggregate);
   sourceData(map, IDS.dots.source, collections.dots);
@@ -120,7 +120,7 @@ function ensureLayers(map: mapboxgl.Map): void {
 
 function updateMaps(channel?: Channel): void {
   for (const map of getTrackedMapboxMaps()) {
-    if (!map.getStyle()) continue;
+    if (!map.isStyleLoaded()) continue;
     try {
       ensureLayers(map);
       if (!channel) continue;

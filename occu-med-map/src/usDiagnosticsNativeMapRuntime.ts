@@ -31,7 +31,7 @@ function sourceData(map: mapboxgl.Map, channel: Channel): void {
 }
 
 function ensureChannel(map: mapboxgl.Map, channel: Channel): void {
-  if (!map.getStyle()) return;
+  if (!map.isStyleLoaded()) return;
   const channelIds = ids(channel);
   sourceData(map, channel);
 
@@ -101,7 +101,7 @@ function ensureChannel(map: mapboxgl.Map, channel: Channel): void {
 
 function update(channel: Channel): void {
   for (const map of getTrackedMapboxMaps()) {
-    if (!map.getStyle()) continue;
+    if (!map.isStyleLoaded()) continue;
     try {
       ensureChannel(map, channel);
       (map.getSource(ids(channel).source) as mapboxgl.GeoJSONSource | undefined)?.setData(collections[channel]);

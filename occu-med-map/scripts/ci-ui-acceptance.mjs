@@ -81,8 +81,7 @@ async function assertRuntimeOwnership(page) {
   const ids = snapshot.owners.map((owner) => owner.id);
   assert.equal(new Set(ids).size, ids.length, "runtime owner ids must be unique");
   for (const required of [
-    "leaflet-map-lifecycle",
-    "mapbox-map-lifecycle",
+      "mapbox-map-lifecycle",
     "network-request-pipeline",
     "dialog-controller",
     "general-ui-integrity",

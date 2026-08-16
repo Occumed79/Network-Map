@@ -1,0 +1,25 @@
+name: One-shot zero Leaflet architecture audit
+
+on:
+  push:
+    paths:
+      - .github/workflows/one-shot-zero-leaflet-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: nuclear/remove-leaflet-compat
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Audit remaining Leaflet-shaped production architecture
+        working-directory: occu-med-map
+        run: pnpm exec tsx scripts/zero-leaflet-architecture-audit.ts

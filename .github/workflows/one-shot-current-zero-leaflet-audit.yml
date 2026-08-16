@@ -1,4 +1,4 @@
-name: One-shot exhaustive zero-compat residue audit
+name: One-shot native tools acceptance repair
 
 on:
   push:
@@ -6,10 +6,10 @@ on:
       - .github/workflows/one-shot-current-zero-leaflet-audit.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  audit:
+  repair:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,41 +19,213 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: corepack enable
-      - run: pnpm install --frozen-lockfile
-      - name: Typecheck frontend
-        run: pnpm --filter @workspace/occu-med-map typecheck
-      - name: Production build
-        run: pnpm --filter @workspace/occu-med-map build
-      - name: Architecture audit
-        working-directory: occu-med-map
-        run: pnpm exec tsx scripts/zero-leaflet-architecture-audit.ts
-      - name: Tracked filename residue
+      - name: Repair stale compatibility-era browser assertions
+        shell: bash
         run: |
-          echo '=== TRACKED FILENAMES ==='
-          git ls-files | grep -Ei 'leaflet|mapscene|map-scene|mapboxnativecompat|scene.*compat|compat.*scene' || true
-      - name: Production and tooling text residue
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path("occu-med-map/scripts/ci-mapbox-native-tools-acceptance.mjs")
+          text = path.read_text()
+
+          helper_pattern = re.compile(
+              r'async function nativeCompatLayerCount\(page, mode = "2d"\) \{.*?(?=async function waitForMode\(page, mode\))',
+              re.S,
+          )
+          helper_replacement = '''async function nativeSourceFeatureCount(page, sourceId, mode = "2d") {
+            return page.evaluate(({ requestedSourceId, requestedMode }) => {
+              const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
+              const selector = requestedMode === "3d" ? ".mapbox-globe-host" : ".mapbox-2d-host";
+              const map = maps.find((candidate) => Boolean(candidate.getContainer().closest(selector)));
+              if (!map || !map.getSource(requestedSourceId)) return 0;
+              try { return (map.querySourceFeatures(requestedSourceId) || []).length; } catch { return 0; }
+            }, { requestedSourceId: sourceId, requestedMode: mode });
+          }
+
+          async function nativePopupFeaturePoint(page, needle) {
+            return page.evaluate((popupNeedle) => {
+              const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
+              const map = maps.find((candidate) => Boolean(candidate.getContainer().closest(".mapbox-2d-host")));
+              if (!map) throw new Error("2D Mapbox map not available");
+              const sourceIds = Object.keys(map.getStyle()?.sources || {})
+                .filter((id) => id.startsWith("provider-explorer-native-") || id.startsWith("provider-dataset-native-"));
+              const diagnostics = [];
+              for (const sourceId of sourceIds) {
+                let features = [];
+                try { features = map.querySourceFeatures(sourceId) || []; } catch {}
+                diagnostics.push({
+                  sourceId,
+                  count: features.length,
+                  popupPreviews: features.map((feature) => String(feature.properties?.popupHtml || "").slice(0, 120)),
+                });
+                const feature = features.find((candidate) =>
+                  String(candidate.properties?.popupHtml || "").includes(popupNeedle)
+                );
+                if (!feature || feature.geometry?.type !== "Point") continue;
+                const coordinates = feature.geometry.coordinates;
+                const point = map.project(coordinates);
+                const rect = map.getCanvas().getBoundingClientRect();
+                return {
+                  x: rect.left + point.x,
+                  y: rect.top + point.y,
+                  sourceId,
+                  coordinates,
+                  diagnostics,
+                };
+              }
+              return { x: null, y: null, sourceId: null, coordinates: null, diagnostics };
+            }, needle);
+          }
+
+          '''
+          text, count = helper_pattern.subn(helper_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f"helper replacement count={count}")
+
+          diagnostics_pattern = re.compile(
+              r'async function indexedProviderDiagnostics\(page\) \{.*?\n\}\n\n(?=const browser =)',
+              re.S,
+          )
+          diagnostics_replacement = '''async function indexedProviderDiagnostics(page) {
+            return page.evaluate(() => {
+              const lifecycle = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getDiagnostics?.() || null;
+              const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
+              const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
+              const toggle = document.querySelector('input[aria-label="Indexed Providers"]');
+              const row = toggle?.closest(".workflow-layer");
+              if (!map) return { lifecycle, noMap: true, indexedRow: row?.textContent || "" };
+
+              const style = map.getStyle();
+              const nativeLayers = (style?.layers || [])
+                .filter((layer) => String(layer.id).startsWith("provider-dataset-native-indexed"))
+                .map((layer) => ({ id: layer.id, type: layer.type, source: layer.source || null }));
+              const sourceId = "provider-dataset-native-indexed";
+              let sourceFeatures = [];
+              try { sourceFeatures = map.querySourceFeatures(sourceId) || []; } catch {}
+
+              return {
+                lifecycle,
+                indexedChecked: Boolean(toggle?.checked),
+                indexedRow: String(row?.textContent || "").replace(/\\s+/g, " ").trim(),
+                styleLoaded: map.isStyleLoaded(),
+                loaded: map.loaded(),
+                moving: map.isMoving(),
+                center: { lng: map.getCenter().lng, lat: map.getCenter().lat },
+                zoom: map.getZoom(),
+                nativeLayers,
+                sourceId,
+                sourceFeatureCount: sourceFeatures.length,
+                clinicOneCount: sourceFeatures.filter((feature) => String(feature.properties?.popupHtml || "").includes("CI Indexed Clinic One")).length,
+                popupPreviews: sourceFeatures.slice(0, 20).map((feature) => String(feature.properties?.popupHtml || "").slice(0, 180)),
+              };
+            });
+          }
+
+          '''
+          text, count = diagnostics_pattern.subn(diagnostics_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f"diagnostics replacement count={count}")
+
+          old_indexed_wait = '''  await page.waitForFunction(() => {
+            const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
+            const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
+            if (!map || !map.isStyleLoaded()) return false;
+            return (map.getStyle()?.layers || []).some((layer) =>
+              layer.type === "circle" && String(layer.id).startsWith("map-scene-") && String(layer.id).endsWith("-points")
+            );
+          }, null, { timeout: 10_000 });'''
+          new_indexed_wait = '''  await page.waitForFunction(() => {
+            const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
+            const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
+            if (!map || !map.isStyleLoaded()) return false;
+            if (!map.getLayer("provider-dataset-native-indexed-points") || !map.getSource("provider-dataset-native-indexed")) return false;
+            try { return (map.querySourceFeatures("provider-dataset-native-indexed") || []).length >= 2; } catch { return false; }
+          }, null, { timeout: 10_000 });'''
+          if old_indexed_wait not in text:
+              raise SystemExit("indexed native-layer wait block not found")
+          text = text.replace(old_indexed_wait, new_indexed_wait, 1)
+
+          text = text.replace(
+              'beforeIndexedClick.lifecycle?.initializers?.some((initializer) => initializer.id === "mapbox-compat-interaction-owner"),\n    "Mapbox compatibility interaction owner must be registered before provider clicks",',
+              'beforeIndexedClick.lifecycle?.initializers?.some((initializer) => initializer.id === "provider-dataset-native-map"),\n    "Native provider dataset interaction owner must be registered before provider clicks",',
+              1,
+          )
+
+          text = text.replace(
+              '  const beforeRadiusLayers = await nativeCompatLayerCount(page, "2d");',
+              '  const beforeRadiusFeatures = await nativeSourceFeatureCount(page, "radius-extractor-native", "2d");',
+              1,
+          )
+
+          old_radius_wait = '''  await page.waitForFunction((before) => {
+            const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
+            const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
+            const count = (map?.getStyle()?.layers || []).filter((layer) => String(layer.id).startsWith("map-scene-")).length;
+            return count > before;
+          }, beforeRadiusLayers, { timeout: 10_000 });'''
+          new_radius_wait = '''  await page.waitForFunction((before) => {
+            const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
+            const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
+            if (!map?.getLayer("radius-extractor-native-fill") || !map.getSource("radius-extractor-native")) return false;
+            try { return (map.querySourceFeatures("radius-extractor-native") || []).length > before; } catch { return false; }
+          }, beforeRadiusFeatures, { timeout: 10_000 });'''
+          if old_radius_wait not in text:
+              raise SystemExit("radius native source wait block not found")
+          text = text.replace(old_radius_wait, new_radius_wait, 1)
+
+          old_globe_wait = '''  await page.waitForFunction(() => {
+            const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
+            const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-globe-host"));
+            return (map?.getStyle()?.layers || []).some((layer) => String(layer.id).startsWith("map-scene-"));
+          }, null, { timeout: 10_000 });
+          assert.ok(await nativeCompatLayerCount(page, "3d") > 0, "3D Mapbox globe must receive the same logical overlay geometry");'''
+          new_globe_wait = '''  await page.waitForFunction(() => {
+            const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
+            const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-globe-host"));
+            if (!map?.getLayer("radius-extractor-native-fill") || !map.getSource("radius-extractor-native")) return false;
+            try { return (map.querySourceFeatures("radius-extractor-native") || []).length > 0; } catch { return false; }
+          }, null, { timeout: 10_000 });
+          assert.ok(await nativeSourceFeatureCount(page, "radius-extractor-native", "3d") > 0, "3D Mapbox globe must receive the same native radius geometry");'''
+          if old_globe_wait not in text:
+              raise SystemExit("3D native radius wait block not found")
+          text = text.replace(old_globe_wait, new_globe_wait, 1)
+
+          text = text.replace(
+              '  const densityLayerCount = await nativeCompatLayerCount(page, "2d");\n  assert.ok(densityLayerCount > 0, "Density cells must exist as native Mapbox compatibility layers");',
+              '  await page.waitForFunction(() => {\n    const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];\n    const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));\n    if (!map?.getLayer("provider-explorer-native-density") || !map.getSource("provider-explorer-native-aggregate")) return false;\n    try { return (map.querySourceFeatures("provider-explorer-native-aggregate") || []).length === 2; } catch { return false; }\n  }, null, { timeout: 10_000 });\n  const densityFeatureCount = await nativeSourceFeatureCount(page, "provider-explorer-native-aggregate", "2d");\n  assert.equal(densityFeatureCount, 2, "Density cells must exist in the native Provider Explorer aggregate source");',
+              1,
+          )
+
+          text = text.replace(
+              '  await clickByText(page, /Hex field/i, explorer);\n  await page.waitForFunction(() => /hex view.*17 matching records.*2 aggregated cells/i.test(document.querySelector(".provider-map-status")?.textContent || ""), null, { timeout: 10_000 });',
+              '  await clickByText(page, /Hex field/i, explorer);\n  await page.waitForFunction(() => /hex view.*17 matching records.*2 aggregated cells/i.test(document.querySelector(".provider-map-status")?.textContent || ""), null, { timeout: 10_000 });\n  await page.waitForFunction(() => {\n    const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];\n    const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));\n    if (!map?.getLayer("provider-explorer-native-hex-fill") || !map.getSource("provider-explorer-native-aggregate")) return false;\n    try {\n      const features = map.querySourceFeatures("provider-explorer-native-aggregate") || [];\n      return features.length === 2 && features.every((feature) => feature.geometry?.type === "Polygon");\n    } catch { return false; }\n  }, null, { timeout: 10_000 });',
+              1,
+          )
+
+          text = text.replace('compatPopupFeaturePoint(page, "CI Stored Clinic")', 'nativePopupFeaturePoint(page, "CI Stored Clinic")', 1)
+          text = text.replace('native Mapbox popup metadata', 'native Provider Explorer popup metadata', 1)
+
+          if "map-scene-" in text:
+              raise SystemExit("stale map-scene prefix remains in native tools acceptance")
+          if "nativeCompatLayerCount" in text or "compatPopupFeaturePoint" in text:
+              raise SystemExit("stale compatibility helper remains in native tools acceptance")
+
+          path.write_text(text)
+          PY
+      - name: Syntax check repaired browser test
+        run: node --check occu-med-map/scripts/ci-mapbox-native-tools-acceptance.mjs
+      - name: Commit browser-test repair
+        shell: bash
         run: |
-          echo '=== SOURCE / SCRIPTS / CONFIG / WORKFLOWS ==='
-          git grep -n -i -E 'leaflet|mapscene|map scene|map-scene|mapboxnativecompat|leafletmaplifecycle|scene-lifecycle|scene-root|__NETWORK_MAP_SCENE|\.leaflet-' -- \
-            'occu-med-map/src/**' \
-            'occu-med-map/scripts/**' \
-            'occu-med-map/package.json' \
-            'occu-med-map/tsconfig.json' \
-            'occu-med-map/vite.config.ts' \
-            '.github/workflows/**' || true
-      - name: Documentation residue
-        run: |
-          echo '=== DOCS / COMMENTS ==='
-          git grep -n -i -E 'leaflet|mapscene|map scene|map-scene|mapboxnativecompat|leafletmaplifecycle|scene-lifecycle|scene-root' -- \
-            '*.md' 'occu-med-map/**/*.md' || true
-      - name: Lockfile dependency residue
-        run: |
-          echo '=== LOCKFILE ==='
-          grep -n -i -E '(^|[/@])leaflet(@|:|/)|react-leaflet|@types/leaflet' pnpm-lock.yaml || true
-      - name: Built bundle residue
-        run: |
-          echo '=== BUILT BUNDLE ==='
-          grep -RIn -i -E 'leaflet|mapSceneRuntime|MapScene\.|mapboxNativeCompat|leafletMapLifecycle|__NETWORK_MAP_SCENE|\.leaflet-' occu-med-map/dist/public || true
-      - name: Git status
-        run: git status --short
+          if git diff --quiet; then
+            echo "No repair changes required."
+            exit 0
+          fi
+          git config user.name "Occumed79"
+          git config user.email "Occumed79@users.noreply.github.com"
+          git add occu-med-map/scripts/ci-mapbox-native-tools-acceptance.mjs
+          git commit -m "Align native Mapbox browser acceptance with migrated runtimes"
+          git fetch origin nuclear/remove-leaflet-compat
+          git rebase origin/nuclear/remove-leaflet-compat
+          git push origin HEAD:nuclear/remove-leaflet-compat

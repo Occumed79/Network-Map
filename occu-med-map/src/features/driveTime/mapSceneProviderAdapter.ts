@@ -1,42 +1,4 @@
-import MapScene from "../../mapSceneRuntime";
-import "../../mapSceneInteractionDefaults";
-import { milesBetween } from "./providerEtaEngine";
-import type { EtaOrigin, EtaProviderCandidate } from "./providerEtaTypes";
-
-export function markerLabel(layer: MapScene.Layer, fallback: string): string {
-  const marker = layer as MapScene.Marker;
-  const tooltip = marker.getTooltip?.();
-  const popup = marker.getPopup?.();
-  const tooltipContent = tooltip?.getContent?.();
-  const popupContent = popup?.getContent?.();
-  const raw = typeof tooltipContent === "string" ? tooltipContent : typeof popupContent === "string" ? popupContent : fallback;
-  return raw.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 90) || fallback;
-}
-
-export function collectVisibleMapSceneProviderCandidates(map: MapScene.Map, origin: EtaOrigin): EtaProviderCandidate[] {
-  const bounds = map.getBounds().pad(0.1);
-  const rows: EtaProviderCandidate[] = [];
-
-  map.eachLayer((layer: MapScene.Layer) => {
-    const marker = layer as MapScene.Marker & { getLatLng?: () => MapScene.LatLng };
-    if (typeof marker.getLatLng !== "function") return;
-    const latLng = marker.getLatLng();
-    if (!bounds.contains(latLng)) return;
-    const id = `scene:${latLng.lat.toFixed(6)}:${latLng.lng.toFixed(6)}:${rows.length}`;
-    const candidate = {
-      id,
-      name: markerLabel(layer, `Provider ${rows.length + 1}`),
-      lat: latLng.lat,
-      lng: latLng.lng,
-    };
-    rows.push({
-      ...candidate,
-      straightMiles: milesBetween(origin, candidate),
-    });
-  });
-
-  return rows;
-}
+import type { EtaProviderCandidate } from "./providerEtaTypes";
 
 export function liveResultToEtaCandidate(result: any, index: number): EtaProviderCandidate | null {
   const lat = Number(result?.lat ?? result?.latitude);

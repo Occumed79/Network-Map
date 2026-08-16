@@ -1,6 +1,7 @@
 import L from "leaflet";
 import { registerLeafletMapInitializer } from "./leafletMapLifecycleRuntime";
 import { registerMapboxMap, unregisterMapboxMap } from "./mapboxMapLifecycleRuntime";
+import { findCompatPopupHit, wasCompatibilityClickHandled } from "./mapboxCompatInteractionRuntime";
 import mapboxgl from "mapbox-gl";
 
 type MapMode = "2d" | "3d";
@@ -360,6 +361,31 @@ function installMapboxInteractions(instance: mapboxgl.Map, mode: MapMode): void 
       new mapboxgl.Popup({ closeButton: true }).setLngLat(event.lngLat).setHTML(html).addTo(instance);
       return;
     }
+
+    // Tiny provider circles can miss Mapbox's exact rendered-feature query by a
+    // few CSS pixels (especially under device-pixel-ratio/WebKit transforms).
+    // The compatibility interaction owner falls back to a small rendered/source
+    // hit radius. Any popup-capable compatibility feature owns the click and must
+    // never fall through into Radius, Map Tools, or Live Finder map-click logic.
+    const compatibilityPopupHit = findCompatPopupHit(instance, event.point, event.lngLat);
+    if (compatibilityPopupHit || wasCompatibilityClickHandled(event.originalEvent)) return;
+
+    // Keep exact ownership for other legacy interactive shapes that have no
+    // popup contract of their own. Non-interactive density/radius geometry does
+    // not block generic map tools.
+    const overlayHit = instance.queryRenderedFeatures(event.point).some((feature) => {
+      const layerId = String(feature.layer?.id || "");
+      const properties = feature.properties || {};
+      const compatibilityFeature = properties.__compatLayerId !== undefined
+        && properties.__compatLayerId !== null
+        && properties.__interactive !== false;
+      return compatibilityFeature || layerId === "provider-location-search-dots";
+    });
+    if (overlayHit) return;
+
+    window.dispatchEvent(new CustomEvent("network-map:native-click", {
+      detail: { lat: event.lngLat.lat, lng: event.lngLat.lng, originalEvent: event.originalEvent, mode },
+    }));
     canonicalMap.fire("click", {
       latlng: L.latLng(event.lngLat.lat, event.lngLat.lng),
       originalEvent: event.originalEvent,
@@ -369,6 +395,9 @@ function installMapboxInteractions(instance: mapboxgl.Map, mode: MapMode): void 
   instance.on("dblclick", (event) => {
     if (currentMode !== mode || !canonicalMap) return;
     event.preventDefault();
+    window.dispatchEvent(new CustomEvent("network-map:native-dblclick", {
+      detail: { lat: event.lngLat.lat, lng: event.lngLat.lng, originalEvent: event.originalEvent, mode },
+    }));
     canonicalMap.fire("dblclick", {
       latlng: L.latLng(event.lngLat.lat, event.lngLat.lng),
       originalEvent: event.originalEvent,
@@ -421,7 +450,13 @@ function syncLeafletCameraFromMapbox(instance: mapboxgl.Map, mode: MapMode): voi
   const rawZoom = Number(instance.getZoom());
   const zoom = mode === "3d" ? leafletZoomFromGlobe(rawZoom) : rawZoom;
   lastEngineDrivenLeafletMove = Date.now();
-  canonicalMap.setView([center.lat, center.lng], Math.max(2, Math.min(17, Math.round(zoom))), { animate: false });
+  const logicalMap = canonicalMap as L.Map & { _setViewFromNative?: (center: L.LatLngExpression, zoom: number) => void };
+  const normalizedZoom = Math.max(2, Math.min(17, zoom));
+  if (typeof logicalMap._setViewFromNative === "function") {
+    logicalMap._setViewFromNative([center.lat, center.lng], normalizedZoom);
+  } else {
+    canonicalMap.setView([center.lat, center.lng], normalizedZoom, { animate: false });
+  }
 }
 
 function destroyMapbox2dView(): void {

@@ -22,13 +22,33 @@ function sourceFiles(directory: string): string[] {
 const main = source("src/main.tsx");
 const lifecycle = source("src/mapboxMapLifecycleRuntime.ts");
 const sourcePipeline = source("src/mapboxSourcePipelineRuntime.ts");
+const compat = source("src/mapboxNativeCompat.ts");
 const lifecycleImport = main.indexOf('import "./mapboxMapLifecycleRuntime";');
-const firstInitializerImport = Math.min(
-  main.indexOf('import "./mapControlsBridgeRuntime";'),
-  main.indexOf('import "./mapOverlaySynchronizationControllerRuntime";'),
-);
+
 assert.ok(lifecycleImport >= 0, "Mapbox lifecycle runtime must be imported");
-assert.ok(lifecycleImport < firstInitializerImport, "Mapbox lifecycle runtime must load before map initializers");
+
+// The compatibility facade can be reached earlier through the temporary
+// `leaflet` alias because it does not construct a native map. What matters is
+// that the lifecycle registry owns every actual Mapbox initializer/engine before
+// those modules execute.
+const liveNativeOwners = [
+  './mapboxSourcePipelineRuntime',
+  './mapControlsBridgeRuntime',
+  './providerLocationFinderRuntime',
+  './dualMapEngineRuntime',
+] as const;
+for (const owner of liveNativeOwners) {
+  const position = main.indexOf(`import "${owner}";`);
+  assert.ok(position >= 0, `${owner} must remain explicitly imported`);
+  assert.ok(lifecycleImport < position, `Mapbox lifecycle runtime must load before ${owner}`);
+}
+
+assert.doesNotMatch(
+  main,
+  /import ["']\.\/mapOverlaySynchronizationControllerRuntime["'];/,
+  "retired Leaflet-to-Mapbox overlay synchronization must not return to application boot",
+);
+
 assert.match(lifecycle, /orderedInitializers/, "Mapbox initializers must have deterministic ordering");
 assert.match(lifecycle, /left\.priority - right\.priority/, "Mapbox initializer priority must control execution order");
 assert.match(lifecycle, /for \(const \[map, tracked\] of maps\)/, "late initializers must run against existing maps");
@@ -52,12 +72,12 @@ assert.match(dualEngine, /registerMapboxMap\(instance, \{ mode \}\)/, "new Mapbo
 assert.equal((dualEngine.match(/unregisterMapboxMap\(instance\)/g) || []).length, 2, "both Mapbox engines must be explicitly unregistered");
 
 const registeredInitializers = [
+  ["src/mapboxNativeCompat.ts", "mapbox-native-leaflet-compat", 5],
   ["src/mapControlsBridgeRuntime.ts", "map-controls-bridge", 10],
-  ["src/mapOverlaySynchronizationControllerRuntime.ts", "overlay-synchronization", 20],
   ["src/providerLocationFinderRuntime.ts", "provider-location-finder", 40],
 ] as const;
 for (const [file, id, priority] of registeredInitializers) {
-  const content = source(file);
+  const content = file === "src/mapboxNativeCompat.ts" ? compat : source(file);
   assert.match(content, /registerMapboxMapInitializer/, `${file} must use the Mapbox lifecycle registry`);
   assert.match(content, new RegExp(`id: ["']${id}["']`), `${file} must retain stable initializer id ${id}`);
   assert.match(content, new RegExp(`priority: ${priority}`), `${file} must retain deterministic priority ${priority}`);
@@ -74,10 +94,7 @@ const globeHardening = source("src/mapboxGlobeLoadHardeningRuntime.ts");
 assert.doesNotMatch(globeHardening, /patchMapboxReadiness/, "globe readiness must use the dual engine's instance-level readiness handling");
 assert.doesNotMatch(globeHardening, /prototype\.once\s*=/, "globe readiness must not patch Map.prototype.once");
 
-const overlay = source("src/mapOverlaySynchronizationControllerRuntime.ts");
-assert.doesNotMatch(overlay, /prototype\.(addSource|removeSource)\s*=/, "overlay source behavior must use the source pipeline");
-assert.match(overlay, /registerMapboxSourceDataMiddleware/, "overlay authority must register through the source pipeline");
 assert.match(sourcePipeline, /prototype\.addSource = function pipelineAddSource/, "source pipeline must own Map.prototype.addSource");
 assert.match(sourcePipeline, /prototype\.removeSource = function pipelineRemoveSource/, "source pipeline must own Map.prototype.removeSource");
 
-console.log("Mapbox map lifecycle hardening smoke test passed.");
+console.log("Mapbox map lifecycle hardening smoke test passed for the native runtime architecture.");

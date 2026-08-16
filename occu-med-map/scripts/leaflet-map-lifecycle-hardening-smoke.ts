@@ -1,78 +1,56 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDirectory, "..");
-const sourceRoot = path.join(projectRoot, "src");
 
 function source(relativePath: string): string {
   return readFileSync(path.join(projectRoot, relativePath), "utf8");
 }
 
-function sourceFiles(directory: string): string[] {
-  return readdirSync(directory).flatMap((entry) => {
-    const absolute = path.join(directory, entry);
-    if (statSync(absolute).isDirectory()) return sourceFiles(absolute);
-    return /\.(ts|tsx)$/.test(entry) ? [absolute] : [];
-  });
-}
-
+const packageJson = JSON.parse(source("package.json"));
+const tsconfig = source("tsconfig.json");
+const vite = source("vite.config.ts");
 const main = source("src/main.tsx");
-const lifecycle = source("src/leafletMapLifecycleRuntime.ts");
-const lifecycleImport = main.indexOf('import "./leafletMapLifecycleRuntime";');
-const firstMapInitializerImport = Math.min(
-  main.indexOf('import "./mapToolsCommandPanel";'),
-  main.indexOf('import "./dualMapEngineRuntime";'),
-);
+const compat = source("src/mapboxNativeCompat.ts");
+const logicalLifecycle = source("src/leafletMapLifecycleRuntime.ts");
+const dual = source("src/dualMapEngineRuntime.ts");
+const osm = source("../api-server/src/providerSources/adapters/openStreetMap.ts");
 
-assert.ok(lifecycleImport >= 0, "Leaflet lifecycle owner must be imported");
-assert.ok(lifecycleImport < firstMapInitializerImport, "lifecycle owner must load before map initializers");
-assert.doesNotMatch(main, /diagnosticsReliabilityRuntime/, "Leaflet lifecycle must not restore the diagnostic toggle replay runtime");
-assert.match(lifecycle, /const nativeMapFactory = L\.map\.bind\(L\)/, "lifecycle runtime must capture the native Leaflet factory once");
-assert.match(lifecycle, /orderedInitializers/, "initializer order must be deterministic");
-assert.match(lifecycle, /left\.priority - right\.priority/, "initializer priorities must control execution order");
-assert.match(lifecycle, /executedByMap/, "each initializer must run once per map");
-assert.match(lifecycle, /for \(const map of maps\) initializeMapWith\(map, registered\)/, "late optional runtimes must initialize existing maps");
-assert.match(lifecycle, /map\.once\("unload"/, "map cleanup must be lifecycle-owned");
-assert.match(lifecycle, /__NETWORK_MAP_LEAFLET_LIFECYCLE__/, "lifecycle diagnostics must be exposed");
-
-const assignmentOwners: string[] = [];
-const nativeCaptures: string[] = [];
-for (const absolute of sourceFiles(sourceRoot)) {
-  const relative = path.relative(projectRoot, absolute);
-  const content = readFileSync(absolute, "utf8");
-  if (
-    /\(L as any\)\.map\s*=/.test(content)
-    || /\(L as typeof L[^)]*\)\.map\s*=/.test(content)
-  ) assignmentOwners.push(relative);
-  if (/L\.map\.bind\(L\)/.test(content)) nativeCaptures.push(relative);
-}
-assert.deepEqual(assignmentOwners, ["src/leafletMapLifecycleRuntime.ts"], "only the lifecycle runtime may replace L.map");
-assert.deepEqual(nativeCaptures, ["src/leafletMapLifecycleRuntime.ts"], "only the lifecycle runtime may capture the native L.map factory");
-
-const registeredInitializers = [
-  ["src/phaseTwoMapBridge.ts", "phase-two-map-bridge", 0],
-  ["src/dualMapEngineRuntime.ts", "dual-map-engine", 10],
-  ["src/mapOverlaySynchronizationControllerRuntime.ts", "overlay-synchronization", 30],
-  ["src/mapToolsCommandPanel.ts", "map-tools-command-panel", 40],
-  ["src/features/driveTime/nativeDriveTimeRuntime.ts", "native-drive-time", 60],
-  ["src/providerDensityField.ts", "provider-density-field", 70],
-  ["src/mapboxProviderRanking.ts", "mapbox-provider-ranking", 80],
-  ["src/mapboxAdvancedControls.ts", "mapbox-advanced-controls", 90],
-] as const;
-
-for (const [file, id, priority] of registeredInitializers) {
-  const content = source(file);
-  assert.match(content, /registerLeafletMapInitializer/, `${file} must use the lifecycle registry`);
-  assert.match(content, new RegExp(`id: ["']${id}["']`), `${file} must retain a stable initializer id`);
-  assert.match(content, new RegExp(`priority: ${priority}`), `${file} must retain deterministic priority ${priority}`);
+const dependencies = { ...(packageJson.dependencies || {}), ...(packageJson.devDependencies || {}) };
+for (const packageName of ["leaflet", "react-leaflet", "@types/leaflet"]) {
+  assert.equal(dependencies[packageName], undefined, `${packageName} must be removed from runtime dependencies`);
 }
 
-const routePlanner = source("src/routePlannerControlsRuntime.ts");
-assert.doesNotMatch(routePlanner, /registerLeafletMapInitializer/, "route planner should consume the Map Tools-owned Leaflet map instead of registering a second lifecycle initializer");
-assert.match(routePlanner, /registerMapToolsSection/, "route planner must register with the authoritative Map Tools section owner");
-assert.match(routePlanner, /id: ["']route-planner-controls["']/, "route planner must retain a stable Map Tools section id");
+assert.match(tsconfig, /"leaflet"\s*:\s*\["\.\/src\/mapboxNativeCompat\.ts"\]/, "TypeScript must route the legacy Leaflet-shaped API to the Mapbox-native facade");
+assert.match(vite, /"leaflet"\s*:\s*path\.resolve\(import\.meta\.dirname, "src\/mapboxNativeCompat\.ts"\)/, "Vite must route runtime Leaflet-shaped imports to the Mapbox-native facade");
+assert.doesNotMatch(main, /leaflet\/dist\/leaflet\.css/, "Leaflet CSS must not load");
+assert.doesNotMatch(main, /mapOverlaySynchronizationControllerRuntime/, "Leaflet-to-Mapbox overlay mirroring must not load");
 
-console.log("Leaflet map lifecycle hardening smoke test passed.");
+assert.match(compat, /import mapboxgl from "mapbox-gl"/, "migration facade must be implemented on Mapbox GL");
+assert.doesNotMatch(compat, /from ["']leaflet["']/, "migration facade itself must not import Leaflet");
+assert.match(compat, /native\.addSource\(/, "vector features must render through Mapbox sources");
+assert.match(compat, /native\.addLayer\(/, "vector features must render through Mapbox layers");
+assert.match(compat, /new mapboxgl\.Marker/, "point markers must render through Mapbox markers");
+assert.match(compat, /new mapboxgl\.Popup/, "popups must render through Mapbox popups");
+
+// During the migration, the historical lifecycle registry is intentionally kept
+// as a logical initializer registry. Its `L.map` symbol resolves to the facade,
+// not to the removed Leaflet package. This lets the 4,971-line App migrate in
+// controlled steps without recreating a hidden Leaflet renderer.
+assert.match(logicalLifecycle, /orderedInitializers/, "legacy initializer order must remain deterministic during migration");
+assert.match(logicalLifecycle, /left\.priority - right\.priority/, "legacy initializer priorities must remain deterministic");
+assert.match(logicalLifecycle, /executedByMap/, "legacy initializers must still run once per logical map");
+
+assert.match(dual, /projection: is2d \? "mercator" : "globe"/, "Mapbox 2D and 3D globe must remain intact");
+assert.match(dual, /mapbox2dMap/, "Mapbox 2D must remain");
+assert.match(dual, /mapboxGlobeMap/, "Mapbox 3D globe must remain");
+
+assert.doesNotMatch(osm, /from ["']leaflet["']/, "OpenStreetMap live discovery must remain independent of Leaflet");
+assert.match(osm, /overpass-api\.de\/api\/interpreter/, "primary OSM Overpass discovery endpoint must remain");
+assert.match(osm, /overpass\.kumi\.systems\/api\/interpreter/, "OSM Overpass fallback must remain");
+assert.match(osm, /searchOpenStreetMap/, "OSM live provider search must remain available");
+
+console.log("Mapbox-native migration lifecycle smoke test passed with Leaflet removed.");

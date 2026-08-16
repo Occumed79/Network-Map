@@ -685,7 +685,10 @@ function createProviderFieldLayer(
   points: any[],
   opts: ProviderFieldRendererOptions,
 ): { group: L.LayerGroup; destroy: () => void } {
-  const group = L.layerGroup().addTo(map);
+  // Build the provider geometry before attaching the root so the first
+  // Mapbox GeoJSON source is never born empty. Provider API requests are already
+  // viewport-bounded, so the returned records are the authoritative render set.
+  const group = L.layerGroup();
   const cellPx = opts.cellPx ?? 54;
   const valid = points.filter(p => p && p.lat != null && p.lng != null && isValidCoord(p.lat, p.lng));
 
@@ -695,8 +698,10 @@ function createProviderFieldLayer(
     group.clearLayers();
     if (!valid.length) return;
     const zoom = map.getZoom();
-    const bounds = map.getBounds().pad(0.35);
-    const visible = valid.filter(p => bounds.contains([p.lat, p.lng] as L.LatLngTuple));
+    // Do not re-filter API-bounded providers through the temporary Leaflet-shaped
+    // camera facade. That second viewport gate could disagree with the native
+    // Mapbox camera and silently erase otherwise valid provider points.
+    const visible = valid;
 
     const cells = new Map<string, { sx: number; sy: number; count: number; colors: string[] }>();
     for (const p of visible) {
@@ -740,6 +745,7 @@ function createProviderFieldLayer(
   }
 
   render();
+  group.addTo(map);
   map.on('moveend zoomend', render);
   return {
     group,
@@ -1292,6 +1298,8 @@ export default function App() {
 
   const [dropCenter, setDropCenter] = useState<{lat:number;lng:number}|null>(null);
   const [dropRadiusMiles, setDropRadiusMiles] = useState(25);
+  const dropRadiusMilesRef = useRef(dropRadiusMiles);
+  useLayoutEffect(()=>{ dropRadiusMilesRef.current = dropRadiusMiles; },[dropRadiusMiles]);
   const [dropFacilityType, setDropFacilityType] = useState('all');
   const [dropIncludeFacilities, setDropIncludeFacilities] = useState(true);
   const [savedRadii, setSavedRadii] = useState<Array<{id:number;lat:number;lng:number;radiusMiles:number;color:string;label:string}>>([]);
@@ -1325,12 +1333,29 @@ export default function App() {
   const [showProviderExplorerDrawer, setShowProviderExplorerDrawer] = useState(false);
   const [datasetStatus, setDatasetStatus] = useState<Record<DatasetKey, DatasetLoadState>>(INITIAL_DATASET_STATUS);
   const datasetRequestsRef = useRef<Partial<Record<DatasetKey, Promise<void>>>>({});
+  const providerLayerVisibilityRef = useRef({
+    indexed: showIndexedProviders,
+    bluehive: showBlueHive,
+    dentists: showDentists,
+    myClinics: showMyClinicsLayer,
+  });
+  useLayoutEffect(() => {
+    providerLayerVisibilityRef.current = {
+      indexed: showIndexedProviders,
+      bluehive: showBlueHive,
+      dentists: showDentists,
+      myClinics: showMyClinicsLayer,
+    };
+  }, [showIndexedProviders, showBlueHive, showDentists, showMyClinicsLayer]);
   const providerExplorerLayerRef = useRef<L.LayerGroup | null>(null);
   const providerExplorerDensityLayerRef = useRef<L.LayerGroup | null>(null);
   const providerExplorerLiveLayerRef = useRef<L.LayerGroup | null>(null);
   const providerExplorerGapLayerRef = useRef<L.LayerGroup | null>(null);
+  const providerExplorerRenderGenerationRef = useRef(0);
+  const providerExplorerModeRef = useRef<ProviderExplorerMode>('density');
   const [providerExplorerFilters, setProviderExplorerFilters] = useState<ProviderExplorerFilters>(INITIAL_PROVIDER_EXPLORER_FILTERS);
   const [providerExplorerMode, setProviderExplorerMode] = useState<ProviderExplorerMode>('density');
+  useLayoutEffect(() => { providerExplorerModeRef.current = providerExplorerMode; }, [providerExplorerMode]);
   const [providerExplorerStatus, setProviderExplorerStatus] = useState('Provider map explorer ready');
   const [providerExplorerLiveEnabled, setProviderExplorerLiveEnabled] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({
@@ -1649,8 +1674,9 @@ export default function App() {
     map.doubleClickZoom.disable();
     mapRef.current = map;
 
-    // Leaflet remains a hidden controller for the existing tools. The visible
-    // basemap is rendered exclusively by the ArcGIS MapView runtime.
+    // This logical map object is supplied by the temporary Mapbox-native
+    // compatibility facade. No Leaflet renderer is created; both visible 2D and
+    // 3D surfaces are owned by Mapbox GL.
 
     // City layer
     const cityLayer = L.layerGroup().addTo(map);
@@ -1663,36 +1689,43 @@ export default function App() {
     // Load GeoJSON only if US Diagnostics is already enabled
     if (showUsDiagnostics) loadStateGeo(map);
 
-    // Single clicks remain reserved for tools that explicitly use them.
-    map.on('click',(e:L.LeafletMouseEvent)=>{
-      const { lat, lng } = e.latlng;
+    // User-facing map tools consume Mapbox-native input directly. The temporary
+    // Leaflet-shaped facade remains only for legacy geometry/control APIs; Radius,
+    // Coverage, and Live Finder no longer depend on its event bus.
+    const onNativeMapClick = (rawEvent: Event) => {
+      const detail = (rawEvent as CustomEvent<{ lat:number; lng:number; originalEvent?: Event }>).detail;
+      if (!detail) return;
+      const { lat, lng } = detail;
       const tool = activeToolRef.current;
 
       if (tool === 'radius') {
-        // Radius tool is explicit and separate: set center, open UI, draw ring.
         setDropCenter({ lat, lng });
         setDropUi(prev=>({ ...prev, panelOpen:true, status:'' }));
-        drawDropRadius(lat, lng, dropRadiusMiles);
+        drawDropRadius(lat, lng, dropRadiusMilesRef.current);
         return;
       }
 
       if (tool === 'coverage' && isUsPoint(lat, lng)) {
-        // U.S. coverage diagnostics only inside the U.S.
         const est = estimateLocalPopulationDensity(lat, lng);
         setLocalPopInfo(est ?? null);
-        return;
       }
-    });
+    };
 
-    map.on('dblclick',(e:L.LeafletMouseEvent)=>{
+    const onNativeMapDoubleClick = (rawEvent: Event) => {
+      const detail = (rawEvent as CustomEvent<{ lat:number; lng:number; originalEvent?: Event }>).detail;
+      if (!detail) return;
       const tool = activeToolRef.current;
       if (tool !== null && tool !== 'liveFinder') return;
-      const { lat, lng } = e.latlng;
+      const { lat, lng } = detail;
       setLocalPopInfo(null);
       setDropCenter({ lat, lng });
+      activeToolRef.current = 'liveFinder';
       setActiveTool('liveFinder');
       doLiveSearch(lat, lng, undefined, undefined, 'live_finder_double_click');
-    });
+    };
+
+    window.addEventListener('network-map:native-click', onNativeMapClick);
+    window.addEventListener('network-map:native-dblclick', onNativeMapDoubleClick);
 
     setMapReady(true);
 
@@ -1702,7 +1735,14 @@ export default function App() {
     });
     resizeObserver.observe(mapDivRef.current);
 
-    return ()=>{ resizeObserver.disconnect(); map.remove(); mapRef.current=null; cityLayerRef.current=null; };
+    return ()=>{
+      window.removeEventListener('network-map:native-click', onNativeMapClick);
+      window.removeEventListener('network-map:native-dblclick', onNativeMapDoubleClick);
+      resizeObserver.disconnect();
+      map.remove();
+      mapRef.current=null;
+      cityLayerRef.current=null;
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
@@ -1726,7 +1766,11 @@ export default function App() {
   },[getProviderExplorerBounds]);
 
   const clearProviderExplorerMap = useCallback(() => {
-    providerExplorerLayerRef.current?.clearLayers();
+    // Invalidate every in-flight map render before clearing so a stale response
+    // can never repopulate or replace a newer/cleared Explorer visualization.
+    providerExplorerRenderGenerationRef.current += 1;
+    providerExplorerLayerRef.current?.remove();
+    providerExplorerLayerRef.current = null;
     providerExplorerDensityLayerRef.current?.clearLayers();
     providerExplorerLiveLayerRef.current?.clearLayers();
     providerExplorerGapLayerRef.current?.clearLayers();
@@ -1735,9 +1779,12 @@ export default function App() {
   const drawProviderPins = useCallback((providers: ProviderFeature[], fit = false) => {
     const map = mapRef.current;
     if(!map) return 0;
-    if(!providerExplorerLayerRef.current) providerExplorerLayerRef.current = L.layerGroup().addTo(map);
-    const layer = providerExplorerLayerRef.current;
-    layer.clearLayers();
+    // Provider Explorer owns a dynamic Mapbox compatibility root. Rebuild that
+    // root off-map so its first GeoJSON payload already contains the provider
+    // features and popup metadata. Mutating an already-attached empty root can
+    // leave the native source empty across browser engines.
+    providerExplorerLayerRef.current?.remove();
+    const layer = L.layerGroup();
     const drawable = providers.filter((provider): provider is ProviderFeature & {lat:number; lng:number} => typeof provider.lat === 'number' && typeof provider.lng === 'number');
     drawable.slice(0,1000).forEach(provider=>{
       const style = providerCategoryStyle(provider);
@@ -1746,6 +1793,8 @@ export default function App() {
         .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>${escapeHtml(provider.source)} · ${escapeHtml(provider.source_kind)}<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/>${escapeHtml(location)}${provider.website ? `<br/><a href="${escapeHtml(provider.website)}" target="_blank" rel="noreferrer">Website</a>` : ''}`)
         .addTo(layer);
     });
+    layer.addTo(map);
+    providerExplorerLayerRef.current = layer;
     if(fit && drawable.length) map.fitBounds(L.latLngBounds(drawable.map(provider=>[provider.lat,provider.lng] as [number,number])), { padding:[28,28], maxZoom: 11 });
     return Math.min(drawable.length,1000);
   },[]);
@@ -1819,37 +1868,55 @@ export default function App() {
     return rendered;
   },[]);
 
-  const renderProviderExplorerMap = useCallback(async (mode: ProviderExplorerMode = providerExplorerMode, filters: ProviderExplorerFilters = providerExplorerFilters) => {
+  const renderProviderExplorerMap = useCallback(async (mode: ProviderExplorerMode = providerExplorerModeRef.current, filters: ProviderExplorerFilters = providerExplorerFilters) => {
     const map = mapRef.current;
     if(!map) return;
+    const generation = ++providerExplorerRenderGenerationRef.current;
+    providerExplorerModeRef.current = mode;
     setProviderExplorerMode(mode);
-    providerExplorerLayerRef.current?.clearLayers();
-    providerExplorerDensityLayerRef.current?.clearLayers();
+
+    // A new density-only visualization can hide old pins immediately. A pin
+    // refresh keeps the last good provider root visible until its replacement
+    // payload is ready, eliminating the empty-source window during fetches.
+    if(mode !== 'pins' && mode !== 'density-pins') {
+      providerExplorerLayerRef.current?.remove();
+      providerExplorerLayerRef.current = null;
+    }
+    if(mode !== 'density' && mode !== 'hex' && mode !== 'density-pins' && mode !== 'dot-density') {
+      providerExplorerDensityLayerRef.current?.clearLayers();
+    }
+
+    const isCurrent = () => generation === providerExplorerRenderGenerationRef.current;
     const aggregateMode = mode === 'hex' ? 'hex' : 'density';
     try {
       let aggregateStatus = '';
       if(mode === 'density' || mode === 'hex' || mode === 'density-pins' || mode === 'dot-density') {
         const resp = await fetch(`/api/provider-explorer/${aggregateMode}?${providerExplorerParams(filters, aggregateMode)}`);
         const data = await resp.json();
+        if(!isCurrent()) return;
         const cells = Array.isArray(data.cells) ? data.cells as ProviderDensityCell[] : [];
         const rendered = mode === 'dot-density' ? drawProviderDotDensity(cells) : drawProviderDensity(cells, aggregateMode);
         aggregateStatus = mode === 'dot-density'
           ? `dot-density view · ${Number(data.total || 0).toLocaleString()} matching records · ${rendered.toLocaleString()} density dots`
           : `${aggregateMode} view · ${Number(data.total || 0).toLocaleString()} matching records · ${rendered.toLocaleString()} aggregated cells`;
+        if(!isCurrent()) return;
         setProviderExplorerStatus(`${aggregateStatus} · filters: ${filterSummary(filters).join(', ') || 'none'}`);
       }
       if(mode === 'pins' || mode === 'density-pins') {
         const resp = await fetch(`/api/provider-explorer/map?${providerExplorerParams({...filters,useMapBounds:true}, 'pins')}`);
         const data = await resp.json();
+        if(!isCurrent()) return;
         const providers = Array.isArray(data.providers) ? data.providers as ProviderFeature[] : [];
         const rendered = drawProviderPins(providers, mode === 'pins');
+        if(!isCurrent()) return;
         const pinStatus = `showing ${rendered.toLocaleString()} visible pins of ${Number(data.total || 0).toLocaleString()} matching records`;
         setProviderExplorerStatus(`${mode} · ${aggregateStatus ? `${aggregateStatus} · ` : ''}${pinStatus} · filters: ${filterSummary(filters).join(', ') || 'none'}`);
       }
     } catch(error) {
+      if(!isCurrent()) return;
       setProviderExplorerStatus(error instanceof Error ? error.message : 'Provider map explorer failed');
     }
-  },[drawProviderDensity, drawProviderDotDensity, drawProviderPins, providerExplorerFilters, providerExplorerMode, providerExplorerParams]);
+  },[drawProviderDensity, drawProviderDotDensity, drawProviderPins, providerExplorerFilters, providerExplorerParams]);
 
   const showProviderExplorerRowsOnMap = useCallback((providers: ProviderFeature[], filters: ProviderExplorerFilters) => {
     setProviderExplorerFilters(filters);
@@ -1990,7 +2057,7 @@ export default function App() {
       myClinics:'my-clinics',
     };
     const request = (async ()=>{
-      setDatasetStatus(prev=>({...prev,[key]:{loading:true,error:'',loaded:false}}));
+      setDatasetStatus(prev=>({...prev,[key]:{loading:true,error:'',loaded:prev[key].loaded}}));
       try {
         const params = new URLSearchParams({limit:'1000',page:'1'});
         if(key==='myClinics' && masterProviderTypeFilter) params.set('clinic_type', masterProviderTypeFilter);
@@ -2043,10 +2110,11 @@ export default function App() {
     const refreshOnMove = () => {
       if(moveTimer) clearTimeout(moveTimer);
       moveTimer = setTimeout(()=>{
-        if(showIndexedProviders) void loadProviderDataset('indexed');
-        if(showBlueHive) void loadProviderDataset('bluehive');
-        if(showDentists) void loadProviderDataset('dentists');
-        if(showMyClinicsLayer) void loadProviderDataset('myClinics');
+        const visibility = providerLayerVisibilityRef.current;
+        if(visibility.indexed) void loadProviderDataset('indexed');
+        if(visibility.bluehive) void loadProviderDataset('bluehive');
+        if(visibility.dentists) void loadProviderDataset('dentists');
+        if(visibility.myClinics) void loadProviderDataset('myClinics');
       }, 300);
     };
 
@@ -2211,7 +2279,17 @@ export default function App() {
   },[mapReady, showNacchoLayer]);
 
   const activeToolRef = React.useRef(activeTool);
-  React.useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
+  React.useLayoutEffect(() => {
+    activeToolRef.current = activeTool;
+    (window as any).__NETWORK_MAP_TOOL_STATE__ = {
+      getActiveTool: () => activeToolRef.current,
+    };
+    return () => {
+      if ((window as any).__NETWORK_MAP_TOOL_STATE__?.getActiveTool) {
+        delete (window as any).__NETWORK_MAP_TOOL_STATE__;
+      }
+    };
+  }, [activeTool]);
 
   const showStateColorsRef = useRef(showStateColors);
   useEffect(()=>{ showStateColorsRef.current = showStateColors; },[showStateColors]);
@@ -3671,10 +3749,10 @@ export default function App() {
   useEffect(()=>{
     if(!mapReady) return;
     const timeout = window.setTimeout(() => {
-      void renderProviderExplorerMap(providerExplorerMode, providerExplorerFilters);
+      void renderProviderExplorerMap(providerExplorerModeRef.current, providerExplorerFilters);
     }, 350);
     return () => window.clearTimeout(timeout);
-  },[mapReady, providerExplorerFilters, providerExplorerMode, renderProviderExplorerMap]);
+  },[mapReady, providerExplorerFilters, renderProviderExplorerMap]);
 
   // ── Cursor light (Liquid Glass) ──────────────────────────────────────────
   useEffect(() => {
@@ -3695,7 +3773,11 @@ export default function App() {
     sidebarWorkspaceRef.current = workspace;
     setSidebarWorkspace(workspace);
     setShowProviderExplorerDrawer(workspace === 'explorer');
-    setActiveTool(current => workspace === 'liveFinder' ? 'liveFinder' : current === 'liveFinder' ? null : current);
+    setActiveTool(current => {
+      const nextTool: ActiveTool = workspace === 'liveFinder' ? 'liveFinder' : current === 'liveFinder' ? null : current;
+      activeToolRef.current = nextTool;
+      return nextTool;
+    });
     if (workspace === 'liveFinder') {
       setProviderToolMode(current => current === 'npi' ? 'npi' : 'live');
       if (!['live','npi'].includes(document.body.dataset.providerTool || '')) document.body.dataset.providerTool = 'live';
@@ -3794,17 +3876,18 @@ export default function App() {
     else if(key==='bluehive') setShowBlueHive(checked);
     else if(key==='dentists') setShowDentists(checked);
     else setShowMyClinicsLayer(checked);
-    if(checked && !datasetStatus[key].loaded && !datasetStatus[key].loading) {
-      void loadProviderDataset(key);
-    }
+    // The per-toggle effects below are the single owner of initial loading.
+    // Keeping network ownership out of the UI event handler prevents duplicate
+    // requests racing the state transition that makes the layer visible.
   }
 
   function providerLayerStatus(key:DatasetKey, count:number, emptyMessage:string, visible:boolean) {
     const state=datasetStatus[key];
-    if(state.loading) return 'Loading provider data…';
+    if(state.loading && !state.loaded) return 'Loading provider data…';
     if(state.error) return state.error;
     if(!state.loaded) return visible ? 'Loading starts when enabled' : 'Toggle on to load';
-    if(count===0) return emptyMessage;
+    if(count===0 && !state.loading) return emptyMessage;
+    if(state.loading) return `${count.toLocaleString()} loaded · refreshing viewport…`;
     return `${count.toLocaleString()} loaded · ${visible ? 'visible' : 'toggle off'}`;
   }
 
@@ -3815,7 +3898,11 @@ export default function App() {
   const loadedProviderCount = indexedLayerData.length + blueHiveData.length + dentistData.length + myClinicsData.length;
   const toggleSection = (section:string) => setCollapsedSections(prev=>({...prev,[section]:!prev[section]}));
   const toggleCommandTool = (tool:Exclude<ActiveTool,null>) => {
-    setActiveTool(current=>current===tool?null:tool);
+    setActiveTool(current=>{
+      const nextTool: ActiveTool = current===tool ? null : tool;
+      activeToolRef.current = nextTool;
+      return nextTool;
+    });
     setMobileSidebarOpen(false);
   };
   return (
@@ -4162,7 +4249,7 @@ export default function App() {
             </div>
           )}
           {(activeTool === 'radius')&&(
-            <div className="local-pop-card" style={{top: dropCenter ? 184 : 96, borderColor:'rgba(252,165,165,0.35)', boxShadow:'0 10px 30px rgba(239,68,68,0.16)'}}>
+            <div className="local-pop-card radius-extractor-card" style={{top: dropCenter ? 184 : 96, borderColor:'rgba(252,165,165,0.35)', boxShadow:'0 10px 30px rgba(239,68,68,0.16)'}}>
               <div className="local-pop-title" style={{color:'#fecaca'}}>Radius extractor</div>
               <div className="local-pop-meta" style={{marginBottom:8,color:'#fca5a5'}}>Click map to move the center point</div>
               <div style={{display:'grid',gap:6}}>

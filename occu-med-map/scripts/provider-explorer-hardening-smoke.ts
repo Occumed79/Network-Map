@@ -12,24 +12,24 @@ function source(relativePath: string): string {
 
 const main = source("src/main.tsx");
 const stability = source("src/providerExplorerStabilityRuntime.ts");
-const overlayController = source("src/mapOverlaySynchronizationControllerRuntime.ts");
+const providerFinder = source("src/providerLocationFinderRuntime.ts");
+const compat = source("src/mapboxNativeCompat.ts");
 
 const pipelineImport = main.indexOf('import "./networkRequestPipelineRuntime";');
 const dualMapImport = main.indexOf('import "./dualMapEngineRuntime";');
 const stabilityImport = main.indexOf('import "./providerExplorerStabilityRuntime";');
-const controllerImport = main.indexOf('import "./mapOverlaySynchronizationControllerRuntime";');
 const appImport = main.indexOf('import App from "./App";');
 
 assert.ok(pipelineImport >= 0, "unified request pipeline must be imported");
 assert.ok(dualMapImport > pipelineImport, "request pipeline must initialize before map request middleware");
-assert.ok(stabilityImport > dualMapImport, "Provider Explorer stability must load after the dual-map prototype patches");
-assert.ok(controllerImport > stabilityImport, "Unified overlay controller must load after the aggregate transaction runtime");
-assert.ok(appImport > controllerImport, "All rendering guards must load before React mounts App");
+assert.ok(stabilityImport > dualMapImport, "Provider Explorer stability must load after the dual-map runtime");
+assert.ok(appImport > stabilityImport, "Provider Explorer stability guards must load before React mounts App");
+assert.doesNotMatch(main, /mapOverlaySynchronizationControllerRuntime/, "Provider Explorer must not depend on the retired Leaflet overlay mirror");
 assert.doesNotMatch(main, /providerExplorerLayerStabilityRuntime/, "fetch-patching Provider Explorer runtime must remain retired");
 assert.doesNotMatch(main, /completeProviderPinMirrorRuntime/, "legacy complete-pin mirror must remain retired");
 assert.doesNotMatch(main, /providerExplorerMapboxCommitGuardRuntime/, "legacy Mapbox commit guard must remain retired");
 
-assert.match(stability, /stagedLayers:\s*L\.Layer\[\]/, "aggregate replacements must use a staging buffer");
+assert.match(stability, /stagedLayers:\s*L\.Layer\[\]/, "aggregate replacements must retain a staging buffer during migration");
 assert.match(stability, /Superseded by a newer Provider Explorer/, "latest-request-wins cancellation must remain enabled");
 assert.match(stability, /REQUEST_TIMEOUT_MS\s*=\s*25_000/, "Provider Explorer visual requests must retain a finite timeout");
 assert.match(stability, /Ignored stale Provider Explorer/, "stale responses must be rejected before drawing");
@@ -40,10 +40,10 @@ assert.doesNotMatch(stability, /window\.fetch\s*=/, "Provider Explorer must not 
 assert.doesNotMatch(stability, /text\.includes\("8px points"\)/, "hardening must not depend on visible button labels");
 assert.doesNotMatch(stability, /text\.includes\("clear filters"\)/, "hardening must not depend on visible button labels");
 
-assert.match(overlayController, /STABILITY_EVENT\s*=\s*"occumed:provider-explorer-stability"/, "overlay controller must consume aggregate transaction events");
-assert.match(overlayController, /snapshot\.requestActive/, "overlay controller must hold the last frame during aggregate requests");
-assert.match(overlayController, /snapshot\.commitDepth/, "overlay controller must avoid rebuilding during atomic commits");
-assert.match(overlayController, /EMPTY_RELEASE_GRACE_MS\s*=\s*360/, "temporary empty frames must remain delayed beyond the layer debounce");
-assert.match(overlayController, /phase === "commit-end"/, "successful aggregate commits must trigger one final mirror rebuild");
+assert.match(providerFinder, /map\.addSource\(SOURCE_ID/, "provider result pins must render through a native Mapbox source");
+assert.match(providerFinder, /map\.addLayer\(/, "provider result pins must render through a native Mapbox layer");
+assert.match(providerFinder, /source\?\.setData\(collection\)/, "Provider Explorer results must update the native Mapbox source directly");
+assert.match(compat, /native\.on\("style\.load"/, "transitional Mapbox-native layers must rehydrate after style changes");
+assert.doesNotMatch(compat, /from ["']leaflet["']/, "transitional Provider Explorer rendering must not import Leaflet");
 
-console.log("Provider Explorer hardening smoke test passed.");
+console.log("Provider Explorer Mapbox-native hardening smoke test passed.");

@@ -9,7 +9,7 @@ html.occumed-us-diagnostics-off .leaflet-overlay-pane path.leaflet-interactive:h
 html.occumed-us-diagnostics-off .tz-legend,
 html.occumed-us-diagnostics-off .legend-row,
 html.occumed-us-diagnostics-off .br,
-html.occumed-us-diagnostics-off .local-pop-card {
+html.occumed-us-diagnostics-off .local-pop-card:not(.radius-extractor-card) {
   display: none !important;
 }
 

@@ -164,6 +164,8 @@ CREATE TABLE IF NOT EXISTS public.provider_raw_records (
 CREATE TABLE IF NOT EXISTS public.provider_stage_records (
   id bigserial PRIMARY KEY,
   raw_record_id bigint REFERENCES public.provider_raw_records(id),
+  source_key text,
+  source_record_id text,
   ingest_batch_id text,
   normalized_data jsonb DEFAULT '{}'::jsonb,
   provider_type text,

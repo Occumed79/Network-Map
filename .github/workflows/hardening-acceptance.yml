@@ -56,12 +56,15 @@ jobs:
   browser:
     name: ${{ matrix.browser }} / ${{ matrix.route }} / desktop browser acceptance
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
         browser: [chromium, webkit]
         route: [standard, p2]
+    env:
+      VITE_MAPBOX_TOKEN: pk.ci-network-map-placeholder
+      VITE_MAPBOX_TOKEN_2: pk.ci-network-map-placeholder
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -90,7 +93,14 @@ jobs:
           NETWORK_MAP_VIEWPORT: desktop
           NETWORK_MAP_CI_UI_URL: http://127.0.0.1:4173
         shell: bash
-        run: timeout --signal=TERM --kill-after=10s 90s pnpm --filter @workspace/occu-med-map exec node scripts/ci-cross-browser-acceptance.mjs
+        run: timeout --signal=TERM --kill-after=10s 110s pnpm --filter @workspace/occu-med-map exec node scripts/ci-cross-browser-acceptance.mjs
+      - name: Run Mapbox-native critical tool acceptance
+        if: matrix.route == 'standard'
+        env:
+          NETWORK_MAP_BROWSER: ${{ matrix.browser }}
+          NETWORK_MAP_CI_UI_URL: http://127.0.0.1:4173
+        shell: bash
+        run: timeout --signal=TERM --kill-after=10s 150s pnpm --filter @workspace/occu-med-map exec node scripts/ci-mapbox-native-tools-acceptance.mjs
       - name: Upload browser failure evidence
         if: failure()
         uses: actions/upload-artifact@v4
@@ -98,6 +108,7 @@ jobs:
           name: hardening-browser-${{ matrix.browser }}-${{ matrix.route }}-desktop
           path: |
             occu-med-map/test-results/hardening-browser
+            occu-med-map/test-results/mapbox-native-tools
             /tmp/network-map-preview.log
           if-no-files-found: ignore
           retention-days: 7

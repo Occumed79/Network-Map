@@ -1,5 +1,4 @@
 import { createRoot } from "react-dom/client";
-import "leaflet/dist/leaflet.css";
 import "mapbox-gl/dist/mapbox-gl.css";
 import "./leafletMapLifecycleRuntime";
 import "./mapboxMapLifecycleRuntime";
@@ -15,7 +14,10 @@ import "./providerTypeNormalizationRuntime";
 import "./dualMapEngineRuntime";
 import { switchMapModeWithTransition } from "./dualMapTransitionRuntime";
 import "./providerExplorerStabilityRuntime";
-import "./mapOverlaySynchronizationControllerRuntime";
+// Source selection is user-facing state, not optional telemetry. Install its
+// change listener before React mounts so a fast user toggle can never be
+// overwritten later by a lazily loaded default-selection restore.
+import "./providerSourceSelectionPersistenceRuntime";
 import App from "./App";
 import AppErrorBoundary, { ApplicationFailureScreen } from "./AppErrorBoundary";
 import {
@@ -65,7 +67,6 @@ async function loadOptionalRuntimes(): Promise<void> {
   await safeLoad("map engine cleanup", () => import("./mapEngineFinalFixRuntime"));
 
   await Promise.allSettled([
-    safeLoad("provider source selection persistence", () => import("./providerSourceSelectionPersistenceRuntime")),
     safeLoad("provider layer telemetry", () => import("./providerLayerTelemetryRuntime")),
     safeLoad("map performance telemetry", () => import("./mapPerformanceTelemetryRuntime")),
     safeLoad("technical diagnostics export", () => import("./technicalDiagnosticsExport")),
@@ -100,10 +101,6 @@ function scheduleOptionalRuntimes(): void {
   };
   const start = () => { void loadOptionalRuntimes(); };
 
-  // Do not let optional compatibility/telemetry runtimes race React's initial
-  // commit. The first usable application frame owns startup; optional work is
-  // admitted only after the browser has had a paint opportunity and an idle
-  // slice, with a bounded fallback for browsers without requestIdleCallback.
   window.requestAnimationFrame(() => {
     if (idleWindow.requestIdleCallback) {
       idleWindow.requestIdleCallback(start, { timeout: 1600 });

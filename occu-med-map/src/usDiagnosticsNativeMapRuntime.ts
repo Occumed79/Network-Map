@@ -6,9 +6,14 @@ export type SavedRadiusOverlay = { id: number; lat: number; lng: number; radiusM
 export type AddressPinOverlay = { lat: number; lng: number; color: string; popupHtml: string; tooltipHtml?: string };
 
 const CHANNELS: Channel[] = ["states", "population", "cities", "timezones", "saved", "address"];
-const collections: Record<Channel, GeoJSON.FeatureCollection> = Object.fromEntries(
-  CHANNELS.map((channel) => [channel, { type: "FeatureCollection", features: [] }]),
-) as Record<Channel, GeoJSON.FeatureCollection>;
+const collections: Record<Channel, GeoJSON.FeatureCollection> = {
+  states: { type: "FeatureCollection", features: [] },
+  population: { type: "FeatureCollection", features: [] },
+  cities: { type: "FeatureCollection", features: [] },
+  timezones: { type: "FeatureCollection", features: [] },
+  saved: { type: "FeatureCollection", features: [] },
+  address: { type: "FeatureCollection", features: [] },
+};
 
 const ids = (channel: Channel) => ({
   source: `us-diagnostics-native-${channel}`,

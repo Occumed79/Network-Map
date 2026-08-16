@@ -1,19 +1,26 @@
-import MapScene from "./mapSceneRuntime";
-import { subscribeSceneRoots } from "./mapSceneRuntime";
+import mapboxgl from "mapbox-gl";
+import { getActiveMapboxMap, getMapboxMapByMode, registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
 import { hasMapboxToken, mapboxDirections, mapboxGeocode, mapboxIsochrone, mapboxReverseGeocode } from "./mapboxServices";
 import { registerMapToolsPanel } from "./mapToolsPanelRegistry";
+import {
+  clearMapToolsDensity,
+  clearMapToolsRoute,
+  clearMapToolsZones,
+  fitActiveMapToGeoJSON,
+  fitActiveMapToRoute,
+  setMapToolsDensity,
+  setMapToolsOrigin,
+  setMapToolsRoute,
+  setMapToolsZones,
+  type NativeMapToolsPoint,
+} from "./mapToolsNativeMapRuntime";
 import { registerRuntimeOwner } from "./runtimeControllerRegistry";
 
-type Point = { lat: number; lng: number; label?: string };
+type Point = NativeMapToolsPoint;
 type RankedPin = Point & { name: string; driveMiles: number; driveMinutes: number; coordinates: Array<[number, number]> };
 
-const mapboxToken = import.meta.env.VITE_MAPBOX_TOKEN || "";
 let installed = false;
 let origin: Point | null = null;
-let searchMarker: MapScene.Marker | null = null;
-let routeLayer: MapScene.LayerGroup | null = null;
-let zoneLayer: MapScene.GeoJSON | null = null;
-let densityLayer: MapScene.LayerGroup | null = null;
 let densityEnabled = false;
 let statusNode: HTMLDivElement | null = null;
 let etaResultsNode: HTMLDivElement | null = null;
@@ -30,17 +37,15 @@ function setStatus(text: string): void {
   if (statusNode) statusNode.textContent = text;
 }
 
-function mapboxTileUrl(style: string): string {
-  const url = new URL(`https://api.mapbox.com/styles/v1/mapbox/${style}/tiles/256/{z}/{x}/{y}@2x`);
-  url.searchParams.set(["access", "token"].join("_"), mapboxToken);
-  return url.toString().replaceAll("%7B", "{").replaceAll("%7D", "}");
+function activeMap(): mapboxgl.Map | null {
+  return getActiveMapboxMap();
 }
 
-function updateBasemap(map: MapScene.Map, style: string): void {
-  map.eachLayer((layer) => {
-    const tile = layer as MapScene.TileLayer & { setUrl?: (url: string) => void };
-    if (typeof tile.setUrl === "function") tile.setUrl(mapboxTileUrl(style));
-  });
+function updateBasemap(style: string): void {
+  const map = getMapboxMapByMode("2d");
+  if (!map) { setStatus("Mapbox 2D map is not ready yet."); return; }
+  map.setStyle(`mapbox://styles/mapbox/${style}`);
+  setStatus(`2D basemap: ${basemaps.find((item) => item.style === style)?.label || style}.`);
 }
 
 function milesBetween(a: Point, b: Point): number {
@@ -53,14 +58,48 @@ function milesBetween(a: Point, b: Point): number {
   return 2 * radiusMiles * Math.asin(Math.sqrt(h));
 }
 
-function markerLabel(layer: MapScene.Layer, fallback: string): string {
-  const marker = layer as MapScene.Marker;
-  const tooltip = marker.getTooltip?.();
-  const popup = marker.getPopup?.();
-  const tooltipContent = tooltip?.getContent?.();
-  const popupContent = popup?.getContent?.();
-  const raw = typeof tooltipContent === "string" ? tooltipContent : typeof popupContent === "string" ? popupContent : fallback;
-  return raw.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 72) || fallback;
+function stripHtml(value: unknown): string {
+  const node = document.createElement("div");
+  node.innerHTML = String(value || "");
+  return (node.textContent || "").replace(/\s+/g, " ").trim();
+}
+
+function providerLayerIds(map: mapboxgl.Map): string[] {
+  const fixed = new Set([
+    "provider-explorer-native-pins",
+    "provider-explorer-native-live",
+    "provider-explorer-native-gaps",
+    "live-finder-results-native",
+    "provider-location-search-dots",
+  ]);
+  return (map.getStyle()?.layers || [])
+    .map((layer) => layer.id)
+    .filter((id) => fixed.has(id) || (id.startsWith("provider-dataset-native-") && id.endsWith("-points")));
+}
+
+function visibleProviderPoints(map: mapboxgl.Map): Array<Point & { name: string }> {
+  const layers = providerLayerIds(map);
+  if (!layers.length) return [];
+  const canvas = map.getCanvas();
+  const box: [[number, number], [number, number]] = [[0, 0], [canvas.clientWidth, canvas.clientHeight]];
+  let features: mapboxgl.MapboxGeoJSONFeature[] = [];
+  try { features = map.queryRenderedFeatures(box, { layers }); } catch { return []; }
+  const seen = new Set<string>();
+  const rows: Array<Point & { name: string }> = [];
+  for (const feature of features) {
+    if (feature.geometry?.type !== "Point") continue;
+    const coordinates = feature.geometry.coordinates;
+    const lng = Number(coordinates[0]);
+    const lat = Number(coordinates[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    const properties = feature.properties || {};
+    const key = String(properties.providerId || properties.id || `${lat.toFixed(6)},${lng.toFixed(6)}`);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const name = stripHtml(properties.name || properties.popupHtml || properties.label || key).slice(0, 72) || "Provider";
+    rows.push({ lat, lng, name });
+  }
+  return rows;
 }
 
 function emitOriginChanged(): void {
@@ -71,100 +110,75 @@ function emitEtaRankings(): void {
   window.dispatchEvent(new CustomEvent("occumed:provider-eta-rankings", { detail: latestRankings }));
 }
 
-function setOrigin(map: MapScene.Map, point: Point): void {
+function setOrigin(point: Point): void {
   origin = point;
-  if (searchMarker) map.removeLayer(searchMarker);
-  searchMarker = MapScene.marker([point.lat, point.lng], {
-    icon: MapScene.divIcon({
-      className: "",
-      html: '<div class="occumed-mapbox-origin-dot"></div>',
-      iconSize: [22, 22],
-      iconAnchor: [11, 11],
-    }),
-    zIndexOffset: 6000,
-  }).addTo(map);
+  setMapToolsOrigin(point);
   setStatus(`Origin set: ${point.label || point.lat.toFixed(4) + ", " + point.lng.toFixed(4)}`);
   emitOriginChanged();
 }
 
-async function searchPlace(map: MapScene.Map, input: HTMLInputElement): Promise<void> {
+async function searchPlace(input: HTMLInputElement): Promise<void> {
   const query = input.value.trim();
   if (!query) return;
+  const map = activeMap();
+  if (!map) { setStatus("Map is not ready."); return; }
   setStatus("Searching Mapbox...");
   try {
     const center = map.getCenter();
     const results = await mapboxGeocode(query, { lat: center.lat, lng: center.lng });
     const best = results[0];
     if (!best) { setStatus("No Mapbox result found."); return; }
-    setOrigin(map, { lat: best.lat, lng: best.lng, label: best.placeName });
-    map.flyTo([best.lat, best.lng], 13, { duration: 1.1 });
+    setOrigin({ lat: best.lat, lng: best.lng, label: best.placeName });
+    map.flyTo({ center: [best.lng, best.lat], zoom: 13, duration: 1100, essential: true });
   } catch (err: any) {
     setStatus(err?.message || "Search failed.");
   }
 }
 
-function clearRoutes(map: MapScene.Map): void {
-  if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
-  if (zoneLayer) { map.removeLayer(zoneLayer); zoneLayer = null; }
+function clearRoutes(): void {
+  clearMapToolsRoute();
+  clearMapToolsZones();
   latestRankings = [];
   if (etaResultsNode) etaResultsNode.innerHTML = "";
   emitEtaRankings();
   setStatus("Routes and zones cleared.");
 }
 
-async function drawRoute(map: MapScene.Map, target: Point): Promise<void> {
+async function drawRoute(target: Point): Promise<void> {
   if (!origin) { setStatus("Set an origin first."); return; }
   setStatus("Loading Mapbox route...");
   try {
-    if (routeLayer) map.removeLayer(routeLayer);
     const route = await mapboxDirections(origin, target, "driving-traffic");
-    const line = MapScene.polyline(route.coordinates, { color: "#2563eb", weight: 5, opacity: 0.88 });
-    const end = MapScene.circleMarker([target.lat, target.lng], { radius: 6, color: "#1e3a8a", fillColor: "#ffffff", fillOpacity: 1, weight: 2 });
-    routeLayer = MapScene.layerGroup([line, end]).addTo(map);
-    map.fitBounds(line.getBounds(), { padding: [38, 38] });
+    setMapToolsRoute(route.coordinates, target);
+    fitActiveMapToRoute(route.coordinates, 38);
     setStatus(`${target.label || "Provider"}: ${route.distanceMiles.toFixed(1)} mi / ${Math.round(route.durationMinutes)} min.`);
   } catch (err: any) {
     setStatus(err?.message || "Route failed.");
   }
 }
 
-async function drawZones(map: MapScene.Map): Promise<void> {
+async function drawZones(): Promise<void> {
   if (!origin) { setStatus("Set an origin first."); return; }
   setStatus("Loading 15/30/45/60 minute zones...");
   try {
-    if (zoneLayer) map.removeLayer(zoneLayer);
     const data = await mapboxIsochrone(origin, [15, 30, 45, 60], "driving");
-    zoneLayer = MapScene.geoJSON(data, {
-      style: (feature: any) => {
-        const contour = Number(feature?.properties?.contour || 15);
-        const rank = [15, 30, 45, 60].indexOf(contour);
-        return { color: "#0f766e", weight: 1.4, opacity: 0.44, fillColor: "#14b8a6", fillOpacity: Math.max(0.05, 0.19 - rank * 0.04) };
-      },
-    }).addTo(map);
-    map.fitBounds(zoneLayer.getBounds(), { padding: [30, 30] });
+    setMapToolsZones(data);
+    fitActiveMapToGeoJSON(data, 30);
     setStatus("Service zones shown: 15 / 30 / 45 / 60 minutes.");
   } catch (err: any) {
     setStatus(err?.message || "Zones failed.");
   }
 }
 
-function visibleMarkerCandidates(map: MapScene.Map, currentOrigin: Point) {
-  const bounds = map.getBounds().pad(0.1);
-  const rows: Array<Point & { name: string; straightMiles: number }> = [];
-  map.eachLayer((layer: MapScene.Layer) => {
-    const marker = layer as MapScene.Marker & { getLatLng?: () => MapScene.LatLng };
-    if (typeof marker.getLatLng !== "function") return;
-    const latLng = marker.getLatLng();
-    if (!bounds.contains(latLng)) return;
-    const point = { lat: latLng.lat, lng: latLng.lng };
-    const straightMiles = milesBetween(currentOrigin, point);
-    if (straightMiles < 0.03 || straightMiles > 250) return;
-    rows.push({ ...point, straightMiles, name: markerLabel(layer, `Pin ${rows.length + 1}`) });
-  });
-  return rows.sort((a, b) => a.straightMiles - b.straightMiles).slice(0, 8);
+function visibleMarkerCandidates(map: mapboxgl.Map, currentOrigin: Point) {
+  return visibleProviderPoints(map)
+    .map((point) => ({ ...point, straightMiles: milesBetween(currentOrigin, point) }))
+    .filter((point) => point.straightMiles >= 0.03 && point.straightMiles <= 250)
+    .sort((a, b) => a.straightMiles - b.straightMiles)
+    .slice(0, 8);
 }
 
-function renderRankings(map: MapScene.Map, rows: RankedPin[]): void {
+function renderRankings(rows: RankedPin[]): void {
   if (!etaResultsNode) return;
   etaResultsNode.innerHTML = "";
   rows.forEach((row, index) => {
@@ -177,16 +191,16 @@ function renderRankings(map: MapScene.Map, rows: RankedPin[]): void {
     mins.textContent = `${Math.round(row.driveMinutes)} min`;
     const miles = document.createElement("em");
     miles.textContent = `${row.driveMiles.toFixed(1)} mi`;
-    btn.appendChild(name);
-    btn.appendChild(mins);
-    btn.appendChild(miles);
-    btn.addEventListener("click", () => drawRoute(map, row));
+    btn.append(name, mins, miles);
+    btn.addEventListener("click", () => { void drawRoute(row); });
     etaResultsNode?.appendChild(btn);
   });
 }
 
-async function rankVisiblePins(map: MapScene.Map): Promise<void> {
+async function rankVisiblePins(): Promise<void> {
   if (!origin) { setStatus("Set an origin first."); return; }
+  const map = activeMap();
+  if (!map) { setStatus("Map is not ready."); return; }
   const candidates = visibleMarkerCandidates(map, origin);
   if (candidates.length === 0) { setStatus("No visible provider pins found to rank."); return; }
   setStatus(`Ranking ${candidates.length} visible pins by drive time...`);
@@ -195,21 +209,18 @@ async function rankVisiblePins(map: MapScene.Map): Promise<void> {
     try {
       const route = await mapboxDirections(origin, candidate, "driving-traffic");
       ranked.push({ ...candidate, driveMiles: route.distanceMiles, driveMinutes: route.durationMinutes, coordinates: route.coordinates });
-    } catch {
-      // Keep ranking resilient when a single pin cannot route.
-    }
+    } catch {}
   }
   ranked.sort((a, b) => a.driveMinutes - b.driveMinutes);
   latestRankings = ranked.slice(0, 6);
-  renderRankings(map, latestRankings);
+  renderRankings(latestRankings);
   emitEtaRankings();
   setStatus(`Ranked ${latestRankings.length} provider pins. Result cards updated.`);
 }
 
 async function copyEta(): Promise<void> {
   if (latestRankings.length === 0) { setStatus("No ETA ranking to copy yet."); return; }
-  const originLabel = origin?.label || "selected origin";
-  const lines = [`Provider ETA ranking from ${originLabel}`];
+  const lines = [`Provider ETA ranking from ${origin?.label || "selected origin"}`];
   latestRankings.forEach((row, index) => lines.push(`${index + 1}. ${row.name} — ${Math.round(row.driveMinutes)} min / ${row.driveMiles.toFixed(1)} mi`));
   try {
     await navigator.clipboard.writeText(lines.join("\n"));
@@ -219,32 +230,13 @@ async function copyEta(): Promise<void> {
   }
 }
 
-function visibleMarkerPoints(map: MapScene.Map): MapScene.LatLng[] {
-  const bounds = map.getBounds().pad(0.15);
-  const rows: MapScene.LatLng[] = [];
-  map.eachLayer((layer: MapScene.Layer) => {
-    const marker = layer as MapScene.Marker & { getLatLng?: () => MapScene.LatLng };
-    if (typeof marker.getLatLng !== "function") return;
-    const point = marker.getLatLng();
-    if (bounds.contains(point)) rows.push(point);
-  });
-  return rows;
-}
-
-function drawDensity(map: MapScene.Map): void {
-  if (densityLayer) { map.removeLayer(densityLayer); densityLayer = null; }
-  if (!densityEnabled) return;
-  const points = visibleMarkerPoints(map);
-  const radius = Math.max(1200, Math.min(18000, 52000 / Math.max(1, map.getZoom())));
-  densityLayer = MapScene.layerGroup(points.slice(0, 250).map((point) => MapScene.circle(point, {
-    radius,
-    color: "#0ea5e9",
-    weight: 0,
-    fillColor: "#0ea5e9",
-    fillOpacity: 0.055,
-    interactive: false,
-  }))).addTo(map);
-  setStatus(`Density field: ${points.length} visible pins sampled.`);
+function drawDensity(): void {
+  if (!densityEnabled) { clearMapToolsDensity(); return; }
+  const map = activeMap();
+  if (!map) return;
+  const points = visibleProviderPoints(map);
+  setMapToolsDensity(points);
+  setStatus(`Density field: ${points.length} visible provider pins sampled.`);
 }
 
 function button(label: string, onClick: () => void): HTMLButtonElement {
@@ -265,137 +257,114 @@ function section(label: string): HTMLDivElement {
   return node;
 }
 
-function addCommandPanel(map: MapScene.Map): { control: MapScene.Control; cleanup: () => void } {
-  const control = new MapScene.Control({ position: "bottomleft" });
-  let unregisterPanel: (() => void) | null = null;
+function createPanel(map: mapboxgl.Map): () => void {
+  const box = document.createElement("div");
+  box.className = "occumed-map-tools-panel";
+  box.addEventListener("click", (event) => event.stopPropagation());
+  box.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
 
-  control.onAdd = () => {
-    const box = MapScene.DomUtil.create("div", "occumed-map-tools-panel");
-    MapScene.DomEvent.disableClickPropagation(box);
-    MapScene.DomEvent.disableScrollPropagation(box);
+  const title = document.createElement("div");
+  title.className = "occumed-basemap-title";
+  title.textContent = "Map Tools";
+  box.appendChild(title);
 
-    const title = document.createElement("div");
-    title.className = "occumed-basemap-title";
-    title.textContent = "Map Tools";
-    box.appendChild(title);
+  const search = section("Search");
+  const input = document.createElement("input");
+  input.className = "occumed-mapbox-search";
+  input.placeholder = "Search address or place";
+  input.type = "text";
+  const searchActions = document.createElement("div");
+  searchActions.className = "occumed-mapbox-actions";
+  searchActions.appendChild(button("Search", () => { void searchPlace(input); }));
+  input.addEventListener("keydown", (event) => { if (event.key === "Enter") void searchPlace(input); });
+  search.append(input, searchActions);
+  box.appendChild(search);
 
-    const search = section("Search");
-    const input = document.createElement("input");
-    input.className = "occumed-mapbox-search";
-    input.placeholder = "Search address or place";
-    input.type = "text";
-    const searchActions = document.createElement("div");
-    searchActions.className = "occumed-mapbox-actions";
-    searchActions.appendChild(button("Search", () => searchPlace(map, input)));
-    input.addEventListener("keydown", (event) => { if (event.key === "Enter") void searchPlace(map, input); });
-    search.appendChild(input);
-    search.appendChild(searchActions);
-    box.appendChild(search);
+  const route = section("Routes and Zones");
+  const routeActions = document.createElement("div");
+  routeActions.className = "occumed-mapbox-actions";
+  routeActions.appendChild(button("Service Zones", () => { void drawZones(); }));
+  routeActions.appendChild(button("Clear", clearRoutes));
+  route.appendChild(routeActions);
+  box.appendChild(route);
 
-    const route = section("Routes and Zones");
-    const routeActions = document.createElement("div");
-    routeActions.className = "occumed-mapbox-actions";
-    routeActions.appendChild(button("Service Zones", () => { void drawZones(map); }));
-    routeActions.appendChild(button("Clear", () => clearRoutes(map)));
-    route.appendChild(routeActions);
-    box.appendChild(route);
+  const eta = section("ETA Ranking");
+  const etaActions = document.createElement("div");
+  etaActions.className = "occumed-mapbox-actions";
+  etaActions.appendChild(button("Rank Visible", () => { void rankVisiblePins(); }));
+  etaActions.appendChild(button("Apply to Results", emitEtaRankings));
+  etaActions.appendChild(button("Copy ETA", () => { void copyEta(); }));
+  etaResultsNode = document.createElement("div");
+  etaResultsNode.className = "occumed-eta-results";
+  eta.append(etaActions, etaResultsNode);
+  box.appendChild(eta);
 
-    const eta = section("ETA Ranking");
-    const etaActions = document.createElement("div");
-    etaActions.className = "occumed-mapbox-actions";
-    etaActions.appendChild(button("Rank Visible", () => { void rankVisiblePins(map); }));
-    etaActions.appendChild(button("Apply to Results", () => emitEtaRankings()));
-    etaActions.appendChild(button("Copy ETA", () => { void copyEta(); }));
-    etaResultsNode = document.createElement("div");
-    etaResultsNode.className = "occumed-eta-results";
-    eta.appendChild(etaActions);
-    eta.appendChild(etaResultsNode);
-    box.appendChild(eta);
+  const density = section("Density and Basemap");
+  const densityActions = document.createElement("div");
+  densityActions.className = "occumed-mapbox-actions";
+  const densityButton = button("Density", () => {
+    densityEnabled = !densityEnabled;
+    densityButton.classList.toggle("active", densityEnabled);
+    densityButton.setAttribute("aria-pressed", String(densityEnabled));
+    drawDensity();
+  });
+  densityButton.setAttribute("aria-pressed", "false");
+  densityActions.appendChild(densityButton);
+  basemaps.forEach((item) => densityActions.appendChild(button(item.label, () => updateBasemap(item.style))));
+  density.appendChild(densityActions);
+  box.appendChild(density);
 
-    const density = section("Density and Basemap");
-    const densityActions = document.createElement("div");
-    densityActions.className = "occumed-mapbox-actions";
-    const densityButton = button("Density", () => {
-      densityEnabled = !densityEnabled;
-      densityButton.classList.toggle("active", densityEnabled);
-      densityButton.setAttribute("aria-pressed", String(densityEnabled));
-      drawDensity(map);
-    });
-    densityButton.setAttribute("aria-pressed", "false");
-    densityActions.appendChild(densityButton);
-    basemaps.forEach((item) => densityActions.appendChild(button(item.label, () => updateBasemap(map, item.style))));
-    density.appendChild(densityActions);
-    box.appendChild(density);
+  statusNode = document.createElement("div");
+  statusNode.className = "occumed-mapbox-status";
+  statusNode.setAttribute("role", "status");
+  statusNode.setAttribute("aria-live", "polite");
+  statusNode.textContent = "Click map to set origin. Alt-click routes from origin.";
+  box.appendChild(statusNode);
 
-    statusNode = document.createElement("div");
-    statusNode.className = "occumed-mapbox-status";
-    statusNode.setAttribute("role", "status");
-    statusNode.setAttribute("aria-live", "polite");
-    statusNode.textContent = "Click map to set origin. Alt-click routes from origin.";
-    box.appendChild(statusNode);
-
-    unregisterPanel?.();
-    unregisterPanel = registerMapToolsPanel(box, map);
-    return box;
-  };
-
-  control.onRemove = () => {
-    unregisterPanel?.();
-    unregisterPanel = null;
-  };
-  control.addTo(map);
-  return {
-    control,
-    cleanup: () => {
-      unregisterPanel?.();
-      unregisterPanel = null;
-      try { control.remove(); } catch {}
-    },
+  map.getContainer().appendChild(box);
+  const unregisterPanel = registerMapToolsPanel(box, map);
+  return () => {
+    unregisterPanel();
+    box.remove();
+    if (statusNode && !statusNode.isConnected) statusNode = null;
+    if (etaResultsNode && !etaResultsNode.isConnected) etaResultsNode = null;
   };
 }
 
-function installOnMap(map: MapScene.Map): () => void {
-  const panel = addCommandPanel(map);
-
-  const onMapClick = async (event: MapScene.MapPointerEvent) => {
-    const point = { lat: event.latlng.lat, lng: event.latlng.lng };
-    if (event.originalEvent?.altKey) {
-      await drawRoute(map, point);
+function installNativeEvents(): () => void {
+  const onClick = async (rawEvent: Event) => {
+    const detail = (rawEvent as CustomEvent<{ lat: number; lng: number; originalEvent?: MouseEvent }>).detail;
+    if (!detail) return;
+    const point = { lat: detail.lat, lng: detail.lng };
+    if (detail.originalEvent?.altKey) {
+      await drawRoute(point);
       return;
     }
     try {
       const place = await mapboxReverseGeocode(point);
-      setOrigin(map, { ...point, label: place?.placeName || "Selected location" });
+      setOrigin({ ...point, label: place?.placeName || "Selected location" });
     } catch {
-      setOrigin(map, point);
+      setOrigin(point);
     }
   };
-  const onViewportChange = () => { if (densityEnabled) drawDensity(map); };
-
-  map.on("click", onMapClick);
-  map.on("moveend zoomend", onViewportChange);
-
+  const onCamera = () => { if (densityEnabled) drawDensity(); };
+  window.addEventListener("network-map:native-click", onClick as EventListener);
+  window.addEventListener("network-map:native-camera", onCamera);
   return () => {
-    map.off("click", onMapClick);
-    map.off("moveend zoomend", onViewportChange);
-    if (searchMarker && map.hasLayer(searchMarker)) map.removeLayer(searchMarker);
-    if (routeLayer && map.hasLayer(routeLayer)) map.removeLayer(routeLayer);
-    if (zoneLayer && map.hasLayer(zoneLayer)) map.removeLayer(zoneLayer);
-    if (densityLayer && map.hasLayer(densityLayer)) map.removeLayer(densityLayer);
-    searchMarker = null;
-    routeLayer = null;
-    zoneLayer = null;
-    densityLayer = null;
-    panel.cleanup();
+    window.removeEventListener("network-map:native-click", onClick as EventListener);
+    window.removeEventListener("network-map:native-camera", onCamera);
   };
 }
 
 export function installMapToolsCommandPanel(): void {
   if (installed || !hasMapboxToken()) return;
-  if (!registerRuntimeOwner("map-tools-command-panel", "Authoritative Map Tools panel and core actions")) return;
+  if (!registerRuntimeOwner("map-tools-command-panel", "Authoritative native Map Tools panel and core actions")) return;
   installed = true;
-  subscribeSceneRoots((map) => {
-    window.setTimeout(() => { installOnMap(map); }, 0);
+  installNativeEvents();
+  registerMapboxMapInitializer({
+    id: "map-tools-command-panel-ui",
+    priority: 40,
+    initialize: (map, context) => context.mode === "2d" ? createPanel(map) : undefined,
   });
 }
 

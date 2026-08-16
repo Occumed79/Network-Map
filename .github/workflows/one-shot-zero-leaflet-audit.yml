@@ -1,4 +1,4 @@
-name: One-shot dead scene runtime purge
+name: One-shot native uploaded clinic migration
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  purge:
+  migrate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,41 +20,8 @@ jobs:
         with:
           node-version: 22
       - run: corepack enable
-      - name: Prove dead scene runtimes have zero live references
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          root = Path('occu-med-map')
-          targets = [
-              root / 'src/mapboxAdvancedControls.ts',
-              root / 'src/mapboxProviderRanking.ts',
-              root / 'src/providerDensityField.ts',
-          ]
-          suffixes = {'.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'}
-          files = [p for p in root.rglob('*') if p.is_file() and p.suffix in suffixes]
-
-          for target in targets:
-              if not target.exists():
-                  raise SystemExit(f'missing expected runtime: {target}')
-              stem = target.stem
-              refs = []
-              for candidate in files:
-                  if candidate == target:
-                      continue
-                  try:
-                      text = candidate.read_text(errors='ignore')
-                  except Exception:
-                      continue
-                  if stem in text:
-                      refs.append(str(candidate))
-              if refs:
-                  raise SystemExit(f'{target} still referenced by: {refs}')
-
-          for target in targets:
-              target.unlink()
-              print(f'deleted {target}')
-          PY
+      - name: Migrate uploaded clinics to native Mapbox
+        run: python occu-med-map/scripts/migrate-uploaded-clinics-native.py
       - run: pnpm install --frozen-lockfile
       - name: Typecheck frontend
         run: pnpm --filter @workspace/occu-med-map typecheck
@@ -67,10 +34,11 @@ jobs:
       - name: Inventory remaining compatibility
         working-directory: occu-med-map
         run: pnpm exec tsx scripts/zero-leaflet-architecture-audit.ts
-      - name: Commit validated purge
+      - name: Commit validated uploaded-clinic migration
         run: |
+          rm -f occu-med-map/scripts/migrate-uploaded-clinics-native.py
           git config user.name "Occumed79"
           git config user.email "Occumed79@users.noreply.github.com"
           git add -A
-          git commit -m "Delete dead scene compatibility runtimes"
+          git commit -m "Render uploaded clinic groups with native Mapbox"
           git push origin HEAD:nuclear/remove-leaflet-compat

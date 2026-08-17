@@ -10,6 +10,24 @@ if (!browserType) throw new Error(`Unsupported browser ${browserName}`);
 const artifactDir = path.resolve(process.cwd(), "test-results", "mapbox-native-tools", browserName);
 fs.mkdirSync(artifactDir, { recursive: true });
 
+const expectedProviderLayerLabels = [
+  "Urgent Cares",
+  "Occupational Health Clinics",
+  "Dentists",
+  "Blue Hive",
+  "FAA Examiners",
+  "DOT Examiners",
+  "Labs",
+  "Imaging",
+  "Audiology",
+  "General Practitioners",
+  "Pharmacy",
+  "International Providers",
+  "U.S. Embassy Recommended",
+  "Uploaded Clinics",
+  "NACCHO Local Health Departments",
+];
+
 function json(route, payload, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(payload) });
 }
@@ -121,6 +139,48 @@ async function mockApi(page) {
         page: 1,
         limit: 2000,
         hasMore: false,
+        visibleCapped: false,
+      });
+    }
+    if (pathname === "/api/naccho-lhd") {
+      const requestedPage = Math.max(Number(url.searchParams.get("page") || 1), 1);
+      const requestedLimit = Math.max(Number(url.searchParams.get("limit") || 2000), 1);
+      const total = 2501;
+      const offset = (requestedPage - 1) * requestedLimit;
+      const pageCount = Math.max(0, Math.min(requestedLimit, total - offset));
+      const providers = Array.from({ length: pageCount }, (_, localIndex) => {
+        const index = offset + localIndex;
+        return {
+          id: `naccho-ci-${index}`,
+          source_id: `naccho-ci-${index}`,
+          name: `CI Health Department ${index + 1}`,
+          lat: 20.6 + (index % 50) * 0.0002,
+          lng: 0.6 + (Math.floor(index / 50) % 50) * 0.0002,
+          address: `${index + 1} Public Health Way`,
+          city: "CI City",
+          admin_area: "CI",
+          country: "US",
+          postal_code: "00000",
+          phone: null,
+          website: null,
+          clinic_type: "local_health_department",
+          public_health_services: ["public health"],
+          services: ["public health"],
+          categories: ["public_health", "local_health_department"],
+          source: "NACCHO Local Health Department Directory",
+          source_kind: "stored",
+          trust_tier: "directory",
+        };
+      });
+      return json(route, {
+        providers,
+        count: providers.length,
+        loaded: providers.length,
+        total,
+        page: requestedPage,
+        limit: requestedLimit,
+        hasMore: offset + providers.length < total,
+        source: "NACCHO Local Health Department Directory",
         visibleCapped: false,
       });
     }
@@ -266,6 +326,12 @@ try {
   await page.waitForFunction(() => (window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || []).some((map) => map.getContainer().closest(".mapbox-2d-host")), null, { timeout: 20_000 });
   await page.locator(".mapbox-2d-host .mapboxgl-canvas").waitFor({ state: "visible", timeout: 15_000 });
 
+  for (const label of expectedProviderLayerLabels) {
+    await page.getByRole("checkbox", { name: label }).waitFor({ state: "visible", timeout: 10_000 });
+  }
+  assert.equal(await page.locator('input[aria-label="Indexed Providers"]:visible').count(), 0, "Generic Indexed Providers toggle must no longer be visible");
+  assert.equal(await page.getByRole("checkbox", { name: "Luminous Density" }).isVisible(), true, "Luminous Density visualization control must remain available");
+
   const categoryToggle = page.getByRole("checkbox", { name: "General Practitioners" });
   const categoryResponsePredicate = (response) => {
     try {
@@ -326,6 +392,20 @@ try {
     console.error("CATEGORY_PROVIDER_DIAGNOSTICS_AFTER_CLICK", JSON.stringify(afterCategoryClick));
     throw error;
   }
+
+  const nacchoToggle = page.getByRole("checkbox", { name: "NACCHO Local Health Departments" });
+  await nacchoToggle.check();
+  await page.waitForFunction(() => (
+    window.__NETWORK_MAP_PROVIDER_DATASET_NATIVE__?.getSnapshot?.("naccho")?.featureCount === 2501
+  ), null, { timeout: 15_000 });
+  const nacchoFeatureCount = await page.evaluate(() => (
+    window.__NETWORK_MAP_PROVIDER_DATASET_NATIVE__?.getSnapshot?.("naccho")?.featureCount || 0
+  ));
+  assert.equal(nacchoFeatureCount, 2501, "NACCHO layer must auto-paginate and render more than the old 1,000-record ceiling");
+  await nacchoToggle.uncheck();
+  await page.waitForFunction(() => (
+    window.__NETWORK_MAP_PROVIDER_DATASET_NATIVE__?.getSnapshot?.("naccho")?.featureCount === 0
+  ), null, { timeout: 10_000 });
 
   const beforeRadiusFeatures = await liveFinderSnapshotFeatureCount(page, "drop");
   const radiusButton = await clickByText(page, /Radius Tool/i);
@@ -434,7 +514,7 @@ try {
   await page.waitForFunction(() => /1 facilities from OSM/i.test(document.querySelector(".live-panel.open")?.textContent || ""), null, { timeout: 15_000 });
 
   assert.deepEqual(pageErrors, [], `Mapbox native tool acceptance saw page errors: ${pageErrors.join("; ")}`);
-  console.log(`Mapbox native tool acceptance passed in ${browserName}: categorized providers, radius, 2D/3D, density, hex, provider click ownership, and OSM Live Finder.`);
+  console.log(`Mapbox native tool acceptance passed in ${browserName}: categorized providers, uncapped NACCHO pagination, radius, 2D/3D, density, hex, provider click ownership, and OSM Live Finder.`);
 } catch (error) {
   await page.screenshot({ path: path.join(artifactDir, "failure.png"), fullPage: true }).catch(() => undefined);
   fs.writeFileSync(path.join(artifactDir, "error.txt"), `${error instanceof Error ? error.stack || error.message : String(error)}\n\nPage errors:\n${pageErrors.join("\n")}`);

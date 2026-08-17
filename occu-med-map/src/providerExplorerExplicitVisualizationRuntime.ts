@@ -8,6 +8,12 @@ type ProviderExplorerIntentGlobal = typeof window & {
   };
 };
 
+type ProviderExplorerNativeGlobal = typeof window & {
+  __NETWORK_MAP_PROVIDER_EXPLORER_NATIVE__?: {
+    getSnapshot?: (channel: "pins" | "aggregate" | "dots" | "live" | "gaps") => { featureCount?: number } | undefined;
+  };
+};
+
 const VISUALIZATION_LABELS = new Set([
   "density",
   "hex field",
@@ -38,8 +44,9 @@ function normalizeButtonLabel(button: HTMLButtonElement): string {
 function restoreInactivePresentation(): void {
   if (explicitlyActive) return;
 
-  const aggregateCount = window.__NETWORK_MAP_PROVIDER_EXPLORER_NATIVE__?.getSnapshot?.("aggregate")?.featureCount || 0;
-  const dotCount = window.__NETWORK_MAP_PROVIDER_EXPLORER_NATIVE__?.getSnapshot?.("dots")?.featureCount || 0;
+  const native = (window as ProviderExplorerNativeGlobal).__NETWORK_MAP_PROVIDER_EXPLORER_NATIVE__;
+  const aggregateCount = native?.getSnapshot?.("aggregate")?.featureCount || 0;
+  const dotCount = native?.getSnapshot?.("dots")?.featureCount || 0;
   if (aggregateCount > 0 || dotCount > 0) clearProviderExplorerNative(["aggregate", "dots"]);
 
   const drawer = document.querySelector<HTMLElement>(".provider-explorer-drawer");

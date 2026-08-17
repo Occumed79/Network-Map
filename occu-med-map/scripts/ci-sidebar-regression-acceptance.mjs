@@ -73,39 +73,47 @@ async function activateWorkspace(page, label) {
 }
 
 async function assertButtonsHittable(page, selector, label) {
-  const failures = await page.locator(selector).evaluate((root) => {
-    const visible = (element) => {
+  const root = page.locator(selector);
+  const buttons = root.locator("button:not(:disabled)");
+  const failures = [];
+  const count = await buttons.count();
+
+  for (let index = 0; index < count; index += 1) {
+    const button = buttons.nth(index);
+    if (!(await button.isVisible())) continue;
+
+    // Sidebar workspaces intentionally scroll. A control that is below the
+    // fold is not a dead control, so first bring the entire target into the
+    // actual clipped viewport and only then test the pointer hit target.
+    await button.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(20);
+
+    const result = await button.evaluate((element) => {
       const style = getComputedStyle(element);
       const rect = element.getBoundingClientRect();
-      return !element.hidden
-        && style.display !== "none"
+      const x = Math.min(innerWidth - 1, Math.max(0, rect.left + rect.width / 2));
+      const y = Math.min(innerHeight - 1, Math.max(0, rect.top + rect.height / 2));
+      const hit = document.elementFromPoint(x, y);
+      const ok = style.display !== "none"
         && style.visibility !== "hidden"
         && Number(style.opacity || "1") > 0
         && rect.width > 2
         && rect.height > 2
-        && rect.right > 0
-        && rect.bottom > 0
-        && rect.left < innerWidth
-        && rect.top < innerHeight;
-    };
+        && rect.left >= 0
+        && rect.top >= 0
+        && rect.right <= innerWidth
+        && rect.bottom <= innerHeight
+        && (hit === element || Boolean(hit && element.contains(hit)));
+      return ok ? null : {
+        label: `${element.textContent || element.getAttribute("aria-label") || "button"}`.replace(/\s+/g, " ").trim(),
+        rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height },
+        hit: hit instanceof HTMLElement ? `${hit.tagName}.${hit.className}` : String(hit),
+      };
+    });
+    if (result) failures.push(result);
+  }
 
-    return Array.from(root.querySelectorAll("button:not(:disabled)"))
-      .filter((button) => visible(button))
-      .map((button) => {
-        const rect = button.getBoundingClientRect();
-        const x = Math.min(innerWidth - 1, Math.max(0, rect.left + rect.width / 2));
-        const y = Math.min(innerHeight - 1, Math.max(0, rect.top + rect.height / 2));
-        const hit = document.elementFromPoint(x, y);
-        const ok = hit === button || Boolean(hit && button.contains(hit));
-        return ok ? null : {
-          label: `${button.textContent || button.getAttribute("aria-label") || "button"}`.replace(/\s+/g, " ").trim(),
-          rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
-          hit: hit instanceof HTMLElement ? `${hit.tagName}.${hit.className}` : String(hit),
-        };
-      })
-      .filter(Boolean);
-  });
-  assert.deepEqual(failures, [], `${label}: enabled buttons must be real pointer hit targets`);
+  assert.deepEqual(failures, [], `${label}: enabled buttons must be reachable and real pointer hit targets`);
 }
 
 async function explorerCounts(page) {

@@ -13,6 +13,18 @@ export type NativeLivePoint = {
 type Center = { lat: number; lng: number };
 type Channel = "drop" | "reference" | "search" | "results";
 
+type NativeOverlaySnapshot = {
+  channel: Channel;
+  featureCount: number;
+  geometryTypes: string[];
+};
+
+type NativeOverlayDiagnosticsGlobal = typeof globalThis & {
+  __NETWORK_MAP_LIVE_FINDER_NATIVE__?: {
+    getSnapshot: (channel: Channel) => NativeOverlaySnapshot;
+  };
+};
+
 const IDS = {
   drop: { source: "radius-extractor-native", fill: "radius-extractor-native-fill", line: "radius-extractor-native-line", center: "radius-extractor-native-center" },
   reference: { source: "reference-radius-native", fill: "reference-radius-native-fill", line: "reference-radius-native-line", center: "reference-radius-native-center" },
@@ -29,6 +41,19 @@ const collections: Record<Channel, GeoJSON.FeatureCollection> = {
 };
 const resultPoints = new Map<string, NativeLivePoint>();
 let onResultSelect: ((id: string) => void) | null = null;
+
+function getNativeOverlaySnapshot(channel: Channel): NativeOverlaySnapshot {
+  const features = collections[channel].features;
+  return {
+    channel,
+    featureCount: features.length,
+    geometryTypes: features.map((feature) => feature.geometry.type),
+  };
+}
+
+(globalThis as NativeOverlayDiagnosticsGlobal).__NETWORK_MAP_LIVE_FINDER_NATIVE__ = {
+  getSnapshot: getNativeOverlaySnapshot,
+};
 
 function activeMap(): mapboxgl.Map | null {
   const mode = window.__NETWORK_MAP_GLOBE__?.getMode?.();

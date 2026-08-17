@@ -22,6 +22,24 @@ type DatasetHit = {
   distance: number;
 };
 
+type ProviderDatasetSnapshotFeature = {
+  coordinates: [number, number];
+  popupHtml: string;
+  providerId: string;
+};
+
+type ProviderDatasetSnapshot = {
+  channel: ProviderDatasetChannel;
+  featureCount: number;
+  features: ProviderDatasetSnapshotFeature[];
+};
+
+type ProviderDatasetDiagnosticsGlobal = typeof globalThis & {
+  __NETWORK_MAP_PROVIDER_DATASET_NATIVE__?: {
+    getSnapshot: (channel: ProviderDatasetChannel) => ProviderDatasetSnapshot;
+  };
+};
+
 const CHANNELS: ProviderDatasetChannel[] = ["bluehive", "dentists", "inventory", "indexed", "my-clinics", "naccho", "uploaded"];
 const states = new Map<ProviderDatasetChannel, ChannelState>();
 for (const channel of CHANNELS) {
@@ -141,6 +159,24 @@ function updateChannel(channel: ProviderDatasetChannel): void {
     }
   }
 }
+
+function getProviderDatasetSnapshot(channel: ProviderDatasetChannel): ProviderDatasetSnapshot {
+  const state = states.get(channel);
+  const features = state?.collection.features ?? [];
+  return {
+    channel,
+    featureCount: features.length,
+    features: features.map((feature) => ({
+      coordinates: [feature.geometry.coordinates[0], feature.geometry.coordinates[1]] as [number, number],
+      popupHtml: String(feature.properties?.popupHtml ?? ""),
+      providerId: String(feature.properties?.providerId ?? ""),
+    })),
+  };
+}
+
+(globalThis as ProviderDatasetDiagnosticsGlobal).__NETWORK_MAP_PROVIDER_DATASET_NATIVE__ = {
+  getSnapshot: getProviderDatasetSnapshot,
+};
 
 export function renderProviderDataset<T>(
   channel: ProviderDatasetChannel,

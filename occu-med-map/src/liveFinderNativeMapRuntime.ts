@@ -275,7 +275,16 @@ registerMapboxMapInitializer({
   id: "live-finder-native-map",
   priority: 13,
   initialize: (map) => {
-    const apply = () => ensureLayers(map);
+    let styleRetryTimer = 0;
+    const apply = () => {
+      window.clearTimeout(styleRetryTimer);
+      styleRetryTimer = 0;
+      if (!map.isStyleLoaded()) {
+        styleRetryTimer = window.setTimeout(apply, 50);
+        return;
+      }
+      ensureLayers(map);
+    };
     const click = (event: mapboxgl.MapMouseEvent) => {
       const feature = featureAt(map, event.point);
       if (!feature) return;
@@ -289,10 +298,13 @@ registerMapboxMapInitializer({
       onResultSelect?.(id);
     };
     map.on("style.load", apply);
+    map.on("load", apply);
     map.on("click", click);
-    if (map.isStyleLoaded()) queueMicrotask(apply);
+    queueMicrotask(apply);
     return () => {
+      window.clearTimeout(styleRetryTimer);
       map.off("style.load", apply);
+      map.off("load", apply);
       map.off("click", click);
     };
   },

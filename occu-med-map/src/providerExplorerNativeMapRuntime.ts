@@ -114,7 +114,6 @@ function addPointLayer(map: mapboxgl.Map, id: string, source: string, radius = 4
 }
 
 function ensureLayers(map: mapboxgl.Map): void {
-  if (!map.isStyleLoaded()) return;
   sourceData(map, IDS.pins.source, collections.pins);
   sourceData(map, IDS.aggregate.source, collections.aggregate);
   sourceData(map, IDS.dots.source, collections.dots);
@@ -169,7 +168,6 @@ function ensureLayers(map: mapboxgl.Map): void {
 
 function updateMaps(channel?: Channel): void {
   for (const map of getTrackedMapboxMaps()) {
-    if (!map.isStyleLoaded()) continue;
     try {
       ensureLayers(map);
       if (channel) {
@@ -178,7 +176,7 @@ function updateMaps(channel?: Channel): void {
       }
       map.triggerRepaint();
     } catch (error) {
-      console.warn("Provider Explorer native source update failed", error);
+      console.debug("Provider Explorer native map waiting for Mapbox style", error);
     }
   }
 }
@@ -393,7 +391,17 @@ registerMapboxMapInitializer({
   id: "provider-explorer-native-map",
   priority: 12,
   initialize: (map) => {
-    const apply = () => ensureLayers(map);
+    let styleRetryTimer = 0;
+    const apply = () => {
+      window.clearTimeout(styleRetryTimer);
+      styleRetryTimer = 0;
+      try {
+        ensureLayers(map);
+      } catch (error) {
+        console.debug("Provider Explorer native map waiting for Mapbox style", error);
+        styleRetryTimer = window.setTimeout(apply, 50);
+      }
+    };
     const click = (event: mapboxgl.MapMouseEvent) => {
       const feature = popupHit(map, event.point);
       if (!feature) return;
@@ -413,10 +421,13 @@ registerMapboxMapInitializer({
       }
     };
     map.on("style.load", apply);
+    map.on("load", apply);
     map.on("click", click);
-    if (map.isStyleLoaded()) queueMicrotask(apply);
+    queueMicrotask(apply);
     return () => {
+      window.clearTimeout(styleRetryTimer);
       map.off("style.load", apply);
+      map.off("load", apply);
       map.off("click", click);
     };
   },

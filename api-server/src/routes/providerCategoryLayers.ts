@@ -232,7 +232,8 @@ function toProvider(row: Record<string, unknown>, category: string): Record<stri
 }
 
 router.get("/provider-category-layers/:category", async (req: Request, res: Response) => {
-  const category = req.params.category;
+  const rawCategory = req.params.category;
+  const category = Array.isArray(rawCategory) ? rawCategory[0] || "" : rawCategory || "";
   const definition = CATEGORY_DEFINITIONS[category];
   if (!definition) {
     res.status(400).json({ error: `Unknown provider category: ${category}`, categories: Object.keys(CATEGORY_DEFINITIONS) });

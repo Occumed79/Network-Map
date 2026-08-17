@@ -138,6 +138,14 @@ export default function ProviderLayerRegistryPanel() {
       for (const child of Array.from(list.children)) {
         if (!(child instanceof HTMLElement)) continue;
         if (child.dataset.providerRegistryOwned === 'true') continue;
+        const label = child.querySelector<HTMLElement>('.workflow-layer-name')?.textContent?.trim();
+        // Luminous Density is a visualization control, not a provider dataset.
+        // Keep it available while replacing only the old provider-source toggles.
+        if (label === 'Luminous Density') {
+          child.style.removeProperty('display');
+          delete child.dataset.providerRegistrySuppressed;
+          continue;
+        }
         child.dataset.providerRegistrySuppressed = 'true';
         child.style.display = 'none';
       }

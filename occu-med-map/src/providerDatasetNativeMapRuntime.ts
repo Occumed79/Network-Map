@@ -102,7 +102,6 @@ function heatmapColor(baseColor: string): mapboxgl.Expression {
 }
 
 function ensureChannel(map: mapboxgl.Map, channel: ProviderDatasetChannel): void {
-  if (!map.isStyleLoaded()) return;
   const state = states.get(channel)!;
   const channelIds = ids(channel);
   const existing = map.getSource(channelIds.source) as mapboxgl.GeoJSONSource | undefined;
@@ -149,13 +148,12 @@ function updateChannel(channel: ProviderDatasetChannel): void {
   const state = states.get(channel)!;
   const channelIds = ids(channel);
   for (const map of getTrackedMapboxMaps()) {
-    if (!map.isStyleLoaded()) continue;
     try {
       ensureChannel(map, channel);
       (map.getSource(channelIds.source) as mapboxgl.GeoJSONSource | undefined)?.setData(state.collection);
       map.triggerRepaint();
     } catch (error) {
-      console.warn(`Provider dataset ${channel} update failed`, error);
+      console.debug(`Provider dataset ${channel} waiting for Mapbox style`, error);
     }
   }
 }
@@ -282,11 +280,12 @@ registerMapboxMapInitializer({
     const apply = () => {
       window.clearTimeout(styleRetryTimer);
       styleRetryTimer = 0;
-      if (!map.isStyleLoaded()) {
+      try {
+        CHANNELS.forEach((channel) => ensureChannel(map, channel));
+      } catch (error) {
+        console.debug("Provider dataset native map waiting for Mapbox style", error);
         styleRetryTimer = window.setTimeout(apply, 50);
-        return;
       }
-      CHANNELS.forEach((channel) => ensureChannel(map, channel));
     };
     const click = (event: mapboxgl.MapMouseEvent) => {
       const feature = hit(map, event.point);

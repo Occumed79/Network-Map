@@ -16,6 +16,7 @@ type ProviderExplorerNativeGlobal = typeof window & {
 
 let explicitlyActive = false;
 let unsubscribeDom: (() => void) | null = null;
+const boundVisualizationButtons = new WeakSet<HTMLButtonElement>();
 
 function setIntent(active: boolean): void {
   explicitlyActive = active;
@@ -30,7 +31,20 @@ function visibleButtonLabel(button: HTMLButtonElement): string {
   return (button.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
+function bindVisualizationControls(): void {
+  document.querySelectorAll<HTMLButtonElement>(".provider-explorer-drawer .provider-visualization-grid button").forEach((button) => {
+    if (boundVisualizationButtons.has(button)) return;
+    boundVisualizationButtons.add(button);
+    // Bind on the control itself as well as the document owner below. This is
+    // deliberate: Safari/WebKit and programmatic HTMLElement.click() both have
+    // to pass through the exact same explicit-intent gate before React renders
+    // a Provider Explorer visualization.
+    button.addEventListener("click", () => setIntent(true), { capture: true });
+  });
+}
+
 function restoreInactivePresentation(): void {
+  bindVisualizationControls();
   if (explicitlyActive) return;
 
   const native = (window as ProviderExplorerNativeGlobal).__NETWORK_MAP_PROVIDER_EXPLORER_NATIVE__;
@@ -64,10 +78,6 @@ function handleClick(event: MouseEvent): void {
   const drawer = button.closest<HTMLElement>(".provider-explorer-drawer");
   if (!drawer) return;
 
-  // The visualization grid is the ownership boundary. Do not depend on button
-  // text or accessible-name composition here: Safari/WebKit and browser tests
-  // can produce different text/aria combinations, but a click inside this grid
-  // always means the user explicitly asked to render one visualization mode.
   if (button.closest(".provider-visualization-grid")) {
     setIntent(true);
     return;

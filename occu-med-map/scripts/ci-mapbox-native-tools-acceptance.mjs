@@ -108,24 +108,23 @@ async function mockApi(page) {
       });
     }
     if (pathname.includes("provider-explorer")) return json(route, { providers: [], total: 0, page: 1, hasMore: false, stored_count: 0, live_count: 0, live_only: [] });
-    if (pathname === "/api/provider-layers/indexed") {
+    if (pathname === "/api/provider-category-layers/general-practitioners") {
       return json(route, {
         providers: [
-          { clinic_name: "CI Indexed Clinic One", name: "CI Indexed Clinic One", lat: 20.4, lng: 0.4, address_1: "10 Indexed Way", city: "CI City", state: "CI", zip: "00001", phone: "+1 555 0301", website: "https://example.invalid/indexed-one", source_id: "indexed-ci-1", data_source: "indexed", category: "clinic", clinic_type: "general_practitioner", providerType: "general_practitioner", services: "primary care", types: ["primary care"] },
-          { clinic_name: "CI Indexed Clinic Two", name: "CI Indexed Clinic Two", lat: 20.43, lng: 0.43, address_1: "20 Indexed Way", city: "CI City", state: "CI", zip: "00002", phone: "+1 555 0302", website: "https://example.invalid/indexed-two", source_id: "indexed-ci-2", data_source: "indexed", category: "clinic", clinic_type: "general_practitioner", providerType: "general_practitioner", services: "primary care", types: ["primary care"] },
+          { clinic_name: "CI Indexed Clinic One", name: "CI Indexed Clinic One", lat: 20.4, lng: 0.4, address_1: "10 Indexed Way", city: "CI City", state: "CI", zip: "00001", phone: "+1 555 0301", website: "https://example.invalid/indexed-one", source_id: "indexed-ci-1", data_source: "indexed", category: "clinic", clinic_type: "general_practitioner", providerType: "general_practitioner", services: ["primary care"], types: ["primary care"] },
+          { clinic_name: "CI Indexed Clinic Two", name: "CI Indexed Clinic Two", lat: 20.43, lng: 0.43, address_1: "20 Indexed Way", city: "CI City", state: "CI", zip: "00002", phone: "+1 555 0302", website: "https://example.invalid/indexed-two", source_id: "indexed-ci-2", data_source: "indexed", category: "clinic", clinic_type: "general_practitioner", providerType: "general_practitioner", services: ["primary care"], types: ["primary care"] },
         ],
         count: 2,
         loaded: 2,
         total: 2,
-        source: "indexed",
+        category: "general-practitioners",
         page: 1,
         limit: 2000,
         hasMore: false,
-        all: false,
-        storage: "provider_master",
         visibleCapped: false,
       });
     }
+    if (pathname.includes("provider-category-layers")) return json(route, { providers: [], count: 0, loaded: 0, total: 0, page: 1, hasMore: false, visibleCapped: false });
     if (pathname.includes("provider-layers")) return json(route, { providers: [], count: 0, loaded: 0, total: 0, page: 1, hasMore: false, visibleCapped: false });
     if (pathname.includes("health") || pathname.includes("ready")) return json(route, { ok: true, status: "ok" });
     if (pathname.includes("inventory") || pathname.includes("coverage")) return json(route, { providers: [], total: 0, cells: [] });
@@ -219,31 +218,31 @@ async function waitForActiveMapIdle(page, mode = "2d") {
   }, mode);
 }
 
-async function indexedProviderDiagnostics(page) {
+async function categoryProviderDiagnostics(page) {
   return page.evaluate(() => {
     const lifecycle = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getDiagnostics?.() || null;
     const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
     const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
-    const toggle = document.querySelector('input[aria-label="Indexed Providers"]');
+    const toggle = document.querySelector('input[aria-label="General Practitioners"]');
     const row = toggle?.closest(".workflow-layer");
-    const snapshot = window.__NETWORK_MAP_PROVIDER_DATASET_NATIVE__?.getSnapshot?.("indexed") || null;
-    if (!map) return { lifecycle, snapshot, noMap: true, indexedRow: row?.textContent || "" };
+    const snapshot = window.__NETWORK_MAP_PROVIDER_DATASET_NATIVE__?.getSnapshot?.("category-general-practitioners") || null;
+    if (!map) return { lifecycle, snapshot, noMap: true, categoryRow: row?.textContent || "" };
     const style = map.getStyle();
     const nativeLayers = (style?.layers || [])
-      .filter((layer) => String(layer.id).startsWith("provider-dataset-native-indexed"))
+      .filter((layer) => String(layer.id).startsWith("provider-dataset-native-category-general-practitioners"))
       .map((layer) => ({ id: layer.id, type: layer.type, source: layer.source || null }));
     const features = snapshot?.features || [];
     return {
       lifecycle,
-      indexedChecked: Boolean(toggle?.checked),
-      indexedRow: String(row?.textContent || "").replace(/\s+/g, " ").trim(),
+      categoryChecked: Boolean(toggle?.checked),
+      categoryRow: String(row?.textContent || "").replace(/\s+/g, " ").trim(),
       styleLoaded: map.isStyleLoaded(),
       loaded: map.loaded(),
       moving: map.isMoving(),
       center: { lng: map.getCenter().lng, lat: map.getCenter().lat },
       zoom: map.getZoom(),
       nativeLayers,
-      sourceId: "provider-dataset-native-indexed",
+      sourceId: "provider-dataset-native-category-general-practitioners",
       sourceFeatureCount: snapshot?.featureCount || 0,
       clinicOneCount: features.filter((feature) => String(feature.popupHtml || "").includes("CI Indexed Clinic One")).length,
       popupPreviews: features.slice(0, 20).map((feature) => String(feature.popupHtml || "").slice(0, 180)),
@@ -267,64 +266,64 @@ try {
   await page.waitForFunction(() => (window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || []).some((map) => map.getContainer().closest(".mapbox-2d-host")), null, { timeout: 20_000 });
   await page.locator(".mapbox-2d-host .mapboxgl-canvas").waitFor({ state: "visible", timeout: 15_000 });
 
-  const indexedToggle = page.getByRole("checkbox", { name: "Indexed Providers" });
-  const indexedResponsePredicate = (response) => {
+  const categoryToggle = page.getByRole("checkbox", { name: "General Practitioners" });
+  const categoryResponsePredicate = (response) => {
     try {
       const url = new URL(response.url());
-      return url.pathname === "/api/provider-layers/indexed" && response.request().method() === "GET";
+      return url.pathname === "/api/provider-category-layers/general-practitioners" && response.request().method() === "GET";
     } catch { return false; }
   };
-  const indexedResponsePromise = page.waitForResponse(indexedResponsePredicate, { timeout: 12_000 });
-  await indexedToggle.check();
-  const indexedResponse = await indexedResponsePromise;
-  assert.equal(indexedResponse.ok(), true, `Indexed Providers request failed with HTTP ${indexedResponse.status()}`);
-  const indexedPayload = await indexedResponse.json();
-  assert.equal(indexedPayload.providers?.length, 2, "Indexed Providers API must return both CI clinics");
+  const categoryResponsePromise = page.waitForResponse(categoryResponsePredicate, { timeout: 12_000 });
+  await categoryToggle.check();
+  const categoryResponse = await categoryResponsePromise;
+  assert.equal(categoryResponse.ok(), true, `General Practitioners request failed with HTTP ${categoryResponse.status()}`);
+  const categoryPayload = await categoryResponse.json();
+  assert.equal(categoryPayload.providers?.length, 2, "General Practitioners API must return both CI clinics");
 
-  const viewportRefreshPromise = page.waitForResponse(indexedResponsePredicate, { timeout: 6000 }).catch(() => null);
+  const viewportRefreshPromise = page.waitForResponse(categoryResponsePredicate, { timeout: 6000 }).catch(() => null);
   await page.evaluate(() => {
     const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
     const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
-    if (!map) throw new Error("2D Mapbox map unavailable for indexed-provider test");
+    if (!map) throw new Error("2D Mapbox map unavailable for categorized-provider test");
     map.jumpTo({ center: [0.415, 20.415], zoom: 9 });
   });
   const viewportRefresh = await viewportRefreshPromise;
   if (viewportRefresh) {
-    assert.equal(viewportRefresh.ok(), true, `Indexed viewport refresh failed with HTTP ${viewportRefresh.status()}`);
+    assert.equal(viewportRefresh.ok(), true, `Categorized provider viewport refresh failed with HTTP ${viewportRefresh.status()}`);
     const refreshPayload = await viewportRefresh.json();
-    assert.equal(refreshPayload.providers?.length, 2, "Indexed viewport refresh must keep both CI clinics");
+    assert.equal(refreshPayload.providers?.length, 2, "Categorized provider viewport refresh must keep both CI clinics");
   }
   await page.waitForFunction(() => Boolean(
-    document.querySelector('input[aria-label="Indexed Providers"]')?.checked
+    document.querySelector('input[aria-label="General Practitioners"]')?.checked
   ), null, { timeout: 15_000 });
   await waitForActiveMapIdle(page, "2d");
   await page.waitForFunction(() => {
     const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
     const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
-    const snapshot = window.__NETWORK_MAP_PROVIDER_DATASET_NATIVE__?.getSnapshot?.("indexed");
+    const snapshot = window.__NETWORK_MAP_PROVIDER_DATASET_NATIVE__?.getSnapshot?.("category-general-practitioners");
     return Boolean(
-      map?.getLayer("provider-dataset-native-indexed-points")
-      && map.getSource("provider-dataset-native-indexed")
+      map?.getLayer("provider-dataset-native-category-general-practitioners-points")
+      && map.getSource("provider-dataset-native-category-general-practitioners")
       && snapshot?.featureCount >= 2
       && snapshot.features.some((feature) => String(feature.popupHtml || "").includes("CI Indexed Clinic One"))
     );
   }, null, { timeout: 10_000 });
 
-  const beforeIndexedClick = await indexedProviderDiagnostics(page);
-  console.log("INDEXED_PROVIDER_DIAGNOSTICS_BEFORE_CLICK", JSON.stringify(beforeIndexedClick));
+  const beforeCategoryClick = await categoryProviderDiagnostics(page);
+  console.log("CATEGORY_PROVIDER_DIAGNOSTICS_BEFORE_CLICK", JSON.stringify(beforeCategoryClick));
   assert.ok(
-    beforeIndexedClick.lifecycle?.initializers?.some((initializer) => initializer.id === "provider-dataset-native-map"),
+    beforeCategoryClick.lifecycle?.initializers?.some((initializer) => initializer.id === "provider-dataset-native-map"),
     "Native provider dataset interaction owner must be registered before provider clicks",
   );
-  assert.equal(beforeIndexedClick.sourceFeatureCount, 2, "First-party indexed provider state must contain both CI clinics");
+  assert.equal(beforeCategoryClick.sourceFeatureCount, 2, "First-party categorized provider state must contain both CI clinics");
 
-  const indexedPoint = await active2dMapPoint(page, 0.4, 20.4);
-  await page.mouse.click(indexedPoint.x, indexedPoint.y);
+  const categoryPoint = await active2dMapPoint(page, 0.4, 20.4);
+  await page.mouse.click(categoryPoint.x, categoryPoint.y);
   try {
     await page.getByText("CI Indexed Clinic One").first().waitFor({ state: "visible", timeout: 8_000 });
   } catch (error) {
-    const afterIndexedClick = await indexedProviderDiagnostics(page);
-    console.error("INDEXED_PROVIDER_DIAGNOSTICS_AFTER_CLICK", JSON.stringify(afterIndexedClick));
+    const afterCategoryClick = await categoryProviderDiagnostics(page);
+    console.error("CATEGORY_PROVIDER_DIAGNOSTICS_AFTER_CLICK", JSON.stringify(afterCategoryClick));
     throw error;
   }
 
@@ -435,7 +434,7 @@ try {
   await page.waitForFunction(() => /1 facilities from OSM/i.test(document.querySelector(".live-panel.open")?.textContent || ""), null, { timeout: 15_000 });
 
   assert.deepEqual(pageErrors, [], `Mapbox native tool acceptance saw page errors: ${pageErrors.join("; ")}`);
-  console.log(`Mapbox native tool acceptance passed in ${browserName}: indexed providers, radius, 2D/3D, density, hex, provider click ownership, and OSM Live Finder.`);
+  console.log(`Mapbox native tool acceptance passed in ${browserName}: categorized providers, radius, 2D/3D, density, hex, provider click ownership, and OSM Live Finder.`);
 } catch (error) {
   await page.screenshot({ path: path.join(artifactDir, "failure.png"), fullPage: true }).catch(() => undefined);
   fs.writeFileSync(path.join(artifactDir, "error.txt"), `${error instanceof Error ? error.stack || error.message : String(error)}\n\nPage errors:\n${pageErrors.join("\n")}`);

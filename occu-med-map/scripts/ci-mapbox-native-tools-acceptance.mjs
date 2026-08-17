@@ -303,8 +303,7 @@ try {
     const map = maps.find((candidate) => candidate.getContainer().closest(".mapbox-2d-host"));
     const snapshot = window.__NETWORK_MAP_PROVIDER_DATASET_NATIVE__?.getSnapshot?.("indexed");
     return Boolean(
-      map?.isStyleLoaded()
-      && map.getLayer("provider-dataset-native-indexed-points")
+      map?.getLayer("provider-dataset-native-indexed-points")
       && map.getSource("provider-dataset-native-indexed")
       && snapshot?.featureCount >= 2
       && snapshot.features.some((feature) => String(feature.popupHtml || "").includes("CI Indexed Clinic One"))

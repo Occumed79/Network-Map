@@ -180,7 +180,7 @@ try {
   assert.ok(closeGeometry.scrollWidth <= closeGeometry.clientWidth + 2, "Explorer Close text must not wrap or overflow");
 
   const explorer = page.locator(".provider-explorer-drawer.open");
-  await explorer.getByRole("button", { name: /^Density$/ }).click();
+  await explorer.locator(".provider-visualization-grid button").filter({ hasText: /^Density$/ }).click();
   await page.waitForFunction(() => document.documentElement.dataset.providerExplorerVisualizationActive === "true");
   await page.waitForFunction(() => (window.__NETWORK_MAP_PROVIDER_EXPLORER_NATIVE__?.getSnapshot?.("aggregate")?.featureCount || 0) === 2, null, { timeout: 10_000 });
 

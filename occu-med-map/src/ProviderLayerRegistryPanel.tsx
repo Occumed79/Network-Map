@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { getActiveMapboxMap } from './dualMapEngineRuntime';
 import { fetchProviderLayer } from './providerLayerRequestRuntime';
 import { clearProviderDataset, renderProviderDataset } from './providerDatasetNativeMapRuntime';
+import { subscribeToSharedDomObserver } from './runtimeControllerRegistry';
 import {
   PROVIDER_LAYER_CATEGORIES,
   PUBLIC_HEALTH_LAYER,
@@ -143,11 +144,10 @@ export default function ProviderLayerRegistryPanel() {
       if (!disposed) setHost((current) => current === list ? current : list);
     };
     suppressLegacyControls();
-    const observer = new MutationObserver(suppressLegacyControls);
-    observer.observe(document.body, { childList: true, subtree: true });
+    const unsubscribe = subscribeToSharedDomObserver('provider-layer-registry-panel', suppressLegacyControls);
     return () => {
       disposed = true;
-      observer.disconnect();
+      unsubscribe();
       document.querySelectorAll<HTMLElement>('[data-provider-registry-suppressed="true"]').forEach((element) => {
         element.style.removeProperty('display');
         delete element.dataset.providerRegistrySuppressed;

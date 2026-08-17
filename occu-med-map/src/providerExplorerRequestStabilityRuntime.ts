@@ -17,6 +17,12 @@ type RuntimeSnapshot = {
   lastCompletedRequestId: number;
 };
 
+type ProviderExplorerIntentGlobal = typeof window & {
+  __NETWORK_MAP_PROVIDER_EXPLORER_INTENT__?: {
+    isExplicitlyActive?: () => boolean;
+  };
+};
+
 declare global {
   interface Window {
     __OCCUMED_PROVIDER_EXPLORER_STABILITY__?: RuntimeSnapshot;
@@ -64,9 +70,37 @@ function finish(record: ActiveRequest): void {
   }
 }
 
+function visualizationIsExplicitlyActive(): boolean {
+  return Boolean(
+    (window as ProviderExplorerIntentGlobal)
+      .__NETWORK_MAP_PROVIDER_EXPLORER_INTENT__
+      ?.isExplicitlyActive?.(),
+  );
+}
+
+function inactiveVisualizationResponse(channel: "aggregate" | "pins"): Response {
+  const payload = channel === "aggregate"
+    ? { cells: [], total: 0, explicitVisualizationRequired: true }
+    : { providers: [], total: 0, page: 1, hasMore: false, explicitVisualizationRequired: true };
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 registerNetworkRequestMiddleware("provider-explorer-request-stability", async (context, next) => {
   const channel = channelFor(context.input);
   if (!channel) return next();
+
+  // App.tsx historically refreshes the last Explorer visualization whenever
+  // map readiness or filters change. Treat that refresh as inert until a user
+  // explicitly selects a visualization. This prevents density/pins from
+  // fetching or reappearing on startup, after Close, or after filter changes.
+  // A real visualization-button click sets intent during capture before React
+  // performs the request, so explicitly requested rendering is unaffected.
+  if ((channel === "aggregate" || channel === "pins") && !visualizationIsExplicitlyActive()) {
+    return inactiveVisualizationResponse(channel);
+  }
 
   const previous = active.get(channel);
   if (previous && !previous.completed) {

@@ -1,7 +1,8 @@
 import mapboxgl from "mapbox-gl";
 import { getTrackedMapboxMaps, registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
 
-export type ProviderDatasetChannel = "bluehive" | "dentists" | "inventory" | "indexed" | "my-clinics" | "naccho" | "uploaded";
+/** Provider dataset channels are registry-driven; new categories do not require a runtime union edit. */
+export type ProviderDatasetChannel = string;
 
 type DatasetRenderOptions<T> = {
   baseColor: string;
@@ -40,15 +41,29 @@ type ProviderDatasetDiagnosticsGlobal = typeof globalThis & {
   };
 };
 
-const CHANNELS: ProviderDatasetChannel[] = ["bluehive", "dentists", "inventory", "indexed", "my-clinics", "naccho", "uploaded"];
+const DEFAULT_CHANNELS: ProviderDatasetChannel[] = ["bluehive", "dentists", "inventory", "indexed", "my-clinics", "naccho", "uploaded"];
+const channels = new Set<ProviderDatasetChannel>(DEFAULT_CHANNELS);
 const states = new Map<ProviderDatasetChannel, ChannelState>();
-for (const channel of CHANNELS) {
-  states.set(channel, {
+
+function emptyState(): ChannelState {
+  return {
     collection: { type: "FeatureCollection", features: [] },
     baseColor: "#0891b2",
     glow: false,
-  });
+  };
 }
+
+function stateFor(channel: ProviderDatasetChannel): ChannelState {
+  channels.add(channel);
+  let state = states.get(channel);
+  if (!state) {
+    state = emptyState();
+    states.set(channel, state);
+  }
+  return state;
+}
+
+for (const channel of DEFAULT_CHANNELS) stateFor(channel);
 
 function safeId(channel: ProviderDatasetChannel): string {
   return channel.replace(/[^a-z0-9-]/gi, "-");
@@ -102,7 +117,7 @@ function heatmapColor(baseColor: string): mapboxgl.Expression {
 }
 
 function ensureChannel(map: mapboxgl.Map, channel: ProviderDatasetChannel): void {
-  const state = states.get(channel)!;
+  const state = stateFor(channel);
   const channelIds = ids(channel);
   const existing = map.getSource(channelIds.source) as mapboxgl.GeoJSONSource | undefined;
   if (existing) existing.setData(state.collection);
@@ -145,7 +160,7 @@ function ensureChannel(map: mapboxgl.Map, channel: ProviderDatasetChannel): void
 }
 
 function updateChannel(channel: ProviderDatasetChannel): void {
-  const state = states.get(channel)!;
+  const state = stateFor(channel);
   const channelIds = ids(channel);
   for (const map of getTrackedMapboxMaps()) {
     try {
@@ -159,8 +174,7 @@ function updateChannel(channel: ProviderDatasetChannel): void {
 }
 
 function getProviderDatasetSnapshot(channel: ProviderDatasetChannel): ProviderDatasetSnapshot {
-  const state = states.get(channel);
-  const features = state?.collection.features ?? [];
+  const features = states.get(channel)?.collection.features ?? [];
   return {
     channel,
     featureCount: features.length,
@@ -199,6 +213,7 @@ export function renderProviderDataset<T>(
       },
     });
   }
+  channels.add(channel);
   states.set(channel, {
     collection: { type: "FeatureCollection", features },
     baseColor: options.baseColor,
@@ -209,7 +224,7 @@ export function renderProviderDataset<T>(
 }
 
 export function clearProviderDataset(channel: ProviderDatasetChannel): void {
-  const previous = states.get(channel)!;
+  const previous = stateFor(channel);
   states.set(channel, {
     ...previous,
     collection: { type: "FeatureCollection", features: [] },
@@ -224,7 +239,7 @@ function markHandled(originalEvent: unknown): void {
 }
 
 function renderedHit(map: mapboxgl.Map, point: mapboxgl.Point): DatasetHit | null {
-  const layers = CHANNELS.map((channel) => ids(channel).points).filter((layer) => Boolean(map.getLayer(layer)));
+  const layers = [...channels].map((channel) => ids(channel).points).filter((layer) => Boolean(map.getLayer(layer)));
   if (!layers.length) return null;
   const box: [[number, number], [number, number]] = [[point.x - 12, point.y - 12], [point.x + 12, point.y + 12]];
   try {
@@ -249,7 +264,7 @@ function renderedHit(map: mapboxgl.Map, point: mapboxgl.Point): DatasetHit | nul
 
 function stateHit(map: mapboxgl.Map, point: mapboxgl.Point, maxDistance = 16): DatasetHit | null {
   let nearest: DatasetHit | null = null;
-  for (const channel of CHANNELS) {
+  for (const channel of channels) {
     const channelIds = ids(channel);
     if (!map.getLayer(channelIds.points) || !map.getSource(channelIds.source)) continue;
     const state = states.get(channel);
@@ -281,7 +296,7 @@ registerMapboxMapInitializer({
       window.clearTimeout(styleRetryTimer);
       styleRetryTimer = 0;
       try {
-        CHANNELS.forEach((channel) => ensureChannel(map, channel));
+        [...channels].forEach((channel) => ensureChannel(map, channel));
       } catch (error) {
         console.debug("Provider dataset native map waiting for Mapbox style", error);
         styleRetryTimer = window.setTimeout(apply, 50);

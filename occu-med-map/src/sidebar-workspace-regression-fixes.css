@@ -1,0 +1,67 @@
+/* Focused regression rules layered after sidebar-workspace-final-fixes.css.
+   Geometry remains owned by the consolidated workspace stylesheet; these rules
+   only normalize text close controls and the explicit-off Explorer state. */
+
+html[data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer .provider-drawer-header .rp-close,
+html[data-occumed-workspace-ready="true"] body
+  .live-panel .rp-header .rp-close {
+  box-sizing: border-box !important;
+  display: inline-flex !important;
+  flex: 0 0 auto !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: auto !important;
+  min-width: 62px !important;
+  max-width: none !important;
+  height: 30px !important;
+  min-height: 30px !important;
+  max-height: 30px !important;
+  margin: 0 !important;
+  padding: 0 10px !important;
+  overflow: visible !important;
+  color: var(--workspace-text) !important;
+  background: var(--workspace-control-bg) !important;
+  border: 1px solid rgba(72, 139, 174, 0.5) !important;
+  border-radius: 8px !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04) !important;
+  font-size: 10px !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+  letter-spacing: .02em !important;
+  text-align: center !important;
+  text-transform: none !important;
+  white-space: nowrap !important;
+  writing-mode: horizontal-tb !important;
+  text-orientation: mixed !important;
+  cursor: pointer !important;
+  pointer-events: auto !important;
+}
+
+html[data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer .provider-drawer-header .rp-close:hover:not(:disabled),
+html[data-occumed-workspace-ready="true"] body
+  .live-panel .rp-header .rp-close:hover:not(:disabled) {
+  color: #fff !important;
+  background: var(--workspace-control-hover) !important;
+  border-color: var(--workspace-border-strong) !important;
+}
+
+/* React keeps its last visualization mode selected internally so filters can
+   refresh an explicitly chosen view. Until the user actually chooses a mode,
+   do not visually present Density as enabled. */
+html[data-provider-explorer-visualization-active="false"] body
+  .provider-explorer-drawer .provider-visualization-grid button.active {
+  color: var(--workspace-text) !important;
+  background: var(--workspace-control-bg) !important;
+  border-color: rgba(72, 139, 174, 0.46) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035) !important;
+}
+
+/* Keep action targets usable at the desktop widths shown in production.
+   Legacy button rules are allowed to style them, but not collapse them. */
+html[data-occumed-workspace-ready="true"] body
+  :is(.provider-explorer-drawer, .occumed-map-tools-panel, .live-panel)
+  button:not(.mapboxgl-ctrl button):not(:disabled) {
+  pointer-events: auto !important;
+}

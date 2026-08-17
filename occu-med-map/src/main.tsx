@@ -12,11 +12,13 @@ import "./providerLocationFinderRuntime";
 import "./providerTypeNormalizationRuntime";
 import { switchMapModeWithTransition } from "./dualMapTransitionRuntime";
 import "./providerExplorerRequestStabilityRuntime";
+import "./providerExplorerExplicitVisualizationRuntime";
 // Source selection is user-facing state, not optional telemetry. Install its
 // change listener before React mounts so a fast user toggle can never be
 // overwritten later by a lazily loaded default-selection restore.
 import "./providerSourceSelectionPersistenceRuntime";
 import App from "./App";
+import ProviderLayerRegistryPanel from "./ProviderLayerRegistryPanel";
 import AppErrorBoundary, { ApplicationFailureScreen } from "./AppErrorBoundary";
 import {
   installGlobalBootDiagnostics,
@@ -49,9 +51,11 @@ import "./sidebarWorkspacePanelGuardRuntime";
 import "./ui-system.css";
 import "./startup-hardening.css";
 // The consolidated sidebar layer intentionally loads after every synchronous
-// shell/theme stylesheet. It is the sole final owner of sidebar geometry,
-// workspace visibility, hit testing, and scrolling.
+// shell/theme stylesheet. It remains the owner of sidebar geometry, workspace
+// visibility, hit testing, and scrolling. The following regression sheet only
+// normalizes text close controls and the explicit-off Explorer presentation.
 import "./sidebar-workspace-final-fixes.css";
+import "./sidebar-workspace-regression-fixes.css";
 import "./dialogControllerRuntime";
 import "./generalUiIntegrityRuntime";
 
@@ -124,7 +128,10 @@ const phaseTwoPreview = new URLSearchParams(window.location.search).get("p2-prev
 function renderStandardApplication(): void {
   root.render(
     <AppErrorBoundary>
-      <App />
+      <>
+        <App />
+        <ProviderLayerRegistryPanel />
+      </>
     </AppErrorBoundary>,
   );
 }
@@ -153,7 +160,10 @@ async function boot(): Promise<void> {
     const { default: PhaseTwoShell } = await import("./PhaseTwoShell");
     root.render(
       <AppErrorBoundary>
-        <PhaseTwoShell><App /></PhaseTwoShell>
+        <PhaseTwoShell>
+          <App />
+          <ProviderLayerRegistryPanel />
+        </PhaseTwoShell>
       </AppErrorBoundary>,
     );
   } catch (error) {

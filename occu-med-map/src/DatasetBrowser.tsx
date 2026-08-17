@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { getProviderLayerCategory, PROVIDER_EXPLORER_SOURCE_OPTIONS, PROVIDER_LAYER_CATEGORIES } from './providerLayerRegistry';
 
 export type ProviderFeature = {
   id:string; source:string; source_kind:'stored'|'live'|'saved'|'candidate'; name:string; normalized_name?:string|null; clinic_type:string; services:string[]; categories:string[];
@@ -16,7 +17,8 @@ type ProviderExplorerResponse = { providers?:ProviderFeature[]; records?:Provide
 type ProviderExplorerStatus = { persistenceConfigured?:boolean; spatialEngine?:string; candidatePersistence?:boolean; savedPersistence?:boolean; liveAdapters?:string[]; schema?:string };
 type Props = { open:boolean; onClose:()=>void; getMapBounds?:()=>{north:number;south:number;east:number;west:number}|null; getCurrentRadius?:()=>{lat:number;lng:number;radiusMiles:number}|null; onViewOnMap?:(providers:ProviderFeature[], filters:ProviderExplorerFilters)=>void; onViewDensity?:(filters:ProviderExplorerFilters)=>void; onCompare?:(filters:ProviderExplorerFilters)=>void; onLoad?:(key:DatasetKey)=>void; sharedFilters?:ProviderExplorerFilters; onFiltersChange?:(filters:ProviderExplorerFilters)=>void; onOpenMatchingInDatabase?:(filters:ProviderExplorerFilters)=>void } & Record<string,unknown>;
 
-const SOURCE_OPTIONS = [ ['all','All'], ['bluehive','BlueHive'], ['dentists','Dentists'], ['indexed','Indexed'], ['my-clinics','My Clinics'], ['live','Live'], ['saved','Saved'], ['candidates','Candidates'] ];
+const SOURCE_OPTIONS = PROVIDER_EXPLORER_SOURCE_OPTIONS;
+const CATEGORY_OPTIONS = [['all','All provider categories'], ...PROVIDER_LAYER_CATEGORIES.map((entry)=>[entry.id,entry.label] as [string,string])] as const;
 const KIND_OPTIONS = [ ['all','All kinds'], ['stored','Stored Neon'], ['live','Live discovery'], ['saved','Saved clinics'], ['candidate','Candidates'] ];
 const SOURCE_MODE_OPTIONS = [ ['database','Database only'], ['live','Live only'], ['blended','Database + Live'], ['saved','Saved only'], ['candidate','Candidate only'] ];
 const LIMIT = 25;
@@ -25,6 +27,8 @@ const EMPTY_FILTERS: ProviderExplorerFilters = { source:'all', source_kind:'all'
 function mapsLink(provider:ProviderFeature) { const query = provider.lat != null && provider.lng != null ? `${provider.lat},${provider.lng}` : `${provider.name} ${[provider.address,provider.city,provider.admin_area,provider.country].filter(Boolean).join(', ')}`; return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`; }
 function sourceMode(filters:ProviderExplorerFilters) { if(filters.source_kind === 'live' || filters.source === 'live') return 'live'; if(filters.source_kind === 'saved' || filters.source === 'saved') return 'saved'; if(filters.source_kind === 'candidate' || filters.source === 'candidates') return 'candidate'; if(filters.includeLive) return 'blended'; return 'database'; }
 function applySourceMode(filters:ProviderExplorerFilters, mode:string):ProviderExplorerFilters { if(mode === 'live') return {...filters,source:'live',source_kind:'live',includeLive:true,includeStored:false,includeSaved:false,includeCandidates:false}; if(mode === 'blended') return {...filters,source:'all',source_kind:'all',includeLive:true,includeStored:true,includeSaved:true,includeCandidates:true}; if(mode === 'saved') return {...filters,source:'saved',source_kind:'saved',includeLive:false,includeStored:false,includeSaved:true,includeCandidates:false}; if(mode === 'candidate') return {...filters,source:'candidates',source_kind:'candidate',includeLive:false,includeStored:false,includeSaved:false,includeCandidates:true}; return {...filters,source:'all',source_kind:'all',includeLive:false,includeStored:true,includeSaved:true,includeCandidates:true}; }
+function selectedCategory(filters:ProviderExplorerFilters):string { const match=PROVIDER_LAYER_CATEGORIES.find((entry)=>entry.explorerSource ? filters.source===entry.explorerSource : entry.explorerClinicType ? filters.source==='all'&&filters.clinicType===entry.explorerClinicType : false); return match?.id || 'all'; }
+function applyCategory(filters:ProviderExplorerFilters,id:string):ProviderExplorerFilters { if(id==='all') return {...filters,source:'all',clinicType:''}; const entry=getProviderLayerCategory(id); if(!entry) return filters; return {...filters,source:entry.explorerSource||'all',clinicType:entry.explorerClinicType||'',source_kind:'all',includeStored:true,includeLive:false}; }
 
 const FACET_KEYS: Array<{key:keyof ProviderExplorerFilters; label:string}> = [
   {key:'source', label:'Source'}, {key:'source_kind', label:'Kind'}, {key:'country', label:'Country'}, {key:'admin_area', label:'Admin area'}, {key:'clinicType', label:'Clinic type'}, {key:'service', label:'Service/category'},
@@ -84,6 +88,7 @@ export default function DatasetBrowser({ open,onClose,getMapBounds,getCurrentRad
     <header className="dataset-header"><div><h2>Provider Intelligence Explorer</h2><p>Neon-backed global database + live/candidate workflow. Source mode: {sourceMode(filters)}.</p></div><button className="dataset-close" onClick={onClose}>Close</button></header>
     <div className="dataset-toolbar provider-explorer-toolbar">
       <select value={sourceMode(filters)} onChange={e=>{ updateFilters(applySourceMode(filters,e.target.value)); setPage(1); }}>{SOURCE_MODE_OPTIONS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>
+      <select aria-label="Provider category" value={selectedCategory(filters)} onChange={e=>{updateFilters(applyCategory(filters,e.target.value));setPage(1);}}>{CATEGORY_OPTIONS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>
       <select value={filters.source} onChange={e=>setFilter('source',e.target.value)}>{SOURCE_OPTIONS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>
       <select value={filters.source_kind} onChange={e=>setFilter('source_kind',e.target.value)}>{KIND_OPTIONS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>
       <input value={filters.q} onChange={e=>setFilter('q',e.target.value)} placeholder="Search name, service, city" />

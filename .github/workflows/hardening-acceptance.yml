@@ -101,6 +101,13 @@ jobs:
           NETWORK_MAP_CI_UI_URL: http://127.0.0.1:4173
         shell: bash
         run: timeout --signal=TERM --kill-after=10s 150s pnpm --filter @workspace/occu-med-map exec node scripts/ci-mapbox-native-tools-acceptance.mjs
+      - name: Run sidebar regression acceptance
+        if: matrix.route == 'standard'
+        env:
+          NETWORK_MAP_BROWSER: ${{ matrix.browser }}
+          NETWORK_MAP_CI_UI_URL: http://127.0.0.1:4173
+        shell: bash
+        run: timeout --signal=TERM --kill-after=10s 150s pnpm --filter @workspace/occu-med-map exec node scripts/ci-sidebar-regression-acceptance.mjs
       - name: Upload browser failure evidence
         if: failure()
         uses: actions/upload-artifact@v4

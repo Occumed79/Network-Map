@@ -223,7 +223,7 @@ function fitProviders(providers: ProviderFeature[]): void {
 }
 
 export function renderProviderExplorerPins(providers: ProviderFeature[], options: ProviderRenderOptions): number {
-  const drawable = providers.slice(0, 1000).map((provider) => providerFeature(provider, options, "pins")).filter(Boolean) as GeoJSON.Feature[];
+  const drawable = providers.map((provider) => providerFeature(provider, options, "pins")).filter(Boolean) as GeoJSON.Feature[];
   collections.pins = { type: "FeatureCollection", features: drawable };
   updateMaps("pins");
   if (options.fit) fitProviders(providers);
@@ -298,14 +298,14 @@ export function renderProviderExplorerLive(providers: ProviderFeature[], options
   liveProviders.clear();
   providers.forEach((provider) => liveProviders.set(String(provider.id || ""), provider));
   liveAction = options.onAction || null;
-  const features = providers.slice(0, 1000).map((provider) => providerFeature(provider, options, "live")).filter(Boolean) as GeoJSON.Feature[];
+  const features = providers.map((provider) => providerFeature(provider, options, "live")).filter(Boolean) as GeoJSON.Feature[];
   collections.live = { type: "FeatureCollection", features };
   updateMaps("live");
   return features.length;
 }
 
 export function renderProviderExplorerGaps(providers: ProviderFeature[], options: ProviderRenderOptions): number {
-  const features = providers.slice(0, 500).map((provider) => providerFeature(provider, options, "gaps")).filter(Boolean) as GeoJSON.Feature[];
+  const features = providers.map((provider) => providerFeature(provider, options, "gaps")).filter(Boolean) as GeoJSON.Feature[];
   collections.gaps = { type: "FeatureCollection", features };
   updateMaps("gaps");
   return features.length;

@@ -21,6 +21,26 @@ type ProviderExplorerHit = {
   distance: number;
 };
 
+type ProviderExplorerSnapshotFeature = {
+  geometryType: string;
+  coordinates: [number, number] | null;
+  popupHtml: string;
+  providerId: string;
+};
+
+type ProviderExplorerSnapshot = {
+  channel: Channel;
+  featureCount: number;
+  geometryTypes: string[];
+  features: ProviderExplorerSnapshotFeature[];
+};
+
+type ProviderExplorerDiagnosticsGlobal = typeof globalThis & {
+  __NETWORK_MAP_PROVIDER_EXPLORER_NATIVE__?: {
+    getSnapshot: (channel: Channel) => ProviderExplorerSnapshot;
+  };
+};
+
 const IDS = {
   pins: { source: "provider-explorer-native-pins", layer: "provider-explorer-native-pins" },
   aggregate: {
@@ -41,6 +61,27 @@ const collections: Record<Channel, GeoJSON.FeatureCollection> = {
   dots: empty(),
   live: empty(),
   gaps: empty(),
+};
+
+function getProviderExplorerSnapshot(channel: Channel): ProviderExplorerSnapshot {
+  const features = collections[channel].features;
+  return {
+    channel,
+    featureCount: features.length,
+    geometryTypes: features.map((feature) => feature.geometry.type),
+    features: features.map((feature) => ({
+      geometryType: feature.geometry.type,
+      coordinates: feature.geometry.type === "Point"
+        ? [feature.geometry.coordinates[0], feature.geometry.coordinates[1]] as [number, number]
+        : null,
+      popupHtml: String(feature.properties?.popupHtml ?? ""),
+      providerId: String(feature.properties?.providerId ?? ""),
+    })),
+  };
+}
+
+(globalThis as ProviderExplorerDiagnosticsGlobal).__NETWORK_MAP_PROVIDER_EXPLORER_NATIVE__ = {
+  getSnapshot: getProviderExplorerSnapshot,
 };
 
 let liveAction: ((provider: ProviderFeature) => void) | null = null;

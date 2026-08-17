@@ -17,6 +17,7 @@ import "./providerExplorerRequestStabilityRuntime";
 // overwritten later by a lazily loaded default-selection restore.
 import "./providerSourceSelectionPersistenceRuntime";
 import App from "./App";
+import ProviderLayerRegistryPanel from "./ProviderLayerRegistryPanel";
 import AppErrorBoundary, { ApplicationFailureScreen } from "./AppErrorBoundary";
 import {
   installGlobalBootDiagnostics,
@@ -124,7 +125,10 @@ const phaseTwoPreview = new URLSearchParams(window.location.search).get("p2-prev
 function renderStandardApplication(): void {
   root.render(
     <AppErrorBoundary>
-      <App />
+      <>
+        <App />
+        <ProviderLayerRegistryPanel />
+      </>
     </AppErrorBoundary>,
   );
 }
@@ -153,7 +157,10 @@ async function boot(): Promise<void> {
     const { default: PhaseTwoShell } = await import("./PhaseTwoShell");
     root.render(
       <AppErrorBoundary>
-        <PhaseTwoShell><App /></PhaseTwoShell>
+        <PhaseTwoShell>
+          <App />
+          <ProviderLayerRegistryPanel />
+        </PhaseTwoShell>
       </AppErrorBoundary>,
     );
   } catch (error) {

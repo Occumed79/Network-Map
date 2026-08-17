@@ -73,13 +73,29 @@ for (const [file, id, priority] of registeredInitializers) {
 }
 
 for (const file of [
-  "src/providerDatasetNativeMapRuntime.ts",
-  "src/providerExplorerNativeMapRuntime.ts",
   "src/mapToolsNativeMapRuntime.ts",
   "src/phaseTwoNativeMapRuntime.ts",
 ] as const) {
   const content = source(file);
   assert.match(content, /isStyleLoaded\(\)/, `${file} must guard native overlay installation on style readiness`);
+  assert.doesNotMatch(content, /if \(!map\.getStyle\(\)\)/, `${file} must not call getStyle as a pre-style readiness guard`);
+}
+
+for (const file of [
+  "src/providerDatasetNativeMapRuntime.ts",
+  "src/providerExplorerNativeMapRuntime.ts",
+] as const) {
+  const content = source(file);
+  assert.doesNotMatch(
+    content,
+    /if \(!map\.isStyleLoaded\(\)\)\s*(?:\{[^}]*\})?\s*return/,
+    `${file} must not short-circuit cross-browser attachment on Mapbox's style readiness flag`,
+  );
+  assert.match(content, /styleRetryTimer/, `${file} must retain an explicit style retry timer`);
+  assert.match(content, /window\.setTimeout\(apply, 50\)/, `${file} must retry native attachment after an actual Mapbox rejection`);
+  assert.match(content, /map\.on\("style\.load", apply\)/, `${file} must re-apply native layers after style reloads`);
+  assert.match(content, /map\.on\("load", apply\)/, `${file} must also re-apply native layers on the initial map load`);
+  assert.match(content, /try \{[\s\S]*ensure/, `${file} must attempt native attachment inside the retry boundary`);
   assert.doesNotMatch(content, /if \(!map\.getStyle\(\)\)/, `${file} must not call getStyle as a pre-style readiness guard`);
 }
 

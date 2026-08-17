@@ -14,14 +14,6 @@ type ProviderExplorerNativeGlobal = typeof window & {
   };
 };
 
-const VISUALIZATION_LABELS = new Set([
-  "density",
-  "hex field",
-  "8px points",
-  "density + points",
-  "dot density",
-]);
-
 let explicitlyActive = false;
 let unsubscribeDom: (() => void) | null = null;
 
@@ -72,12 +64,16 @@ function handleClick(event: MouseEvent): void {
   const drawer = button.closest<HTMLElement>(".provider-explorer-drawer");
   if (!drawer) return;
 
-  const label = visibleButtonLabel(button);
-  if (VISUALIZATION_LABELS.has(label)) {
+  // The visualization grid is the ownership boundary. Do not depend on button
+  // text or accessible-name composition here: Safari/WebKit and browser tests
+  // can produce different text/aria combinations, but a click inside this grid
+  // always means the user explicitly asked to render one visualization mode.
+  if (button.closest(".provider-visualization-grid")) {
     setIntent(true);
     return;
   }
 
+  const label = visibleButtonLabel(button);
   if (button.getAttribute("aria-label") === "Close Provider Explorer" || label === "clear filters") {
     reset();
   }

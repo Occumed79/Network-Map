@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import L from 'leaflet';
+import { initializeDualMapEngines, cleanupDualMapEngines, getActiveMapboxMap } from './dualMapEngineRuntime';
 import * as topojson from 'topojson-client';
 import * as XLSX from 'xlsx';
 import {
@@ -44,12 +44,41 @@ import { fetchMapInventory, type MapInventoryProvider } from './features/provide
 import { DriveTimeControlStrip } from './features/driveTime/DriveTimeControlStrip';
 import { ProviderEtaBadge } from './features/driveTime/ProviderEtaBadge';
 import { requestEtaRoute } from './features/driveTime/etaRouteEvents';
-import { liveResultsToEtaCandidates } from './features/driveTime/leafletProviderAdapter';
+import { liveResultsToEtaCandidates } from './features/driveTime/mapSceneProviderAdapter';
 import { useProviderEta } from './features/driveTime/useProviderEta';
 import './features/driveTime/driveTimeControls.css';
 import './features/driveTime/driveTimeBadge.css';
 import DatasetBrowser, { filterSummary, type DatasetKey, type DatasetLoadState, type ProviderFeature, type ProviderExplorerFilters } from './DatasetBrowser';
 import { fetchProviderLayer } from './providerLayerRequestRuntime';
+import {
+  clearProviderExplorerNative,
+  renderProviderExplorerPins,
+  renderProviderExplorerDensity,
+  renderProviderExplorerDotDensity,
+  renderProviderExplorerLive,
+  renderProviderExplorerGaps,
+} from './providerExplorerNativeMapRuntime';
+import {
+  clearLiveFinderSearchOverlay,
+  flyToNativeLivePoint,
+  renderNativeLivePoints,
+  setLiveFinderSearchOverlay,
+  setRadiusExtractorOverlay,
+  setReferenceRadiusOverlay,
+  type NativeLivePoint,
+} from './liveFinderNativeMapRuntime';
+import {
+  clearProviderDataset,
+  renderProviderDataset,
+} from './providerDatasetNativeMapRuntime';
+import {
+  clearNativeDiagnosticChannel,
+  flyNativeMap,
+  openNativeMapPopup,
+  renderSavedRadiusOverlays,
+  setNativeAddressPin,
+  setNativeDiagnosticCollection,
+} from './usDiagnosticsNativeMapRuntime';
 
 const NATIVE_DRIVE_TIME_ENABLED = import.meta.env.VITE_NATIVE_DRIVE_TIME === 'true';
 
@@ -671,91 +700,6 @@ function providerCategoryStyle(provider:any) {
 // Provider sources stay visually distinct without collapsing into numbered
 // clusters. Every viewport gets a soft, non-interactive density field beneath
 // the individual 8px points; popups remain attached to the real provider point.
-interface ProviderFieldRendererOptions {
-  color: string;
-  glow: boolean;
-  cellPx?: number;
-  badgeLabel: string;
-  buildPopup: (p: any) => string;
-  getStyle?: (p: any) => { key: ProviderCategoryKey; label: string; color: string };
-}
-
-function createProviderFieldLayer(
-  map: L.Map,
-  points: any[],
-  opts: ProviderFieldRendererOptions,
-): { group: L.LayerGroup; destroy: () => void } {
-  // Build the provider geometry before attaching the root so the first
-  // Mapbox GeoJSON source is never born empty. Provider API requests are already
-  // viewport-bounded, so the returned records are the authoritative render set.
-  const group = L.layerGroup();
-  const cellPx = opts.cellPx ?? 54;
-  const valid = points.filter(p => p && p.lat != null && p.lng != null && isValidCoord(p.lat, p.lng));
-
-  function styleFor(p: any) { return opts.getStyle?.(p) || { key: 'unknown' as ProviderCategoryKey, label: opts.badgeLabel, color: opts.color }; }
-
-  function render() {
-    group.clearLayers();
-    if (!valid.length) return;
-    const zoom = map.getZoom();
-    // Do not re-filter API-bounded providers through the temporary Leaflet-shaped
-    // camera facade. That second viewport gate could disagree with the native
-    // Mapbox camera and silently erase otherwise valid provider points.
-    const visible = valid;
-
-    const cells = new Map<string, { sx: number; sy: number; count: number; colors: string[] }>();
-    for (const p of visible) {
-      const pt = map.project([p.lat, p.lng] as L.LatLngTuple, zoom);
-      const key = `${Math.floor(pt.x / cellPx)}:${Math.floor(pt.y / cellPx)}`;
-      const c = cells.get(key);
-      const style = styleFor(p);
-      if (c) { c.sx += pt.x; c.sy += pt.y; c.count++; c.colors.push(style.color); }
-      else cells.set(key, { sx: pt.x, sy: pt.y, count: 1, colors: [style.color] });
-    }
-
-    cells.forEach(c => {
-      const center = map.unproject([c.sx / c.count, c.sy / c.count] as L.PointTuple, zoom);
-      const intensity = Math.min(1, Math.log2(c.count + 1) / 5);
-      const dominantColor = c.colors[0] || opts.color;
-      group.addLayer(L.circleMarker(center, {
-        radius: 10 + intensity * 30,
-        stroke: false,
-        fillColor: dominantColor,
-        fillOpacity: 0.055 + intensity * (opts.glow ? 0.18 : 0.1),
-        interactive: false,
-        className: 'provider-density-field',
-      }));
-    });
-
-    for (const p of visible) {
-      const style = styleFor(p);
-      const point = L.circleMarker([p.lat, p.lng], {
-        radius: 4,
-        color: 'rgba(255,255,255,.94)',
-        weight: 1,
-        fillColor: style.color,
-        fillOpacity: 0.9,
-        opacity: 0.96,
-        className: opts.glow ? 'provider-point provider-point-glow' : 'provider-point',
-      });
-      point.bindTooltip(style.label, { direction:'top', offset:[0,-5], opacity:0.9 });
-      point.bindPopup(opts.buildPopup(p));
-      group.addLayer(point);
-    }
-  }
-
-  render();
-  group.addTo(map);
-  map.on('moveend zoomend', render);
-  return {
-    group,
-    destroy() {
-      map.off('moveend zoomend', render);
-      try { map.removeLayer(group); } catch { /* noop */ }
-    },
-  };
-}
-
 function classifyFacility(tags:any):string {
   const a=(tags.amenity||'').toLowerCase(),h=(tags.healthcare||'').toLowerCase(),
     n=(tags.name||'').toLowerCase(),o=(tags.office||'').toLowerCase(),
@@ -1175,24 +1119,7 @@ const MapToolsWorkspaceHost = React.memo(React.forwardRef<HTMLDivElement>(functi
 }));
 
 export default function App() {
-  const mapRef = useRef<L.Map|null>(null);
   const mapDivRef = useRef<HTMLDivElement>(null);
-  const stateGeoRef = useRef<L.GeoJSON|null>(null);
-  const cityLayerRef = useRef<L.LayerGroup|null>(null);
-  const customPinRef = useRef<L.Marker|null>(null);
-  const radiusCircleRef = useRef<any>(null);
-  const tzLayerRef = useRef<L.LayerGroup|null>(null);
-  const liveGrpRef = useRef<L.LayerGroup|null>(null);
-  const liveCircleRef = useRef<L.Circle|null>(null);
-  const livePinRef = useRef<L.Marker|null>(null);
-  const dropCircleRef = useRef<L.Circle|null>(null);
-  const dropPinRef = useRef<L.Marker|null>(null);
-  const popDensityLayerRef = useRef<L.LayerGroup|null>(null);
-  const clinicLayerRef = useRef<L.LayerGroup|null>(null);
-  const blueHiveLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
-  const indexedProviderLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
-  const myClinicsLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
-  const savedRadiusLayerRef = useRef<L.LayerGroup|null>(null);
   const rawStateFeaturesRef = useRef<any[]>([]);
   const clinicFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1306,7 +1233,6 @@ export default function App() {
   const [pendingMarkerLabel, setPendingMarkerLabel] = useState('');
   const [pendingMarkerColor, setPendingMarkerColor] = useState('#ef4444');
   const [multiDropMode, setMultiDropMode] = useState(false);
-  const multiDropLayerRef = useRef<L.LayerGroup|null>(null);
   const [showGlowPoints, setShowGlowPoints] = useState(false);
   const [showBlueHive, setShowBlueHive] = useState(false);
   const [blueHiveData, setBlueHiveData] = useState<any[]>([]);
@@ -1314,12 +1240,10 @@ export default function App() {
   const [inventoryLoading, setInventoryLoading] = useState(false);
   const [inventoryError, setInventoryError] = useState('');
   const [serviceInventoryEnabled, setServiceInventoryEnabled] = useState(false);
-  const inventoryLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
   const inventoryFetchRef = useRef<AbortController|null>(null);
   const [showIndexedProviders, setShowIndexedProviders] = useState(false);
   const [showDentists, setShowDentists] = useState(false);
   const [dentistData, setDentistData] = useState<any[]>([]);
-  const dentistLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
   const [showMyClinicsLayer, setShowMyClinicsLayer] = useState(false);
   const [myClinicsData, setMyClinicsData] = useState<any[]>([]);
   // NACCHO Local Health Department layer — Issue #37
@@ -1327,7 +1251,6 @@ export default function App() {
   const [nacchoData, setNacchoData] = useState<any[]>([]);
   const [nacchoLoading, setNacchoLoading] = useState(false);
   const [nacchoError, setNacchoError] = useState('');
-  const nacchoLayerRef = useRef<ReturnType<typeof createProviderFieldLayer>|null>(null);
   const nacchoFetchRef = useRef<AbortController|null>(null);
   const [showDatasetBrowser, setShowDatasetBrowser] = useState(false);
   const [showProviderExplorerDrawer, setShowProviderExplorerDrawer] = useState(false);
@@ -1347,10 +1270,6 @@ export default function App() {
       myClinics: showMyClinicsLayer,
     };
   }, [showIndexedProviders, showBlueHive, showDentists, showMyClinicsLayer]);
-  const providerExplorerLayerRef = useRef<L.LayerGroup | null>(null);
-  const providerExplorerDensityLayerRef = useRef<L.LayerGroup | null>(null);
-  const providerExplorerLiveLayerRef = useRef<L.LayerGroup | null>(null);
-  const providerExplorerGapLayerRef = useRef<L.LayerGroup | null>(null);
   const providerExplorerRenderGenerationRef = useRef(0);
   const providerExplorerModeRef = useRef<ProviderExplorerMode>('density');
   const [providerExplorerFilters, setProviderExplorerFilters] = useState<ProviderExplorerFilters>(INITIAL_PROVIDER_EXPLORER_FILTERS);
@@ -1522,37 +1441,11 @@ export default function App() {
   }
 
   function clearDropRadius() {
-    const map = mapRef.current;
-    if (!map) return;
-    if (dropCircleRef.current) { try { map.removeLayer(dropCircleRef.current); } catch {} dropCircleRef.current = null; }
-    if (dropPinRef.current) { try { map.removeLayer(dropPinRef.current); } catch {} dropPinRef.current = null; }
+    setRadiusExtractorOverlay(null, dropRadiusMilesRef.current);
   }
 
   function drawDropRadius(lat:number,lng:number,radiusMiles:number) {
-    const map = mapRef.current;
-    if (!map) return;
-    if (dropCircleRef.current) { try { map.removeLayer(dropCircleRef.current); } catch {} }
-    if (dropPinRef.current) { try { map.removeLayer(dropPinRef.current); } catch {} }
-    const meters = Math.max(radiusMiles, 0.1) * 1609.34;
-    dropCircleRef.current = L.circle([lat, lng], {
-      radius: meters,
-      color: '#ef4444',
-      weight: 2,
-      opacity: 0.95,
-      fillColor: '#ef4444',
-      fillOpacity: 0.1,
-      className: 'drop-radius-ring',
-    }).addTo(map);
-    dropPinRef.current = L.marker([lat,lng], {
-      icon: L.divIcon({
-        className: '',
-        html: '<div style="width:14px;height:14px;border-radius:50%;background:#ef4444;border:2px solid #fff;box-shadow:0 0 0 4px rgba(239,68,68,0.26),0 0 16px rgba(239,68,68,0.72);"></div>',
-        iconSize:[14,14],
-        iconAnchor:[7,7],
-      }),
-      zIndexOffset: 3500,
-      interactive: false,
-    }).addTo(map);
+    setRadiusExtractorOverlay({lat,lng}, radiusMiles);
   }
 
   function saveCurrentRadius(label?:string, color?:string) {
@@ -1665,33 +1558,19 @@ export default function App() {
 
   // ── Init Map ───────────────────────────────────────────────────────────────
   useEffect(()=>{
-    if(mapRef.current||!mapDivRef.current) return;
-    const map = L.map(mapDivRef.current, {
-      center:[20,0],zoom:2,zoomControl:true,
-      preferCanvas:true,
-      attributionControl:false,
-    });
-    map.doubleClickZoom.disable();
-    mapRef.current = map;
+    if(!mapDivRef.current || getActiveMapboxMap()) return;
+    let disposed = false;
 
-    // This logical map object is supplied by the temporary Mapbox-native
-    // compatibility facade. No Leaflet renderer is created; both visible 2D and
-    // 3D surfaces are owned by Mapbox GL.
+    void initializeDualMapEngines(mapDivRef.current, { center:[0,20], zoom:2 })
+      .then(()=>{ if(!disposed) setMapReady(true); })
+      .catch((error)=>{
+        console.error('Native Mapbox initialization failed', error);
+        if(!disposed) setMapReady(false);
+      });
 
-    // City layer
-    const cityLayer = L.layerGroup().addTo(map);
-    cityLayerRef.current = cityLayer;
+    // Load U.S. diagnostic GeoJSON only if the diagnostics workspace is enabled.
+    if (showUsDiagnostics) void loadStateGeo();
 
-    // Live layer
-    const liveGrp = L.layerGroup().addTo(map);
-    liveGrpRef.current = liveGrp;
-
-    // Load GeoJSON only if US Diagnostics is already enabled
-    if (showUsDiagnostics) loadStateGeo(map);
-
-    // User-facing map tools consume Mapbox-native input directly. The temporary
-    // Leaflet-shaped facade remains only for legacy geometry/control APIs; Radius,
-    // Coverage, and Live Finder no longer depend on its event bus.
     const onNativeMapClick = (rawEvent: Event) => {
       const detail = (rawEvent as CustomEvent<{ lat:number; lng:number; originalEvent?: Event }>).detail;
       if (!detail) return;
@@ -1727,30 +1606,21 @@ export default function App() {
     window.addEventListener('network-map:native-click', onNativeMapClick);
     window.addEventListener('network-map:native-dblclick', onNativeMapDoubleClick);
 
-    setMapReady(true);
-
-    // Use ResizeObserver to keep map size in sync with container dimensions
-    const resizeObserver = new ResizeObserver(() => {
-      map.invalidateSize();
-    });
-    resizeObserver.observe(mapDivRef.current);
-
     return ()=>{
+      disposed = true;
       window.removeEventListener('network-map:native-click', onNativeMapClick);
       window.removeEventListener('network-map:native-dblclick', onNativeMapDoubleClick);
-      resizeObserver.disconnect();
-      map.remove();
-      mapRef.current=null;
-      cityLayerRef.current=null;
+      cleanupDualMapEngines();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
 
   const getProviderExplorerBounds = useCallback(() => {
-    const map = mapRef.current;
+    const map = getActiveMapboxMap();
     if(!map) return null;
     const bounds = map.getBounds();
+    if(!bounds) return null;
     return { north: bounds.getNorth(), south: bounds.getSouth(), east: bounds.getEast(), west: bounds.getWest() };
   },[]);
 
@@ -1766,110 +1636,32 @@ export default function App() {
   },[getProviderExplorerBounds]);
 
   const clearProviderExplorerMap = useCallback(() => {
-    // Invalidate every in-flight map render before clearing so a stale response
-    // can never repopulate or replace a newer/cleared Explorer visualization.
     providerExplorerRenderGenerationRef.current += 1;
-    providerExplorerLayerRef.current?.remove();
-    providerExplorerLayerRef.current = null;
-    providerExplorerDensityLayerRef.current?.clearLayers();
-    providerExplorerLiveLayerRef.current?.clearLayers();
-    providerExplorerGapLayerRef.current?.clearLayers();
+    clearProviderExplorerNative();
   },[]);
 
   const drawProviderPins = useCallback((providers: ProviderFeature[], fit = false) => {
-    const map = mapRef.current;
-    if(!map) return 0;
-    // Provider Explorer owns a dynamic Mapbox compatibility root. Rebuild that
-    // root off-map so its first GeoJSON payload already contains the provider
-    // features and popup metadata. Mutating an already-attached empty root can
-    // leave the native source empty across browser engines.
-    providerExplorerLayerRef.current?.remove();
-    const layer = L.layerGroup();
-    const drawable = providers.filter((provider): provider is ProviderFeature & {lat:number; lng:number} => typeof provider.lat === 'number' && typeof provider.lng === 'number');
-    drawable.slice(0,1000).forEach(provider=>{
-      const style = providerCategoryStyle(provider);
-      const location = [provider.address,provider.city,provider.admin_area,provider.country].filter(Boolean).join(', ');
-      L.circleMarker([provider.lat, provider.lng], { radius: 4, color: '#ffffff', weight: 1, fillColor: style.color, fillOpacity: 0.92, opacity: 0.95, className:'provider-point provider-point-glow' })
-        .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>${escapeHtml(provider.source)} · ${escapeHtml(provider.source_kind)}<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/>${escapeHtml(location)}${provider.website ? `<br/><a href="${escapeHtml(provider.website)}" target="_blank" rel="noreferrer">Website</a>` : ''}`)
-        .addTo(layer);
+    return renderProviderExplorerPins(providers, {
+      fit,
+      color: (provider) => providerCategoryStyle(provider).color,
+      popupHtml: (provider) => {
+        const style = providerCategoryStyle(provider);
+        const location = [provider.address,provider.city,provider.admin_area,provider.country].filter(Boolean).join(', ');
+        return `<strong>${escapeHtml(provider.name)}</strong><br/>${escapeHtml(provider.source)} · ${escapeHtml(provider.source_kind)}<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/>${escapeHtml(location)}${provider.website ? `<br/><a href="${escapeHtml(provider.website)}" target="_blank" rel="noreferrer">Website</a>` : ''}`;
+      },
     });
-    layer.addTo(map);
-    providerExplorerLayerRef.current = layer;
-    if(fit && drawable.length) map.fitBounds(L.latLngBounds(drawable.map(provider=>[provider.lat,provider.lng] as [number,number])), { padding:[28,28], maxZoom: 11 });
-    return Math.min(drawable.length,1000);
   },[]);
 
   const drawProviderDensity = useCallback((cells: ProviderDensityCell[], mode: 'density'|'hex') => {
-    const map = mapRef.current;
-    if(!map) return 0;
-    if(!providerExplorerDensityLayerRef.current) providerExplorerDensityLayerRef.current = L.layerGroup().addTo(map);
-    const layer = providerExplorerDensityLayerRef.current;
-    layer.clearLayers();
-    const max = Math.max(1,...cells.map(cell=>Number(cell.count)||0));
-    cells.forEach(cell=>{
-      const count = Number(cell.count) || 0;
-      const intensity = Math.max(0.18, Math.log(count + 1) / Math.log(max + 1));
-      const color = mode === 'hex' ? '#7c3aed' : '#0891b2';
-      const pixelRadius = 10 + intensity * (mode === 'hex' ? 24 : 38);
-      const field = mode === 'hex'
-        ? L.polygon(Array.from({length:6},(_,index)=>{
-            const center = map.project([cell.lat,cell.lng],map.getZoom());
-            const angle = (Math.PI / 3) * index - Math.PI / 6;
-            return map.unproject([center.x + Math.cos(angle) * pixelRadius,center.y + Math.sin(angle) * pixelRadius],map.getZoom());
-          }), {
-            color,
-            weight:1.25,
-            fillColor:color,
-            fillOpacity:Math.min(0.3,0.07 + intensity * 0.2),
-            opacity:0.42,
-            className:'provider-density-field provider-hex-field',
-          })
-        : L.circleMarker([cell.lat, cell.lng], {
-            radius: pixelRadius,
-            color,
-            weight:0,
-            fillColor:color,
-            fillOpacity:Math.min(0.36,0.08 + intensity * 0.24),
-            opacity:0.48,
-            className:'provider-density-field',
-          });
-      field.bindTooltip(`${count.toLocaleString()} matching providers`, { direction:'top', opacity:0.92 });
-      field.addTo(layer);
-    });
-    return cells.length;
+    return renderProviderExplorerDensity(cells, mode);
   },[]);
 
   const drawProviderDotDensity = useCallback((cells: ProviderDensityCell[]) => {
-    const map = mapRef.current;
-    if(!map) return 0;
-    if(!providerExplorerDensityLayerRef.current) providerExplorerDensityLayerRef.current = L.layerGroup().addTo(map);
-    const layer = providerExplorerDensityLayerRef.current;
-    layer.clearLayers();
-    let rendered = 0;
-    cells.forEach((cell,cellIndex)=>{
-      const count = Math.max(1,Number(cell.count)||1);
-      const dotCount = Math.min(14,Math.max(1,Math.ceil(Math.log2(count + 1))));
-      const center = map.project([cell.lat,cell.lng],map.getZoom());
-      for(let index=0;index<dotCount;index++) {
-        const angle = (cellIndex * 0.73) + index * 2.399963;
-        const distance = 3 + Math.sqrt(index + 1) * 4;
-        const point = map.unproject([center.x + Math.cos(angle) * distance,center.y + Math.sin(angle) * distance],map.getZoom());
-        L.circleMarker(point, {
-          radius:2.25,
-          stroke:false,
-          fillColor:'#087f9a',
-          fillOpacity:0.54,
-          interactive:false,
-          className:'provider-dot-density-point',
-        }).addTo(layer);
-        rendered++;
-      }
-    });
-    return rendered;
+    return renderProviderExplorerDotDensity(cells);
   },[]);
 
   const renderProviderExplorerMap = useCallback(async (mode: ProviderExplorerMode = providerExplorerModeRef.current, filters: ProviderExplorerFilters = providerExplorerFilters) => {
-    const map = mapRef.current;
+    const map = getActiveMapboxMap();
     if(!map) return;
     const generation = ++providerExplorerRenderGenerationRef.current;
     providerExplorerModeRef.current = mode;
@@ -1878,12 +1670,9 @@ export default function App() {
     // A new density-only visualization can hide old pins immediately. A pin
     // refresh keeps the last good provider root visible until its replacement
     // payload is ready, eliminating the empty-source window during fetches.
-    if(mode !== 'pins' && mode !== 'density-pins') {
-      providerExplorerLayerRef.current?.remove();
-      providerExplorerLayerRef.current = null;
-    }
+    if(mode !== 'pins' && mode !== 'density-pins') clearProviderExplorerNative(['pins']);
     if(mode !== 'density' && mode !== 'hex' && mode !== 'density-pins' && mode !== 'dot-density') {
-      providerExplorerDensityLayerRef.current?.clearLayers();
+      clearProviderExplorerNative(['aggregate','dots']);
     }
 
     const isCurrent = () => generation === providerExplorerRenderGenerationRef.current;
@@ -2000,47 +1789,39 @@ export default function App() {
   }
 
   const renderProviderExplorerLiveLayer = useCallback(async () => {
-    const map = mapRef.current;
-    if(!map) return;
-    if(!providerExplorerLiveLayerRef.current) providerExplorerLiveLayerRef.current = L.layerGroup().addTo(map);
-    const layer = providerExplorerLiveLayerRef.current;
-    layer.clearLayers();
-    if(!providerExplorerLiveEnabled) return;
+    if(!providerExplorerLiveEnabled) {
+      clearProviderExplorerNative(['live']);
+      return;
+    }
     let providers = mapLiveResultsAsProviderFeatures();
-    try { const resp = await fetch(`/api/provider-explorer/live?${providerExplorerParams({...providerExplorerFilters, includeLive:true}, 'live')}`); const data = await resp.json(); if(Array.isArray(data.providers) && data.providers.length) providers = data.providers as ProviderFeature[]; } catch {}
-    providers.filter((provider): provider is ProviderFeature & {lat:number; lng:number}=>typeof provider.lat === 'number' && typeof provider.lng === 'number').slice(0,1000).forEach(provider=>{
-      const style = providerCategoryStyle(provider);
-      const marker = L.circleMarker([provider.lat, provider.lng], { radius:4, color:'#ffffff', weight:1, fillColor:style.color, fillOpacity:.92, opacity:.95, className:'provider-point provider-point-glow' })
-        .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>Live discovery · not stored<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/><button class="provider-popup-save" data-provider-id="${escapeHtml(provider.id)}">Save candidate</button>`)
-        .addTo(layer);
-      marker.on('popupopen', () => {
-        const button = marker.getPopup()?.getElement()?.querySelector<HTMLButtonElement>('.provider-popup-save');
-        button?.addEventListener('click', event => {
-          event.preventDefault();
-          void saveProviderExplorerCandidate(provider);
-          marker.closePopup();
-        }, { once:true });
-      });
+    try {
+      const resp = await fetch(`/api/provider-explorer/live?${providerExplorerParams({...providerExplorerFilters, includeLive:true}, 'live')}`);
+      const data = await resp.json();
+      if(Array.isArray(data.providers) && data.providers.length) providers = data.providers as ProviderFeature[];
+    } catch {}
+    const rendered = renderProviderExplorerLive(providers, {
+      color: (provider) => providerCategoryStyle(provider).color,
+      popupHtml: (provider) => {
+        const style = providerCategoryStyle(provider);
+        return `<strong>${escapeHtml(provider.name)}</strong><br/>Live discovery · not stored<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/><button class="provider-popup-save" data-provider-id="${escapeHtml(provider.id)}">Save candidate</button>`;
+      },
+      onAction: (provider) => { void saveProviderExplorerCandidate(provider); },
     });
-    setProviderExplorerStatus(prev=>`${prev} · live layer: ${providers.length.toLocaleString()} not-stored results`);
+    setProviderExplorerStatus(prev=>`${prev} · live layer: ${rendered.toLocaleString()} not-stored results`);
   },[mapLiveResultsAsProviderFeatures, providerExplorerLiveEnabled, providerExplorerFilters, providerExplorerParams]);
 
 
   const compareProviderExplorerArea = useCallback(async (filters: ProviderExplorerFilters = providerExplorerFilters) => {
-    const map = mapRef.current;
-    if(!map) return;
-    if(!providerExplorerGapLayerRef.current) providerExplorerGapLayerRef.current = L.layerGroup().addTo(map);
-    const layer = providerExplorerGapLayerRef.current;
-    layer.clearLayers();
     try {
       const resp = await fetch(`/api/provider-explorer/compare?${providerExplorerParams({...filters, includeLive:true}, 'compare')}`);
       const data = await resp.json();
       const liveOnly = Array.isArray(data.live_only) ? data.live_only as ProviderFeature[] : [];
-      liveOnly.filter((provider): provider is ProviderFeature & {lat:number; lng:number}=>typeof provider.lat === 'number' && typeof provider.lng === 'number').slice(0,500).forEach(provider=>{
-        const style = providerCategoryStyle(provider);
-        L.circleMarker([provider.lat, provider.lng], { radius:4, color:'#ffffff', weight:1, fillColor:style.color, fillOpacity:.9, opacity:.98, className:'provider-point provider-point-gap' })
-          .bindPopup(`<strong>${escapeHtml(provider.name)}</strong><br/>Live-only gap<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/>${escapeHtml(provider.match_reason || '')}`)
-          .addTo(layer);
+      renderProviderExplorerGaps(liveOnly, {
+        color: (provider) => providerCategoryStyle(provider).color,
+        popupHtml: (provider) => {
+          const style = providerCategoryStyle(provider);
+          return `<strong>${escapeHtml(provider.name)}</strong><br/>Live-only gap<br/>${escapeHtml(style.label)} · ${escapeHtml(provider.clinic_type)}<br/>${escapeHtml(provider.match_reason || '')}`;
+        },
       });
       setProviderExplorerStatus(`compare · stored ${Number(data.stored_count||0).toLocaleString()} · live ${Number(data.live_count||0).toLocaleString()} · live-only gaps ${liveOnly.length.toLocaleString()}`);
     } catch(error) {
@@ -2061,13 +1842,15 @@ export default function App() {
       try {
         const params = new URLSearchParams({limit:'1000',page:'1'});
         if(key==='myClinics' && masterProviderTypeFilter) params.set('clinic_type', masterProviderTypeFilter);
-        const map = mapRef.current;
+        const map = getActiveMapboxMap();
         if(map) {
           const bounds = map.getBounds();
-          params.set('north',String(bounds.getNorth()));
-          params.set('south',String(bounds.getSouth()));
-          params.set('east',String(bounds.getEast()));
-          params.set('west',String(bounds.getWest()));
+          if(bounds) {
+            params.set('north',String(bounds.getNorth()));
+            params.set('south',String(bounds.getSouth()));
+            params.set('east',String(bounds.getEast()));
+            params.set('west',String(bounds.getWest()));
+          }
         }
         const response = await fetchProviderLayer(`/api/provider-layers/${sourceByKey[key]}?${params.toString()}`);
         const data = await response.json().catch(()=>null);
@@ -2100,8 +1883,7 @@ export default function App() {
   },[masterProviderTypeFilter]);
 
   useEffect(()=>{
-    const map = mapRef.current;
-    if(!map || !mapReady) return;
+    if(!mapReady) return;
     let moveTimer: ReturnType<typeof setTimeout>|null = null;
     let startupTimers: ReturnType<typeof setTimeout>[] = [];
 
@@ -2132,11 +1914,11 @@ export default function App() {
       startupTimers.push(setTimeout(()=>{ void loadProviderDataset(key); }, index * STAGGER_MS));
     });
 
-    map.on('moveend', refreshOnMove);
+    window.addEventListener('network-map:native-camera', refreshOnMove);
     return ()=>{
       if(moveTimer) clearTimeout(moveTimer);
       startupTimers.forEach(clearTimeout);
-      map.off('moveend', refreshOnMove);
+      window.removeEventListener('network-map:native-camera', refreshOnMove);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[mapReady]);
@@ -2150,15 +1932,16 @@ export default function App() {
 
   // ── Map Inventory: load indexed providers from Neon on map load + pan/zoom ──
   useEffect(()=>{
-    const map = mapRef.current;
-    if (!map || !mapReady || !serviceInventoryEnabled) return;
+    if (!mapReady || !serviceInventoryEnabled) return;
 
     let debounceTimer: ReturnType<typeof setTimeout>|null = null;
 
     function loadInventory(){
       if(debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(()=>{
-        const bounds = map!.getBounds();
+        const activeMap = getActiveMapboxMap();
+        const bounds = activeMap?.getBounds();
+        if(!bounds) return;
         if(inventoryFetchRef.current) inventoryFetchRef.current.abort();
         const ac = new AbortController();
         inventoryFetchRef.current = ac;
@@ -2191,92 +1974,83 @@ export default function App() {
     loadInventory();
 
     // Reload on pan/zoom
-    map.on('moveend', loadInventory);
+    window.addEventListener('network-map:native-camera', loadInventory);
 
     return ()=>{
-      map.off('moveend', loadInventory);
+      window.removeEventListener('network-map:native-camera', loadInventory);
       if(debounceTimer) clearTimeout(debounceTimer);
       if(inventoryFetchRef.current) inventoryFetchRef.current.abort();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[mapReady, metric, serviceInventoryEnabled]);
 
-  // ── NACCHO LHD layer: load + render on map bounds change ─────────────────
+  // ── NACCHO LHD layer: native Mapbox source + heatmap ───────────────────────
   useEffect(()=>{
-    const map = mapRef.current;
-    if (!map || !mapReady) return;
-    if (!showNacchoLayer) {
-      // Clear the layer when disabled
-      if (nacchoLayerRef.current) { nacchoLayerRef.current.destroy(); nacchoLayerRef.current = null; }
+    if(!mapReady) return;
+    if(!showNacchoLayer) {
+      clearProviderDataset('naccho');
       nacchoFetchRef.current?.abort();
-      nacchoFetchRef.current = null;
+      nacchoFetchRef.current=null;
       return;
     }
-    let timer: ReturnType<typeof setTimeout>|null = null;
-    const reload = () => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(async ()=>{
+    let timer:ReturnType<typeof setTimeout>|null=null;
+    const reload=()=>{
+      if(timer) clearTimeout(timer);
+      timer=setTimeout(async()=>{
         nacchoFetchRef.current?.abort();
-        const ac = new AbortController();
-        nacchoFetchRef.current = ac;
+        const ac=new AbortController();
+        nacchoFetchRef.current=ac;
         setNacchoLoading(true);
         setNacchoError('');
         try {
-          const bounds = map.getBounds();
-          const params = new URLSearchParams({
-            useBounds: 'true',
-            north: String(bounds.getNorth()),
-            south: String(bounds.getSouth()),
-            east: String(bounds.getEast()),
-            west: String(bounds.getWest()),
-            limit: '1000',
+          const activeMap=getActiveMapboxMap();
+          const bounds=activeMap?.getBounds();
+          if(!bounds) return;
+          const params=new URLSearchParams({
+            useBounds:'true',
+            north:String(bounds.getNorth()),south:String(bounds.getSouth()),
+            east:String(bounds.getEast()),west:String(bounds.getWest()),limit:'1000',
           });
-          const resp = await fetch(`/api/naccho-lhd?${params}`, { signal: ac.signal });
-          if (ac.signal.aborted) return;
-          const data = await resp.json().catch(()=>({providers:[]}));
-          if (ac.signal.aborted) return;
-          const providers = Array.isArray(data.providers) ? data.providers : [];
+          const resp=await fetch(`/api/naccho-lhd?${params}`,{signal:ac.signal});
+          if(ac.signal.aborted) return;
+          const data=await resp.json().catch(()=>({providers:[]}));
+          if(ac.signal.aborted) return;
+          const providers=Array.isArray(data.providers)?data.providers:[];
           setNacchoData(providers);
-          // Render on map
-          if (nacchoLayerRef.current) { nacchoLayerRef.current.destroy(); nacchoLayerRef.current = null; }
-          nacchoLayerRef.current = createProviderFieldLayer(map, providers, {
-            color: '#34d399',
-            glow: false,
-            cellPx: 52,
-            badgeLabel: 'Local Health Dept',
-            buildPopup: (p:any) => {
-              const services = Array.isArray(p.public_health_services) ? p.public_health_services : (p.services || []);
-              const svcHtml = services.length ? `<div style="font-size:9px;color:#6ee7b7;margin-top:4px;">${services.slice(0,5).join(', ')}</div>` : '';
+          renderProviderDataset('naccho',providers,{
+            baseColor:'#34d399',
+            glow:false,
+            buildPopup:(p:any)=>{
+              const services=Array.isArray(p.public_health_services)?p.public_health_services:(p.services||[]);
+              const svcHtml=services.length?`<div style="font-size:9px;color:#6ee7b7;margin-top:4px;">${services.slice(0,5).join(', ')}</div>`:'';
               return `<div style="font-family:Inter,sans-serif;padding:10px 12px;max-width:270px;">
                 <div style="font-size:12px;font-weight:700;color:#e2f0ff;">${p.name||'Local Health Department'}</div>
                 <div style="font-size:9px;font-family:'IBM Plex Mono',monospace;color:#34d399;letter-spacing:1px;text-transform:uppercase;margin:2px 0 4px;">NACCHO LHD Directory</div>
                 <div style="font-size:9px;color:#4a6888;margin-bottom:4px;">${[p.address,p.city,p.admin_area,p.country].filter(Boolean).join(', ')||'Address unavailable'}</div>
-                ${p.phone ? `<div style="font-size:9px;margin-bottom:3px;"><a href="tel:${p.phone}">${p.phone}</a></div>` : ''}
-                ${p.website ? `<div style="font-size:8.5px;margin-bottom:3px;"><a href="${p.website}" target="_blank" rel="noreferrer">${p.website}</a></div>` : ''}
+                ${p.phone?`<div style="font-size:9px;margin-bottom:3px;"><a href="tel:${p.phone}">${p.phone}</a></div>`:''}
+                ${p.website?`<div style="font-size:8.5px;margin-bottom:3px;"><a href="${p.website}" target="_blank" rel="noreferrer">${p.website}</a></div>`:''}
                 ${svcHtml}
                 <div style="font-size:8px;color:#94a3b8;margin-top:5px;border-top:1px solid rgba(255,255,255,0.08);padding-top:4px;">External directory record · not a confirmed service provider</div>
-                <div style="font-size:8px;color:#64748b;margin-top:2px;"><a href="https://www.naccho.org/membership/lhd-directory" target="_blank" rel="noreferrer">naccho.org/membership/lhd-directory</a></div>
               </div>`;
             },
           });
-        } catch (err:any) {
-          if (!ac.signal.aborted) setNacchoError(err?.message || 'NACCHO layer failed');
+        } catch(error:any) {
+          if(!ac.signal.aborted) setNacchoError(error?.message||'NACCHO layer failed');
         } finally {
-          if (!ac.signal.aborted) setNacchoLoading(false);
+          if(!ac.signal.aborted) setNacchoLoading(false);
         }
-      }, 400);
+      },400);
     };
     reload();
-    map.on('moveend', reload);
-    return ()=>{
-      if (timer) clearTimeout(timer);
-      map.off('moveend', reload);
+    window.addEventListener('network-map:native-camera',reload);
+    return()=>{
+      if(timer) clearTimeout(timer);
+      window.removeEventListener('network-map:native-camera',reload);
       nacchoFetchRef.current?.abort();
-      nacchoFetchRef.current = null;
-      if (nacchoLayerRef.current) { nacchoLayerRef.current.destroy(); nacchoLayerRef.current = null; }
+      nacchoFetchRef.current=null;
+      clearProviderDataset('naccho');
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[mapReady, showNacchoLayer]);
+  },[mapReady,showNacchoLayer]);
 
   const activeToolRef = React.useRef(activeTool);
   React.useLayoutEffect(() => {
@@ -2309,60 +2083,26 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[activeTool]);
 
-  const labelLayerRef = useRef<L.LayerGroup|null>(null);
 
-  // ── Load State GeoJSON ───────────────────────────────────────────────────
-  async function loadStateGeo(map:L.Map) {
-    const urls = [
-      '/states-10m.json',
-      'https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json',
-      'https://unpkg.com/us-atlas@3/states-10m.json',
-    ];
-    for(const url of urls) {
-      try {
-        const r = await fetch(url);
-        if(!r.ok) continue;
-        const topo = await r.json();
-        const gj = topojson.feature(topo, topo.objects.states) as any;
-        gj.features.forEach((f:any)=>{
-          const id = String(f.properties.id||'').padStart(2,'0');
-          f.properties.postal = FIPS2CODE[id]||NAME2CODE[(f.properties.name||'').toLowerCase()]||'';
-        });
-        const stateGeo = L.geoJSON(gj,{
-          style:(f:any)=>sStyle(f?.properties?.postal||'',metric),
-          onEachFeature:(f:any,layer:any)=>{
-            const postal = f.properties.postal;
-            layer.on({
-              mouseover:(e:any)=>{ e.target.setStyle({weight:2,opacity:0.9}); },
-              mouseout:(e:any)=>{ e.target.setStyle(sStyle(postal, metricRef.current)); },
-              click:(e:any)=>{
-                L.popup({maxWidth:340,className:''})
-                  .setLatLng(e.latlng)
-                  .setContent(buildStatePopup(postal))
-                  .openOn(map);
-              }
-            });
-            layer.bindTooltip(()=>{
-              const d=SD[postal];
-              if(!d) return postal;
-              const v=getVal(d,metricRef.current);
-              return `<div style="padding:5px 8px;font-family:'IBM Plex Mono',monospace">
-                <span style="font-weight:700;font-size:11px;color:#eef4ff">${postal}</span>&nbsp;
-                <span style="font-size:9px;color:${DCOL[v]};font-weight:700">${DLBL[v]}</span>
-              </div>`;
-            },{sticky:true,direction:'top'});
-          }
-        }).addTo(map);
-        stateGeoRef.current = stateGeo;
-        rawStateFeaturesRef.current = gj.features;
-        buildStateLabels(map, stateGeo);
-        setStateGeoRevision(value=>value+1);
-        break;
-      } catch(e) { console.warn('GeoJSON load error',e); }
-    }
+  // ── Load / render U.S. state diagnostics with native Mapbox sources ────────
+  function featureCenter(feature:any): [number,number] {
+    const coords:number[][]=[];
+    const walk=(value:any)=>{
+      if(!Array.isArray(value)) return;
+      if(value.length>=2 && typeof value[0]==='number' && typeof value[1]==='number') {
+        coords.push([Number(value[0]),Number(value[1])]);
+        return;
+      }
+      value.forEach(walk);
+    };
+    walk(feature?.geometry?.coordinates);
+    if(!coords.length) return [0,0];
+    const lngs=coords.map(point=>point[0]);
+    const lats=coords.map(point=>point[1]);
+    return [(Math.min(...lats)+Math.max(...lats))/2,(Math.min(...lngs)+Math.max(...lngs))/2];
   }
 
-  function sStyle(postal:string,m:string):L.PathOptions {
+  function sStyle(postal:string,m:string) {
     const d=SD[postal];
     if(!d) return{fillColor:'#0a1830',fillOpacity:0.38,weight:1,color:'rgba(99,179,237,0.15)',opacity:0.6};
     if(!showStateColorsRef.current) return {fillColor:'#11243f',fillOpacity:0.12,weight:1,color:'rgba(161,209,255,0.25)',opacity:0.8};
@@ -2371,27 +2111,79 @@ export default function App() {
     return{fillColor:col,fillOpacity:0.25,weight:1,color:col,opacity:0.45};
   }
 
-  const metricRef = useRef(metric);
-  useEffect(()=>{ metricRef.current=metric; },[metric]);
-  useEffect(()=>{
-    if(!stateGeoRef.current) return;
-    stateGeoRef.current.setStyle((f:any)=>sStyle(f?.properties?.postal||'',metricRef.current));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[showStateColors]);
+  function renderStateDiagnostics() {
+    const features=rawStateFeaturesRef.current;
+    if(!features.length) {
+      clearNativeDiagnosticChannel('states');
+      return;
+    }
+    const rendered:any[]=[];
+    features.forEach((feature:any)=>{
+      const postal=feature.properties?.postal||'';
+      const style=sStyle(postal,metricRef.current);
+      const d=SD[postal];
+      const value=d?getVal(d,metricRef.current):0;
+      rendered.push({
+        ...feature,
+        properties:{
+          ...feature.properties,
+          fillColor:style.fillColor,
+          fillOpacity:style.fillOpacity,
+          lineColor:style.color,
+          lineOpacity:style.opacity,
+          lineWidth:style.weight,
+          popupHtml:buildStatePopup(postal),
+          tooltipHtml:d?`<div style="padding:5px 8px;font-family:'IBM Plex Mono',monospace"><span style="font-weight:700;font-size:11px;color:#eef4ff">${postal}</span>&nbsp;<span style="font-size:9px;color:${DCOL[value]};font-weight:700">${DLBL[value]}</span></div>`:postal,
+        },
+      });
+      const fallback=featureCenter(feature);
+      const [lat,lng]=STATE_CTR[postal]||fallback;
+      if(postal) rendered.push({
+        type:'Feature',
+        geometry:{type:'Point',coordinates:[lng,lat]},
+        properties:{kind:'label',label:postal,labelColor:'#8aa4c4',labelSize:9,hidden:!showLabelsRef.current},
+      });
+    });
+    setNativeDiagnosticCollection('states',{type:'FeatureCollection',features:rendered} as any);
+  }
 
-  // Load / remove state GeoJSON when US Diagnostics toggles
+  async function loadStateGeo() {
+    const urls = [
+      '/states-10m.json',
+      'https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json',
+      'https://unpkg.com/us-atlas@3/states-10m.json',
+    ];
+    for(const url of urls) {
+      try {
+        const r=await fetch(url);
+        if(!r.ok) continue;
+        const topo=await r.json();
+        const gj=topojson.feature(topo,topo.objects.states) as any;
+        gj.features.forEach((f:any)=>{
+          const id=String(f.properties.id||'').padStart(2,'0');
+          f.properties.postal=FIPS2CODE[id]||NAME2CODE[(f.properties.name||'').toLowerCase()]||'';
+        });
+        rawStateFeaturesRef.current=gj.features;
+        renderStateDiagnostics();
+        setStateGeoRevision(value=>value+1);
+        break;
+      } catch(error) { console.warn('GeoJSON load error',error); }
+    }
+  }
+
+  const metricRef=useRef(metric);
+  useEffect(()=>{ metricRef.current=metric; renderStateDiagnostics(); },[metric]);
+  useEffect(()=>{ showStateColorsRef.current=showStateColors; renderStateDiagnostics(); },[showStateColors]);
+
   useEffect(()=>{
-    const map = mapRef.current;
-    if(!map) return;
-    if(showUsDiagnostics && !stateGeoRef.current) {
-      void loadStateGeo(map);
+    if(showUsDiagnostics && !rawStateFeaturesRef.current.length) {
+      void loadStateGeo();
     } else if(!showUsDiagnostics) {
-      if(stateGeoRef.current) {
-        try { map.removeLayer(stateGeoRef.current); } catch(e){}
-        stateGeoRef.current = null;
-      }
-      if(labelLayerRef.current) { try{ map.removeLayer(labelLayerRef.current); }catch(e){} labelLayerRef.current = null; }
-      rawStateFeaturesRef.current = [];
+      rawStateFeaturesRef.current=[];
+      clearNativeDiagnosticChannel('states');
+      clearNativeDiagnosticChannel('population');
+      clearNativeDiagnosticChannel('cities');
+      clearNativeDiagnosticChannel('timezones');
       setShowLabels(false);
       setShowTZ(false);
       setShowPopDensity(false);
@@ -2489,227 +2281,171 @@ export default function App() {
     }
   }
 
-  function buildStateLabels(map:L.Map,stateGeo:L.GeoJSON) {
-    const labelGrp = L.layerGroup();
-    stateGeo.eachLayer((layer:any)=>{
-      const props = layer.feature?.properties;
-      if(!props) return;
-      const postal = props.postal;
-      if(!postal) return;
-      const rawCtr = layer.getBounds().getCenter();
-      const [lat,lng] = STATE_CTR[postal]||[rawCtr.lat,rawCtr.lng];
-      const icon = L.divIcon({
-        className:'',
-        html:`<div style="font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;color:#8aa4c4;text-shadow:0 1px 4px rgba(0,0,0,0.9),0 0 8px rgba(0,0,0,0.7);pointer-events:none;white-space:nowrap;letter-spacing:0.5px;">${postal}</div>`,
-        iconSize:[0,0],iconAnchor:[10,7]
-      });
-      const mk = L.marker([lat,lng],{icon,interactive:false,zIndexOffset:200});
-      labelGrp.addLayer(mk);
-    });
-    labelLayerRef.current = labelGrp;
-    if(showLabelsRef.current) labelGrp.addTo(map);
-    return labelGrp;
-  }
 
-  // ── Population density overlay ─────────────────────────────────────────────
-  const showPopDensityRef = useRef(showPopDensity);
-  useEffect(()=>{ showPopDensityRef.current = showPopDensity; },[showPopDensity]);
+  // ── Population density overlay: native Mapbox polygons ────────────────────
+  const showPopDensityRef=useRef(showPopDensity);
+  useEffect(()=>{ showPopDensityRef.current=showPopDensity; },[showPopDensity]);
   useEffect(()=>{
-    const map = mapRef.current;
-    if (!map) return;
-    if (!showPopDensity) {
-      if (popDensityLayerRef.current) { map.removeLayer(popDensityLayerRef.current); popDensityLayerRef.current = null; }
+    if(!showPopDensity) {
+      clearNativeDiagnosticChannel('population');
       return;
     }
-    const features = rawStateFeaturesRef.current;
-    if (!features.length) return;
-    const layers: L.Layer[] = [];
-    features.forEach((f: any) => {
-      const postal = f.properties?.postal;
-      const pop = STATE_POP[postal];
-      if (!pop) return;
-      const color = densityColor(pop.density);
-      const lyr = L.geoJSON(f, {
-        style: { fillColor: color, fillOpacity: 0.55, weight: 1, color: color, opacity: 0.6 },
-      });
-      lyr.bindTooltip(()=>{
-        return `<div style="padding:5px 8px;font-family:'IBM Plex Mono',monospace;font-size:10px">
-          <span style="font-weight:700;color:#eef4ff">${postal}</span>
-          <span style="color:${color};margin-left:6px;font-weight:700">${densityLabel(pop.density)}</span><br/>
-          <span style="color:#67e8f9">${Math.round(pop.density).toLocaleString()}/mi²</span>
-          <span style="color:#3d5478;margin-left:6px">${pop.pop.toLocaleString()}</span>
-        </div>`;
-      },{sticky:true,direction:'top'});
-      layers.push(lyr);
+    const features=rawStateFeaturesRef.current;
+    if(!features.length) return;
+    const rendered=features.flatMap((feature:any)=>{
+      const postal=feature.properties?.postal;
+      const pop=STATE_POP[postal];
+      if(!pop) return [];
+      const color=densityColor(pop.density);
+      return [{
+        ...feature,
+        properties:{
+          ...feature.properties,
+          fillColor:color,
+          fillOpacity:0.55,
+          lineColor:color,
+          lineOpacity:0.6,
+          lineWidth:1,
+          tooltipHtml:`<div style="padding:5px 8px;font-family:'IBM Plex Mono',monospace;font-size:10px"><span style="font-weight:700;color:#eef4ff">${postal}</span><span style="color:${color};margin-left:6px;font-weight:700">${densityLabel(pop.density)}</span><br/><span style="color:#67e8f9">${Math.round(pop.density).toLocaleString()}/mi²</span><span style="color:#3d5478;margin-left:6px">${pop.pop.toLocaleString()}</span></div>`,
+        },
+      }];
     });
-    const grp = L.layerGroup(layers).addTo(map);
-    popDensityLayerRef.current = grp;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    setNativeDiagnosticCollection('population',{type:'FeatureCollection',features:rendered} as any);
   },[showPopDensity, stateGeoRevision]);
 
-  // ── Uploaded clinic pins ───────────────────────────────────────────────────
+  // ── Uploaded clinic pins: native Mapbox source ─────────────────────────────
   useEffect(()=>{
-    const map = mapRef.current;
-    if (!map) return;
-    if (clinicLayerRef.current) { map.removeLayer(clinicLayerRef.current); clinicLayerRef.current = null; }
-    if (!showUploadedClinics || uploadedClinics.length===0) return;
-    const grp = L.layerGroup();
-    uploadedClinics.forEach((c)=>{
-      if (c.lat===null || c.lng===null) return;
-      const col = c.color || '#f472b6';
-      const mk = L.circleMarker([c.lat, c.lng], {
-        radius:4,
-        color:'#ffffff',
-        weight:1,
-        fillColor:col,
-        fillOpacity:.92,
-        opacity:.98,
-        className:showGlowPoints?'provider-point provider-point-glow':'provider-point',
-      });
-      mk.bindPopup(`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:170px;">
-        <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${c.name}</div>
-        ${c.address?`<div style="font-size:9.5px;color:#4a6888"> ${c.address}${c.city?', '+c.city:''}${c.state?' '+c.state:''}${c.zip?' '+c.zip:''}</div>`:''}
-        ${c.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${c.phone}">${c.phone}</a></div>`:''}
-        ${c.notes?`<div style="font-size:9px;color:#3d5478;margin-top:3px">${c.notes}</div>`:''}
-        <div style="margin-top:6px;display:flex;gap:5px">
-          <div style="width:8px;height:8px;border-radius:50%;background:${col};box-shadow:0 0 6px ${col};flex-shrink:0;margin-top:2px"></div>
-          <span style="font-size:8.5px;color:#3d5478;font-family:'IBM Plex Mono',monospace">UPLOADED CLINIC</span>
-        </div>
-      </div>`);
-      grp.addLayer(mk);
-    });
-    grp.addTo(map);
-    clinicLayerRef.current = grp;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[uploadedClinics, showUploadedClinics, showGlowPoints]);
-
-  // ── BlueHive density field + provider points ──────────────────────────────
-  useEffect(()=>{
-    const map = mapRef.current;
-    if (!map) return;
-    if (blueHiveLayerRef.current) { blueHiveLayerRef.current.destroy(); blueHiveLayerRef.current = null; }
-    if (!showBlueHive || blueHiveData.length===0) return;
-    blueHiveLayerRef.current = createProviderFieldLayer(map, blueHiveData, {
-      color: '#3b82f6',
-      glow: showGlowPoints,
-      getStyle: providerCategoryStyle,
-      badgeLabel: 'BlueHive providers',
-      buildPopup: (p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
-        <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||'Unnamed'}</div>
-        ${p.address_1?`<div style="font-size:9.5px;color:#4a6888"> ${p.address_1}${p.city?', '+p.city:''}${p.state?' '+p.state:''}${p.zip?' '+p.zip:''}</div>`:''}
-        ${p.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${p.phone}">${p.phone}</a></div>`:''}
-        ${p.website?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px"><a href="${p.website}" target="_blank" style="color:#93c5fd">${p.website}</a></div>`:''}
-        ${p.services?`<div style="font-size:8px;color:#3d5478;margin-top:3px">${p.services}</div>`:''}
-        <div style="margin-top:6px;display:flex;gap:5px">
-          <div style="width:8px;height:8px;border-radius:50%;background:#3b82f6;box-shadow:0 0 6px #3b82f6;flex-shrink:0;margin-top:2px"></div>
-          <span style="font-size:8.5px;color:#3d5478;font-family:'IBM Plex Mono',monospace">BLUEHIVE PROVIDER</span>
-        </div>
-      </div>`,
-    });
-    return ()=>{ if (blueHiveLayerRef.current) { blueHiveLayerRef.current.destroy(); blueHiveLayerRef.current = null; } };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[showBlueHive, blueHiveData, showGlowPoints]);
-
-  // ── Dentist density field + provider points ───────────────────────────────
-  useEffect(()=>{
-    const map = mapRef.current;
-    if (!map) return;
-    if (dentistLayerRef.current) { dentistLayerRef.current.destroy(); dentistLayerRef.current = null; }
-    if (!showDentists || dentistData.length===0) return;
-    dentistLayerRef.current = createProviderFieldLayer(map, dentistData, {
-      color: '#06b6d4',
-      glow: showGlowPoints,
-      getStyle: providerCategoryStyle,
-      badgeLabel: 'dentists',
-      buildPopup: (p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
-        <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||'Unnamed'}</div>
-        ${p.address_1?`<div style="font-size:9.5px;color:#4a6888"> ${p.address_1}${p.city?', '+p.city:''}${p.state?' '+p.state:''}${p.zip?' '+p.zip:''}</div>`:''}
-        ${p.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${p.phone}">${p.phone}</a></div>`:''}
-        ${p.npi?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px">NPI: <a href="${p.source_url}" target="_blank" style="color:#93c5fd">${p.npi}</a></div>`:''}
-        ${p.taxonomy_description?`<div style="font-size:8px;color:#3d5478;margin-top:3px">${p.taxonomy_description}</div>`:''}
-        <div style="margin-top:6px;display:flex;gap:5px">
-          <div style="width:8px;height:8px;border-radius:50%;background:#06b6d4;box-shadow:0 0 6px #06b6d4;flex-shrink:0;margin-top:2px"></div>
-          <span style="font-size:8.5px;color:#3d5478;font-family:'IBM Plex Mono',monospace">DENTIST</span>
-        </div>
-      </div>`,
-    });
-    return ()=>{ if (dentistLayerRef.current) { dentistLayerRef.current.destroy(); dentistLayerRef.current = null; } };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[showDentists, dentistData, showGlowPoints]);
-
-  // ── Service Presence density field + provider points ──────────────────────
-  useEffect(()=>{
-    const map = mapRef.current;
-    if (!map) return;
-    if (inventoryLayerRef.current) { inventoryLayerRef.current.destroy(); inventoryLayerRef.current = null; }
-    if (inventoryData.length===0) return;
-    const trustColor = (t:string)=>t==='verified'?'#34d399':t==='registry'?'#60a5fa':t==='directory'?'#a78bfa':'#94a3b8';
-    inventoryLayerRef.current = createProviderFieldLayer(map, inventoryData, {
-      color: '#10b981',
-      glow: showGlowPoints,
-      getStyle: providerCategoryStyle,
-      badgeLabel: 'Service presence providers',
-      buildPopup: (p:MapInventoryProvider)=>{
-        const tc = trustColor(p.trustTier);
-        return `<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:210px;max-width:280px;">
-        <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.name||'Unnamed'}</div>
-        ${p.address?`<div style="font-size:9.5px;color:#4a6888"> ${p.address}${p.city?', '+p.city:''}${p.state?' '+p.state:''}</div>`:''}
-        ${p.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${p.phone}">${p.phone}</a></div>`:''}
-        ${p.website?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px"><a href="${p.website}" target="_blank" style="color:#93c5fd">${p.website}</a></div>`:''}
-        ${p.npi?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px">NPI: <a href="https://npiregistry.cms.hhs.gov/provider-view/${p.npi}" target="_blank" style="color:#93c5fd">${p.npi}</a></div>`:''}
-        ${p.services.length>0?`<div style="font-size:8px;color:#3d5478;margin-top:3px">${p.services.join(', ')}</div>`:''}
-        <div style="margin-top:6px;display:flex;gap:5px;align-items:center">
-          <div style="width:8px;height:8px;border-radius:50%;background:${tc};box-shadow:0 0 6px ${tc};flex-shrink:0"></div>
-          <span style="font-size:8.5px;color:${tc};font-family:'IBM Plex Mono',monospace;text-transform:uppercase">${p.trustTier}</span>
-          ${p.coordinateStatus?`<span style="font-size:7.5px;color:#5d7a9e;margin-left:4px">${p.coordinateStatus}</span>`:''}
-        </div>
-      </div>`;
+    if(!showUploadedClinics || uploadedClinics.length===0) {
+      clearProviderDataset('uploaded');
+      return;
+    }
+    renderProviderDataset('uploaded', uploadedClinics, {
+      baseColor:'#f472b6',
+      glow:showGlowPoints,
+      getColor:(clinic)=>clinic.color || '#f472b6',
+      buildPopup:(c)=>{
+        const col=c.color||'#f472b6';
+        return `<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:170px;">
+          <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${escapeHtml(c.name)}</div>
+          ${c.address?`<div style="font-size:9.5px;color:#4a6888">${escapeHtml(c.address)}${c.city?', '+escapeHtml(c.city):''}${c.state?' '+escapeHtml(c.state):''}${c.zip?' '+escapeHtml(c.zip):''}</div>`:''}
+          ${c.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${escapeHtml(c.phone)}">${escapeHtml(c.phone)}</a></div>`:''}
+          ${c.notes?`<div style="font-size:9px;color:#3d5478;margin-top:3px">${escapeHtml(c.notes)}</div>`:''}
+          <div style="margin-top:6px;display:flex;gap:5px"><div style="width:8px;height:8px;border-radius:50%;background:${col};box-shadow:0 0 6px ${col};flex-shrink:0;margin-top:2px"></div><span style="font-size:8.5px;color:#3d5478;font-family:'IBM Plex Mono',monospace">UPLOADED CLINIC</span></div>
+        </div>`;
       },
     });
-    return ()=>{ if (inventoryLayerRef.current) { inventoryLayerRef.current.destroy(); inventoryLayerRef.current = null; } };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[inventoryData, showGlowPoints]);
+    return ()=>clearProviderDataset('uploaded');
+  },[uploadedClinics, showUploadedClinics, showGlowPoints]);
 
-  // ── Full indexed provider density field + points ──────────────────────────
+  // ── BlueHive native heatmap + provider points ────────────────────────────
   useEffect(()=>{
-    const map = mapRef.current;
-    if(!map) return;
-    if(indexedProviderLayerRef.current) { indexedProviderLayerRef.current.destroy(); indexedProviderLayerRef.current = null; }
-    if(!showIndexedProviders || indexedLayerData.length===0) return;
-    indexedProviderLayerRef.current = createProviderFieldLayer(map, indexedLayerData, {
-      color:'#10b981',
+    if(!showBlueHive || blueHiveData.length===0) {
+      clearProviderDataset('bluehive');
+      return;
+    }
+    renderProviderDataset('bluehive', blueHiveData, {
+      baseColor:'#3b82f6',
       glow:showGlowPoints,
-      getStyle: providerCategoryStyle,
-      badgeLabel:'Indexed providers',
+      getColor:(provider:any)=>providerCategoryStyle(provider).color,
       buildPopup:(p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
         <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||p.name||'Unnamed'}</div>
-        ${p.address_1?`<div style="font-size:9.5px;color:#4a6888">${p.address_1}${p.city?', '+p.city:''}${p.state?' '+p.state:''}</div>`:''}
+        ${p.address_1?`<div style="font-size:9.5px;color:#4a6888"> ${p.address_1}${p.city?', '+p.city:''}${p.state?' '+p.state:''}${p.zip?' '+p.zip:''}</div>`:''}
+        ${p.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${p.phone}">${p.phone}</a></div>`:''}
+        ${p.website?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px"><a href="${p.website}" target="_blank" rel="noreferrer" style="color:#93c5fd">${p.website}</a></div>`:''}
+        ${p.services?`<div style="font-size:8px;color:#3d5478;margin-top:3px">${p.services}</div>`:''}
+        <div style="margin-top:6px;font-size:8.5px;color:#3b82f6;font-family:'IBM Plex Mono',monospace">BLUEHIVE PROVIDER</div>
+      </div>`,
+    });
+    return ()=>clearProviderDataset('bluehive');
+  },[showBlueHive,blueHiveData,showGlowPoints]);
+
+  // ── Dentist native heatmap + provider points ─────────────────────────────
+  useEffect(()=>{
+    if(!showDentists || dentistData.length===0) {
+      clearProviderDataset('dentists');
+      return;
+    }
+    renderProviderDataset('dentists', dentistData, {
+      baseColor:'#06b6d4',
+      glow:showGlowPoints,
+      getColor:(provider:any)=>providerCategoryStyle(provider).color,
+      buildPopup:(p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
+        <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||p.name||'Unnamed'}</div>
+        ${p.address_1?`<div style="font-size:9.5px;color:#4a6888"> ${p.address_1}${p.city?', '+p.city:''}${p.state?' '+p.state:''}${p.zip?' '+p.zip:''}</div>`:''}
+        ${p.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${p.phone}">${p.phone}</a></div>`:''}
+        ${p.npi?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px">NPI: <a href="${p.source_url||'#'}" target="_blank" rel="noreferrer" style="color:#93c5fd">${p.npi}</a></div>`:''}
+        ${p.taxonomy_description?`<div style="font-size:8px;color:#3d5478;margin-top:3px">${p.taxonomy_description}</div>`:''}
+        <div style="margin-top:6px;font-size:8.5px;color:#06b6d4;font-family:'IBM Plex Mono',monospace">DENTIST</div>
+      </div>`,
+    });
+    return ()=>clearProviderDataset('dentists');
+  },[showDentists,dentistData,showGlowPoints]);
+
+  // ── Service Presence native heatmap + provider points ────────────────────
+  useEffect(()=>{
+    if(inventoryData.length===0) {
+      clearProviderDataset('inventory');
+      return;
+    }
+    const trustColor=(tier:string)=>tier==='verified'?'#34d399':tier==='registry'?'#60a5fa':tier==='directory'?'#a78bfa':'#94a3b8';
+    renderProviderDataset('inventory', inventoryData, {
+      baseColor:'#10b981',
+      glow:showGlowPoints,
+      getColor:(provider:MapInventoryProvider)=>providerCategoryStyle(provider).color,
+      buildPopup:(p:MapInventoryProvider)=>{
+        const tc=trustColor(p.trustTier);
+        return `<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:210px;max-width:280px;">
+          <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.name||'Unnamed'}</div>
+          ${p.address?`<div style="font-size:9.5px;color:#4a6888"> ${p.address}${p.city?', '+p.city:''}${p.state?' '+p.state:''}</div>`:''}
+          ${p.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${p.phone}">${p.phone}</a></div>`:''}
+          ${p.website?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px"><a href="${p.website}" target="_blank" rel="noreferrer" style="color:#93c5fd">${p.website}</a></div>`:''}
+          ${p.npi?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px">NPI: <a href="https://npiregistry.cms.hhs.gov/provider-view/${p.npi}" target="_blank" rel="noreferrer" style="color:#93c5fd">${p.npi}</a></div>`:''}
+          ${p.services.length>0?`<div style="font-size:8px;color:#3d5478;margin-top:3px">${p.services.join(', ')}</div>`:''}
+          <div style="margin-top:6px;display:flex;gap:5px;align-items:center"><span style="font-size:8.5px;color:${tc};font-family:'IBM Plex Mono',monospace;text-transform:uppercase">${p.trustTier}</span>${p.coordinateStatus?`<span style="font-size:7.5px;color:#5d7a9e;margin-left:4px">${p.coordinateStatus}</span>`:''}</div>
+        </div>`;
+      },
+    });
+    return ()=>clearProviderDataset('inventory');
+  },[inventoryData,showGlowPoints]);
+
+  // ── Full indexed providers: native heatmap + points ──────────────────────
+  useEffect(()=>{
+    if(!showIndexedProviders || indexedLayerData.length===0) {
+      clearProviderDataset('indexed');
+      return;
+    }
+    renderProviderDataset('indexed', indexedLayerData, {
+      baseColor:'#10b981',
+      glow:showGlowPoints,
+      getColor:(provider:any)=>providerCategoryStyle(provider).color,
+      buildPopup:(p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
+        <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||p.name||'Unnamed'}</div>
+        ${(p.address_1||p.address)?`<div style="font-size:9.5px;color:#4a6888">${p.address_1||p.address}${p.city?', '+p.city:''}${(p.state||p.admin_area)?' '+(p.state||p.admin_area):''}</div>`:''}
         ${p.phone?`<div style="font-size:9.5px;color:#67e8f9;margin-top:2px">${p.phone}</div>`:''}
         <div style="margin-top:6px;font-size:8.5px;color:#10b981;font-family:'IBM Plex Mono',monospace">INDEXED PROVIDER</div>
       </div>`,
     });
-    return ()=>{ if(indexedProviderLayerRef.current) { indexedProviderLayerRef.current.destroy(); indexedProviderLayerRef.current = null; } };
+    return ()=>clearProviderDataset('indexed');
   },[showIndexedProviders,indexedLayerData,showGlowPoints]);
 
-  // ── Persisted My Clinics density field + points ───────────────────────────
+  // ── Persisted My Clinics: native heatmap + points ────────────────────────
   useEffect(()=>{
-    const map = mapRef.current;
-    if(!map) return;
-    if(myClinicsLayerRef.current) { myClinicsLayerRef.current.destroy(); myClinicsLayerRef.current = null; }
-    if(!showMyClinicsLayer || myClinicsData.length===0) return;
-    myClinicsLayerRef.current = createProviderFieldLayer(map, myClinicsData, {
-      color:'#8b5cf6',
+    if(!showMyClinicsLayer || myClinicsData.length===0) {
+      clearProviderDataset('my-clinics');
+      return;
+    }
+    renderProviderDataset('my-clinics', myClinicsData, {
+      baseColor:'#8b5cf6',
       glow:showGlowPoints,
-      getStyle: providerCategoryStyle,
-      badgeLabel:'My Clinics',
+      getColor:(provider:any)=>providerCategoryStyle(provider).color,
       buildPopup:(p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
         <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||p.name||'Unnamed'}</div>
-        ${p.address_1?`<div style="font-size:9.5px;color:#4a6888">${p.address_1}${p.city?', '+p.city:''}${p.state?' '+p.state:''}</div>`:''}
+        ${(p.address_1||p.address)?`<div style="font-size:9.5px;color:#4a6888">${p.address_1||p.address}${p.city?', '+p.city:''}${(p.state||p.admin_area)?' '+(p.state||p.admin_area):''}</div>`:''}
         ${p.phone?`<div style="font-size:9.5px;color:#67e8f9;margin-top:2px">${p.phone}</div>`:''}
         <div style="margin-top:6px;font-size:8.5px;color:#8b5cf6;font-family:'IBM Plex Mono',monospace">MY CLINIC</div>
       </div>`,
     });
-    return ()=>{ if(myClinicsLayerRef.current) { myClinicsLayerRef.current.destroy(); myClinicsLayerRef.current = null; } };
+    return ()=>clearProviderDataset('my-clinics');
   },[showMyClinicsLayer,myClinicsData,showGlowPoints]);
 
   async function uploadClinicChunk(groupName:string, filename:string, rows:any[], chunkIndex:number, totalChunks:number, uploadSessionId:string, rowOffset:number) {
@@ -2767,182 +2503,107 @@ export default function App() {
     }
   }
 
-  const showLabelsRef = useRef(showLabels);
+  const showLabelsRef=useRef(showLabels);
   useEffect(()=>{
-    showLabelsRef.current = showLabels;
-    const map = mapRef.current;
-    const lyr = labelLayerRef.current;
-    if(!map||!lyr) return;
-    if(showLabels) lyr.addTo(map); else map.removeLayer(lyr);
-  },[showLabels]);
+    showLabelsRef.current=showLabels;
+    renderStateDiagnostics();
+  },[showLabels,stateGeoRevision]);
 
   useEffect(()=>{
-    const map = mapRef.current;
-    if(!map) return;
-    if(savedRadiusLayerRef.current) {
-      try { map.removeLayer(savedRadiusLayerRef.current); } catch {}
-      savedRadiusLayerRef.current = null;
-    }
-    if(!savedRadii.length) return;
-    const grp = L.layerGroup();
-    savedRadii.forEach((r, idx)=>{
-      // Glow circle with colored ring
-      const circEl = L.circle([r.lat,r.lng],{
-        radius: Math.max(r.radiusMiles,0.1)*1609.34,
-        color: r.color,
-        weight: 2.5,
-        opacity: 0.92,
-        fillColor: r.color,
-        fillOpacity: 0.07,
-        dashArray: '10 6',
-        interactive: false,
-        className: showGlowPoints ? 'drop-radius-ring' : '',
-      }).addTo(grp);
-      // Label + dot marker
-      const labelHtml = `<div style="display:flex;flex-direction:column;align-items:center;gap:3px;pointer-events:none;">
-        <div style="background:rgba(4,10,24,0.85);border:1.5px solid ${r.color};border-radius:8px;padding:2px 7px;font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;color:${r.color};white-space:nowrap;${showGlowPoints?`box-shadow:0 0 10px ${r.color}66,0 0 22px ${r.color}33;`:''}">${r.label||`Marker ${idx+1}`}</div>
-        <div style="width:12px;height:12px;border-radius:50%;background:${r.color};border:2px solid #fff;${showGlowPoints?`box-shadow:0 0 0 3px ${r.color}55,0 0 16px ${r.color}bb;`:'box-shadow:0 0 0 2px rgba(255,255,255,0.5);'}"></div>
-      </div>`;
-      L.marker([r.lat,r.lng],{
-        icon:L.divIcon({
-          className:'',
-          html:labelHtml,
-          iconSize:[80,40],iconAnchor:[40,40],
-        }),
-        interactive:true,
-        zIndexOffset: 2800 - idx,
-      }).bindPopup(`<div class="pi"><div class="pt">${r.label||'Marker'}</div><div class="ps">${r.radiusMiles} mi radius</div><div class="pg"><div><div class="psl">Lat</div><div class="psv">${r.lat.toFixed(4)}</div></div><div><div class="psl">Lng</div><div class="psv">${r.lng.toFixed(4)}</div></div></div></div>`,{maxWidth:240}).addTo(grp);
-    });
-    grp.addTo(map);
-    savedRadiusLayerRef.current = grp;
-  },[savedRadii, showGlowPoints]);
+    renderSavedRadiusOverlays(savedRadii,showGlowPoints);
+    return ()=>renderSavedRadiusOverlays([],showGlowPoints);
+  },[savedRadii,showGlowPoints]);
 
-  // ── Re-style states when metric changes ─────────────────────────────────
+  // ── City markers: native Mapbox points ───────────────────────────────────
   useEffect(()=>{
-    if(!stateGeoRef.current) return;
-    stateGeoRef.current.setStyle((f:any)=>sStyle(f?.properties?.postal||'',metric));
-  },[metric]);
-
-  // ── City markers ─────────────────────────────────────────────────────────
-  useEffect(()=>{
-    const map = mapRef.current;
-    const cityLayer = cityLayerRef.current;
-    if(!map||!cityLayer) return;
-    cityLayer.clearLayers();
-    if(!showCityDots) return; // blank map mode
-
-    // Show ALL cities — only apply difficulty filter if one is active
-    const visibleLocs = LOCS.filter(loc=>{
-      if(filterDiff!==null && getVal(loc,metric)!==filterDiff) return false;
-      return true;
-    });
-
-    for(const loc of visibleLocs) {
-      const [name,state,lat,lng,tier]=loc;
-      const v = getVal(loc,metric);
-      const col = DCOL[v];
-      // Scale dot by tier: 1=major metro large, 2=mid, 3/4=small
-      const r = tier===1?9:tier===2?6:tier===3?4:3;
-      const borderW = tier<=2 ? 2 : 1.5;
-      const icon = L.divIcon({
-        className:'',
-        html:`<div style="width:${r*2}px;height:${r*2}px;border-radius:50%;background:${col};border:${borderW}px solid rgba(255,255,255,${tier===1?0.8:0.5});${showGlowPoints?`box-shadow:0 0 ${r+4}px ${col}55,0 1px 4px rgba(0,0,0,0.6);`:'box-shadow:0 0 0 1px rgba(255,255,255,0.2);'}cursor:pointer;"></div>`,
-        iconSize:[r*2,r*2],iconAnchor:[r,r]
-      });
-      const mk = L.marker([lat,lng],{icon,zIndexOffset:tier===1?300:tier===2?200:tier===3?100:50});
-      mk.bindPopup(()=>buildCityPopup(loc,metricRef.current),{maxWidth:320,className:''});
-      mk.bindTooltip(()=>`<div style="padding:5px 8px;font-family:'IBM Plex Mono',monospace">
-        <span style="font-weight:700;color:#eef4ff">${name}, ${state}</span><br>
-        <span style="font-size:9px;color:${DCOL[getVal(loc,metricRef.current)]}">${DLBL[getVal(loc,metricRef.current)]}</span>
-      </div>`,{sticky:false,direction:'top'});
-      cityLayer.addLayer(mk);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[metric,filterDiff,mapReady,showGlowPoints,showCityDots]);
-
-  // ── Timezone layer ────────────────────────────────────────────────────────
-  useEffect(()=>{
-    const map = mapRef.current;
-    if(!map) return;
-    if(!showTZ) {
-      if(tzLayerRef.current) { map.removeLayer(tzLayerRef.current); tzLayerRef.current=null; }
+    if(!showCityDots) {
+      clearNativeDiagnosticChannel('cities');
       return;
     }
-    if(tzLayerRef.current) return;
-    if(!stateGeoRef.current) return;
-    const layers:L.Layer[]=[];
+    const visibleLocs=LOCS.filter(loc=>filterDiff===null || getVal(loc,metric)===filterDiff);
+    const features=visibleLocs.map((loc:any)=>{
+      const [name,state,lat,lng,tier]=loc;
+      const value=getVal(loc,metric);
+      const color=DCOL[value];
+      const radius=tier===1?9:tier===2?6:tier===3?4:3;
+      return {
+        type:'Feature',
+        geometry:{type:'Point',coordinates:[lng,lat]},
+        properties:{
+          color,
+          radius,
+          strokeWidth:tier<=2?2:1.5,
+          strokeColor:tier===1?'rgba(255,255,255,0.8)':'rgba(255,255,255,0.55)',
+          blur:showGlowPoints?0.12:0,
+          popupHtml:buildCityPopup(loc,metricRef.current),
+          tooltipHtml:`<div style="padding:5px 8px;font-family:'IBM Plex Mono',monospace"><span style="font-weight:700;color:#eef4ff">${name}, ${state}</span><br/><span style="font-size:9px;color:${DCOL[getVal(loc,metricRef.current)]}">${DLBL[getVal(loc,metricRef.current)]}</span></div>`,
+        },
+      };
+    });
+    setNativeDiagnosticCollection('cities',{type:'FeatureCollection',features} as any);
+  },[metric,filterDiff,mapReady,showGlowPoints,showCityDots]);
+
+  // ── Time-zone overlay: native Mapbox polygons + labels ───────────────────
+  useEffect(()=>{
+    if(!showTZ) {
+      clearNativeDiagnosticChannel('timezones');
+      return;
+    }
+    const features=rawStateFeaturesRef.current;
+    if(!features.length) return;
+    const rendered:any[]=[];
     const labelDone:Record<string,boolean>={};
-    stateGeoRef.current.eachLayer((layer:any)=>{
-      const props=layer.feature?.properties;
-      if(!props) return;
-      const postal=props.postal||'';
+    features.forEach((feature:any)=>{
+      const postal=feature.properties?.postal||'';
       const tzIdx=(STATE_TZ as any)[postal];
       if(tzIdx===undefined) return;
       const info=TZ_INFO[tzIdx];
-      const poly=L.geoJSON(layer.feature,{
-        style:{color:info.color,weight:1.2,opacity:0.7,fillColor:info.color,fillOpacity:0.16},
-        interactive:true
+      rendered.push({
+        ...feature,
+        properties:{
+          ...feature.properties,
+          fillColor:info.color,
+          fillOpacity:0.16,
+          lineColor:info.color,
+          lineOpacity:0.7,
+          lineWidth:1.2,
+          tooltipHtml:`<div style="padding:5px 8px;font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700;color:${info.color}">${info.name} Time<br/><span style="font-size:10px;color:#aac">${info.abbr} · ${info.utc}</span></div>`,
+        },
       });
-      poly.bindTooltip(`<div style="padding:5px 8px;font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700;color:${info.color}">${info.name} Time<br><span style="font-size:10px;color:#aac">${info.abbr} · ${info.utc}</span></div>`,{direction:'top'});
-      layers.push(poly);
-      const rawCtr=layer.getBounds().getCenter();
-      const [lat,lng]=STATE_CTR[postal]||[rawCtr.lat,rawCtr.lng];
-      const stateIcon=L.divIcon({className:'',html:`<div style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;color:${info.color};text-shadow:0 0 6px rgba(0,0,0,0.9),0 1px 3px rgba(0,0,0,0.9);pointer-events:none;white-space:nowrap;letter-spacing:0.5px;">${postal}</div>`,iconSize:[0,0],iconAnchor:[10,7]});
-      layers.push(L.marker([lat,lng],{icon:stateIcon,interactive:false,zIndexOffset:200}));
+      const fallback=featureCenter(feature);
+      const [lat,lng]=STATE_CTR[postal]||fallback;
+      rendered.push({type:'Feature',geometry:{type:'Point',coordinates:[lng,lat]},properties:{kind:'label',label:postal,labelColor:info.color,labelSize:10}});
       if(!labelDone[info.abbr]&&info.abbr!=='AK'&&info.abbr!=='HI') {
         labelDone[info.abbr]=true;
-        const bigIcon=L.divIcon({className:'',html:`<div style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:700;color:${info.color};text-shadow:0 0 14px ${info.color},0 1px 6px rgba(0,0,0,0.95);letter-spacing:3px;pointer-events:none;white-space:nowrap;padding:2px 8px;border-radius:3px;background:rgba(4,12,26,0.55);border:1px solid ${info.color}44;">${info.abbr}</div>`,iconSize:[0,0],iconAnchor:[-4,10]});
-        layers.push(L.marker([info.labelLat,info.labelLng],{icon:bigIcon,interactive:false,zIndexOffset:-500}));
+        rendered.push({type:'Feature',geometry:{type:'Point',coordinates:[info.labelLng,info.labelLat]},properties:{kind:'label',label:info.abbr,labelColor:info.color,labelSize:13}});
       }
     });
-    tzLayerRef.current=L.layerGroup(layers).addTo(map);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    setNativeDiagnosticCollection('timezones',{type:'FeatureCollection',features:rendered} as any);
   },[showTZ, stateGeoRevision]);
 
   // ── View presets ─────────────────────────────────────────────────────────
   function flyToView(v:'world'|'us'|'east'|'central'|'west') {
     setView(v);
-    const map=mapRef.current;
-    if(!map) return;
-    if(v==='world') map.flyTo([20,0],2,{duration:1});
-    else if(v==='us') map.flyTo([38.5,-96],4,{duration:1});
-    else if(v==='east') map.flyTo([38,-79],5.5,{duration:1});
-    else if(v==='central') map.flyTo([38.5,-96],5,{duration:1});
-    else if(v==='west') map.flyTo([40,-118],5.5,{duration:1});
+    if(v==='world') flyNativeMap(20,0,2,1000);
+    else if(v==='us') flyNativeMap(38.5,-96,4,1000);
+    else if(v==='east') flyNativeMap(38,-79,5.5,1000);
+    else if(v==='central') flyNativeMap(38.5,-96,5,1000);
+    else if(v==='west') flyNativeMap(40,-118,5.5,1000);
   }
 
   // ── Radius circle ─────────────────────────────────────────────────────────
   const lastRadiusLatRef = useRef<number|null>(null);
   const lastRadiusLngRef = useRef<number|null>(null);
   function drawRadiusCircle(lat:number,lng:number) {
-    const map=mapRef.current;
-    if(!map) return;
     lastRadiusLatRef.current=lat;
     lastRadiusLngRef.current=lng;
-    if(!showRadiusRef.current) return;
-    if(radiusCircleRef.current) {
-      try{ if(radiusCircleRef.current._label) map.removeLayer(radiusCircleRef.current._label); }catch(e){}
-      try{ map.removeLayer(radiusCircleRef.current); }catch(e){}
-      radiusCircleRef.current=null;
-    }
-    const circle=L.circle([lat,lng],{radius:70*1609.34,color:'#00d4ff',opacity:1,weight:3,dashArray:'10 6',fillColor:'#00d4ff',fillOpacity:0.07,interactive:false}).addTo(map);
-    const lbl=L.marker([lat,lng],{
-      icon:L.divIcon({className:'',html:`<div style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;color:#00d4ff;white-space:nowrap;pointer-events:none;margin-top:-26px;margin-left:8px;text-shadow:0 0 8px rgba(0,212,255,0.8),0 1px 4px rgba(0,0,0,0.9)">70mi radius</div>`,iconSize:[0,0]}),
-      interactive:false,zIndexOffset:-100
-    }).addTo(map);
-    (circle as any)._label=lbl;
-    radiusCircleRef.current=circle;
+    setReferenceRadiusOverlay({lat,lng}, showRadiusRef.current);
   }
   const showRadiusRef=useRef(showRadius);
   useEffect(()=>{
     showRadiusRef.current=showRadius;
     if(!showRadius) {
-      const map=mapRef.current;
-      if(radiusCircleRef.current&&map) {
-        try{ if(radiusCircleRef.current._label) map.removeLayer(radiusCircleRef.current._label); }catch(e){}
-        try{ map.removeLayer(radiusCircleRef.current); }catch(e){}
-        radiusCircleRef.current=null;
-      }
+      setReferenceRadiusOverlay(null, false);
     } else if(dropCenter) {
       drawRadiusCircle(dropCenter.lat,dropCenter.lng);
     } else if(lastRadiusLatRef.current!==null&&lastRadiusLngRef.current!==null) {
@@ -2996,8 +2657,8 @@ export default function App() {
     const nearbyData=LOCS.filter(l=>l!==match&&l[4]<=2).map(l=>{const dist=approxMiles(l[2],l[3],lat,lng);return{name:l[0],state:l[1],dist,v:getVal(l,rpExam)};}).filter(l=>l.dist<250&&l.dist>0).sort((a,b)=>a.dist-b.dist).slice(0,4);
     const rd:ReportData={locName:`${name}, ${state}`,stateCode:state,examKey:rpExam,scores,nearby:nearbyData,recommendation:v,isGeo:false,prov,wait,tier,queryCity:name,queryState:state,isIntl:false,lat,lng};
     setLastReportData(rd);
-    const map=mapRef.current;
-    if(map) { map.flyTo([lat,lng],tier<=2?9:11,{duration:1.2}); drawRadiusCircle(lat,lng); }
+    flyNativeMap(lat,lng,tier<=2?9:11,1200);
+    drawRadiusCircle(lat,lng);
     placeCustomPin(lat,lng,`${name}, ${state}`,col);
     setDriveLocA(a=>{ setDriveLocB(a||null); return {name:`${name}, ${state}`,lat,lng}; });
     const provData=countProvidersInRadius(lat,lng,rpExam);
@@ -3041,8 +2702,8 @@ export default function App() {
     const nearbyData=LOCS.filter(l=>l[4]<=2).map(l=>{const dist=approxMiles(l[2],l[3],lat,lng);return{name:l[0],state:l[1],dist,v:getVal(l,rpExam)};}).filter(l=>l.dist<250&&l.dist>0).sort((a,b)=>a.dist-b.dist).slice(0,4);
     const rd:ReportData={locName:`${city||display}${state?', '+state:''}`,stateCode:state||'',examKey:rpExam,scores,nearby:nearbyData,recommendation:v,isGeo:true,prov:stD?stD.prov:null,wait:stD?stD.wait:null,tier:null,queryCity:city||display,queryState:state||'',isIntl:false,lat,lng};
     setLastReportData(rd);
-    const map=mapRef.current;
-    if(map){ map.flyTo([lat,lng],11,{duration:1.2}); drawRadiusCircle(lat,lng); }
+    flyNativeMap(lat,lng,11,1200);
+    drawRadiusCircle(lat,lng);
     placeCustomPin(lat,lng,`${city}${zip?', '+zip:''}`,col);
     setDriveLocA(a=>{ setDriveLocB(a||null); return {name:`${city}, ${state}`,lat,lng}; });
     const provData=countProvidersInRadius(lat,lng,rpExam);
@@ -3089,8 +2750,8 @@ export default function App() {
     const label=`${city||display}${state?', '+state:''}`;
     const rd:ReportData={locName:label,stateCode:state||'',examKey:rpExam,scores:[],nearby:[],recommendation:0,isGeo:true,prov:null,wait:null,tier:null,queryCity:city||display,queryState:state||'',isIntl:true,lat,lng};
     setLastReportData(rd);
-    const map=mapRef.current;
-    if(map){ map.flyTo([lat,lng],11,{duration:1.2}); drawRadiusCircle(lat,lng); }
+    flyNativeMap(lat,lng,11,1200);
+    drawRadiusCircle(lat,lng);
     placeCustomPin(lat,lng,`${city||display}${zip?', '+zip:''}`,'#89d4fe');
     setDriveLocA(a=>{ setDriveLocB(a||null); return {name:label,lat,lng}; });
     // Kick off a live search immediately so the user gets real provider data.
@@ -3129,24 +2790,17 @@ export default function App() {
   }
 
   function placeCustomPin(lat:number,lng:number,label:string,color:string) {
-    const map=mapRef.current;
-    if(!map) return;
-    if(customPinRef.current) map.removeLayer(customPinRef.current);
-    const icon=L.divIcon({className:'',html:`<div style="position:relative;width:28px;height:28px;"><div style="width:20px;height:20px;border-radius:50% 50% 50% 0;background:${color};border:2px solid white;transform:rotate(-45deg);box-shadow:0 2px 8px rgba(0,0,0,0.5);position:absolute;top:0;left:4px;"></div><div style="width:6px;height:6px;border-radius:50%;background:white;position:absolute;top:6px;left:11px;z-index:2;"></div></div>`,iconSize:[28,28],iconAnchor:[14,24]});
-    const mk=L.marker([lat,lng],{icon}).addTo(map);
-    mk.bindTooltip(`<div style="padding:5px 8px;font-size:11px;font-weight:600;color:#eef4ff">${label}</div>`,{permanent:false});
-    customPinRef.current=mk;
+    setNativeAddressPin({
+      lat,lng,color,
+      tooltipHtml:`<div style="padding:5px 8px;font-size:11px;font-weight:600;color:#eef4ff">${escapeHtml(label)}</div>`,
+      popupHtml:`<div class="pi"><div class="pt">${escapeHtml(label)}</div></div>`,
+    });
   }
 
   function flyToNearer(lat:number,lng:number,name:string,state:string,score:number,examKey:string) {
-    const map=mapRef.current;
-    if(!map) return;
-    map.flyTo([lat,lng],9,{duration:1.2});
+    flyNativeMap(lat,lng,9,1200);
     drawRadiusCircle(lat,lng);
-    L.popup({closeButton:true,maxWidth:240})
-      .setLatLng([lat,lng])
-      .setContent(`<div style="font-family:'Inter',sans-serif;padding:4px 2px"><div style="font-size:13px;font-weight:700;color:#cdd9f0">${name}, ${state}</div><div style="font-size:10px;color:#3d5478;margin-top:2px">${MLBL[examKey]}: <span style="color:${DCOL[score]};font-weight:600">${DLBL[score]}</span></div></div>`)
-      .openOn(map);
+    openNativeMapPopup(lat,lng,`<div style="font-family:'Inter',sans-serif;padding:4px 2px"><div style="font-size:13px;font-weight:700;color:#cdd9f0">${escapeHtml(name)}, ${escapeHtml(state)}</div><div style="font-size:10px;color:#3d5478;margin-top:2px">${escapeHtml(MLBL[examKey])}: <span style="color:${DCOL[score]};font-weight:600">${DLBL[score]}</span></div></div>`,'240px');
   }
 
   function pinCity(idx:number) {
@@ -3294,7 +2948,7 @@ export default function App() {
     googlePlacesTrigger?:'address_search'|'live_finder_double_click'|'explicit_google',
   ) {
     const categoryForSearch = categoryOverride || liveBackendCategoryRef.current;
-    const map=mapRef.current;
+    const map=getActiveMapboxMap();
     if(!map) return;
     if(NATIVE_DRIVE_TIME_ENABLED) providerEta.clear();
     const validCoordinates = Number.isFinite(lat) && Number.isFinite(lng)
@@ -3308,6 +2962,8 @@ export default function App() {
       setLiveMirror('');
       setLiveLocation('');
       setLiveHint('Choose a location on the map or search for a city to run Live Finder.');
+      clearLiveFinderSearchOverlay();
+      renderNativeLivePoints([]);
       return;
     }
     setLiveLoading(true);
@@ -3325,10 +2981,7 @@ export default function App() {
     const cityState = await reverseGeocodeCityState(lat,lng).catch(()=>null);
     setLiveLocation(selectedLocationLabel || cityState?.display || `${lat.toFixed(4)}, ${lng.toFixed(4)}`);
 
-    if(liveCircleRef.current) { try{map.removeLayer(liveCircleRef.current);}catch(e){} }
-    if(livePinRef.current) { try{map.removeLayer(livePinRef.current);}catch(e){} }
-    liveCircleRef.current=L.circle([lat,lng],{radius:liveRadius*1609.34,color:'#22d3ee',weight:1.5,opacity:0.45,dashArray:'7 5',fillColor:'#06b6d4',fillOpacity:0.03,interactive:false}).addTo(map);
-    livePinRef.current=L.marker([lat,lng],{icon:L.divIcon({className:'',html:'<div style="width:14px;height:14px;border-radius:50%;background:#06b6d4;border:2.5px solid #fff;box-shadow:0 0 0 4px rgba(6,182,212,0.28),0 0 14px rgba(6,182,212,0.6);"></div>',iconSize:[14,14],iconAnchor:[7,7]}),zIndexOffset:3000,interactive:false}).addTo(map);
+    setLiveFinderSearchOverlay({lat,lng}, liveRadius);
 
     try {
     const backendParams=new URLSearchParams({
@@ -3578,31 +3231,13 @@ export default function App() {
   }
 
   function renderNpiMarkers(results:ProviderCandidate[],category:string){
-    const liveGrp=liveGrpRef.current;
-    const map=mapRef.current;
-    if(!liveGrp||!map) return;
-    liveGrp.clearLayers();
     const config=NPI_CATEGORY_MAP[category];
     const color=config?.color||'#22d3ee';
     const label=config?.label||'Provider';
-
+    const points:NativeLivePoint[]=[];
     results.forEach((p)=>{
-      // Only render map pins for providers with verified coordinates (imported or geocoded)
       if(p.lat==null||p.lng==null) return;
       if((p as any).coordinateStatus==='unverified') return;
-      const lat=p.lat;
-      const lng=p.lng;
-      const mk=L.circleMarker([lat,lng],{
-        radius:4,
-        color:'#ffffff',
-        weight:1,
-        fillColor:color,
-        fillOpacity:.92,
-        opacity:.98,
-        className:showGlowPoints?'provider-point provider-point-glow':'provider-point',
-      });
-      mk.bindTooltip(`${label} presence`,{direction:'top',offset:[0,-5]});
-      // Internal popup: full provider details
       const badgesHtml=(p.badges||[]).map((b)=>`<span style="display:inline-block;font-size:7.5px;padding:1px 5px;border-radius:3px;background:${color}22;border:1px solid ${color}44;color:${color};margin-right:3px;">${b}</span>`).join('');
       const evidenceHtml=p.evidence&&p.evidence.length>0
         ? `<div style="margin-top:5px;font-size:8px;color:#eab308;background:rgba(234,179,8,0.06);border:1px solid rgba(234,179,8,0.15);border-radius:3px;padding:4px 6px;"><strong>Evidence:</strong> ${p.evidence[0].serviceDetected}</div>`
@@ -3624,24 +3259,17 @@ export default function App() {
         <div style="margin-bottom:4px;">${badgesHtml}</div>
         ${evidenceHtml}
       </div>`;
-      mk.bindPopup(popupHtml,{maxWidth:280,className:'live-marker-popup'});
-      liveGrp.addLayer(mk);
+      points.push({id:String(p.id||`${p.lat},${p.lng}`),lat:p.lat,lng:p.lng,color,popupHtml});
     });
+    renderNativeLivePoints(points,(id)=>setLiveHighlightId(id));
   }
 
   function renderLiveMarkers(results:any[]) {
-    const liveGrp=liveGrpRef.current;
-    const map=mapRef.current;
-    if(!liveGrp||!map) return;
-    liveGrp.clearLayers();
     const filtered=liveFilter==='all'?results:results.filter(r=>r.cat===liveFilter);
-    const markerRows = filtered.slice(0, 750);
-    markerRows.forEach((r:any)=>{
+    const points:NativeLivePoint[]=filtered.slice(0,750).map((r:any)=>{
       const c=CATS[r.cat]||CATS.clinic;
       const gmUrl=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name+(r.addr?' '+r.addr:''))}`;
-      const mk=L.circleMarker([r.lat,r.lng],{radius:4,color:'#ffffff',weight:1,fillColor:c.col,fillOpacity:.92,opacity:.98,className:showGlowPoints?'provider-point provider-point-glow':'provider-point'});
-      mk.bindTooltip(c.lbl,{direction:'top',offset:[0,-5]});
-      mk.bindPopup(`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:190px;">
+      const popupHtml=`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:190px;">
         <div style="margin-bottom:6px;"><div style="font-size:12.5px;font-weight:700;color:#e2f0ff;line-height:1.3">${r.name}</div>
         <div style="font-size:8.5px;font-weight:700;font-family:'IBM Plex Mono',monospace;color:${c.col};letter-spacing:1px;text-transform:uppercase;margin-top:2px">${c.lbl}</div></div>
         ${r.addr?`<div style="font-size:9.5px;color:#4a6888;margin-bottom:3px;"> ${r.addr}</div>`:''}
@@ -3651,11 +3279,10 @@ export default function App() {
         <div style="display:flex;gap:4px;">
           <a href="${gmUrl}" target="_blank" rel="noopener" style="flex:1;text-align:center;padding:5px;border-radius:3px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.25);color:#93c5fd;font-size:8.5px;font-family:'IBM Plex Mono',monospace;font-weight:700;text-decoration:none;">GOOGLE MAPS</a>
           ${r.website?`<a href="${r.website}" target="_blank" rel="noopener" style="flex:1;text-align:center;padding:5px;border-radius:3px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);color:#34d399;font-size:8.5px;font-family:'IBM Plex Mono',monospace;font-weight:700;text-decoration:none;">WEBSITE</a>`:''}
-        </div></div>`,{maxWidth:270,className:'live-marker-popup'});
-      mk.on('click',()=>setLiveHighlightId(r.id));
-      r._mk=mk;
-      liveGrp.addLayer(mk);
+        </div></div>`;
+      return {id:String(r.id),lat:Number(r.lat),lng:Number(r.lng),color:c.col,popupHtml};
     });
+    renderNativeLivePoints(points,(id)=>setLiveHighlightId(id));
   }
 
   function filterAndSortLiveResults(results:any[]) {
@@ -3687,11 +3314,7 @@ export default function App() {
   },[liveFilter, liveTextFilter, liveResults, liveRegionFilter, liveSort, showGlowPoints, npiCategory, npiResults]);
 
   function lpFly(lat:number,lng:number,id:any) {
-    const map=mapRef.current;
-    if(!map) return;
-    map.flyTo([lat,lng],17,{duration:0.8});
-    const r=liveResults.find(x=>x.id==id);
-    if(r&&r._mk) setTimeout(()=>r._mk.openPopup(),900);
+    flyToNativeLivePoint(String(id),lat,lng);
     setLiveHighlightId(id);
   }
 
@@ -3717,24 +3340,16 @@ export default function App() {
     }, 380);
   }
   function jumpToAddr(lat: string, lon: string, name: string) {
-    const map = mapRef.current;
+    const map = getActiveMapboxMap();
     if (!map) return;
     const lLat = parseFloat(lat);
     const lLng = parseFloat(lon);
-    map.flyTo([lLat, lLng], 13, { duration: 1.2 });
+    flyNativeMap(lLat,lLng,13,1200);
     setAddrSearch(name.split(',').slice(0,2).join(','));
     setAddrSuggestions([]);
-    // Drop a temporary "you are here" pin
-    if (customPinRef.current) { try { map.removeLayer(customPinRef.current); } catch {} }
-    customPinRef.current = L.marker([lLat, lLng], {
-      icon: L.divIcon({
-        className: '',
-        html: `<div style="width:16px;height:16px;border-radius:50%;background:#7bd7ff;border:2.5px solid #fff;box-shadow:0 0 0 4px rgba(123,215,255,0.30),0 0 18px rgba(123,215,255,0.8);"></div>`,
-        iconSize:[16,16], iconAnchor:[8,8]
-      }),
-      zIndexOffset: 5000,
-    }).addTo(map);
-    customPinRef.current.bindPopup(`<div class="pi"><div class="pt">${name.split(',')[0]}</div><div class="ps">Address Search Result</div></div>`,{maxWidth:260}).openPopup();
+    const popupHtml=`<div class="pi"><div class="pt">${escapeHtml(name.split(',')[0])}</div><div class="ps">Address Search Result</div></div>`;
+    setNativeAddressPin({lat:lLat,lng:lLng,color:'#7bd7ff',popupHtml});
+    openNativeMapPopup(lLat,lLng,popupHtml,'260px');
     setLocalPopInfo(null);
     setDropCenter({ lat: lLat, lng: lLng });
     setActiveTool('liveFinder');
@@ -3893,7 +3508,7 @@ export default function App() {
 
   const selectedService = SERVICE_PRESENCE_OPTIONS.find(service=>service.key===metric) || SERVICE_PRESENCE_OPTIONS[0];
   const hasRadiusCenter = !!dropCenter || (lastRadiusLatRef.current!==null && lastRadiusLngRef.current!==null);
-  const usLayerStatus = showUsDiagnostics ? (stateGeoRef.current ? 'Available' : 'Loading U.S. map data…') : 'Enable U.S. Diagnostics first';
+  const usLayerStatus = showUsDiagnostics ? (rawStateFeaturesRef.current.length ? 'Available' : 'Loading U.S. map data…') : 'Enable U.S. Diagnostics first';
   const activeProviderSourceCount = [showIndexedProviders,showBlueHive,showDentists,showMyClinicsLayer].filter(Boolean).length;
   const loadedProviderCount = indexedLayerData.length + blueHiveData.length + dentistData.length + myClinicsData.length;
   const toggleSection = (section:string) => setCollapsedSections(prev=>({...prev,[section]:!prev[section]}));

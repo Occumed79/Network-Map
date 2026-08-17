@@ -1,6 +1,6 @@
 import { DriveTimeControlStrip } from "./DriveTimeControlStrip";
 import { ProviderEtaBadge } from "./ProviderEtaBadge";
-import { liveResultsToEtaCandidates } from "./leafletProviderAdapter";
+import { liveResultsToEtaCandidates } from "./mapSceneProviderAdapter";
 import { requestEtaRoute } from "./etaRouteEvents";
 import { downloadEtaCsv } from "./providerEtaExport";
 import { useProviderEta } from "./useProviderEta";

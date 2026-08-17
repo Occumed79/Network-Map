@@ -51,8 +51,7 @@ await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
 mark("domcontentloaded");
 await page.locator(".app-wrap").waitFor({ state: "visible" });
 mark("app-visible");
-await page.waitForFunction(() => Boolean(window.__NETWORK_MAP_LEAFLET_LIFECYCLE__)
-  && Boolean(window.__NETWORK_MAP_MAPBOX_LIFECYCLE__)
+await page.waitForFunction(() => Boolean(window.__NETWORK_MAP_MAPBOX_LIFECYCLE__)
   && Boolean(window.__NETWORK_MAP_REQUEST_PIPELINE__));
 mark("runtime-owners-ready");
 await page.waitForFunction(() => document.documentElement.dataset.occumedWorkspaceReady === "true"
@@ -66,7 +65,7 @@ await page.waitForFunction(() => {
     return !element.hidden && style.display !== "none" && style.visibility !== "hidden"
       && Number(style.opacity || "1") > 0 && rect.width > 2 && rect.height > 2;
   };
-  return Array.from(document.querySelectorAll(".mapboxgl-map,.leaflet-container,.map-shell,.map-area")).some(visible);
+  return Array.from(document.querySelectorAll(".mapboxgl-map,.map-shell,.map-area")).some(visible);
 });
 mark("map-surface-visible");
 

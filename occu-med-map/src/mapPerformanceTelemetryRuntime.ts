@@ -24,9 +24,6 @@ function memorySnapshot(): MemorySummary {
 function mapboxLifecycle() {
   return (window as any).__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getDiagnostics?.() || null;
 }
-function leafletLifecycle() {
-  return (window as any).__NETWORK_MAP_LEAFLET_LIFECYCLE__?.getDiagnostics?.() || null;
-}
 function sourcePipeline() {
   return (window as any).__NETWORK_MAP_MAPBOX_SOURCE_PIPELINE__?.getDiagnostics?.() || null;
 }
@@ -34,7 +31,7 @@ function activeEngine(): string {
   const bodyMode = document.body?.dataset?.mapEngine || document.documentElement.dataset.mapEngine;
   if (bodyMode) return bodyMode;
   const mapbox = document.querySelector(".mapboxgl-map");
-  return mapbox ? "mapbox" : "leaflet";
+  return mapbox ? "mapbox" : "none";
 }
 
 function snapshot() {
@@ -45,7 +42,6 @@ function snapshot() {
     viewportRequests: mapInventoryRequestDiagnostics(),
     geoJsonWorker: providerGeoJsonDiagnostics(),
     mapboxLifecycle: mapboxLifecycle(),
-    leafletLifecycle: leafletLifecycle(),
     mapboxSources: pipeline,
     featureCount: Array.isArray(pipeline?.sources)
       ? pipeline.sources.reduce((sum: number, source: any) => sum + Number(source.featureCount || 0), 0)

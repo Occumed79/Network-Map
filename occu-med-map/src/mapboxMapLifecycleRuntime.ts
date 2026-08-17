@@ -185,6 +185,22 @@ export function getTrackedMapboxMaps(): mapboxgl.Map[] {
   return [...maps.keys()];
 }
 
+export function getMapboxMapByMode(mode: MapboxMapMode): mapboxgl.Map | null {
+  for (const [map, tracked] of maps) {
+    if (tracked.context.mode === mode) return map;
+  }
+  return null;
+}
+
+export function getActiveMapboxMap(): mapboxgl.Map | null {
+  const requestedMode = (window as any).__NETWORK_MAP_GLOBE__?.getMode?.() as MapboxMapMode | undefined;
+  if (requestedMode) {
+    const requested = getMapboxMapByMode(requestedMode);
+    if (requested) return requested;
+  }
+  return getMapboxMapByMode("2d") || getTrackedMapboxMaps()[0] || null;
+}
+
 if (registerRuntimeOwner("mapbox-map-lifecycle", "Authoritative Mapbox map lifecycle and initializer registry")) {
   window.__NETWORK_MAP_MAPBOX_LIFECYCLE__ = {
     getMaps: getTrackedMapboxMaps,

@@ -28,7 +28,6 @@ assert(registrySource.includes("duplicateAttempts"), "runtime owner registry mus
 assert((registrySource.match(/new MutationObserver/g) || []).length === 1, "runtime owner registry must own exactly one shared MutationObserver");
 
 const requiredOwners: Record<string, string> = {
-  "leafletMapLifecycleRuntime.ts": "leaflet-map-lifecycle",
   "mapboxMapLifecycleRuntime.ts": "mapbox-map-lifecycle",
   "networkRequestPipelineRuntime.ts": "network-request-pipeline",
   "mapToolsPanelRegistry.ts": "map-tools-section-registry",
@@ -119,7 +118,6 @@ assert(!duplicateOwners.length, `Duplicate runtime owner ids found: ${duplicateO
 
 const main = source("main.tsx");
 for (const runtime of [
-  "./leafletMapLifecycleRuntime",
   "./mapboxMapLifecycleRuntime",
   "./networkRequestPipelineRuntime",
   "./dialogControllerRuntime",

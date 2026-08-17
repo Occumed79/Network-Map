@@ -105,7 +105,7 @@ function relabelFooter(node: Element): void {
 }
 
 function relabelVisiblePopups(root: ParentNode = document): void {
-  const candidates = root.querySelectorAll(".leaflet-popup-content div");
+  const candidates = root.querySelectorAll(".mapboxgl-popup-content div");
   for (const candidate of Array.from(candidates)) relabelFooter(candidate);
 }
 

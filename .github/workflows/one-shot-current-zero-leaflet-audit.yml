@@ -1,0 +1,59 @@
+name: One-shot exhaustive zero-compat residue audit
+
+on:
+  push:
+    paths:
+      - .github/workflows/one-shot-current-zero-leaflet-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: nuclear/remove-leaflet-compat
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck frontend
+        run: pnpm --filter @workspace/occu-med-map typecheck
+      - name: Production build
+        run: pnpm --filter @workspace/occu-med-map build
+      - name: Architecture audit
+        working-directory: occu-med-map
+        run: pnpm exec tsx scripts/zero-leaflet-architecture-audit.ts
+      - name: Tracked filename residue
+        run: |
+          echo '=== TRACKED FILENAMES ==='
+          git ls-files | grep -Ei 'leaflet|mapscene|map-scene|mapboxnativecompat|scene.*compat|compat.*scene' || true
+      - name: Production and tooling text residue
+        run: |
+          echo '=== SOURCE / SCRIPTS / CONFIG / WORKFLOWS ==='
+          git grep -n -i -E 'leaflet|mapscene|map scene|map-scene|mapboxnativecompat|leafletmaplifecycle|scene-lifecycle|scene-root|__NETWORK_MAP_SCENE|\.leaflet-' -- \
+            'occu-med-map/src/**' \
+            'occu-med-map/scripts/**' \
+            'occu-med-map/package.json' \
+            'occu-med-map/tsconfig.json' \
+            'occu-med-map/vite.config.ts' \
+            '.github/workflows/**' || true
+      - name: Documentation residue
+        run: |
+          echo '=== DOCS / COMMENTS ==='
+          git grep -n -i -E 'leaflet|mapscene|map scene|map-scene|mapboxnativecompat|leafletmaplifecycle|scene-lifecycle|scene-root' -- \
+            '*.md' 'occu-med-map/**/*.md' || true
+      - name: Lockfile dependency residue
+        run: |
+          echo '=== LOCKFILE ==='
+          grep -n -i -E '(^|[/@])leaflet(@|:|/)|react-leaflet|@types/leaflet' pnpm-lock.yaml || true
+      - name: Built bundle residue
+        run: |
+          echo '=== BUILT BUNDLE ==='
+          grep -RIn -i -E 'leaflet|mapSceneRuntime|MapScene\.|mapboxNativeCompat|leafletMapLifecycle|__NETWORK_MAP_SCENE|\.leaflet-' occu-med-map/dist/public || true
+      - name: Git status
+        run: git status --short

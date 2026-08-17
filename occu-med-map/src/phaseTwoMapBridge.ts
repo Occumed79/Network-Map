@@ -1,5 +1,5 @@
-import L from 'leaflet';
-import { registerLeafletMapInitializer } from './leafletMapLifecycleRuntime';
+import mapboxgl from "mapbox-gl";
+import { registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
 
 export type PhaseTwoMapSnapshot = {
   zoom: number;
@@ -13,16 +13,13 @@ export type PhaseTwoMapSnapshot = {
 
 declare global {
   interface Window {
-    __occumedPhaseTwoMap?: L.Map;
+    __occumedPhaseTwoMap?: mapboxgl.Map;
   }
 }
 
-const INSTALL_KEY = '__occumedPhaseTwoMapBridgeInstalled';
-const REGISTERED_KEY = '__occumedPhaseTwoMapBridgeRegistered';
-const leafletRuntime = L as typeof L & Record<string, unknown>;
-
-function snapshot(map: L.Map): PhaseTwoMapSnapshot {
+function snapshot(map: mapboxgl.Map): PhaseTwoMapSnapshot | null {
   const bounds = map.getBounds();
+  if (!bounds) return null;
   return {
     zoom: map.getZoom(),
     bounds: {
@@ -34,33 +31,30 @@ function snapshot(map: L.Map): PhaseTwoMapSnapshot {
   };
 }
 
-function emitMapState(map: L.Map, eventName: string): void {
-  window.dispatchEvent(new CustomEvent(eventName, { detail: snapshot(map) }));
+function emitMapState(map: mapboxgl.Map, eventName: string): void {
+  const detail = snapshot(map);
+  if (!detail) return;
+  window.dispatchEvent(new CustomEvent(eventName, { detail }));
 }
 
-function registerMap(map: L.Map): void {
-  const registeredMap = map as L.Map & Record<string, unknown>;
-  if (registeredMap[REGISTERED_KEY]) return;
-  registeredMap[REGISTERED_KEY] = true;
-
-  window.__occumedPhaseTwoMap = map;
-  emitMapState(map, 'occumed:p2-map-ready');
-  const emitChange = () => emitMapState(map, 'occumed:p2-map-change');
-  map.on('moveend zoomend resize', emitChange);
-  map.once('unload', () => {
-    map.off('moveend zoomend resize', emitChange);
-    if (window.__occumedPhaseTwoMap === map) delete window.__occumedPhaseTwoMap;
-  });
-}
-
-export function installPhaseTwoMapBridge(): void {
-  if (leafletRuntime[INSTALL_KEY]) return;
-  leafletRuntime[INSTALL_KEY] = true;
-  registerLeafletMapInitializer({
-    id: 'phase-two-map-bridge',
-    priority: 0,
-    initialize: registerMap,
-  });
-}
-
-installPhaseTwoMapBridge();
+registerMapboxMapInitializer({
+  id: "phase-two-map-bridge",
+  priority: 16,
+  initialize: (map) => {
+    window.__occumedPhaseTwoMap = map;
+    emitMapState(map, "occumed:p2-map-ready");
+    const emitChange = () => {
+      window.__occumedPhaseTwoMap = map;
+      emitMapState(map, "occumed:p2-map-change");
+    };
+    map.on("moveend", emitChange);
+    map.on("zoomend", emitChange);
+    map.on("resize", emitChange);
+    return () => {
+      map.off("moveend", emitChange);
+      map.off("zoomend", emitChange);
+      map.off("resize", emitChange);
+      if (window.__occumedPhaseTwoMap === map) delete window.__occumedPhaseTwoMap;
+    };
+  },
+});

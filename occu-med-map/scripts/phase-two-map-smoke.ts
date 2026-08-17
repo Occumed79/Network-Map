@@ -106,11 +106,14 @@ assert.doesNotMatch(shell, /new MutationObserver/);
 
 const bridge = readFileSync(resolve(here, '../src/phaseTwoMapBridge.ts'), 'utf8');
 assert.match(bridge, /occumed:p2-map-change/);
-assert.match(bridge, /moveend zoomend resize/);
-assert.match(bridge, /registerLeafletMapInitializer/);
-assert.match(bridge, /id: 'phase-two-map-bridge'/);
-assert.match(bridge, /priority: 0/);
-assert.match(bridge, /initialize: registerMap/);
+assert.match(bridge, /registerMapboxMapInitializer/);
+assert.match(bridge, /id:\s*["']phase-two-map-bridge["']/);
+assert.match(bridge, /priority:\s*16/);
+assert.match(bridge, /map\.on\(["']moveend["'],\s*emitChange\)/);
+assert.match(bridge, /map\.on\(["']zoomend["'],\s*emitChange\)/);
+assert.match(bridge, /map\.on\(["']resize["'],\s*emitChange\)/);
+assert.match(bridge, /map\.off\(["']moveend["'],\s*emitChange\)/);
+assert.doesNotMatch(bridge, /registerLeafletMapInitializer/);
 assert.doesNotMatch(bridge, /L\.map\s*=/);
 assert.doesNotMatch(bridge, /setTimeout\(\(\) => registerMap\(map\),\s*0\)/);
 
@@ -144,4 +147,4 @@ const diagnosticsGate = readFileSync(resolve(here, '../src/usDiagnosticsGate.ts'
 assert.match(diagnosticsGate, /scheduleDiagnosticsSync/);
 assert.match(diagnosticsGate, /clearTimeout\(syncTimer\)/);
 
-console.log('P2 preview uses the unified provider route, avoids global runtime patches, preserves startup recovery, and keeps loading and pagination stable');
+console.log('P2 preview uses the unified provider route, native Mapbox lifecycle, startup recovery, and stable loading and pagination');

@@ -1,7 +1,7 @@
 import mapboxgl from "mapbox-gl";
 import { registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
 
-const COMPAT_PREFIX = "leaflet-compat-";
+const COMPAT_PREFIX = "map-scene-";
 const HIT_RADIUS_PX = 10;
 
 type ScreenPoint = { x: number; y: number };

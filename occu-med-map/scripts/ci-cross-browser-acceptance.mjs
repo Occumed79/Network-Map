@@ -129,7 +129,7 @@ async function assertNoGeometryFailure(page, label) {
       return !element.hidden && style.display !== "none" && style.visibility !== "hidden" && rect.width > 2 && rect.height > 2;
     };
     const offscreen = Array.from(document.querySelectorAll(
-      ".command-search-results,.local-pop-card,.tz-legend,.modal-box,.pdf-modal-wrap,.leaflet-popup,.mapboxgl-popup",
+      ".command-search-results,.local-pop-card,.tz-legend,.modal-box,.pdf-modal-wrap,.mapboxgl-popup",
     )).filter(visible).map((element) => {
       const rect = element.getBoundingClientRect();
       return { className: String(element.className || element.tagName), left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
@@ -163,17 +163,14 @@ async function assertWorkspace(page, label) {
 
 async function waitForRuntimeOwners(page, label) {
   try {
-    await page.waitForFunction(() => Boolean(window.__NETWORK_MAP_LEAFLET_LIFECYCLE__)
-      && Boolean(window.__NETWORK_MAP_MAPBOX_LIFECYCLE__)
+    await page.waitForFunction(() => Boolean(window.__NETWORK_MAP_MAPBOX_LIFECYCLE__)
       && Boolean(window.__NETWORK_MAP_REQUEST_PIPELINE__), null, { timeout: 20_000 });
   } catch (error) {
     const runtimeSnapshot = await page.evaluate(() => ({
-      leaflet: Boolean(window.__NETWORK_MAP_LEAFLET_LIFECYCLE__),
       mapbox: Boolean(window.__NETWORK_MAP_MAPBOX_LIFECYCLE__),
       requests: Boolean(window.__NETWORK_MAP_REQUEST_PIPELINE__),
       mapWrap: Boolean(document.querySelector(".map-wrap")),
       mapboxSurface: Boolean(document.querySelector(".mapboxgl-map")),
-      leafletSurface: Boolean(document.querySelector(".leaflet-container")),
       arcgisSurface: Boolean(document.querySelector(".esri-view,.esri-view-root,.esri-view-surface")),
     }));
     throw new Error(`${label}: runtime owners did not initialize: ${JSON.stringify(runtimeSnapshot)}\n${error instanceof Error ? error.message : String(error)}`);
@@ -199,7 +196,7 @@ async function waitForWorkspaceReady(page, label) {
 }
 
 async function waitForVisibleMapSurface(page, label) {
-  const selector = ".map-wrap,.esri-view,.esri-view-root,.esri-view-surface,.mapboxgl-map,.leaflet-container,.map-shell,.map-area";
+  const selector = ".map-wrap,.esri-view,.esri-view-root,.esri-view-surface,.mapboxgl-map,.map-shell,.map-area";
   try {
     await page.waitForFunction((surfaceSelector) => {
       const visible = (element) => {

@@ -168,13 +168,16 @@ export default function ProviderLayerRegistryPanel() {
       const map = getActiveMapboxMap();
       if (!map) throw new Error('Map is not ready');
       const bounds = map.getBounds();
+      if (!bounds) throw new Error('Map bounds are not ready');
       const params = new URLSearchParams({
         useBounds: 'true',
         north: String(bounds.getNorth()),
         south: String(bounds.getSouth()),
         east: String(bounds.getEast()),
         west: String(bounds.getWest()),
-        limit: '5000',
+        // Use the common transport page size. The request runtime auto-paginates
+        // until every matching viewport record has been assembled.
+        limit: '2000',
       });
       const response = await fetchProviderLayer(`${definition.endpoint}?${params.toString()}`, { signal: controller.signal });
       if (controller.signal.aborted) return;

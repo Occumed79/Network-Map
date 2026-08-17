@@ -34,11 +34,8 @@ function clearExplorerVisualization(): void {
   clearProviderExplorerNative();
 }
 
-function normalizeButtonLabel(button: HTMLButtonElement): string {
-  return `${button.textContent || ""} ${button.getAttribute("aria-label") || ""}`
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
+function visibleButtonLabel(button: HTMLButtonElement): string {
+  return (button.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 function restoreInactivePresentation(): void {
@@ -75,7 +72,7 @@ function handleClick(event: MouseEvent): void {
   const drawer = button.closest<HTMLElement>(".provider-explorer-drawer");
   if (!drawer) return;
 
-  const label = normalizeButtonLabel(button);
+  const label = visibleButtonLabel(button);
   if (VISUALIZATION_LABELS.has(label)) {
     setIntent(true);
     return;

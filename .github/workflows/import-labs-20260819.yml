@@ -37,14 +37,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat tmp/lab-import-20260819/part-*.b64 | base64 --decode | xz --decompress --stdout > /tmp/labs_neon_import_20260819.csv
-          actual="$(python - <<'PY'
-import csv
-p='/tmp/labs_neon_import_20260819.csv'
-with open(p, encoding='utf-8-sig', newline='') as f:
-    print(sum(1 for _ in csv.DictReader(f)))
-PY
-)"
+          cat tmp/lab-import-20260819/part-*.b64 | base64 --decode | xz --decompress --stdout > /tmp/labs_min.tsv
+          actual="$(wc -l < /tmp/labs_min.tsv | tr -d ' ')"
           echo "Reconstructed ${actual} laboratory rows"
           test "$actual" = "$EXPECTED_ROWS"
 
@@ -63,7 +57,7 @@ PY
             (source_key, display_name, source_kind, trust_tier, active, notes)
           VALUES
             ('lab_dataset', 'Laboratory Dataset', 'directory', 'directory', true,
-             'Geocoded laboratory dataset imported 2026-08-19 from Places source records using Census and Geocodio results.')
+             'Combined geocoded laboratory dataset imported 2026-08-19 from Census and Geocodio results.')
           ON CONFLICT (source_key) DO UPDATE SET
             display_name = EXCLUDED.display_name,
             source_kind = EXCLUDED.source_kind,
@@ -73,28 +67,13 @@ PY
             updated_at = now();
 
           CREATE TEMP TABLE lab_import_20260819 (
-            master_key text NOT NULL,
             name text NOT NULL,
-            normalized_name text,
-            address_line1 text,
-            formatted_address text,
-            city text,
-            state_region text,
-            postal_code text,
-            country_code text,
+            formatted_address text NOT NULL,
             lat double precision NOT NULL,
-            lng double precision NOT NULL,
-            phone text,
-            website text,
-            email text,
-            quality_score numeric,
-            geocode_source text,
-            geocode_match text,
-            source_dataset text,
-            source_confidence numeric
+            lng double precision NOT NULL
           ) ON COMMIT DROP;
 
-          \copy lab_import_20260819 (master_key,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,quality_score,geocode_source,geocode_match,source_dataset,source_confidence) FROM '/tmp/labs_neon_import_20260819.csv' WITH (FORMAT csv, HEADER true, ENCODING 'UTF8')
+          \copy lab_import_20260819 (name,formatted_address,lat,lng) FROM '/tmp/labs_min.tsv' WITH (FORMAT csv, DELIMITER E'\t', QUOTE '"', ENCODING 'UTF8')
 
           DO $$
           DECLARE n bigint;
@@ -109,46 +88,51 @@ PY
                  OR lng NOT BETWEEN -180 AND 180
                  OR (lat = 0 AND lng = 0)
                  OR btrim(name) = ''
+                 OR name ~* '^LAB[0-9]+$'
             ) THEN
               RAISE EXCEPTION 'Invalid laboratory row detected';
             END IF;
           END $$;
 
+          CREATE TEMP TABLE lab_import_prepared_20260819 ON COMMIT DROP AS
+          SELECT
+            'lab_dataset:' || md5(lower(btrim(name)) || '|' || lower(btrim(formatted_address))) AS master_key,
+            btrim(name) AS name,
+            lower(regexp_replace(btrim(name), '[^[:alnum:]]+', ' ', 'g')) AS normalized_name,
+            CASE WHEN m.parts IS NOT NULL
+              THEN btrim(regexp_replace(formatted_address, ',\s*[^,]+,\s*[A-Z]{2},\s*\d{5}(?:-\d{4})?\s*$', ''))
+              ELSE btrim(formatted_address)
+            END AS address_line1,
+            btrim(formatted_address) AS formatted_address,
+            CASE WHEN m.parts IS NOT NULL THEN btrim(m.parts[1]) END AS city,
+            CASE WHEN m.parts IS NOT NULL THEN upper(m.parts[2]) END AS state_region,
+            CASE WHEN m.parts IS NOT NULL THEN m.parts[3] END AS postal_code,
+            'US'::text AS country_code,
+            lat,
+            lng
+          FROM lab_import_20260819 s
+          LEFT JOIN LATERAL (
+            SELECT regexp_match(s.formatted_address, ',\s*([^,]+),\s*([A-Z]{2}),\s*(\d{5})(?:-\d{4})?\s*$') AS parts
+          ) m ON true;
+
           UPDATE public.provider_master
              SET active = false,
                  updated_at = now()
            WHERE primary_source_key = 'lab_dataset'
-             AND master_key NOT IN (SELECT master_key FROM lab_import_20260819);
+             AND master_key NOT IN (SELECT master_key FROM lab_import_prepared_20260819);
 
           INSERT INTO public.provider_master (
             master_key, name, normalized_name, address_line1, formatted_address,
             city, state_region, postal_code, country_code, lat, lng,
-            phone, website, email, primary_provider_type, capability_tags,
-            primary_source_key, quality_score, active, last_seen_at, updated_at
+            primary_provider_type, capability_tags, primary_source_key,
+            quality_score, active, last_seen_at, updated_at
           )
           SELECT
-            s.master_key,
-            s.name,
-            NULLIF(s.normalized_name, ''),
-            NULLIF(s.address_line1, ''),
-            NULLIF(s.formatted_address, ''),
-            NULLIF(s.city, ''),
-            NULLIF(s.state_region, ''),
-            NULLIF(s.postal_code, ''),
-            COALESCE(NULLIF(s.country_code, ''), 'US'),
-            s.lat,
-            s.lng,
-            NULLIF(s.phone, ''),
-            NULLIF(s.website, ''),
-            NULLIF(s.email, ''),
-            'lab',
-            ARRAY['lab','laboratory']::text[],
-            'lab_dataset',
-            s.quality_score,
-            true,
-            now(),
-            now()
-          FROM lab_import_20260819 s
+            master_key, name, normalized_name, address_line1, formatted_address,
+            city, state_region, postal_code, country_code, lat, lng,
+            'lab', ARRAY['lab','laboratory']::text[], 'lab_dataset',
+            0.90, true, now(), now()
+          FROM lab_import_prepared_20260819
           ON CONFLICT (master_key) DO UPDATE SET
             name = EXCLUDED.name,
             normalized_name = EXCLUDED.normalized_name,
@@ -160,9 +144,6 @@ PY
             country_code = EXCLUDED.country_code,
             lat = EXCLUDED.lat,
             lng = EXCLUDED.lng,
-            phone = COALESCE(EXCLUDED.phone, provider_master.phone),
-            website = COALESCE(EXCLUDED.website, provider_master.website),
-            email = COALESCE(EXCLUDED.email, provider_master.email),
             primary_provider_type = 'lab',
             capability_tags = ARRAY['lab','laboratory']::text[],
             primary_source_key = 'lab_dataset',
@@ -173,12 +154,12 @@ PY
 
           INSERT INTO public.provider_master_types
             (master_provider_id, type_key, source_key, confidence_score)
-          SELECT pm.id, 'lab', 'lab_dataset', COALESCE(s.quality_score, 0.90)
-          FROM lab_import_20260819 s
+          SELECT pm.id, 'lab', 'lab_dataset', 0.90
+          FROM lab_import_prepared_20260819 s
           JOIN public.provider_master pm ON pm.master_key = s.master_key
           ON CONFLICT (master_provider_id, type_key) DO UPDATE SET
             source_key = 'lab_dataset',
-            confidence_score = EXCLUDED.confidence_score;
+            confidence_score = 0.90;
 
           DELETE FROM public.provider_master_sources
           WHERE source_key = 'lab_dataset';
@@ -191,14 +172,9 @@ PY
             pm.id,
             'lab_dataset',
             s.master_key,
-            COALESCE(s.source_confidence, s.quality_score),
-            jsonb_strip_nulls(jsonb_build_object(
-              'geocode_source', NULLIF(s.geocode_source, ''),
-              'geocode_match', NULLIF(s.geocode_match, ''),
-              'source_dataset', NULLIF(s.source_dataset, ''),
-              'source_confidence', s.source_confidence
-            ))
-          FROM lab_import_20260819 s
+            0.90,
+            jsonb_build_object('import', 'labs_combined_geocoded_20260819')
+          FROM lab_import_prepared_20260819 s
           JOIN public.provider_master pm ON pm.master_key = s.master_key;
 
           COMMIT;

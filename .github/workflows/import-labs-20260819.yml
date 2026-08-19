@@ -1,0 +1,222 @@
+name: One-time laboratory provider import
+
+on:
+  push:
+    paths:
+      - '.lab-import-trigger-20260819'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: one-time-lab-provider-import-20260819
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      EXPECTED_ROWS: '23025'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install --yes -qq postgresql-client xz-utils
+
+      - name: Reconstruct laboratory import file
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat tmp/lab-import-20260819/part-*.b64 | base64 --decode | xz --decompress --stdout > /tmp/labs_neon_import_20260819.csv
+          actual="$(python - <<'PY'
+import csv
+p='/tmp/labs_neon_import_20260819.csv'
+with open(p, encoding='utf-8-sig', newline='') as f:
+    print(sum(1 for _ in csv.DictReader(f)))
+PY
+)"
+          echo "Reconstructed ${actual} laboratory rows"
+          test "$actual" = "$EXPECTED_ROWS"
+
+      - name: Import labs into canonical provider inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DATABASE_URL" == postgres* ]] || { echo 'DATABASE_URL secret is missing' >&2; exit 1; }
+          echo "::add-mask::$DATABASE_URL"
+
+          cat > /tmp/import_labs.sql <<'SQL'
+          \set ON_ERROR_STOP on
+          BEGIN;
+
+          INSERT INTO public.provider_source_catalog
+            (source_key, display_name, source_kind, trust_tier, active, notes)
+          VALUES
+            ('lab_dataset', 'Laboratory Dataset', 'directory', 'directory', true,
+             'Geocoded laboratory dataset imported 2026-08-19 from Places source records using Census and Geocodio results.')
+          ON CONFLICT (source_key) DO UPDATE SET
+            display_name = EXCLUDED.display_name,
+            source_kind = EXCLUDED.source_kind,
+            trust_tier = EXCLUDED.trust_tier,
+            active = true,
+            notes = EXCLUDED.notes,
+            updated_at = now();
+
+          CREATE TEMP TABLE lab_import_20260819 (
+            master_key text NOT NULL,
+            name text NOT NULL,
+            normalized_name text,
+            address_line1 text,
+            formatted_address text,
+            city text,
+            state_region text,
+            postal_code text,
+            country_code text,
+            lat double precision NOT NULL,
+            lng double precision NOT NULL,
+            phone text,
+            website text,
+            email text,
+            quality_score numeric,
+            geocode_source text,
+            geocode_match text,
+            source_dataset text,
+            source_confidence numeric
+          ) ON COMMIT DROP;
+
+          \copy lab_import_20260819 (master_key,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,quality_score,geocode_source,geocode_match,source_dataset,source_confidence) FROM '/tmp/labs_neon_import_20260819.csv' WITH (FORMAT csv, HEADER true, ENCODING 'UTF8')
+
+          DO $$
+          DECLARE n bigint;
+          BEGIN
+            SELECT count(*) INTO n FROM lab_import_20260819;
+            IF n <> 23025 THEN
+              RAISE EXCEPTION 'Expected 23025 lab rows, loaded %', n;
+            END IF;
+            IF EXISTS (
+              SELECT 1 FROM lab_import_20260819
+              WHERE lat NOT BETWEEN -90 AND 90
+                 OR lng NOT BETWEEN -180 AND 180
+                 OR (lat = 0 AND lng = 0)
+                 OR btrim(name) = ''
+            ) THEN
+              RAISE EXCEPTION 'Invalid laboratory row detected';
+            END IF;
+          END $$;
+
+          UPDATE public.provider_master
+             SET active = false,
+                 updated_at = now()
+           WHERE primary_source_key = 'lab_dataset'
+             AND master_key NOT IN (SELECT master_key FROM lab_import_20260819);
+
+          INSERT INTO public.provider_master (
+            master_key, name, normalized_name, address_line1, formatted_address,
+            city, state_region, postal_code, country_code, lat, lng,
+            phone, website, email, primary_provider_type, capability_tags,
+            primary_source_key, quality_score, active, last_seen_at, updated_at
+          )
+          SELECT
+            s.master_key,
+            s.name,
+            NULLIF(s.normalized_name, ''),
+            NULLIF(s.address_line1, ''),
+            NULLIF(s.formatted_address, ''),
+            NULLIF(s.city, ''),
+            NULLIF(s.state_region, ''),
+            NULLIF(s.postal_code, ''),
+            COALESCE(NULLIF(s.country_code, ''), 'US'),
+            s.lat,
+            s.lng,
+            NULLIF(s.phone, ''),
+            NULLIF(s.website, ''),
+            NULLIF(s.email, ''),
+            'lab',
+            ARRAY['lab','laboratory']::text[],
+            'lab_dataset',
+            s.quality_score,
+            true,
+            now(),
+            now()
+          FROM lab_import_20260819 s
+          ON CONFLICT (master_key) DO UPDATE SET
+            name = EXCLUDED.name,
+            normalized_name = EXCLUDED.normalized_name,
+            address_line1 = EXCLUDED.address_line1,
+            formatted_address = EXCLUDED.formatted_address,
+            city = EXCLUDED.city,
+            state_region = EXCLUDED.state_region,
+            postal_code = EXCLUDED.postal_code,
+            country_code = EXCLUDED.country_code,
+            lat = EXCLUDED.lat,
+            lng = EXCLUDED.lng,
+            phone = COALESCE(EXCLUDED.phone, provider_master.phone),
+            website = COALESCE(EXCLUDED.website, provider_master.website),
+            email = COALESCE(EXCLUDED.email, provider_master.email),
+            primary_provider_type = 'lab',
+            capability_tags = ARRAY['lab','laboratory']::text[],
+            primary_source_key = 'lab_dataset',
+            quality_score = EXCLUDED.quality_score,
+            active = true,
+            last_seen_at = now(),
+            updated_at = now();
+
+          INSERT INTO public.provider_master_types
+            (master_provider_id, type_key, source_key, confidence_score)
+          SELECT pm.id, 'lab', 'lab_dataset', COALESCE(s.quality_score, 0.90)
+          FROM lab_import_20260819 s
+          JOIN public.provider_master pm ON pm.master_key = s.master_key
+          ON CONFLICT (master_provider_id, type_key) DO UPDATE SET
+            source_key = 'lab_dataset',
+            confidence_score = EXCLUDED.confidence_score;
+
+          DELETE FROM public.provider_master_sources
+          WHERE source_key = 'lab_dataset';
+
+          INSERT INTO public.provider_master_sources (
+            master_provider_id, source_key, source_record_id,
+            source_confidence_score, raw_payload
+          )
+          SELECT
+            pm.id,
+            'lab_dataset',
+            s.master_key,
+            COALESCE(s.source_confidence, s.quality_score),
+            jsonb_strip_nulls(jsonb_build_object(
+              'geocode_source', NULLIF(s.geocode_source, ''),
+              'geocode_match', NULLIF(s.geocode_match, ''),
+              'source_dataset', NULLIF(s.source_dataset, ''),
+              'source_confidence', s.source_confidence
+            ))
+          FROM lab_import_20260819 s
+          JOIN public.provider_master pm ON pm.master_key = s.master_key;
+
+          COMMIT;
+          SQL
+
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /tmp/import_labs.sql
+
+      - name: Verify lab-only map category import
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$DATABASE_URL"
+          imported="$(psql "$DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master WHERE active=true AND primary_source_key='lab_dataset' AND primary_provider_type='lab' AND lat IS NOT NULL AND lng IS NOT NULL AND lat BETWEEN -90 AND 90 AND lng BETWEEN -180 AND 180 AND (lat<>0 OR lng<>0);")"
+          bad_names="$(psql "$DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master WHERE primary_source_key='lab_dataset' AND (name ~* '^LAB[0-9]+$' OR btrim(name)='');")"
+          layer_rows="$(psql "$DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE primary_source_key='lab_dataset' AND primary_provider_type='lab';")"
+          echo "Imported active labs: $imported"
+          echo "Labs visible to Labs category query: $layer_rows"
+          echo "Bad lab-code names: $bad_names"
+          test "$imported" = "$EXPECTED_ROWS"
+          test "$layer_rows" = "$EXPECTED_ROWS"
+          test "$bad_names" = '0'

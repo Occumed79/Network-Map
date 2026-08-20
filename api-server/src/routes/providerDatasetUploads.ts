@@ -13,15 +13,35 @@ const DEFAULT_SOURCE_KEY = "my_clinics_upload";
 
 const PROVIDER_TYPES = new Set([
   "urgent_care",
-  "dot_provider",
-  "faa_provider",
-  "lab",
-  "general_practitioner",
+  "walk_in_clinic",
+  "occupational_health",
   "occupational_health_clinic",
+  "dentist",
   "dental",
-  "imaging",
-  "pharmacy_vaccination",
+  "cardiology",
+  "public_health",
   "hospital",
+  "hearing_aid",
+  "imaging",
+  "concierge_medicine",
+  "lab",
+  "audiology",
+  "ent",
+  "general_practitioner",
+  "family_practice",
+  "psychiatry",
+  "pulmonology",
+  "sports_medicine",
+  "gastroenterology",
+  "neurotology",
+  "orthopedics",
+  "internal_medicine",
+  "pharmacy",
+  "pharmacy_vaccination",
+  "faa_examiner",
+  "faa_provider",
+  "dot_examiner",
+  "dot_provider",
   "specialist",
   "unknown",
 ]);
@@ -168,6 +188,7 @@ function normalizeSourceLabel(value: unknown, filename: string): string {
 
 function sourceKeyForLabel(label: string): string {
   const normalized = label.toLowerCase();
+  if (normalized === "overture" || normalized === "overture maps") return "overture";
   if (normalized === "my clinics" || normalized === "my clinics upload") return DEFAULT_SOURCE_KEY;
   const slug = normalized
     .normalize("NFKD")
@@ -176,6 +197,10 @@ function sourceKeyForLabel(label: string): string {
     .replace(/^_+|_+$/g, "")
     .slice(0, 48) || "dataset";
   return `user_upload_${slug}_${contentHash(normalized).slice(0, 8)}`;
+}
+
+function sourceKindForKey(sourceKey: string): string {
+  return sourceKey === "overture" ? "external_directory" : "user_upload";
 }
 
 function countryCodeFor(value: string): string {
@@ -220,7 +245,26 @@ function classify(row: IncomingRow, name: string, notes: string, taxonomy: strin
     if (primary === "unknown") primary = type;
   };
 
+  // Preserve normalized multi-type values supplied by import files.
+  for (const candidate of blob.split(/[,;|\s]+/)) add(candidate);
+
   if (/urgent|walk[- ]?in|immediate care/.test(blob)) add("urgent_care");
+  if (/walk[- ]?in/.test(blob)) add("walk_in_clinic");
+  if (/family practice|family medicine/.test(blob)) add("family_practice");
+  if (/internal medicine/.test(blob)) add("internal_medicine");
+  if (/concierge medicine/.test(blob)) add("concierge_medicine");
+  if (/cardiolog/.test(blob)) add("cardiology");
+  if (/gastroenterolog/.test(blob)) add("gastroenterology");
+  if (/otolaryngolog|\bent\b/.test(blob)) add("ent");
+  if (/neurotolog/.test(blob)) add("neurotology");
+  if (/orthopedi|orthopaedi/.test(blob)) add("orthopedics");
+  if (/pulmonolog/.test(blob)) add("pulmonology");
+  if (/psychiatr/.test(blob)) add("psychiatry");
+  if (/sports medicine/.test(blob)) add("sports_medicine");
+  if (/hearing aid/.test(blob)) add("hearing_aid");
+  if (/audiolog/.test(blob)) add("audiology");
+  if (/public health clinic/.test(blob)) add("public_health");
+
   if (/occupational|occ\s*med|employee health|workers? comp|fit[- ]?for[- ]?duty|ffd/.test(blob)) add("occupational_health_clinic");
   if (/\bdot\b|department of transportation|cdl|medical examiner/.test(blob)) add("dot_provider");
   if (/\bfaa\b|aviation medical|\bame\b/.test(blob)) add("faa_provider");
@@ -232,7 +276,11 @@ function classify(row: IncomingRow, name: string, notes: string, taxonomy: strin
   if (/family medicine|internal medicine|primary care|general practice|physician|doctor|\bmd\b|\bdo\b/.test(blob)) add("general_practitioner");
   if (/cardiology|pulmonary|orthopedic|neurology|specialist|specialty/.test(blob)) add("specialist");
 
-  for (const tag of parseStringList(firstValue(row, "capabilityTags", "capability_tags", "capabilities", "tags"))) {
+  for (const tag of parseStringList(firstValue(
+    row,
+    "providerTypes", "provider_types", "normalizedProviderTypes", "normalized_provider_types",
+    "capabilityTags", "capability_tags", "capabilities", "tags",
+  ))) {
     const normalized = tag.toLowerCase().replace(/[\s-]+/g, "_");
     if (PROVIDER_TYPES.has(normalized)) add(normalized);
   }
@@ -258,7 +306,7 @@ function normalizeRow(row: IncomingRow, index: number): NormalizedRow {
   const lng = parseOptionalNumber(first(row, "lng", "lon", "long", "longitude"));
   const { primaryProviderType, capabilityTags } = classify(row, name, notes, taxonomyDescription);
   const normalizedName = first(row, "normalizedName", "normalized_name") || normalizedProviderName(name);
-  const sourceRecordId = first(row, "sourceRecordId", "source_record_id", "id", "sourceId", "source_id") || contentHash({
+  const sourceRecordId = first(row, "overtureId", "overture_id", "sourceRecordId", "source_record_id", "id", "sourceId", "source_id") || contentHash({
     name: normalizedName,
     address: address.toLowerCase(),
     city: city.toLowerCase(),
@@ -269,7 +317,7 @@ function normalizeRow(row: IncomingRow, index: number): NormalizedRow {
   const suppliedRowNumber = parseOptionalNumber(first(row, "fileRowNumber", "file_row_number", "sourceRow", "source_row", "sequence"));
   const fileRowNumber = suppliedRowNumber !== null && suppliedRowNumber > 0 ? Math.trunc(suppliedRowNumber) : index + 1;
   const qualityReasons = providerQualityReasons({ name, address, lat, lng });
-  const providedQuality = parseOptionalNumber(first(row, "qualityScore", "quality_score"));
+  const providedQuality = parseOptionalNumber(first(row, "qualityScore", "quality_score", "confidence"));
   const qualityScore = providedQuality === null
     ? (hasValidCoordinates(lat, lng) && isUsableProviderName(name) ? 0.95 : 0.35)
     : Math.min(Math.max(providedQuality, 0), 1);
@@ -375,6 +423,7 @@ router.post("/my-clinics/upload", async (req: Request, res: Response, next: Next
     originalFilename,
   );
   const sourceKey = sourceKeyForLabel(sourceLabel);
+  const sourceKind = sourceKindForKey(sourceKey);
   const uploadLabel = text(req.body?.uploadLabel || req.body?.groupName) || sourceLabel;
   const uploadedBy = text(req.body?.uploadedBy) || null;
   const rowOffset = Math.max(0, Math.trunc(Number(req.body?.rowOffset) || 0));
@@ -409,14 +458,14 @@ router.post("/my-clinics/upload", async (req: Request, res: Response, next: Next
     await client.query(
       `INSERT INTO public.provider_source_catalog (
          source_key, display_name, source_kind, trust_tier, active, notes
-       ) VALUES ($1,$2,'user_upload','verified',true,$3)
+       ) VALUES ($1,$2,$3,$4,true,$5)
        ON CONFLICT (source_key) DO UPDATE SET
          display_name=EXCLUDED.display_name,
-         source_kind='user_upload',
-         trust_tier='verified',
+         source_kind=EXCLUDED.source_kind,
+         trust_tier=EXCLUDED.trust_tier,
          active=true,
          updated_at=now()`,
-      [sourceKey, sourceLabel, `Uploaded from ${originalFilename}`],
+      [sourceKey, sourceLabel, sourceKind, sourceKey === "overture" ? "directory" : "verified", `Uploaded from ${originalFilename}`],
     );
 
     const batch = await client.query(

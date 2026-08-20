@@ -14,6 +14,7 @@ type CategoryDefinition = {
   typeKeys?: string[];
   capabilityPatterns?: string[];
   sourceKeys?: string[];
+  international?: boolean;
 };
 
 const CATEGORY_DEFINITIONS: Record<string, CategoryDefinition> = {
@@ -24,12 +25,12 @@ const CATEGORY_DEFINITIONS: Record<string, CategoryDefinition> = {
   },
   "occupational-health-clinics": {
     family: "all",
-    typeKeys: ["occupational_health_clinic"],
+    typeKeys: ["occupational_health", "occupational_health_clinic"],
     capabilityPatterns: ["occupational", "occ med", "employee health", "workers comp", "fit-for-duty", "fit for duty"],
   },
   dentists: {
     family: "all",
-    typeKeys: ["dental"],
+    typeKeys: ["dentist", "dental"],
     capabilityPatterns: ["dental", "dentist", "dd 2813"],
   },
   "blue-hive": {
@@ -38,12 +39,12 @@ const CATEGORY_DEFINITIONS: Record<string, CategoryDefinition> = {
   },
   "faa-examiners": {
     family: "all",
-    typeKeys: ["faa_provider"],
+    typeKeys: ["faa_examiner", "faa_provider"],
     capabilityPatterns: ["faa", "aviation medical", "aerospace medicine"],
   },
   "dot-examiners": {
     family: "all",
-    typeKeys: ["dot_provider"],
+    typeKeys: ["dot_examiner", "dot_provider"],
     capabilityPatterns: ["dot exam", "dot medical", "fmcsa", "cdl medical"],
   },
   labs: {
@@ -58,6 +59,7 @@ const CATEGORY_DEFINITIONS: Record<string, CategoryDefinition> = {
   },
   audiology: {
     family: "all",
+    typeKeys: ["audiology"],
     capabilityPatterns: ["audiology", "audiogram", "audiometry", "hearing"],
   },
   "general-practitioners": {
@@ -67,11 +69,12 @@ const CATEGORY_DEFINITIONS: Record<string, CategoryDefinition> = {
   },
   pharmacy: {
     family: "all",
-    typeKeys: ["pharmacy_vaccination"],
+    typeKeys: ["pharmacy", "pharmacy_vaccination"],
     capabilityPatterns: ["pharmacy", "vaccination", "immunization", "travel medicine"],
   },
   "international-providers": {
-    family: "healthsites",
+    family: "all",
+    international: true,
   },
   "usa-embassy-recommended": {
     family: "usa-embassy",
@@ -80,6 +83,21 @@ const CATEGORY_DEFINITIONS: Record<string, CategoryDefinition> = {
     family: "primary",
     sourceKeys: ["my_clinics_upload"],
   },
+  "walk-in-clinics": { family: "all", typeKeys: ["walk_in_clinic"] },
+  "family-practice": { family: "all", typeKeys: ["family_practice"] },
+  "internal-medicine": { family: "all", typeKeys: ["internal_medicine"] },
+  "concierge-medicine": { family: "all", typeKeys: ["concierge_medicine"] },
+  cardiology: { family: "all", typeKeys: ["cardiology"] },
+  gastroenterology: { family: "all", typeKeys: ["gastroenterology"] },
+  ent: { family: "all", typeKeys: ["ent"] },
+  neurotology: { family: "all", typeKeys: ["neurotology"] },
+  orthopedics: { family: "all", typeKeys: ["orthopedics"] },
+  pulmonology: { family: "all", typeKeys: ["pulmonology"] },
+  psychiatry: { family: "all", typeKeys: ["psychiatry"] },
+  "sports-medicine": { family: "all", typeKeys: ["sports_medicine"] },
+  "hearing-aid-providers": { family: "all", typeKeys: ["hearing_aid"] },
+  hospitals: { family: "all", typeKeys: ["hospital"] },
+  "public-health-clinics": { family: "all", typeKeys: ["public_health"] },
 };
 
 function addParam(params: unknown[], value: unknown): string {
@@ -127,10 +145,23 @@ function categoryWhere(definition: CategoryDefinition, bounds: Bounds | null, pa
     conditions.push(`lower(COALESCE(pmv.source_key, '')) = ANY(${placeholder}::text[])`);
   }
 
+  if (definition.international) {
+    // Preserve the existing Healthsites overlay while also allowing any
+    // non-US canonical provider (including Overture) to retain clinical types.
+    conditions.push("(upper(COALESCE(pmv.country, pmv.country_code, '')) <> 'US' OR lower(COALESCE(pmv.source_key, '')) = 'healthsites_osm')");
+  }
+
   const typePredicates: string[] = [];
   if (definition.typeKeys?.length) {
     const placeholder = addParam(params, definition.typeKeys.map((value) => value.toLowerCase()));
-    typePredicates.push(`lower(COALESCE(pmv.primary_provider_type, '')) = ANY(${placeholder}::text[])`);
+    typePredicates.push(`(
+      lower(COALESCE(pmv.primary_provider_type, '')) = ANY(${placeholder}::text[])
+      OR EXISTS (
+        SELECT 1 FROM public.provider_master_types pmt
+        WHERE pmt.master_provider_id = pmv.id::bigint
+          AND lower(pmt.type_key) = ANY(${placeholder}::text[])
+      )
+    )`);
   }
   if (definition.capabilityPatterns?.length) {
     const placeholder = addParam(params, definition.capabilityPatterns.map((value) => `%${value.toLowerCase()}%`));

@@ -79,7 +79,7 @@ function providerPopup(provider: any, layer: LayerDefinition): string {
 function layerStatus(state: LayerState): string {
   if (state.loading) return 'Loading all records in view…';
   if (state.error) return state.error;
-  if (!state.enabled) return 'Off';
+  if (!state.enabled) return state.total > 0 ? `${state.total.toLocaleString()} total · off` : 'Off';
   const loaded = `${state.count.toLocaleString()} mapped`;
   const total = state.total > state.count ? ` · ${state.total.toLocaleString()} matching` : '';
   return `${loaded}${total}${state.warning ? ' · partial result' : ''}`;
@@ -121,9 +121,27 @@ export default function ProviderLayerRegistryPanel() {
   const [host, setHost] = useState<HTMLElement | null>(null);
   const [layers, setLayers] = useState<LayerStateMap>(initialState);
   const controllers = useRef(new Map<string, AbortController>());
+  const loadedProviders = useRef(new Map<string, any[]>());
   const reloadTimer = useRef<number>(0);
   const layerStateRef = useRef(layers);
   layerStateRef.current = layers;
+
+  function renderCombinedProviderLayers(): void {
+    const unique = new Map<string, { provider: any; definition: ProviderLayerCategory }>();
+    for (const definition of PROVIDER_LAYER_CATEGORIES) {
+      if (!layerStateRef.current[definition.id]?.enabled) continue;
+      for (const provider of loadedProviders.current.get(definition.id) || []) {
+        const key = String(provider?.id || provider?.source_id || `${provider?.lat}:${provider?.lng}:${provider?.name}`);
+        if (!unique.has(key)) unique.set(key, { provider, definition });
+      }
+    }
+    const entries = [...unique.values()];
+    renderProviderDataset('provider-categories', entries, {
+      baseColor: '#38bdf8',
+      getColor: (entry) => entry.definition.color,
+      buildPopup: (entry) => providerPopup(entry.provider, entry.definition),
+    });
+  }
 
   const definitions = useMemo<LayerDefinition[]>(
     () => [...PROVIDER_LAYER_CATEGORIES, PUBLIC_HEALTH_LAYER],
@@ -194,10 +212,13 @@ export default function ProviderLayerRegistryPanel() {
         throw new Error(data?.warning || data?.error || `HTTP ${response.status}`);
       }
       const providers = Array.isArray(data?.providers) ? data.providers : [];
-      const mapped = renderProviderDataset(definition.channel, providers, {
-        baseColor: definition.color,
-        glow: false,
-        buildPopup: (provider: any) => providerPopup(provider, definition),
+      const isCategory = 'section' in definition;
+      if (isCategory) {
+        loadedProviders.current.set(definition.id, providers);
+        renderCombinedProviderLayers();
+      }
+      const mapped = isCategory ? providers.length : renderProviderDataset(definition.channel, providers, {
+        baseColor: definition.color, glow: false, buildPopup: (provider: any) => providerPopup(provider, definition),
       });
       setLayers((current) => ({
         ...current,
@@ -237,10 +258,15 @@ export default function ProviderLayerRegistryPanel() {
     if (!enabled) {
       controllers.current.get(definition.id)?.abort();
       controllers.current.delete(definition.id);
-      clearProviderDataset(definition.channel);
+      if ('section' in definition) {
+        loadedProviders.current.delete(definition.id);
+        // State refs update on the next render; remove this category immediately.
+        layerStateRef.current = { ...layerStateRef.current, [definition.id]: { ...layerStateRef.current[definition.id], enabled: false } };
+        renderCombinedProviderLayers();
+      } else clearProviderDataset(definition.channel);
       setLayers((current) => ({
         ...current,
-        [definition.id]: { ...current[definition.id], loading: false, count: 0, total: 0, warning: '' },
+        [definition.id]: { ...current[definition.id], loading: false, count: 0, warning: '' },
       }));
       return;
     }
@@ -271,14 +297,12 @@ export default function ProviderLayerRegistryPanel() {
   if (!host) return null;
   return createPortal(
     <div data-provider-registry-owned="true">
-      {PROVIDER_LAYER_CATEGORIES.map((definition) => (
-        <Toggle
-          key={definition.id}
-          definition={definition}
-          state={layers[definition.id] || EMPTY_LAYER_STATE}
-          onChange={(enabled) => setEnabled(definition, enabled)}
-        />
-      ))}
+      {PROVIDER_LAYER_CATEGORIES.map((definition, index) => <div key={definition.id}>
+        {(index === 0 || PROVIDER_LAYER_CATEGORIES[index - 1].section !== definition.section) &&
+          <div style={{ margin: '8px 0 4px', fontSize: 8, letterSpacing: '.12em', color: '#64748b', fontFamily: "'IBM Plex Mono',monospace" }}>{definition.section}</div>}
+        <Toggle definition={definition} state={layers[definition.id] || EMPTY_LAYER_STATE}
+          onChange={(enabled) => setEnabled(definition, enabled)} />
+      </div>)}
       <div style={{ margin: '8px 0 4px', fontSize: 8, letterSpacing: '.12em', color: '#64748b', fontFamily: "'IBM Plex Mono',monospace" }}>
         PUBLIC HEALTH DATA
       </div>

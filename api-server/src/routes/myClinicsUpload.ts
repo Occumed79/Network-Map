@@ -11,15 +11,35 @@ const MAX_ROWS_PER_REQUEST = 5000;
 
 const PROVIDER_TYPES = new Set([
   "urgent_care",
-  "dot_provider",
-  "faa_provider",
-  "lab",
-  "general_practitioner",
+  "walk_in_clinic",
+  "occupational_health",
   "occupational_health_clinic",
+  "dentist",
   "dental",
-  "imaging",
-  "pharmacy_vaccination",
+  "cardiology",
+  "public_health",
   "hospital",
+  "hearing_aid",
+  "imaging",
+  "concierge_medicine",
+  "lab",
+  "audiology",
+  "ent",
+  "general_practitioner",
+  "family_practice",
+  "psychiatry",
+  "pulmonology",
+  "sports_medicine",
+  "gastroenterology",
+  "neurotology",
+  "orthopedics",
+  "internal_medicine",
+  "pharmacy",
+  "pharmacy_vaccination",
+  "faa_examiner",
+  "faa_provider",
+  "dot_examiner",
+  "dot_provider",
   "specialist",
   "unknown",
 ]);
@@ -97,7 +117,26 @@ function classify(
     if (primary === "unknown") primary = type;
   };
 
+  // Preserve normalized multi-type values supplied by import files.
+  for (const candidate of blob.split(/[,;|\s]+/)) add(candidate);
+
   if (/urgent|walk[- ]?in|immediate care/.test(blob)) add("urgent_care");
+  if (/walk[- ]?in/.test(blob)) add("walk_in_clinic");
+  if (/family practice|family medicine/.test(blob)) add("family_practice");
+  if (/internal medicine/.test(blob)) add("internal_medicine");
+  if (/concierge medicine/.test(blob)) add("concierge_medicine");
+  if (/cardiolog/.test(blob)) add("cardiology");
+  if (/gastroenterolog/.test(blob)) add("gastroenterology");
+  if (/otolaryngolog|\bent\b/.test(blob)) add("ent");
+  if (/neurotolog/.test(blob)) add("neurotology");
+  if (/orthopedi|orthopaedi/.test(blob)) add("orthopedics");
+  if (/pulmonolog/.test(blob)) add("pulmonology");
+  if (/psychiatr/.test(blob)) add("psychiatry");
+  if (/sports medicine/.test(blob)) add("sports_medicine");
+  if (/hearing aid/.test(blob)) add("hearing_aid");
+  if (/audiolog/.test(blob)) add("audiology");
+  if (/public health clinic/.test(blob)) add("public_health");
+
   if (/occupational|occ\s*med|employee health|workers? comp|fit[- ]?for[- ]?duty|ffd/.test(blob)) add("occupational_health_clinic");
   if (/\bdot\b|department of transportation|cdl|medical examiner/.test(blob)) add("dot_provider");
   if (/\bfaa\b|aviation medical|\bame\b/.test(blob)) add("faa_provider");

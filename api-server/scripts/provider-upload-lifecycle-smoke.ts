@@ -6,6 +6,7 @@ const apiRoot = path.resolve(process.cwd());
 const repoRoot = path.resolve(apiRoot, "..");
 const route = fs.readFileSync(path.join(apiRoot, "src/routes/providerUploadLifecycle.ts"), "utf8");
 const migration = fs.readFileSync(path.join(apiRoot, "src/db/migrations/20260806_provider_upload_lifecycle.sql"), "utf8");
+const overtureMigration = fs.readFileSync(path.join(apiRoot, "src/db/migrations/20260820_expanded_provider_type_catalog.sql"), "utf8");
 const routeIndex = fs.readFileSync(path.join(apiRoot, "src/routes/index.ts"), "utf8");
 const sync = fs.readFileSync(path.join(repoRoot, "occu-med-map/src/myClinicsBackendSync.ts"), "utf8");
 const spreadsheetSafety = fs.readFileSync(path.join(repoRoot, "occu-med-map/src/lib/spreadsheetSafety.ts"), "utf8");
@@ -35,6 +36,19 @@ assert.doesNotMatch(route, /coordinateStatus\s*:\s*["'](?:imported|geocoded)["']
 assert.match(route, /sourceLabel/, "user-selected source label must be preserved");
 assert.match(route, /mapping/, "explicit field mapping must be accepted and persisted");
 assert.match(route, /MAX_ROWS_PER_CHUNK = 5000/, "5,000-row request boundary must remain enforced");
+assert.match(route, /overtureid/, "cleaned Overture IDs must map to source provenance IDs");
+assert.match(route, /providertypes/, "cleaned multi-type arrays must map to capability tags");
+assert.match(route, /return "overture"/, "Overture Maps must use the canonical source key");
+assert.match(route, /ON CONFLICT \(master_provider_id,source_key,\(COALESCE\(source_record_id,''\)\)\)/, "source relationships must be idempotent");
+assert.match(route, /provider_master_types[\s\S]*ON CONFLICT DO NOTHING/, "type relationships must be idempotent");
+assert.match(overtureMigration, /\('overture', 'Overture Maps', 'external_directory'/, "Overture must be registered as a source, not a type");
+for (const typeKey of [
+  "urgent_care", "occupational_health", "dentist", "cardiology", "public_health", "hospital",
+  "hearing_aid", "imaging", "concierge_medicine", "lab", "audiology", "ent",
+  "general_practitioner", "family_practice", "psychiatry", "pulmonology", "sports_medicine",
+  "walk_in_clinic", "gastroenterology", "neurotology", "orthopedics", "internal_medicine",
+  "pharmacy", "faa_examiner", "dot_examiner",
+]) assert.match(overtureMigration, new RegExp(`'${typeKey}'`), `${typeKey} must be present in the additive catalog migration`);
 
 assert.match(routeIndex, /providerUploadLifecycleRouter/, "upload lifecycle router must be mounted");
 assert.ok(routeIndex.indexOf("providerUploadLifecycleRouter") < routeIndex.indexOf("providerDatasetUploadsRouter"), "safe lifecycle must be mounted before the legacy upload route");

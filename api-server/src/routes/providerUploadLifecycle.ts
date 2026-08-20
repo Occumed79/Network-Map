@@ -36,6 +36,7 @@ type NormalizedUploadRow = {
   npi: string;
   primaryProviderType: string;
   capabilityTags: string[];
+  qualityScore: number;
   raw: IncomingRow;
 };
 
@@ -52,9 +53,10 @@ const aliases: Record<string, string[]> = {
   email: ["email", "emailaddress"],
   website: ["website", "url", "sourceurl"],
   npi: ["npi", "npinumber"],
-  sourceRecordId: ["sourcerecordid", "sourceid", "id"],
+  sourceRecordId: ["overtureid", "sourcerecordid", "sourceid", "id"],
   primaryProviderType: ["primaryprovidertype", "providertype", "clinictype", "category", "type"],
-  capabilityTags: ["capabilitytags", "capabilities", "tags", "services", "specialtiesservices"],
+  capabilityTags: ["providertypes", "normalizedprovidertypes", "capabilitytags", "capabilities", "tags", "services", "specialtiesservices"],
+  qualityScore: ["qualityscore", "confidence"],
 };
 
 function text(value: unknown): string {
@@ -106,6 +108,7 @@ function normalizedName(value: string): string {
 }
 
 function sourceKeyForLabel(label: string): string {
+  if (["overture", "overture maps"].includes(label.trim().toLowerCase())) return "overture";
   const slug = label.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || "dataset";
   return `user_upload_${slug}_${sha(label.toLowerCase()).slice(0, 8)}`;
 }
@@ -131,7 +134,11 @@ function normalizeRow(row: IncomingRow, mapping: FieldMapping, rowIndex: number)
   const rawNpi = normalizeNpi(mappedValue(row, mapping, "npi"));
   const npi = rawNpi && isValidNpi(rawNpi) ? rawNpi : "";
   const primaryProviderType = text(mappedValue(row, mapping, "primaryProviderType")).toLowerCase().replace(/[\s-]+/g, "_") || "unknown";
-  const capabilityTags = parseTags(mappedValue(row, mapping, "capabilityTags"));
+  const capabilityTags = parseTags(mappedValue(row, mapping, "capabilityTags"))
+    .map((tag) => tag.toLowerCase().replace(/[\s-]+/g, "_"));
+  const qualityValue = mappedValue(row, mapping, "qualityScore");
+  const suppliedQuality = text(qualityValue) ? parseNumber(qualityValue) : null;
+  const qualityScore = suppliedQuality === null ? 0.95 : Math.min(Math.max(suppliedQuality, 0), 1);
   const normalized = normalizedName(name);
   const sourceRecordId = text(mappedValue(row, mapping, "sourceRecordId")) || sha({ normalized, address: address.toLowerCase(), city: city.toLowerCase(), state, postalCode, npi }).slice(0, 32);
   const masterKey = npi ? `npi:${npi}` : `loc:${sha({ normalized, address: address.toLowerCase(), city: city.toLowerCase(), state, postalCode })}`;
@@ -150,7 +157,7 @@ function normalizeRow(row: IncomingRow, mapping: FieldMapping, rowIndex: number)
   const disposition: Disposition = fatal ? "rejected" : quarantine ? "quarantined" : "accepted";
   const normalizedPayload = {
     name, normalizedName: normalized, address, city, state, postalCode, countryCode, lat, lng,
-    phone, email, website, npi, primaryProviderType, capabilityTags, sourceRecordId, masterKey,
+    phone, email, website, npi, primaryProviderType, capabilityTags, qualityScore, sourceRecordId, masterKey,
   };
 
   return {
@@ -175,6 +182,7 @@ function normalizeRow(row: IncomingRow, mapping: FieldMapping, rowIndex: number)
     npi,
     primaryProviderType,
     capabilityTags,
+    qualityScore,
     raw: row,
   };
 }
@@ -335,9 +343,9 @@ router.post("/provider-uploads/:uploadId/commit", async (req: Request, res: Resp
     await client.query("UPDATE public.provider_upload_runs SET status='committing',updated_at=now() WHERE id=$1", [uploadId]);
     await client.query(
       `INSERT INTO public.provider_source_catalog (source_key,display_name,source_kind,trust_tier,active,notes)
-       VALUES ($1,$2,'user_upload','verified',true,$3)
-       ON CONFLICT (source_key) DO UPDATE SET display_name=EXCLUDED.display_name,source_kind='user_upload',active=true,updated_at=now()`,
-      [run.source_key, run.source_label, `Provider upload ${uploadId}`],
+       VALUES ($1,$2,$3,$4,true,$5)
+       ON CONFLICT (source_key) DO UPDATE SET display_name=EXCLUDED.display_name,source_kind=EXCLUDED.source_kind,trust_tier=EXCLUDED.trust_tier,active=true,updated_at=now()`,
+      [run.source_key, run.source_label, run.source_key === "overture" ? "external_directory" : "user_upload", run.source_key === "overture" ? "directory" : "verified", `Provider upload ${uploadId}`],
     );
 
     const records = await client.query(
@@ -362,7 +370,7 @@ router.post("/provider-uploads/:uploadId/commit", async (req: Request, res: Resp
       const upsert = await client.query(
         `INSERT INTO public.provider_master
          (master_key,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,email,website,npi,primary_provider_type,capability_tags,primary_source_key,quality_score,last_seen_at,updated_at)
-         VALUES ($1,$2,$3,NULLIF($4,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),NULLIF($8,''),$9,$10,NULLIF($11,''),NULLIF($12,''),NULLIF($13,''),NULLIF($14,''),$15,$16,$17,0.95,now(),now())
+         VALUES ($1,$2,$3,NULLIF($4,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),NULLIF($8,''),$9,$10,NULLIF($11,''),NULLIF($12,''),NULLIF($13,''),NULLIF($14,''),$15,$16,$17,$18,now(),now())
          ON CONFLICT (master_key) DO UPDATE SET
            name=EXCLUDED.name,normalized_name=EXCLUDED.normalized_name,
            address_line1=COALESCE(EXCLUDED.address_line1,provider_master.address_line1),
@@ -374,9 +382,9 @@ router.post("/provider-uploads/:uploadId/commit", async (req: Request, res: Resp
            npi=COALESCE(EXCLUDED.npi,provider_master.npi),primary_provider_type=EXCLUDED.primary_provider_type,
            capability_tags=ARRAY(SELECT DISTINCT value FROM unnest(COALESCE(provider_master.capability_tags,ARRAY[]::text[]) || COALESCE(EXCLUDED.capability_tags,ARRAY[]::text[])) value WHERE value<>''),
            primary_source_key=COALESCE(provider_master.primary_source_key,EXCLUDED.primary_source_key),
-           quality_score=GREATEST(COALESCE(provider_master.quality_score,0),0.95),active=true,last_seen_at=now(),updated_at=now()
+           quality_score=GREATEST(COALESCE(provider_master.quality_score,0),EXCLUDED.quality_score),active=true,last_seen_at=now(),updated_at=now()
          RETURNING id,to_jsonb(provider_master) AS row`,
-        [row.masterKey, row.name, row.normalizedName, row.address, row.city, row.state, row.postalCode, row.countryCode, row.lat, row.lng, row.phone, row.email, row.website, row.npi, row.primaryProviderType, row.capabilityTags, run.source_key],
+        [row.masterKey, row.name, row.normalizedName, row.address, row.city, row.state, row.postalCode, row.countryCode, row.lat, row.lng, row.phone, row.email, row.website, row.npi, row.primaryProviderType, row.capabilityTags, run.source_key, row.qualityScore],
       );
       if (existedBefore) updated += 1; else inserted += 1;
       const masterId = upsert.rows[0].id;
@@ -384,15 +392,15 @@ router.post("/provider-uploads/:uploadId/commit", async (req: Request, res: Resp
       await client.query(
         `INSERT INTO public.provider_master_sources
          (master_provider_id,source_key,source_record_id,source_confidence_score,raw_payload)
-         VALUES ($1,$2,$3,0.95,$4::jsonb)
-         ON CONFLICT (master_provider_id,source_key,(COALESCE(source_record_id,''))) DO UPDATE SET raw_payload=EXCLUDED.raw_payload,source_confidence_score=GREATEST(COALESCE(provider_master_sources.source_confidence_score,0),0.95),updated_at=now()`,
-        [masterId, run.source_key, row.sourceRecordId, JSON.stringify(row.raw)],
+         VALUES ($1,$2,$3,$4,$5::jsonb)
+         ON CONFLICT (master_provider_id,source_key,(COALESCE(source_record_id,''))) DO UPDATE SET raw_payload=EXCLUDED.raw_payload,source_confidence_score=GREATEST(COALESCE(provider_master_sources.source_confidence_score,0),EXCLUDED.source_confidence_score),updated_at=now()`,
+        [masterId, run.source_key, row.sourceRecordId, row.qualityScore, JSON.stringify(row.raw)],
       );
       for (const typeKey of [...new Set([row.primaryProviderType, ...row.capabilityTags].filter(Boolean))]) {
         await client.query(
           `INSERT INTO public.provider_master_types (master_provider_id,type_key,source_key,confidence_score)
-           VALUES ($1,$2,$3,0.95) ON CONFLICT DO NOTHING`,
-          [masterId, typeKey, run.source_key],
+           VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
+          [masterId, typeKey, run.source_key, row.qualityScore],
         );
       }
     }

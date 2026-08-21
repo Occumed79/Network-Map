@@ -39,4 +39,4 @@ jobs:
         run: python scripts/import-overture-cleaned-usa-20260820.py
 
       - name: Import marker
-        run: echo "Overture USA import workflow completed"
+        run: echo "Overture USA import workflow completed - trigger 2"

@@ -7,6 +7,12 @@ on:
     paths:
       - scripts/import-overture-cleaned-usa-20260820.py
       - .github/workflows/import-overture-cleaned-usa-20260820.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - scripts/import-overture-cleaned-usa-20260820.py
+      - .github/workflows/import-overture-cleaned-usa-20260820.yml
 
 permissions:
   contents: read

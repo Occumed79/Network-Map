@@ -3,6 +3,7 @@ name: Import cleaned Overture USA providers
 on:
   push:
     branches:
+      - main
       - overture-usa-import-20260820-use-this
     paths:
       - scripts/import-overture-cleaned-usa-20260820.py
@@ -39,4 +40,4 @@ jobs:
         run: python scripts/import-overture-cleaned-usa-20260820.py
 
       - name: Import marker
-        run: echo "Overture USA import workflow completed - trigger 2"
+        run: echo "Overture USA import workflow completed"

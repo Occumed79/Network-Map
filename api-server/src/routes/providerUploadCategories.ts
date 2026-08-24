@@ -31,7 +31,7 @@ async function uploadedSourceExists(sourceKey: string): Promise<boolean> {
     `SELECT EXISTS (
        SELECT 1
        FROM public.provider_source_catalog
-       WHERE lower(source_key) = lower($1)
+       WHERE source_key = $1
          AND active = true
          AND source_kind = 'user_upload'
          AND source_key <> $2
@@ -48,7 +48,7 @@ function buildWhere(sourceKey: string, bounds: Bounds | null, params: unknown[])
        SELECT 1
        FROM public.provider_master_sources pms
        WHERE pms.master_provider_id = pm.id
-         AND lower(pms.source_key) = lower($1)
+         AND pms.source_key = $1
      )`,
     "pm.active = true",
     "pm.lat IS NOT NULL",
@@ -120,7 +120,7 @@ router.get("/provider-upload-categories", async (_req: Request, res: Response) =
          count(DISTINCT pm.id)::int AS total
        FROM public.provider_source_catalog catalog
        LEFT JOIN public.provider_master_sources pms
-         ON lower(pms.source_key) = lower(catalog.source_key)
+         ON pms.source_key = catalog.source_key
        LEFT JOIN public.provider_master pm
          ON pm.id = pms.master_provider_id
         AND pm.active = true
@@ -158,7 +158,7 @@ router.get("/provider-upload-categories", async (_req: Request, res: Response) =
 router.get("/provider-upload-categories/:sourceKey", async (req: Request, res: Response) => {
   const rawSourceKey = req.params.sourceKey;
   const sourceKey = Array.isArray(rawSourceKey) ? text(rawSourceKey[0]) : text(rawSourceKey);
-  if (!sourceKey || sourceKey.length > 120) {
+  if (!sourceKey || sourceKey.length > 120 || !/^user_upload_[a-z0-9_]+$/.test(sourceKey)) {
     res.status(400).json({ error: "A valid uploaded dataset source key is required." });
     return;
   }

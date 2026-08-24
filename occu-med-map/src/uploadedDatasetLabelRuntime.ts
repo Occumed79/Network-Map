@@ -20,6 +20,11 @@ type ProviderLayerResponse = {
   providers?: UploadedProvider[];
 };
 
+type UploadPayload = Record<string, unknown> & {
+  rows?: Array<Record<string, unknown>>;
+  clinics?: Array<Record<string, unknown>>;
+};
+
 const labelsByName = new Map<string, Set<string>>();
 const labelsByNameAndAddress = new Map<string, Set<string>>();
 
@@ -109,6 +114,109 @@ function relabelVisiblePopups(root: ParentNode = document): void {
   for (const candidate of Array.from(candidates)) relabelFooter(candidate);
 }
 
+function compactKey(value: string): string {
+  return value.toLowerCase().replace(/[\s_-]+/g, "");
+}
+
+function rowLookup(row: Record<string, unknown>): Map<string, unknown> {
+  const lookup = new Map<string, unknown>();
+  for (const [key, value] of Object.entries(row)) lookup.set(compactKey(key), value);
+  return lookup;
+}
+
+function firstUploadValue(lookup: Map<string, unknown>, ...keys: string[]): unknown {
+  for (const key of keys) {
+    const value = lookup.get(compactKey(key));
+    if (value !== undefined && value !== null && String(value).trim()) return value;
+  }
+  return undefined;
+}
+
+function hasUploadValue(lookup: Map<string, unknown>, ...keys: string[]): boolean {
+  return firstUploadValue(lookup, ...keys) !== undefined;
+}
+
+function normalizeUploadedRow(row: Record<string, unknown>): Record<string, unknown> {
+  const lookup = rowLookup(row);
+  const next = { ...row };
+
+  if (!hasUploadValue(lookup, "lat", "latitude")) {
+    const latitude = firstUploadValue(lookup, "final latitude", "geocoded latitude", "matched latitude");
+    if (latitude !== undefined) next.lat = latitude;
+  }
+  if (!hasUploadValue(lookup, "lng", "lon", "long", "longitude")) {
+    const longitude = firstUploadValue(lookup, "final longitude", "geocoded longitude", "matched longitude");
+    if (longitude !== undefined) next.lng = longitude;
+  }
+  if (!hasUploadValue(lookup, "address", "formatted address", "street address", "address 1")) {
+    const address = firstUploadValue(
+      lookup,
+      "final matched address",
+      "matched address",
+      "submitted address",
+      "original cdc address",
+      "original address",
+    );
+    if (address !== undefined) next.address = address;
+  }
+  if (!hasUploadValue(lookup, "source record id", "source id", "id")) {
+    const sourceRecordId = firstUploadValue(lookup, "unique id", "record id", "registry id");
+    if (sourceRecordId !== undefined) next.source_record_id = sourceRecordId;
+  }
+
+  const location = firstUploadValue(lookup, "cdc city", "city state", "city/state");
+  if (location !== undefined) {
+    const match = String(location).trim().match(/^(.+?),\s*([A-Za-z]{2})$/);
+    if (match) {
+      if (!hasUploadValue(lookup, "city")) next.city = match[1].trim();
+      if (!hasUploadValue(lookup, "state", "st", "admin area")) next.state = match[2].toUpperCase();
+    } else if (!hasUploadValue(lookup, "city")) {
+      next.city = String(location).trim();
+    }
+  }
+
+  return next;
+}
+
+function requestBodyText(context: NetworkRequestContext): string | null {
+  if (typeof context.init?.body === "string") return context.init.body;
+  return null;
+}
+
+async function normalizeUploadedDatasetRequest(
+  context: NetworkRequestContext,
+  next: NetworkRequestNext,
+): Promise<Response> {
+  if (
+    context.method !== "POST"
+    || !context.url
+    || !context.url.pathname.endsWith("/api/my-clinics/upload")
+  ) {
+    return next();
+  }
+
+  const bodyText = requestBodyText(context);
+  if (!bodyText) return next();
+
+  try {
+    const payload = JSON.parse(bodyText) as UploadPayload;
+    const rows = Array.isArray(payload.rows) ? payload.rows : Array.isArray(payload.clinics) ? payload.clinics : null;
+    if (!rows) return next();
+    const normalizedRows = rows.map((row) => normalizeUploadedRow(row || {}));
+    const key = Array.isArray(payload.rows) ? "rows" : "clinics";
+    const response = await next({
+      init: {
+        ...context.init,
+        body: JSON.stringify({ ...payload, [key]: normalizedRows }),
+      },
+    });
+    if (response.ok) window.dispatchEvent(new Event("network-map:provider-dataset-uploaded"));
+    return response;
+  } catch {
+    return next();
+  }
+}
+
 async function captureUploadedDatasetLabels(
   context: NetworkRequestContext,
   next: NetworkRequestNext,
@@ -134,6 +242,12 @@ async function captureUploadedDatasetLabels(
 
 function installUploadedDatasetLabelRuntime(): void {
   if (!registerRuntimeOwner("uploaded-dataset-labels", "Uploaded dataset labels in provider map popups")) return;
+
+  registerNetworkRequestMiddleware(
+    "uploaded-dataset-column-normalization",
+    normalizeUploadedDatasetRequest,
+    60,
+  );
 
   registerNetworkRequestMiddleware(
     "uploaded-dataset-popup-labels",

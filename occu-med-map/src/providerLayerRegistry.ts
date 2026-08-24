@@ -14,18 +14,19 @@ export type ProviderLayerCategory = {
 };
 
 function providerType(id: string, label: string, typeKey: string, color: string, section: string, legacyExplorerType = typeKey): ProviderLayerCategory {
-  return { id, label, section, kind: 'provider-type', typeKey, channel: 'provider-categories', color,
+  return { id, label, section, kind: 'provider-type', typeKey, channel: `category-${id}`, color,
     endpoint: `/api/provider-category-layers/${id}`, explorerClinicType: legacyExplorerType };
 }
 
 function source(id: string, label: string, sourceKey: string, color: string, section: string): ProviderLayerCategory {
-  return { id, label, section, kind: 'source', channel: 'provider-categories', color,
+  return { id, label, section, kind: 'source', channel: `category-${id}`, color,
     endpoint: `/api/provider-category-layers/${id}`, explorerSource: sourceKey };
 }
 
 /**
  * Ordered UI registry for on-demand provider layers. `typeKey` is the canonical
  * provider_type_catalog key; source overlays deliberately have no type key.
+ * Every entry owns its own native Mapbox channel so each toggle is independent.
  */
 export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   providerType('urgent-cares', 'Urgent Cares', 'urgent_care', '#38bdf8', 'CORE OCCUPATIONAL / PRIMARY CARE'),

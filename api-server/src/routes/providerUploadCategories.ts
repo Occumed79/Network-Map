@@ -31,7 +31,7 @@ async function uploadedSourceExists(sourceKey: string): Promise<boolean> {
     `SELECT EXISTS (
        SELECT 1
        FROM public.provider_source_catalog
-       WHERE source_key = $1
+       WHERE lower(source_key) = lower($1)
          AND active = true
          AND source_kind = 'user_upload'
          AND source_key <> $2
@@ -44,30 +44,36 @@ async function uploadedSourceExists(sourceKey: string): Promise<boolean> {
 function buildWhere(sourceKey: string, bounds: Bounds | null, params: unknown[]): string {
   params.push(sourceKey);
   const conditions = [
-    "lower(COALESCE(pmv.source_key, '')) = lower($1)",
-    "pmv.lat IS NOT NULL",
-    "pmv.lng IS NOT NULL",
-    "pmv.lat BETWEEN -90 AND 90",
-    "pmv.lng BETWEEN -180 AND 180",
-    "(pmv.lat <> 0 OR pmv.lng <> 0)",
+    `EXISTS (
+       SELECT 1
+       FROM public.provider_master_sources pms
+       WHERE pms.master_provider_id = pm.id
+         AND lower(pms.source_key) = lower($1)
+     )`,
+    "pm.active = true",
+    "pm.lat IS NOT NULL",
+    "pm.lng IS NOT NULL",
+    "pm.lat BETWEEN -90 AND 90",
+    "pm.lng BETWEEN -180 AND 180",
+    "(pm.lat <> 0 OR pm.lng <> 0)",
   ];
 
   if (bounds) {
     params.push(bounds.south, bounds.north);
-    conditions.push(`pmv.lat BETWEEN $${params.length - 1} AND $${params.length}`);
+    conditions.push(`pm.lat BETWEEN $${params.length - 1} AND $${params.length}`);
     if (bounds.west <= bounds.east) {
       params.push(bounds.west, bounds.east);
-      conditions.push(`pmv.lng BETWEEN $${params.length - 1} AND $${params.length}`);
+      conditions.push(`pm.lng BETWEEN $${params.length - 1} AND $${params.length}`);
     } else {
       params.push(bounds.west, bounds.east);
-      conditions.push(`(pmv.lng >= $${params.length - 1} OR pmv.lng <= $${params.length})`);
+      conditions.push(`(pm.lng >= $${params.length - 1} OR pm.lng <= $${params.length})`);
     }
   }
 
   return conditions.join(" AND ");
 }
 
-function toProvider(row: Record<string, unknown>): Record<string, unknown> {
+function toProvider(row: Record<string, unknown>, sourceKey: string): Record<string, unknown> {
   const type = String(row.primary_provider_type || "unknown");
   const tags = Array.isArray(row.capability_tags) ? row.capability_tags.map(String) : [type];
   return {
@@ -91,9 +97,9 @@ function toProvider(row: Record<string, unknown>): Record<string, unknown> {
     services: tags,
     categories: tags,
     types: tags,
-    source: String(row.source_key || "uploaded"),
-    data_source: String(row.source_key || "uploaded"),
-    source_kind: String(row.source_kind || "stored"),
+    source: sourceKey,
+    data_source: sourceKey,
+    source_kind: "stored",
     confidence_score: row.quality_score == null ? null : Number(row.quality_score),
   };
 }
@@ -111,10 +117,18 @@ router.get("/provider-upload-categories", async (_req: Request, res: Response) =
          catalog.source_key,
          catalog.display_name,
          catalog.source_kind,
-         count(pmv.id)::int AS total
+         count(DISTINCT pm.id)::int AS total
        FROM public.provider_source_catalog catalog
-       LEFT JOIN public.provider_master_map_view pmv
-         ON lower(COALESCE(pmv.source_key, '')) = lower(catalog.source_key)
+       LEFT JOIN public.provider_master_sources pms
+         ON lower(pms.source_key) = lower(catalog.source_key)
+       LEFT JOIN public.provider_master pm
+         ON pm.id = pms.master_provider_id
+        AND pm.active = true
+        AND pm.lat IS NOT NULL
+        AND pm.lng IS NOT NULL
+        AND pm.lat BETWEEN -90 AND 90
+        AND pm.lng BETWEEN -180 AND 180
+        AND (pm.lat <> 0 OR pm.lng <> 0)
        WHERE catalog.active = true
          AND catalog.source_kind = 'user_upload'
          AND catalog.source_key <> $1
@@ -168,7 +182,7 @@ router.get("/provider-upload-categories/:sourceKey", async (req: Request, res: R
     const countResult = await queryWithStatementTimeout(
       getPool(),
       `SELECT count(*)::int AS total
-       FROM public.provider_master_map_view pmv
+       FROM public.provider_master pm
        WHERE ${countWhere}`,
       countParams,
     );
@@ -182,30 +196,28 @@ router.get("/provider-upload-categories/:sourceKey", async (req: Request, res: R
     const { rows } = await queryWithStatementTimeout(
       getPool(),
       `SELECT
-         pmv.id,
-         pmv.master_key,
-         pmv.name,
-         pmv.address,
-         pmv.city,
-         pmv.admin_area,
-         pmv.postal_code,
-         pmv.lat,
-         pmv.lng,
-         pmv.phone,
-         pmv.website,
-         pmv.primary_provider_type,
-         pmv.capability_tags,
-         pmv.source_key,
-         pmv.source_kind,
-         pmv.quality_score
-       FROM public.provider_master_map_view pmv
+         pm.id,
+         pm.master_key,
+         pm.name,
+         pm.formatted_address AS address,
+         pm.city,
+         pm.state_region AS admin_area,
+         pm.postal_code,
+         pm.lat,
+         pm.lng,
+         pm.phone,
+         pm.website,
+         pm.primary_provider_type,
+         pm.capability_tags,
+         pm.quality_score
+       FROM public.provider_master pm
        WHERE ${rowWhere}
-       ORDER BY pmv.name ASC, pmv.id ASC
+       ORDER BY pm.name ASC, pm.id ASC
        LIMIT ${limitParam} OFFSET ${offsetParam}`,
       rowParams,
     );
 
-    const providers = rows.map((row) => toProvider(row));
+    const providers = rows.map((row) => toProvider(row, sourceKey));
     res.json({
       providers,
       count: providers.length,

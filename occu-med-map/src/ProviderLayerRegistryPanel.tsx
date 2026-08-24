@@ -4,6 +4,7 @@ import { getActiveMapboxMap } from './dualMapEngineRuntime';
 import { fetchProviderLayer } from './providerLayerRequestRuntime';
 import { clearProviderDataset, renderProviderDataset } from './providerDatasetNativeMapRuntime';
 import { subscribeToSharedDomObserver } from './runtimeControllerRegistry';
+import DynamicUploadedDatasetLayers from './DynamicUploadedDatasetLayers';
 import {
   PROVIDER_LAYER_CATEGORIES,
   PUBLIC_HEALTH_LAYER,
@@ -303,6 +304,7 @@ export default function ProviderLayerRegistryPanel() {
         <Toggle definition={definition} state={layers[definition.id] || EMPTY_LAYER_STATE}
           onChange={(enabled) => setEnabled(definition, enabled)} />
       </div>)}
+      <DynamicUploadedDatasetLayers />
       <div style={{ margin: '8px 0 4px', fontSize: 8, letterSpacing: '.12em', color: '#64748b', fontFamily: "'IBM Plex Mono',monospace" }}>
         PUBLIC HEALTH DATA
       </div>

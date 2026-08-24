@@ -122,27 +122,9 @@ export default function ProviderLayerRegistryPanel() {
   const [host, setHost] = useState<HTMLElement | null>(null);
   const [layers, setLayers] = useState<LayerStateMap>(initialState);
   const controllers = useRef(new Map<string, AbortController>());
-  const loadedProviders = useRef(new Map<string, any[]>());
   const reloadTimer = useRef<number>(0);
   const layerStateRef = useRef(layers);
   layerStateRef.current = layers;
-
-  function renderCombinedProviderLayers(): void {
-    const unique = new Map<string, { provider: any; definition: ProviderLayerCategory }>();
-    for (const definition of PROVIDER_LAYER_CATEGORIES) {
-      if (!layerStateRef.current[definition.id]?.enabled) continue;
-      for (const provider of loadedProviders.current.get(definition.id) || []) {
-        const key = String(provider?.id || provider?.source_id || `${provider?.lat}:${provider?.lng}:${provider?.name}`);
-        if (!unique.has(key)) unique.set(key, { provider, definition });
-      }
-    }
-    const entries = [...unique.values()];
-    renderProviderDataset('provider-categories', entries, {
-      baseColor: '#38bdf8',
-      getColor: (entry) => entry.definition.color,
-      buildPopup: (entry) => providerPopup(entry.provider, entry.definition),
-    });
-  }
 
   const definitions = useMemo<LayerDefinition[]>(
     () => [...PROVIDER_LAYER_CATEGORIES, PUBLIC_HEALTH_LAYER],
@@ -213,13 +195,10 @@ export default function ProviderLayerRegistryPanel() {
         throw new Error(data?.warning || data?.error || `HTTP ${response.status}`);
       }
       const providers = Array.isArray(data?.providers) ? data.providers : [];
-      const isCategory = 'section' in definition;
-      if (isCategory) {
-        loadedProviders.current.set(definition.id, providers);
-        renderCombinedProviderLayers();
-      }
-      const mapped = isCategory ? providers.length : renderProviderDataset(definition.channel, providers, {
-        baseColor: definition.color, glow: false, buildPopup: (provider: any) => providerPopup(provider, definition),
+      const mapped = renderProviderDataset(definition.channel, providers, {
+        baseColor: definition.color,
+        glow: false,
+        buildPopup: (provider: any) => providerPopup(provider, definition),
       });
       setLayers((current) => ({
         ...current,
@@ -259,12 +238,7 @@ export default function ProviderLayerRegistryPanel() {
     if (!enabled) {
       controllers.current.get(definition.id)?.abort();
       controllers.current.delete(definition.id);
-      if ('section' in definition) {
-        loadedProviders.current.delete(definition.id);
-        // State refs update on the next render; remove this category immediately.
-        layerStateRef.current = { ...layerStateRef.current, [definition.id]: { ...layerStateRef.current[definition.id], enabled: false } };
-        renderCombinedProviderLayers();
-      } else clearProviderDataset(definition.channel);
+      clearProviderDataset(definition.channel);
       setLayers((current) => ({
         ...current,
         [definition.id]: { ...current[definition.id], loading: false, count: 0, warning: '' },

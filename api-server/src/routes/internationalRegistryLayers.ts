@@ -7,9 +7,10 @@ const MAX_PAGE_SIZE = 2000;
 const CANADA_ARCGIS_PAGE_SIZE = 1000;
 const GERMANY_LOCATIONS_URL = "https://bundes-klinik-atlas.de/fileadmin/json/locations.json";
 const CANADA_ODHF_QUERY_URL = "https://services.arcgis.com/wjcPoefzjpzCgffS/ArcGIS/rest/services/Open_Database_of_Healthcare_Facilities_/FeatureServer/0/query";
+const AUSTRALIA_HEALTHDIRECT_MAPSERVER = "https://services.ga.gov.au/gis/rest/services/National_HealthDirect_Health_Facilities/MapServer";
 
 type Bounds = { north: number; south: number; east: number; west: number };
-type InternationalRegistryId = "germany-klinik-atlas" | "canada-odhf";
+type InternationalRegistryId = "germany-klinik-atlas" | "canada-odhf" | "australia-healthdirect";
 
 type GermanyLocation = {
   name?: string;
@@ -28,6 +29,19 @@ type ArcGisFeature = { attributes?: Record<string, unknown> };
 type ArcGisError = { message?: string; details?: string[] };
 type ArcGisFeatureResponse = { features?: ArcGisFeature[]; exceededTransferLimit?: boolean; error?: ArcGisError };
 type ArcGisCountResponse = { count?: number; error?: ArcGisError };
+
+type AustraliaLayer = {
+  id: number;
+  sourceId: string;
+  clinicType: "general_practitioner" | "hospital" | "pharmacy";
+  label: string;
+};
+
+const AUSTRALIA_LAYERS: readonly AustraliaLayer[] = [
+  { id: 0, sourceId: "au-healthdirect-gp", clinicType: "general_practitioner", label: "General Practice" },
+  { id: 1, sourceId: "au-healthdirect-hospital", clinicType: "hospital", label: "Hospital" },
+  { id: 2, sourceId: "au-healthdirect-pharmacy", clinicType: "pharmacy", label: "Pharmacy" },
+] as const;
 
 function finiteNumber(value: unknown): number | null {
   const parsed = typeof value === "number" ? value : Number(value);
@@ -61,6 +75,22 @@ function inBounds(lat: number, lng: number, bounds: Bounds | null): boolean {
 function stableId(prefix: string, parts: unknown[]): string {
   const digest = createHash("sha1").update(parts.map((part) => String(part ?? "")).join("|")).digest("hex").slice(0, 20);
   return `${prefix}:${digest}`;
+}
+
+function geometryParams(bounds: Bounds | null): URLSearchParams {
+  const params = new URLSearchParams();
+  if (!bounds || bounds.west > bounds.east) return params;
+  params.set("geometry", `${bounds.west},${bounds.south},${bounds.east},${bounds.north}`);
+  params.set("geometryType", "esriGeometryEnvelope");
+  params.set("inSR", "4326");
+  params.set("spatialRel", "esriSpatialRelIntersects");
+  return params;
+}
+
+function arcGisError(payload: ArcGisFeatureResponse | ArcGisCountResponse): string | null {
+  if (!payload.error) return null;
+  const details = Array.isArray(payload.error.details) ? payload.error.details.filter(Boolean).join(" ") : "";
+  return [payload.error.message, details].filter(Boolean).join(" ") || "ArcGIS query failed";
 }
 
 function germanyWebsite(link: unknown): string | null {
@@ -122,23 +152,7 @@ async function loadGermany(bounds: Bounds | null, limit: number, page: number) {
     .filter((provider): provider is Record<string, unknown> => Boolean(provider))
     .filter((provider) => inBounds(Number(provider.lat), Number(provider.lng), bounds));
   const offset = (page - 1) * limit;
-  return { providers: matching.slice(offset, offset + limit), total: matching.length, limit };
-}
-
-function arcGisError(payload: ArcGisFeatureResponse | ArcGisCountResponse): string | null {
-  if (!payload.error) return null;
-  const details = Array.isArray(payload.error.details) ? payload.error.details.filter(Boolean).join(" ") : "";
-  return [payload.error.message, details].filter(Boolean).join(" ") || "ArcGIS query failed";
-}
-
-function canadaGeometryParams(bounds: Bounds | null): URLSearchParams {
-  const params = new URLSearchParams();
-  if (!bounds || bounds.west > bounds.east) return params;
-  params.set("geometry", `${bounds.west},${bounds.south},${bounds.east},${bounds.north}`);
-  params.set("geometryType", "esriGeometryEnvelope");
-  params.set("inSR", "4326");
-  params.set("spatialRel", "esriSpatialRelIntersects");
-  return params;
+  return { providers: matching.slice(offset, offset + limit), total: matching.length };
 }
 
 function normalizeCanada(feature: ArcGisFeature): Record<string, unknown> | null {
@@ -212,7 +226,7 @@ async function fetchCanadaChunk(common: URLSearchParams, resultOffset: number, r
 }
 
 async function loadCanada(bounds: Bounds | null, limit: number, page: number) {
-  const common = canadaGeometryParams(bounds);
+  const common = geometryParams(bounds);
   common.set("where", "latitude IS NOT NULL AND longitude IS NOT NULL");
   common.set("f", "json");
 
@@ -239,17 +253,117 @@ async function loadCanada(bounds: Bounds | null, limit: number, page: number) {
     .map(normalizeCanada)
     .filter((provider): provider is Record<string, unknown> => Boolean(provider))
     .filter((provider) => inBounds(Number(provider.lat), Number(provider.lng), bounds));
-  return { providers, total: Number(countPayload.count || 0), limit };
+  return { providers, total: Number(countPayload.count || 0) };
+}
+
+function normalizeAustralia(feature: ArcGisFeature, layer: AustraliaLayer): Record<string, unknown> | null {
+  const row = feature.attributes || {};
+  const lat = finiteNumber(row.latitude);
+  const lng = finiteNumber(row.longitude);
+  if (lat === null || lng === null || lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  const sourceId = String(row.nhsd_service_id || row.objectid || "").trim();
+  const id = sourceId
+    ? `au-healthdirect:${layer.id}:${sourceId}`
+    : stableId("au-healthdirect", [layer.id, row.organisation_name, row.address, row.suburb, lat, lng]);
+  const serviceType = String(row.nhsd_service_type || layer.label);
+  return {
+    id,
+    source_id: sourceId || id,
+    name: String(row.organisation_name || `Unnamed Australian ${layer.label}`),
+    address: row.address ?? null,
+    address_1: row.address ?? null,
+    city: row.suburb ?? null,
+    admin_area: row.state ?? null,
+    state: row.state ?? null,
+    postal_code: row.postcode == null ? null : String(row.postcode),
+    zip: row.postcode == null ? null : String(row.postcode),
+    country: "Australia",
+    country_code: "AU",
+    lat,
+    lng,
+    phone: null,
+    website: null,
+    clinic_type: layer.clinicType,
+    providerType: layer.clinicType,
+    category: serviceType,
+    services: [serviceType],
+    categories: [serviceType],
+    types: [layer.clinicType],
+    operational_status: row.operationalstatus ?? null,
+    source_date: row.ga_source_date ?? null,
+    source: "au_healthdirect",
+    data_source: "au_healthdirect",
+    source_kind: "official_registry_live",
+    trust_tier: "registry",
+    confidence_score: 1,
+    provider_layer_category: "australia-healthdirect",
+  };
+}
+
+async function australiaLayerCount(layer: AustraliaLayer, bounds: Bounds | null): Promise<number> {
+  const params = geometryParams(bounds);
+  params.set("where", "latitude IS NOT NULL AND longitude IS NOT NULL");
+  params.set("returnCountOnly", "true");
+  params.set("f", "json");
+  const payload = await fetchExternalJson<ArcGisCountResponse>(
+    layer.sourceId,
+    `${AUSTRALIA_HEALTHDIRECT_MAPSERVER}/${layer.id}/query?${params.toString()}`,
+    { headers: { accept: "application/json" } },
+  );
+  const error = arcGisError(payload);
+  if (error) throw new Error(`${layer.label}: ${error}`);
+  return Number(payload.count || 0);
+}
+
+async function australiaLayerPage(layer: AustraliaLayer, bounds: Bounds | null, offset: number, limit: number) {
+  const params = geometryParams(bounds);
+  params.set("where", "latitude IS NOT NULL AND longitude IS NOT NULL");
+  params.set("outFields", "objectid,operationalstatus,organisation_name,address,suburb,state,postcode,longitude,latitude,nhsd_service_id,nhsd_service_type,ga_source_date");
+  params.set("returnGeometry", "false");
+  params.set("orderByFields", "objectid ASC");
+  params.set("resultOffset", String(offset));
+  params.set("resultRecordCount", String(limit));
+  params.set("f", "json");
+  const payload = await fetchExternalJson<ArcGisFeatureResponse>(
+    layer.sourceId,
+    `${AUSTRALIA_HEALTHDIRECT_MAPSERVER}/${layer.id}/query?${params.toString()}`,
+    { headers: { accept: "application/json" } },
+  );
+  const error = arcGisError(payload);
+  if (error) throw new Error(`${layer.label}: ${error}`);
+  return (payload.features || [])
+    .map((feature) => normalizeAustralia(feature, layer))
+    .filter((provider): provider is Record<string, unknown> => Boolean(provider))
+    .filter((provider) => inBounds(Number(provider.lat), Number(provider.lng), bounds));
+}
+
+async function loadAustralia(bounds: Bounds | null, limit: number, page: number) {
+  const counts = await Promise.all(AUSTRALIA_LAYERS.map(async (layer) => ({ layer, total: await australiaLayerCount(layer, bounds) })));
+  const total = counts.reduce((sum, entry) => sum + entry.total, 0);
+  let offset = (page - 1) * limit;
+  let remaining = limit;
+  const providers: Record<string, unknown>[] = [];
+
+  for (const entry of counts) {
+    if (remaining <= 0) break;
+    if (offset >= entry.total) {
+      offset -= entry.total;
+      continue;
+    }
+    const requested = Math.min(remaining, entry.total - offset);
+    providers.push(...await australiaLayerPage(entry.layer, bounds, offset, requested));
+    remaining -= requested;
+    offset = 0;
+  }
+  return { providers, total };
 }
 
 router.get("/international-registry-layers/:source", async (req: Request, res: Response) => {
   const sourceParam = Array.isArray(req.params.source) ? req.params.source[0] : req.params.source;
   const source = String(sourceParam || "") as InternationalRegistryId;
-  if (source !== "germany-klinik-atlas" && source !== "canada-odhf") {
-    res.status(400).json({
-      error: `Unknown international registry source: ${source}`,
-      sources: ["germany-klinik-atlas", "canada-odhf"],
-    });
+  const supported: InternationalRegistryId[] = ["germany-klinikatlas", "canada-odhf", "australia-healthdirect"];
+  if (!supported.includes(source)) {
+    res.status(400).json({ error: `Unknown international registry source: ${source}`, sources: supported });
     return;
   }
 
@@ -258,9 +372,11 @@ router.get("/international-registry-layers/:source", async (req: Request, res: R
   const page = Math.max(Number(req.query.page) || 1, 1);
 
   try {
-    const result = source === "germany-klinik-atlas"
+    const result = source === "germany-klinikatlas"
       ? await loadGermany(bounds, limit, page)
-      : await loadCanada(bounds, limit, page);
+      : source === "canada-odhf"
+        ? await loadCanada(bounds, limit, page)
+        : await loadAustralia(bounds, limit, page);
     const { providers, total } = result;
     res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
     res.json({

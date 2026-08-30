@@ -361,7 +361,7 @@ async function loadAustralia(bounds: Bounds | null, limit: number, page: number)
 router.get("/international-registry-layers/:source", async (req: Request, res: Response) => {
   const sourceParam = Array.isArray(req.params.source) ? req.params.source[0] : req.params.source;
   const source = String(sourceParam || "") as InternationalRegistryId;
-  const supported: InternationalRegistryId[] = ["germany-klinikatlas", "canada-odhf", "australia-healthdirect"];
+  const supported: InternationalRegistryId[] = ["germany-klinik-atlas", "canada-odhf", "australia-healthdirect"];
   if (!supported.includes(source)) {
     res.status(400).json({ error: `Unknown international registry source: ${source}`, sources: supported });
     return;
@@ -372,7 +372,7 @@ router.get("/international-registry-layers/:source", async (req: Request, res: R
   const page = Math.max(Number(req.query.page) || 1, 1);
 
   try {
-    const result = source === "germany-klinikatlas"
+    const result = source === "germany-klinik-atlas"
       ? await loadGermany(bounds, limit, page)
       : source === "canada-odhf"
         ? await loadCanada(bounds, limit, page)

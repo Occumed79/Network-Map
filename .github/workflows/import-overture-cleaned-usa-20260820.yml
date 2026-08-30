@@ -1,27 +1,20 @@
-name: Import cleaned Overture USA providers
+name: Overture exact-import preparation
 
 on:
-  push:
-    branches:
-      - main
-      - overture-usa-import-20260820-use-this
-    paths:
-      - scripts/import-overture-cleaned-usa-20260820.py
-      - .github/workflows/import-overture-cleaned-usa-20260820.yml
   pull_request:
     branches:
       - main
     paths:
-      - scripts/import-overture-cleaned-usa-20260820.py
       - .github/workflows/import-overture-cleaned-usa-20260820.yml
+      - scripts/import-overture-cleaned-usa-20260820.py
 
 permissions:
   contents: read
 
 jobs:
-  import-overture-usa:
+  build-overture-candidate-artifact:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 120
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,12 +27,39 @@ jobs:
       - name: Install DuckDB
         run: python -m pip install --disable-pip-version-check duckdb
 
-      - name: Extract, clean, and import Overture USA providers
-        env:
-          NETWORK_MAP_API_URL: https://network-map-tool-mqib.onrender.com/api/my-clinics/upload
-        run: python scripts/import-overture-cleaned-usa-20260820.py
+      - name: Patch historical syntax typo
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/import-overture-cleaned-usa-20260820.py')
+          lines = p.read_text().splitlines()
+          lines[120] = '    return {norm(p.strip(" \'\\\"")) for p in re.split(r"[,|;]+", s) if p.strip(" \'\\\"")}'
+          p.write_text('\n'.join(lines) + '\n')
+          compile(p.read_text(), str(p), 'exec')
+          PY
 
-      - name: Import marker
-        run: echo "Overture USA import workflow completed"
+      - name: Build candidate SQLite without Render upload
+        run: |
+          python - <<'PY'
+          import importlib.util
+          p='scripts/import-overture-cleaned-usa-20260820.py'
+          spec=importlib.util.spec_from_file_location('overture_import',p)
+          m=importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(m)
+          class ExportComplete(Exception): pass
+          def stop_after_extract(*args, **kwargs): raise ExportComplete()
+          m.post_chunk=stop_after_extract
+          try:
+              m.main()
+          except ExportComplete:
+              pass
+          PY
+          test -s overture_cleaned_usa.sqlite
 
-# retrigger after production API-security migration: 2026-08-21T13:44:00-07:00
+      - name: Upload candidate SQLite
+        uses: actions/upload-artifact@v4
+        with:
+          name: overture-candidate-sqlite
+          path: overture_cleaned_usa.sqlite
+          compression-level: 9
+          retention-days: 2

@@ -19,6 +19,7 @@ import providerUploadLifecycleRouter from "./providerUploadLifecycle";
 import providerDatasetUploadsRouter from "./providerDatasetUploads";
 import providerLayersRouter from "./providerLayers";
 import providerCategoryLayersRouter from "./providerCategoryLayers";
+import internationalRegistryLayersRouter from "./internationalRegistryLayers";
 import providerUploadCategoriesRouter from "./providerUploadCategories";
 import googlePlacesRouter from "./googlePlaces";
 import enhancedSearchRouter from "./enhancedSearch";
@@ -49,6 +50,9 @@ router.use(normalizeProviderTypeResponses);
 router.use(providerExplorerRouter);
 router.use(nacchoRecoveryStatusRouter);
 router.use(nacchoLhdRouter);
+// Public national registries are normalized server-side before the generic
+// provider-layer stabilizer so the browser never calls foreign APIs directly.
+router.use(internationalRegistryLayersRouter);
 router.use(stabilizeProviderLayerRequests);
 
 // Safe provider uploads require explicit preview -> commit -> rollback lifecycle.

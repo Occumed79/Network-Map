@@ -23,6 +23,11 @@ function source(id: string, label: string, sourceKey: string, color: string, sec
     endpoint: `/api/provider-category-layers/${id}`, explorerSource: sourceKey };
 }
 
+function liveRegistrySource(id: string, label: string, color: string): ProviderLayerCategory {
+  return { id, label, section: 'LIVE INTERNATIONAL REGISTRIES', kind: 'source', channel: `registry-${id}`, color,
+    endpoint: `/api/international-registry-layers/${id}` };
+}
+
 /**
  * Ordered UI registry for on-demand provider layers. `typeKey` is the canonical
  * provider_type_catalog key; source overlays deliberately have no type key.
@@ -59,6 +64,10 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   providerType('faa-examiners', 'FAA Examiners', 'faa_examiner', '#f59e0b', 'EXAMINER / SPECIAL NETWORKS', 'faa_provider'),
   providerType('dot-examiners', 'DOT Examiners', 'dot_examiner', '#fb923c', 'EXAMINER / SPECIAL NETWORKS', 'dot_provider'),
   source('blue-hive', 'Blue Hive', 'bluehive', '#60a5fa', 'EXAMINER / SPECIAL NETWORKS'),
+
+  liveRegistrySource('germany-klinik-atlas', 'Germany — Bundes-Klinik-Atlas', '#2563eb'),
+  liveRegistrySource('canada-odhf', 'Canada — ODHF', '#dc2626'),
+  liveRegistrySource('australia-healthdirect', 'Australia — HealthDirect', '#059669'),
 
   source('international-providers', 'International Providers', 'healthsites_osm', '#06b6d4', 'SOURCE / NETWORK OVERLAYS'),
   source('usa-embassy-recommended', 'U.S. Embassy Recommended', 'embassy_clinic_docs', '#facc15', 'SOURCE / NETWORK OVERLAYS'),

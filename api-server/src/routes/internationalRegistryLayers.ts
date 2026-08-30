@@ -4,6 +4,7 @@ import { fetchExternalJson } from "../providerSources/externalSourceRuntime";
 
 const router = Router();
 const MAX_PAGE_SIZE = 2000;
+const CANADA_MAX_PAGE_SIZE = 1000;
 const GERMANY_LOCATIONS_URL = "https://bundes-klinik-atlas.de/fileadmin/json/locations.json";
 const CANADA_ODHF_QUERY_URL = "https://services.arcgis.com/wjcPoefzjpzCgffS/ArcGIS/rest/services/Open_Database_of_Healthcare_Facilities_/FeatureServer/0/query";
 
@@ -23,20 +24,10 @@ type GermanyLocation = {
   link?: string;
 };
 
-type ArcGisFeature = {
-  attributes?: Record<string, unknown>;
-};
-
-type ArcGisFeatureResponse = {
-  features?: ArcGisFeature[];
-  exceededTransferLimit?: boolean;
-  error?: { message?: string; details?: string[] };
-};
-
-type ArcGisCountResponse = {
-  count?: number;
-  error?: { message?: string; details?: string[] };
-};
+type ArcGisFeature = { attributes?: Record<string, unknown> };
+type ArcGisError = { message?: string; details?: string[] };
+type ArcGisFeatureResponse = { features?: ArcGisFeature[]; exceededTransferLimit?: boolean; error?: ArcGisError };
+type ArcGisCountResponse = { count?: number; error?: ArcGisError };
 
 function finiteNumber(value: unknown): number | null {
   const parsed = typeof value === "number" ? value : Number(value);
@@ -119,19 +110,19 @@ function normalizeGermany(location: GermanyLocation): Record<string, unknown> | 
   };
 }
 
-async function loadGermany(bounds: Bounds | null, limit: number, page: number, signal?: AbortSignal) {
+async function loadGermany(bounds: Bounds | null, limit: number, page: number) {
   const locations = await fetchExternalJson<GermanyLocation[]>(
     "de-klinikatlas",
     GERMANY_LOCATIONS_URL,
     { headers: { accept: "application/json" } },
-    { signal, validate: (value): value is GermanyLocation[] => Array.isArray(value) },
+    { validate: (value): value is GermanyLocation[] => Array.isArray(value) },
   );
   const matching = locations
     .map(normalizeGermany)
     .filter((provider): provider is Record<string, unknown> => Boolean(provider))
     .filter((provider) => inBounds(Number(provider.lat), Number(provider.lng), bounds));
   const offset = (page - 1) * limit;
-  return { providers: matching.slice(offset, offset + limit), total: matching.length };
+  return { providers: matching.slice(offset, offset + limit), total: matching.length, limit };
 }
 
 function arcGisError(payload: ArcGisFeatureResponse | ArcGisCountResponse): string | null {
@@ -142,10 +133,7 @@ function arcGisError(payload: ArcGisFeatureResponse | ArcGisCountResponse): stri
 
 function canadaGeometryParams(bounds: Bounds | null): URLSearchParams {
   const params = new URLSearchParams();
-  if (!bounds) return params;
-  // Canada does not cross the antimeridian. A wrapped Mapbox viewport can report west > east;
-  // in that case omit the server-side envelope and apply normal paging to the full national layer.
-  if (bounds.west > bounds.east) return params;
+  if (!bounds || bounds.west > bounds.east) return params;
   params.set("geometry", `${bounds.west},${bounds.south},${bounds.east},${bounds.north}`);
   params.set("geometryType", "esriGeometryEnvelope");
   params.set("inSR", "4326");
@@ -206,7 +194,8 @@ function normalizeCanada(feature: ArcGisFeature): Record<string, unknown> | null
   };
 }
 
-async function loadCanada(bounds: Bounds | null, limit: number, page: number, signal?: AbortSignal) {
+async function loadCanada(bounds: Bounds | null, requestedLimit: number, page: number) {
+  const limit = Math.min(requestedLimit, CANADA_MAX_PAGE_SIZE);
   const common = canadaGeometryParams(bounds);
   common.set("where", "latitude IS NOT NULL AND longitude IS NOT NULL");
   common.set("f", "json");
@@ -217,7 +206,6 @@ async function loadCanada(bounds: Bounds | null, limit: number, page: number, si
     "ca-odhf",
     `${CANADA_ODHF_QUERY_URL}?${countParams.toString()}`,
     { headers: { accept: "application/json" } },
-    { signal },
   );
   const countError = arcGisError(countPayload);
   if (countError) throw new Error(countError);
@@ -227,12 +215,11 @@ async function loadCanada(bounds: Bounds | null, limit: number, page: number, si
   dataParams.set("returnGeometry", "false");
   dataParams.set("orderByFields", "ObjectId2 ASC");
   dataParams.set("resultOffset", String((page - 1) * limit));
-  dataParams.set("resultRecordCount", String(Math.min(limit, 1000)));
+  dataParams.set("resultRecordCount", String(limit));
   const dataPayload = await fetchExternalJson<ArcGisFeatureResponse>(
     "ca-odhf",
     `${CANADA_ODHF_QUERY_URL}?${dataParams.toString()}`,
     { headers: { accept: "application/json" } },
-    { signal },
   );
   const dataError = arcGisError(dataPayload);
   if (dataError) throw new Error(dataError);
@@ -241,7 +228,7 @@ async function loadCanada(bounds: Bounds | null, limit: number, page: number, si
     .map(normalizeCanada)
     .filter((provider): provider is Record<string, unknown> => Boolean(provider))
     .filter((provider) => inBounds(Number(provider.lat), Number(provider.lng), bounds));
-  return { providers, total: Number(countPayload.count || 0) };
+  return { providers, total: Number(countPayload.count || 0), limit };
 }
 
 router.get("/international-registry-layers/:source", async (req: Request, res: Response) => {
@@ -256,19 +243,19 @@ router.get("/international-registry-layers/:source", async (req: Request, res: R
   }
 
   const bounds = parseBounds(req);
-  const limit = Math.min(Math.max(Number(req.query.limit) || 1000, 1), MAX_PAGE_SIZE);
+  const requestedLimit = Math.min(Math.max(Number(req.query.limit) || 1000, 1), MAX_PAGE_SIZE);
   const page = Math.max(Number(req.query.page) || 1, 1);
 
   try {
     const result = source === "germany-klinik-atlas"
-      ? await loadGermany(bounds, limit, page, req.signal)
-      : await loadCanada(bounds, limit, page, req.signal);
-    const total = result.total;
+      ? await loadGermany(bounds, requestedLimit, page)
+      : await loadCanada(bounds, requestedLimit, page);
+    const { providers, total, limit } = result;
     res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
     res.json({
-      providers: result.providers,
-      count: result.providers.length,
-      loaded: result.providers.length,
+      providers,
+      count: providers.length,
+      loaded: providers.length,
       total,
       page,
       limit,
@@ -287,7 +274,7 @@ router.get("/international-registry-layers/:source", async (req: Request, res: R
       loaded: 0,
       total: 0,
       page,
-      limit,
+      limit: requestedLimit,
       hasMore: false,
       source,
       officialRegistry: true,

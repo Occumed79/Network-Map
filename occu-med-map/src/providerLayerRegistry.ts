@@ -67,6 +67,7 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
 
   liveRegistrySource('germany-klinik-atlas', 'Germany — Bundes-Klinik-Atlas', '#2563eb'),
   liveRegistrySource('canada-odhf', 'Canada — ODHF', '#dc2626'),
+  liveRegistrySource('australia-healthdirect', 'Australia — HealthDirect', '#059669'),
 
   source('international-providers', 'International Providers', 'healthsites_osm', '#06b6d4', 'SOURCE / NETWORK OVERLAYS'),
   source('usa-embassy-recommended', 'U.S. Embassy Recommended', 'embassy_clinic_docs', '#facc15', 'SOURCE / NETWORK OVERLAYS'),

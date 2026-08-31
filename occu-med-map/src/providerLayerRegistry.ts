@@ -80,6 +80,7 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   liveRegistrySource('latvia-medical-facilities', 'Latvia — Medical Facilities', '#7c3aed'),
   liveRegistrySource('lithuania-vaspvt', 'Lithuania — Licensed Facilities', '#0284c7'),
   liveRegistrySource('wales-gp-main-sites', 'Wales — GP Main Sites', '#d946ef'),
+  liveRegistrySource('scotland-nhs-hospitals', 'Scotland — NHS Hospitals', '#1d4ed8'),
   liveRegistrySource('montenegro-health-facilities', 'Montenegro — Ministry of Health Facilities', '#b91c1c'),
   liveRegistrySource('cyprus-state-hospitals', 'Cyprus — State Hospitals', '#0e7490'),
 

@@ -11,11 +11,26 @@ const CHILE_CKAN_URL = "https://datos.gob.cl/ne/api/3/action/datastore_search";
 const LATVIA_RESOURCE_ID = "5ea6e4aa-ee21-462a-8590-283483d2b0a4";
 const LATVIA_CKAN_URL = "https://data.gov.lv/dati/api/3/action/datastore_search";
 const IRELAND_QUERY_URL = "https://services-eu1.arcgis.com/v5dOXTEOb7ZHdNyQ/arcgis/rest/services/Health_Centres/FeatureServer/0/query";
+const COLOMBIA_QUERY_URL = "https://sig.sispro.gov.co/arcgis_msp/rest/services/Visor/MPS_Proteccion_Social/MapServer/2/query";
+const LITHUANIA_ARCGIS_ITEM_ID = "39ea3e5a8e7d4a78b329d5568f8973be";
+const LITHUANIA_LAYER_ID = 2;
+const ARCGIS_ITEM_URL = `https://www.arcgis.com/sharing/rest/content/items/${LITHUANIA_ARCGIS_ITEM_ID}`;
 
 type Bounds = { north: number; south: number; east: number; west: number };
 type CkanPayload = { success?: boolean; result?: { total?: number; records?: Record<string, unknown>[] }; error?: unknown };
 type ArcGisFeature = { attributes?: Record<string, unknown>; geometry?: { x?: number; y?: number } };
-type ArcGisPayload = { features?: ArcGisFeature[]; count?: number; error?: { message?: string; details?: string[] } };
+type ArcGisError = { message?: string; details?: string[] };
+type ArcGisPayload = { features?: ArcGisFeature[]; count?: number; exceededTransferLimit?: boolean; error?: ArcGisError };
+type ArcGisItem = { url?: string; title?: string; type?: string; error?: ArcGisError };
+type ArcGisField = { name?: string; alias?: string };
+type ArcGisLayerMetadata = {
+  displayField?: string;
+  objectIdField?: string;
+  maxRecordCount?: number;
+  fields?: ArcGisField[];
+  error?: ArcGisError;
+};
+type ArcGisNormalizer = (feature: ArcGisFeature) => Record<string, unknown> | null;
 
 function numberValue(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -193,7 +208,7 @@ async function loadCkanRegistry(
   return { providers: matching.slice(offset, offset + limit), total: matching.length };
 }
 
-function irelandGeometryParams(bounds: Bounds | null): URLSearchParams {
+function geometryParams(bounds: Bounds | null): URLSearchParams {
   const params = new URLSearchParams();
   if (!bounds || bounds.west > bounds.east) return params;
   params.set("geometry", `${bounds.west},${bounds.south},${bounds.east},${bounds.north}`);
@@ -203,10 +218,55 @@ function irelandGeometryParams(bounds: Bounds | null): URLSearchParams {
   return params;
 }
 
-function arcGisError(payload: ArcGisPayload): string | null {
+function arcGisError(payload: { error?: ArcGisError }): string | null {
   if (!payload.error) return null;
   const details = Array.isArray(payload.error.details) ? payload.error.details.filter(Boolean).join(" ") : "";
   return [payload.error.message, details].filter(Boolean).join(" ") || "ArcGIS query failed";
+}
+
+async function loadArcGisLayer(options: {
+  source: string;
+  queryUrl: string;
+  where?: string;
+  outFields: string;
+  bounds: Bounds | null;
+  limit: number;
+  page: number;
+  normalize: ArcGisNormalizer;
+}) {
+  const common = geometryParams(options.bounds);
+  common.set("where", options.where || "1=1");
+  common.set("f", "json");
+
+  const countParams = new URLSearchParams(common);
+  countParams.set("returnCountOnly", "true");
+  const countPayload = await fetchExternalJson<ArcGisPayload>(
+    `${options.source}-count`,
+    `${options.queryUrl}?${countParams.toString()}`,
+    { headers: { accept: "application/json" } },
+  );
+  const countError = arcGisError(countPayload);
+  if (countError) throw new Error(countError);
+
+  const params = new URLSearchParams(common);
+  params.set("outFields", options.outFields);
+  params.set("returnGeometry", "true");
+  params.set("outSR", "4326");
+  params.set("resultOffset", String((options.page - 1) * options.limit));
+  params.set("resultRecordCount", String(options.limit));
+  const payload = await fetchExternalJson<ArcGisPayload>(
+    options.source,
+    `${options.queryUrl}?${params.toString()}`,
+    { headers: { accept: "application/json" } },
+  );
+  const error = arcGisError(payload);
+  if (error) throw new Error(error);
+
+  const providers = (payload.features || [])
+    .map(options.normalize)
+    .filter((provider): provider is Record<string, unknown> => Boolean(provider))
+    .filter((provider) => inBounds(Number(provider.lat), Number(provider.lng), options.bounds));
+  return { providers, total: Number(countPayload.count || 0) };
 }
 
 function normalizeIreland(feature: ArcGisFeature): Record<string, unknown> | null {
@@ -249,39 +309,199 @@ function normalizeIreland(feature: ArcGisFeature): Record<string, unknown> | nul
   };
 }
 
+function colombiaType(row: Record<string, unknown>): string {
+  const name = `${text(row.Nombre)} ${text(row.NombrePrestador)}`.toLowerCase();
+  if (/hospital|cl[ií]nica/.test(name)) return "hospital";
+  if (/laborator/.test(name)) return "lab";
+  if (/imagen|radiolog|diagn[oó]stic/.test(name)) return "imaging";
+  if (/odont|dental/.test(name)) return "dental";
+  return numberValue(row.ClaseDePrestador) === 2 ? "general_practitioner" : "healthcare_facility";
+}
+
+function normalizeColombia(feature: ArcGisFeature): Record<string, unknown> | null {
+  const row = feature.attributes || {};
+  const lng = numberValue(feature.geometry?.x);
+  const lat = numberValue(feature.geometry?.y);
+  if (lat === null || lng === null || lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  if (numberValue(row.MetodoUbicacion) === 4) return null;
+  const code = text(row.CodigoHabilitacion) || text(row.CodigoPrestador);
+  const id = code ? `co-reps:${code}` : stableId("co-reps", [row.Nombre, row.Direccion, lat, lng]);
+  const providerType = colombiaType(row);
+  return {
+    id,
+    source_id: code || id,
+    name: text(row.Nombre) || text(row.NombrePrestador) || "Unnamed Colombian healthcare site",
+    parent_organization: text(row.NombrePrestador) || null,
+    address: text(row.Direccion) || null,
+    address_1: text(row.Direccion) || null,
+    city: text(row.NOM_MPIO) || text(row.CentroPoblado) || null,
+    admin_area: text(row.NOM_DPTO) || null,
+    state: text(row.NOM_DPTO) || null,
+    postal_code: null,
+    zip: null,
+    country: "Colombia",
+    country_code: "CO",
+    lat,
+    lng,
+    phone: text(row.Telefono) || null,
+    website: text(row.URL) || null,
+    clinic_type: providerType,
+    providerType,
+    category: providerType,
+    services: [providerType],
+    categories: [providerType],
+    types: [providerType],
+    provider_code: row.CodigoPrestador ?? null,
+    legal_nature: row.NaturalezaJuridica ?? null,
+    care_level: row.NivelAtencion ?? null,
+    location_method: row.MetodoUbicacion ?? null,
+    source: "co_reps_sispro",
+    data_source: "co_reps_sispro",
+    source_kind: "official_registry_live",
+    trust_tier: "registry",
+    confidence_score: 1,
+    provider_layer_category: "colombia-reps",
+  };
+}
+
+function canonical(value: unknown): string {
+  return text(value)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, " ")
+    .trim();
+}
+
+function fieldFor(metadata: ArcGisLayerMetadata, candidates: string[], fallback?: string): string | null {
+  const fields = metadata.fields || [];
+  const candidateSet = candidates.map(canonical);
+  for (const field of fields) {
+    const values = [canonical(field.name), canonical(field.alias)];
+    if (values.some((value) => candidateSet.includes(value))) return text(field.name) || null;
+  }
+  for (const field of fields) {
+    const values = [canonical(field.name), canonical(field.alias)];
+    if (values.some((value) => candidateSet.some((candidate) => value.includes(candidate)))) return text(field.name) || null;
+  }
+  return fallback || null;
+}
+
+async function lithuaniaLayer() {
+  const item = await fetchExternalJson<ArcGisItem>(
+    "lt-vaspvt-item",
+    `${ARCGIS_ITEM_URL}?f=json`,
+    { headers: { accept: "application/json" } },
+  );
+  const itemError = arcGisError(item);
+  if (itemError) throw new Error(itemError);
+  const serviceUrl = text(item.url).replace(/\/$/u, "");
+  if (!serviceUrl) throw new Error("Lithuania VASPVT ArcGIS item did not expose a feature-service URL");
+  const layerUrl = /\/(?:FeatureServer|MapServer)\/\d+$/iu.test(serviceUrl)
+    ? serviceUrl
+    : `${serviceUrl}/${LITHUANIA_LAYER_ID}`;
+  const metadata = await fetchExternalJson<ArcGisLayerMetadata>(
+    "lt-vaspvt-layer-metadata",
+    `${layerUrl}?f=json`,
+    { headers: { accept: "application/json" } },
+  );
+  const metadataError = arcGisError(metadata);
+  if (metadataError) throw new Error(metadataError);
+  return { layerUrl, metadata };
+}
+
+function lithuaniaNormalizer(metadata: ArcGisLayerMetadata): ArcGisNormalizer {
+  const nameField = metadata.displayField || fieldFor(metadata, ["pavadinimas", "istaigos pavadinimas", "name"]);
+  const addressField = fieldFor(metadata, ["adresas", "veiklos adresas", "address"]);
+  const cityField = fieldFor(metadata, ["miestas", "savivaldybe", "savivaldybes pavadinimas", "municipality", "city"]);
+  const codeField = fieldFor(metadata, ["istaigos kodas", "jar kodas", "juridinio asmens kodas", "kodas", "code"]);
+  const licenseField = fieldFor(metadata, ["licencijos nr", "licencijos numeris", "licencija", "license"]);
+  const phoneField = fieldFor(metadata, ["telefonas", "telefono numeris", "phone"]);
+  const websiteField = fieldFor(metadata, ["interneto svetaine", "svetaine", "website", "url"]);
+  const objectIdField = metadata.objectIdField || fieldFor(metadata, ["objectid", "fid", "id"]);
+
+  return (feature: ArcGisFeature) => {
+    const row = feature.attributes || {};
+    const lng = numberValue(feature.geometry?.x);
+    const lat = numberValue(feature.geometry?.y);
+    if (lat === null || lng === null || lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+    const name = nameField ? text(row[nameField]) : "";
+    if (!name) return null;
+    const code = codeField ? text(row[codeField]) : "";
+    const objectId = objectIdField ? text(row[objectIdField]) : "";
+    const sourceId = code || objectId;
+    const address = addressField ? text(row[addressField]) : "";
+    const id = sourceId ? `lt-vaspvt:${sourceId}` : stableId("lt-vaspvt", [name, address, lat, lng]);
+    return {
+      id,
+      source_id: sourceId || id,
+      name,
+      address: address || null,
+      address_1: address || null,
+      city: cityField ? text(row[cityField]) || null : null,
+      admin_area: null,
+      state: null,
+      postal_code: null,
+      zip: null,
+      country: "Lithuania",
+      country_code: "LT",
+      lat,
+      lng,
+      phone: phoneField ? text(row[phoneField]) || null : null,
+      website: websiteField ? text(row[websiteField]) || null : null,
+      clinic_type: "healthcare_facility",
+      providerType: "healthcare_facility",
+      category: "licensed healthcare facility",
+      services: ["licensed healthcare facility"],
+      categories: ["licensed healthcare facility"],
+      types: ["healthcare_facility"],
+      license: licenseField ? row[licenseField] ?? null : null,
+      source: "lt_vaspvt_licensed_facilities",
+      data_source: "lt_vaspvt_licensed_facilities",
+      source_kind: "official_registry_live",
+      trust_tier: "registry",
+      confidence_score: 1,
+      provider_layer_category: "lithuania-vaspvt",
+    };
+  };
+}
+
 async function loadIreland(bounds: Bounds | null, limit: number, page: number) {
-  const common = irelandGeometryParams(bounds);
-  common.set("where", "1=1");
-  common.set("f", "json");
+  return loadArcGisLayer({
+    source: "ie-hse-health-centres",
+    queryUrl: IRELAND_QUERY_URL,
+    outFields: "OBJECTID,Service_name,Alternative_name,Address,County",
+    bounds,
+    limit,
+    page,
+    normalize: normalizeIreland,
+  });
+}
 
-  const countParams = new URLSearchParams(common);
-  countParams.set("returnCountOnly", "true");
-  const countPayload = await fetchExternalJson<ArcGisPayload>(
-    "ie-hse-health-centres",
-    `${IRELAND_QUERY_URL}?${countParams.toString()}`,
-    { headers: { accept: "application/json" } },
-  );
-  const countError = arcGisError(countPayload);
-  if (countError) throw new Error(countError);
+async function loadColombia(bounds: Bounds | null, limit: number, page: number) {
+  return loadArcGisLayer({
+    source: "co-reps-sispro",
+    queryUrl: COLOMBIA_QUERY_URL,
+    where: "IndicadorHabilitacion = 1 AND (MetodoUbicacion <> 4 OR MetodoUbicacion IS NULL)",
+    outFields: "OBJECTID,CodigoHabilitacion,ClaseDePrestador,NaturalezaJuridica,NivelAtencion,Nombre,CodigoPrestador,NombrePrestador,Direccion,URL,Barrio,Telefono,CentroPoblado,NOM_DPTO,NOM_MPIO,MetodoUbicacion",
+    bounds,
+    limit,
+    page,
+    normalize: normalizeColombia,
+  });
+}
 
-  const params = new URLSearchParams(common);
-  params.set("outFields", "OBJECTID,Service_name,Alternative_name,Address,County");
-  params.set("returnGeometry", "true");
-  params.set("outSR", "4326");
-  params.set("orderByFields", "OBJECTID ASC");
-  params.set("resultOffset", String((page - 1) * limit));
-  params.set("resultRecordCount", String(limit));
-  const payload = await fetchExternalJson<ArcGisPayload>(
-    "ie-hse-health-centres",
-    `${IRELAND_QUERY_URL}?${params.toString()}`,
-    { headers: { accept: "application/json" } },
-  );
-  const error = arcGisError(payload);
-  if (error) throw new Error(error);
-  const providers = (payload.features || [])
-    .map(normalizeIreland)
-    .filter((provider): provider is Record<string, unknown> => Boolean(provider));
-  return { providers, total: Number(countPayload.count || 0) };
+async function loadLithuania(bounds: Bounds | null, limit: number, page: number) {
+  const { layerUrl, metadata } = await lithuaniaLayer();
+  return loadArcGisLayer({
+    source: "lt-vaspvt-licensed-facilities",
+    queryUrl: `${layerUrl}/query`,
+    outFields: "*",
+    bounds,
+    limit,
+    page,
+    normalize: lithuaniaNormalizer(metadata),
+  });
 }
 
 function handler(
@@ -326,5 +546,7 @@ handler("latvia-medical-facilities", (bounds, limit, page) => loadCkanRegistry(
   "lv-medical-facilities", LATVIA_CKAN_URL, LATVIA_RESOURCE_ID, normalizeLatvia, bounds, limit, page,
 ));
 handler("ireland-hse-health-centres", loadIreland);
+handler("colombia-reps", loadColombia);
+handler("lithuania-vaspvt", loadLithuania);
 
 export default router;

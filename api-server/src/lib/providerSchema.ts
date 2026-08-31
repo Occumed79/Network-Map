@@ -22,6 +22,28 @@ export async function detectProviderSchema(pool: ReturnType<typeof getPool>): Pr
     `);
     if (state.rows[0]?.canonical_read_enabled === true) return "canonical";
   }
+
+  // Source-specific provider projects can be initialized directly into the
+  // canonical pipeline without the primary database's migration-state table.
+  // Only treat that shape as canonical when the canonical view actually has
+  // data and the legacy table is absent or empty. This preserves the stricter
+  // provider_schema_state gate for the primary database while preventing a
+  // populated Overture/Healthsites/Embassy shard from falling through to an
+  // empty legacy medical_providers table.
+  if (rows[0]?.canonical_view && !rows[0]?.canonical_state) {
+    const fallback = await pool.query(`
+      SELECT
+        EXISTS (SELECT 1 FROM public.provider_master_map_view LIMIT 1) AS canonical_has_rows,
+        CASE
+          WHEN to_regclass('public.medical_providers') IS NULL THEN false
+          ELSE EXISTS (SELECT 1 FROM public.medical_providers LIMIT 1)
+        END AS legacy_has_rows
+    `);
+    if (fallback.rows[0]?.canonical_has_rows === true && fallback.rows[0]?.legacy_has_rows !== true) {
+      return "canonical";
+    }
+  }
+
   if (rows[0]?.normalized) return "normalized";
   if (rows[0]?.legacy) return "legacy";
   return "none";

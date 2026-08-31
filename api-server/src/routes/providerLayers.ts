@@ -494,6 +494,7 @@ async function loadNormalizedLayer(
 async function detectLayerStorage(pool: ReturnType<typeof getPool>): Promise<ProviderLayerStorage> {
   if (await canonicalReadsEnabled(pool)) return "provider_master";
   const schema = await detectProviderSchema(pool);
+  if (schema === "canonical") return "provider_master";
   if (schema === "legacy") return "medical_providers";
   if (schema === "normalized") return "providers";
   return "none";

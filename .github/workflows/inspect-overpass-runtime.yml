@@ -1,0 +1,53 @@
+name: Inspect Overture shard runtime schema
+
+on:
+  push:
+    branches:
+      - wire-overpass-shards-20260831
+    paths:
+      - .github/workflows/inspect-overpass-runtime.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OVERPASS_DATABASE_URL: ${{ secrets.OVERPASS_DATABASE_URL }}
+      OVERPASS_DATABASE_URL_2: ${{ secrets.OVERPASS_DATABASE_URL_2 }}
+    steps:
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install --yes -qq postgresql-client
+
+      - name: Inspect both Overture shards
+        shell: bash
+        run: |
+          set -euo pipefail
+          for pair in "overpass-1|$OVERPASS_DATABASE_URL" "overpass-2|$OVERPASS_DATABASE_URL_2"; do
+            label="${pair%%|*}"
+            url="${pair#*|}"
+            [[ "$url" == postgres* ]] || { echo "$label secret missing" >&2; exit 1; }
+            echo "::add-mask::$url"
+            echo "===== $label ====="
+            psql "$url" -v ON_ERROR_STOP=1 -At <<'SQL'
+SELECT 'db_size=' || pg_size_pretty(pg_database_size(current_database()));
+SELECT 'master=' || count(*) FROM public.provider_master;
+SELECT 'sources=' || count(*) FROM public.provider_master_sources WHERE source_key='overture';
+SELECT 'distinct_source_providers=' || count(DISTINCT master_provider_id) FROM public.provider_master_sources WHERE source_key='overture';
+SELECT 'types=' || count(*) FROM public.provider_master_types;
+SELECT 'map_view=' || count(*) FROM public.provider_master_map_view;
+SELECT 'provider_master.id=' || pg_typeof(id)::text FROM public.provider_master LIMIT 1;
+SELECT 'provider_master_types.master_provider_id=' || pg_typeof(master_provider_id)::text FROM public.provider_master_types LIMIT 1;
+SELECT 'provider_master_sources.master_provider_id=' || pg_typeof(master_provider_id)::text FROM public.provider_master_sources LIMIT 1;
+SELECT 'provider_master_map_view.id=' || pg_typeof(id)::text FROM public.provider_master_map_view LIMIT 1;
+SELECT 'sample=' || concat_ws('|', id::text, master_key, source_key, primary_provider_type, lat::text, lng::text) FROM public.provider_master_map_view LIMIT 1;
+SELECT 'viewdef=' || pg_get_viewdef('public.provider_master_map_view'::regclass, true);
+SQL
+          done

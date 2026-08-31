@@ -1,0 +1,72 @@
+name: Verify live Overture shard runtime
+
+on:
+  push:
+    branches:
+      - verify-overpass-runtime-20260831
+    paths:
+      - .github/workflows/verify-overpass-runtime-20260831.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BASE_URL: https://network-map-tool-mqib.onrender.com
+      EXPECTED_REVISION: d5f2f48e33bea9b5891ac18f0ca17028a234d999
+    steps:
+      - name: Wait for merged revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..50}; do
+            body=$(curl --fail --silent --show-error --max-time 20 "$BASE_URL/api/revision" || true)
+            echo "revision_response=$body"
+            if echo "$body" | grep -q "$EXPECTED_REVISION"; then
+              echo "Merged revision is live."
+              exit 0
+            fi
+            echo "Waiting for Render deployment ($attempt/50)..."
+            sleep 10
+          done
+          echo "Expected revision did not become live." >&2
+          exit 1
+
+      - name: Verify both Overture database projects are live
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 30 "$BASE_URL/api/ready" -o /tmp/ready.json
+          cat /tmp/ready.json
+          python - <<'PY'
+          import json
+          data=json.load(open('/tmp/ready.json'))
+          names={item.get('name') for item in data.get('dependencies', [])}
+          missing={'overpass-project-1','overpass-project-2'}-names
+          if missing:
+              raise SystemExit(f'Missing runtime database projects: {sorted(missing)}; live dependencies={sorted(x for x in names if x)}')
+          if not data.get('ok'):
+              raise SystemExit(f'Readiness is not OK: {data}')
+          print('Both Overture database projects are connected in production.')
+          PY
+
+      - name: Verify provider category fan-out
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 60 "$BASE_URL/api/provider-category-layers/concierge-medicine?limit=1&page=1" -o /tmp/category.json
+          cat /tmp/category.json
+          python - <<'PY'
+          import json
+          data=json.load(open('/tmp/category.json'))
+          projects=set(data.get('databaseProjects') or [])
+          missing={'overpass-project-1','overpass-project-2'}-projects
+          if missing:
+              raise SystemExit(f'Category fan-out missing {sorted(missing)}; projects={sorted(projects)}; warnings={data.get("warnings")}')
+          if data.get('partial'):
+              raise SystemExit(f'Category response is partial: {data.get("warnings")}')
+          print(f'Category fan-out OK: total={data.get("total")}, projects={sorted(projects)}')
+          PY

@@ -17,6 +17,8 @@ services:
         sync: false
       - key: DATABASE_URL_POOLED
         sync: false
+      - key: OVERPASS_DATABASE_URL
+        sync: false
       - key: WRITE_API_TOKEN
         sync: false
       - key: PGPOOL_MAX

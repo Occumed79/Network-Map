@@ -1,0 +1,34 @@
+name: Reclaim OVERPASS import space
+
+on:
+  push:
+    branches:
+      - overture-exact-import-20260830
+    paths:
+      - .github/workflows/inspect-overpass-20260830.yml
+
+permissions:
+  contents: read
+
+jobs:
+  reclaim:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.OVERPASS_DATABASE_URL }}
+    steps:
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install --yes -qq postgresql-client
+      - name: Reclaim space from rolled-back import
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DATABASE_URL" == postgres* ]] || { echo 'OVERPASS_DATABASE_URL missing' >&2; exit 1; }
+          echo "::add-mask::$DATABASE_URL"
+          psql "$DATABASE_URL" -Atqc "SELECT 'before='||pg_size_pretty(pg_database_size(current_database()));"
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "VACUUM FULL public.provider_master;"
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "VACUUM FULL public.provider_master_sources;"
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "VACUUM FULL public.provider_master_types;"
+          psql "$DATABASE_URL" -Atqc "SELECT 'after='||pg_size_pretty(pg_database_size(current_database()));"
+          psql "$DATABASE_URL" -Atqc "SELECT 'provider_master='||count(*) FROM public.provider_master;"

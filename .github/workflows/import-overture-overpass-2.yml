@@ -1,0 +1,174 @@
+name: Import remaining Overture providers to OVERPASS Neon 2
+
+on:
+  push:
+    branches:
+      - overture-exact-import-20260830
+    paths:
+      - .github/workflows/import-overture-overpass-2.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: overture-overpass-neon-2-import-20260831
+  cancel-in-progress: false
+
+jobs:
+  import-overture-remainder:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      SOURCE_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      OVERPASS_DATABASE_URL_2: ${{ secrets.OVERPASS_DATABASE_URL_2 }}
+      OVERTURE_SKIP_VALID: '335000'
+      EXPECTED_REMAINING: '148736'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Download completed Overture candidate artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: overture-candidate-sqlite
+          path: /tmp/overture-candidate
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 33302987142
+
+      - name: Install PostgreSQL 18 client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo install -d -m 0755 /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor --yes -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install --yes -qq postgresql-client-18
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+          test -s /tmp/overture-candidate/overture_cleaned_usa.sqlite
+
+      - name: Validate database 2 and initialize provider schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_DATABASE_URL" == postgres* ]] || { echo 'DATABASE_URL secret is missing' >&2; exit 1; }
+          [[ "$OVERPASS_DATABASE_URL_2" == postgres* ]] || { echo 'OVERPASS_DATABASE_URL_2 secret is missing' >&2; exit 1; }
+          echo "::add-mask::$SOURCE_DATABASE_URL"
+          echo "::add-mask::$OVERPASS_DATABASE_URL_2"
+
+          if ! psql "$OVERPASS_DATABASE_URL_2" -Atqc "SELECT to_regclass('public.provider_master') IS NOT NULL" | grep -qx t; then
+            echo 'Initializing empty OVERPASS database 2 provider schema from primary database'
+            pg_dump "$SOURCE_DATABASE_URL" --schema-only --no-owner --no-privileges --file=/tmp/provider-schema.sql
+            psql "$OVERPASS_DATABASE_URL_2" -v ON_ERROR_STOP=1 -f /tmp/provider-schema.sql
+            for table in provider_schema_state schema_migration_versions provider_type_catalog; do
+              if psql "$SOURCE_DATABASE_URL" -Atqc "SELECT to_regclass('public.${table}') IS NOT NULL" | grep -qx t; then
+                pg_dump "$SOURCE_DATABASE_URL" --data-only --inserts --no-owner --no-privileges --table="public.${table}" \
+                  | psql "$OVERPASS_DATABASE_URL_2" -v ON_ERROR_STOP=1
+              fi
+            done
+          fi
+
+          psql "$OVERPASS_DATABASE_URL_2" -v ON_ERROR_STOP=1 -c \
+            "CREATE UNIQUE INDEX IF NOT EXISTS overpass_provider_master_sources_source_record_uq
+             ON public.provider_master_sources(source_key, source_record_id)
+             WHERE source_record_id IS NOT NULL;"
+
+      - name: Check whether remainder is already complete
+        id: precheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$OVERPASS_DATABASE_URL_2"
+          source_rows=$(psql "$OVERPASS_DATABASE_URL_2" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='overture';")
+          echo "source_rows=$source_rows"
+          if [ "$source_rows" -eq "$EXPECTED_REMAINING" ]; then
+            echo "already_complete=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already_complete=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Patch importer to resume after first 335000 valid providers
+        if: steps.precheck.outputs.already_complete != 'true'
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/import-overture-candidate-direct-neon.py')
+          s=p.read_text()
+
+          old="""ON CONFLICT (source_key,source_record_id) WHERE source_record_id IS NOT NULL DO UPDATE SET
+            master_provider_id=EXCLUDED.master_provider_id,
+            source_confidence_score=GREATEST(COALESCE(provider_master_sources.source_confidence_score,0),COALESCE(EXCLUDED.source_confidence_score,0)),
+            updated_at=now();"""
+          if old in s:
+              s=s.replace(old,"ON CONFLICT DO NOTHING;")
+
+          old="BATCH_SIZE = int(os.environ.get(\"OVERTURE_BATCH_SIZE\", \"5000\"))"
+          new=old + "\nSKIP_VALID = int(os.environ.get(\"OVERTURE_SKIP_VALID\", \"0\"))"
+          if old not in s:
+              raise SystemExit('batch-size patch target not found')
+          s=s.replace(old,new,1)
+
+          old_loop="""batch = []
+processed = skipped = batch_no = 0
+for row in cur:
+    out = transformed(row)
+    if out is None:
+        skipped += 1
+        continue
+    batch.append(out)
+    processed += 1
+"""
+          new_loop="""batch = []
+processed = skipped = batch_no = valid_seen = 0
+for row in cur:
+    out = transformed(row)
+    if out is None:
+        skipped += 1
+        continue
+    valid_seen += 1
+    if valid_seen <= SKIP_VALID:
+        continue
+    batch.append(out)
+    processed += 1
+"""
+          if old_loop not in s:
+              raise SystemExit('resume-loop patch target not found')
+          s=s.replace(old_loop,new_loop,1)
+          p.write_text(s)
+          compile(s, str(p), 'exec')
+          PY
+
+      - name: Import remaining providers to OVERPASS database 2
+        if: steps.precheck.outputs.already_complete != 'true'
+        shell: bash
+        env:
+          DATABASE_URL: ${{ secrets.OVERPASS_DATABASE_URL_2 }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$DATABASE_URL"
+          python scripts/import-overture-candidate-direct-neon.py /tmp/overture-candidate/overture_cleaned_usa.sqlite || true
+
+      - name: Verify database 2 exact remainder
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$OVERPASS_DATABASE_URL_2"
+          source_rows=$(psql "$OVERPASS_DATABASE_URL_2" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='overture';")
+          providers=$(psql "$OVERPASS_DATABASE_URL_2" -Atqc "SELECT count(DISTINCT master_provider_id) FROM public.provider_master_sources WHERE source_key='overture';")
+          type_rows=$(psql "$OVERPASS_DATABASE_URL_2" -Atqc "SELECT count(*) FROM public.provider_master_types pmt WHERE EXISTS (SELECT 1 FROM public.provider_master_sources s WHERE s.master_provider_id=pmt.master_provider_id AND s.source_key='overture');")
+          db_size=$(psql "$OVERPASS_DATABASE_URL_2" -Atqc "SELECT pg_size_pretty(pg_database_size(current_database()));")
+          echo "source_rows=$source_rows"
+          echo "providers=$providers"
+          echo "type_rows=$type_rows"
+          echo "db_size=$db_size"
+          test "$source_rows" -eq "$EXPECTED_REMAINING"
+          test "$providers" -eq "$EXPECTED_REMAINING"

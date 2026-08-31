@@ -40,3 +40,4 @@ jobs:
           git add occu-med-map/src/dualMapEngineRuntime.ts
           git commit -m "Allow primary Mapbox token for 2D map"
           git push origin HEAD:main
+# Registered workflow trigger

@@ -155,8 +155,12 @@ function firstWebPage(channel) {
 }
 
 function firstEmail(channel) {
-  if (!Array.isArray(channel.supportEmails)) return "";
-  return localized(channel.supportEmails, ["fi", "sv", "en"]) || text(channel.supportEmails[0]?.value);
+  for (const collection of [channel.emails, channel.supportEmails]) {
+    if (!Array.isArray(collection)) continue;
+    const value = localized(collection, ["fi", "sv", "en"]) || text(collection[0]?.value);
+    if (value) return value;
+  }
+  return "";
 }
 
 function postgresArray(values) {
@@ -210,7 +214,7 @@ async function serviceLocationBatch(ids) {
   const params = new URLSearchParams({ guids: ids.join(","), showHeader: "false" });
   const payload = await fetchJson(`${API_BASE}/ServiceChannel/list?${params.toString()}`);
   if (!Array.isArray(payload)) throw new Error("PTV ServiceChannel/list did not return an array");
-  return payload.map((wrapper) => wrapper?.locationChannel).filter(Boolean);
+  return payload.filter((channel) => channel && typeof channel === "object");
 }
 
 function normalizedRow(channel) {

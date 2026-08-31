@@ -2,6 +2,7 @@
 
 import { createHash } from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 
 const API_BASE = "https://api.palvelutietovaranto.suomi.fi/api/v11";
 const columns = [
@@ -72,7 +73,7 @@ function descriptionValues(items) {
   return items.map((item) => text(item?.value || item?.name)).filter(Boolean);
 }
 
-const HEALTH_RE = /(terveys|terveydenhuol|terveysasema|terveyskesk|sairaal|sairaanhoit|lääk|laakar|hammas|suun\s*terv|laborator|kuvant|röntgen|rontgen|fysioterap|mielenterv|psykiatr|työterv|tyoterv|neuvol|rokot|apteek|häls|halsov|hälsov|sjukhus|läkar|lakare|tandv|laborator|röntgen|rontgen|fysioterap|mentalv|psykiatr|företagshäls|foretagshals|vaccin|apotek|health|healthcare|clinic|doctor|physician|hospital|dental|laboratory|imaging|radiolog|physiotherap|mental\s*health|psychiatr|occupational\s*health|vaccin|pharmacy)/iu;
+const HEALTH_RE = /(terveys|terveydenhuol|terveysasema|terveyskesk|sairaal|sairaanhoit|lääk|laakar|hammas|suun\s*terv|laborator|kuvant|röntgen|rontgen|fysioterap|mielenterv|psykiatr|työterv|tyoterv|neuvol|rokot|apteek|häls|halsov|sjukhus|läkar|lakare|tandv|fysioterap|mentalv|företagshäls|foretagshals|vaccin|apotek|health|healthcare|clinic|doctor|physician|hospital|dental|laboratory|imaging|radiolog|physiotherap|mental\s*health|psychiatr|occupational\s*health|pharmacy)/iu;
 
 function searchableText(channel) {
   const values = [
@@ -274,7 +275,7 @@ for (let offset = 0; offset < ids.length; offset += 100) {
 }
 
 const sorted = [...rows.values()].sort((a, b) => String(a[2]).localeCompare(String(b[2])) || String(a[0]).localeCompare(String(b[0])));
-fs.mkdirSync(new URL(".", `file://${outputPath}`).pathname, { recursive: true });
+fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 const lines = [columns.join("\t"), ...sorted.map((row) => row.map(csvField).join("\t"))];
 fs.writeFileSync(outputPath, `${lines.join("\n")}\n`, "utf8");
 console.log(JSON.stringify({ source: "fi_ptv_healthcare", serviceLocationIds: ids.length, healthcareLocations: sorted.length, outputPath }));

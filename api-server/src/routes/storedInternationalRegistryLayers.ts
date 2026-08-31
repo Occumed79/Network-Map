@@ -22,6 +22,7 @@ const REGISTRIES: Record<string, StoredRegistryDefinition> = {
   "france-finess": { sourceKey: "fr_finess", countryCode: "FR", countryName: "France" },
   "england-cqc": { sourceKey: "gb_cqc_healthcare", countryCode: "GB", countryName: "England" },
   "northern-ireland-gp": { sourceKey: "gb_ni_gp", countryCode: "GB", countryName: "Northern Ireland" },
+  "ukraine-nhsu": { sourceKey: "ua_nhsu_pmg", countryCode: "UA", countryName: "Ukraine" },
 };
 
 function addParam(params: unknown[], value: unknown): string {

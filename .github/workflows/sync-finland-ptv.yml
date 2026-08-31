@@ -7,6 +7,9 @@ on:
       - main
     paths:
       - ".github/workflows/sync-finland-ptv.yml"
+      - "scripts/sync-finland-ptv.mjs"
+  schedule:
+    - cron: "15 11 * * 1,4"
 
 permissions:
   contents: read
@@ -16,48 +19,124 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  diagnose:
-    name: Inspect live Suomi.fi ServiceLocation payload
+  sync:
+    name: Fetch and promote official Suomi.fi healthcare locations
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 180
+    env:
+      TARGET_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
+
     steps:
+      - name: Check out importer
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      - name: Inspect PTV payload shape
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Validate provider database
         shell: bash
         run: |
           set -euo pipefail
-          node <<'NODE'
-          const base = "https://api.palvelutietovaranto.suomi.fi/api/v11";
-          const pageResponse = await fetch(`${base}/ServiceChannel/type/ServiceLocation?page=1`);
-          if (!pageResponse.ok) throw new Error(`ID page HTTP ${pageResponse.status}`);
-          const page = await pageResponse.json();
-          const ids = (page.itemList || []).slice(0, 3).map((x) => x.id).filter(Boolean);
-          console.log("PTV_ID_PAGE", JSON.stringify({ keys: Object.keys(page), pageNumber: page.pageNumber, pageCount: page.pageCount, itemCount: page.itemList?.length, ids }, null, 2));
-          if (!ids.length) throw new Error("No ServiceLocation IDs returned");
+          [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "HEALTHSITES_DATABASE_URL is missing" >&2; exit 1; }
+          echo "::add-mask::${TARGET_DATABASE_URL}"
+          test "$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT to_regclass('public.provider_master_map_view') IS NOT NULL")" = "t"
 
-          const params = new URLSearchParams({ guids: ids.join(","), showHeader: "false" });
-          const listResponse = await fetch(`${base}/ServiceChannel/list?${params.toString()}`);
-          if (!listResponse.ok) throw new Error(`List HTTP ${listResponse.status}`);
-          const rows = await listResponse.json();
-          console.log("PTV_LIST_IS_ARRAY", Array.isArray(rows), "COUNT", Array.isArray(rows) ? rows.length : null);
-          for (const [index, wrapper] of (Array.isArray(rows) ? rows.slice(0, 3) : []).entries()) {
-            const location = wrapper?.locationChannel;
-            console.log(`PTV_WRAPPER_${index}`, JSON.stringify({
-              wrapperKeys: Object.keys(wrapper || {}),
-              hasLocationChannel: Boolean(location),
-              locationKeys: Object.keys(location || {}),
-              id: location?.id,
-              channelId: location?.channelId,
-              serviceChannelType: location?.serviceChannelType,
-              serviceChannelNames: location?.serviceChannelNames,
-              serviceChannelDescriptions: location?.serviceChannelDescriptions,
-              services: location?.services,
-              ontologyTerms: location?.ontologyTerms,
-              addresses: location?.addresses,
-            }, null, 2));
-          }
-          NODE
+      - name: Fetch and normalize Finland healthcare service locations
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/finland-ptv
+          node scripts/sync-finland-ptv.mjs --output /tmp/finland-ptv/provider.tsv
+          test -s /tmp/finland-ptv/provider.tsv
+          expected=$(( $(wc -l < /tmp/finland-ptv/provider.tsv) - 1 ))
+          distinct_master="$(tail -n +2 /tmp/finland-ptv/provider.tsv | cut -f19 | sort -u | wc -l | tr -d ' ')"
+          (( expected >= 500 )) || { echo "Only ${expected} geocoded Finland healthcare locations; refusing promotion" >&2; exit 1; }
+          (( distinct_master >= 400 )) || { echo "Only ${distinct_master} Finland canonical locations; refusing promotion" >&2; exit 1; }
+          echo "REGISTRY_EXPECTED=${expected}" >> "$GITHUB_ENV"
+          echo "REGISTRY_EXPECTED_MASTER=${distinct_master}" >> "$GITHUB_ENV"
+          echo "Finland healthcare service locations: ${expected}; canonical locations: ${distinct_master}"
+
+      - name: Protect against an unexpected registry collapse
+        shell: bash
+        run: |
+          set -euo pipefail
+          previous="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='fi_ptv_healthcare'" || echo 0)"
+          previous="${previous:-0}"
+          if (( previous >= 500 )); then
+            minimum=$(( previous * 60 / 100 ))
+            (( REGISTRY_EXPECTED >= minimum )) || {
+              echo "Finland PTV source shrank from ${previous} to ${REGISTRY_EXPECTED}; refusing automatic replacement" >&2
+              exit 1
+            }
+          fi
+
+      - name: Stage normalized Finland rows
+        shell: bash
+        run: |
+          set -euo pipefail
+          columns="source_record_id,source_url,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,primary_provider_type,capability_tags,quality_score,master_key"
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+            CREATE TABLE IF NOT EXISTS public.source5_import_staging (
+              source_record_id text PRIMARY KEY,
+              source_url text,
+              name text NOT NULL,
+              normalized_name text,
+              address_line1 text,
+              formatted_address text,
+              city text,
+              state_region text,
+              postal_code text,
+              country_code text NOT NULL,
+              lat double precision NOT NULL,
+              lng double precision NOT NULL,
+              phone text,
+              website text,
+              email text,
+              primary_provider_type text,
+              capability_tags text[] NOT NULL DEFAULT ARRAY[]::text[],
+              quality_score numeric,
+              master_key text NOT NULL
+            );
+            TRUNCATE public.source5_import_staging;
+          "
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "\\copy public.source5_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" \
+            < /tmp/finland-ptv/provider.tsv
+          actual="$(psql "$TARGET_DATABASE_URL" -Atqc 'SELECT count(*) FROM public.source5_import_staging')"
+          [[ "$actual" == "$REGISTRY_EXPECTED" ]] || { echo "Staging mismatch ${actual} vs ${REGISTRY_EXPECTED}" >&2; exit 1; }
+
+      - name: Promote Finland into canonical registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$TARGET_DATABASE_URL" \
+            -v ON_ERROR_STOP=1 \
+            -v expected="$REGISTRY_EXPECTED" \
+            -v expected_master="$REGISTRY_EXPECTED_MASTER" \
+            -v source_key="fi_ptv_healthcare" \
+            -v country_code="FI" \
+            -v source_prefix_pattern="ptv:%" \
+            -v source_display_name="Finland Suomi.fi PTV — Healthcare Service Locations" \
+            -v data_source_name="Finland Suomi.fi PTV" \
+            -v source_notes="Official Finnish Digital and Population Data Services Agency Suomi.fi Service Catalogue v11 OUT API; published physical ServiceLocation channels filtered to healthcare-related services and synchronized twice weekly" \
+            -f scripts/promote-staged-government-registry.sql
+
+      - name: Verify production Finland source
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='fi_ptv_healthcare'")"
+          mapped_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='fi_ptv_healthcare' AND country_code='FI' AND lat IS NOT NULL AND lng IS NOT NULL")"
+          [[ "$source_count" == "$REGISTRY_EXPECTED" ]] || { echo "Finland PTV lineage mismatch ${source_count} vs ${REGISTRY_EXPECTED}" >&2; exit 1; }
+          (( mapped_count >= 400 )) || { echo "Only ${mapped_count} Finland PTV providers map-renderable" >&2; exit 1; }
+          echo "Finland PTV source records: ${source_count}"
+          echo "Finland PTV map-renderable providers: ${mapped_count}"

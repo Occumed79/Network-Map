@@ -99,3 +99,5 @@ jobs:
           psql "$OVERPASS_DATABASE_URL" -Atqc "SELECT 'providers='||count(DISTINCT master_provider_id) FROM public.provider_master_sources WHERE source_key='overture';"
           psql "$OVERPASS_DATABASE_URL" -Atqc "SELECT 'map_visible='||count(DISTINCT v.id) FROM public.provider_master_map_view v JOIN public.provider_master_sources s ON s.master_provider_id=v.id WHERE s.source_key='overture';"
           psql "$OVERPASS_DATABASE_URL" -Atqc "SELECT 'db_size='||pg_size_pretty(pg_database_size(current_database()));"
+
+# Triggered after OVERPASS_DATABASE_URL secret was added on 2026-08-30.

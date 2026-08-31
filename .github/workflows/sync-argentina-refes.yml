@@ -1,0 +1,155 @@
+name: Sync Argentina REFES healthcare establishments
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "5 11 6 * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: argentina-refes-provider-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Download and promote official REFES registry
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      TARGET_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
+      REFES_PACKAGE_API: https://datos.salud.gob.ar/api/3/action/package_show?id=listado-establecimientos-de-salud-asentados-en-el-registro-federal-refes
+
+    steps:
+      - name: Check out importer
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install import tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes curl jq postgresql-client
+          python -m pip install --disable-pip-version-check openpyxl
+
+      - name: Validate provider database
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "HEALTHSITES_DATABASE_URL is missing" >&2; exit 1; }
+          echo "::add-mask::${TARGET_DATABASE_URL}"
+          test "$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT to_regclass('public.provider_master_map_view') IS NOT NULL")" = "t"
+
+      - name: Resolve and download latest official REFES resource
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/refes
+          curl --fail --location --retry 4 --retry-all-errors "$REFES_PACKAGE_API" --output /tmp/refes/package.json
+          jq -e '.success == true and (.result.resources | length > 0)' /tmp/refes/package.json >/dev/null
+
+          resource="$(jq -r '
+            [.result.resources[]
+             | select((((.format // "") + " " + (.mimetype // "") + " " + (.name // "")) | ascii_downcase)
+               | test("xlsx|spreadsheet|excel|csv"))]
+            | sort_by(.last_modified // .created // "")
+            | last
+            | [(.url // ""), (.format // .mimetype // ""), (.name // "")]
+            | @tsv
+          ' /tmp/refes/package.json)"
+          IFS=$'\t' read -r url format name <<< "$resource"
+          [[ "$url" == http* ]] || { echo "Could not resolve a downloadable REFES resource" >&2; exit 1; }
+          case "${format,,} ${url,,}" in
+            *csv*) ext=csv ;;
+            *) ext=xlsx ;;
+          esac
+          target="/tmp/refes/refes.${ext}"
+          curl --fail --location --retry 4 --retry-all-errors "$url" --output "$target"
+          test -s "$target"
+          size="$(stat -c%s "$target")"
+          (( size >= 500000 )) || { echo "REFES download is unexpectedly small: ${size} bytes" >&2; exit 1; }
+          echo "REFES_FILE=${target}" >> "$GITHUB_ENV"
+          echo "REFES_RESOURCE_NAME=${name}" >> "$GITHUB_ENV"
+          echo "Resolved REFES resource: ${name} (${format})"
+
+      - name: Normalize geocoded REFES establishments
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/normalize-argentina-refes.py --input "$REFES_FILE" --output /tmp/refes/provider.tsv
+          test -s /tmp/refes/provider.tsv
+          expected=$(( $(wc -l < /tmp/refes/provider.tsv) - 1 ))
+          distinct_master="$(tail -n +2 /tmp/refes/provider.tsv | cut -f19 | sort -u | wc -l | tr -d ' ')"
+          (( expected >= 5000 )) || { echo "Only ${expected} geocoded REFES establishments; refusing promotion" >&2; exit 1; }
+          (( distinct_master >= 4000 )) || { echo "Only ${distinct_master} REFES canonical locations; refusing promotion" >&2; exit 1; }
+          echo "REGISTRY_EXPECTED=${expected}" >> "$GITHUB_ENV"
+          echo "REGISTRY_EXPECTED_MASTER=${distinct_master}" >> "$GITHUB_ENV"
+          echo "REFES geocoded records: ${expected}; canonical locations: ${distinct_master}"
+
+      - name: Stage normalized REFES rows
+        shell: bash
+        run: |
+          set -euo pipefail
+          columns="source_record_id,source_url,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,primary_provider_type,capability_tags,quality_score,master_key"
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+            CREATE TABLE IF NOT EXISTS public.source5_import_staging (
+              source_record_id text PRIMARY KEY,
+              source_url text,
+              name text NOT NULL,
+              normalized_name text,
+              address_line1 text,
+              formatted_address text,
+              city text,
+              state_region text,
+              postal_code text,
+              country_code text NOT NULL,
+              lat double precision NOT NULL,
+              lng double precision NOT NULL,
+              phone text,
+              website text,
+              email text,
+              primary_provider_type text,
+              capability_tags text[] NOT NULL DEFAULT ARRAY[]::text[],
+              quality_score numeric,
+              master_key text NOT NULL
+            );
+            TRUNCATE public.source5_import_staging;
+          "
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "\\copy public.source5_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" \
+            < /tmp/refes/provider.tsv
+          actual="$(psql "$TARGET_DATABASE_URL" -Atqc 'SELECT count(*) FROM public.source5_import_staging')"
+          [[ "$actual" == "$REGISTRY_EXPECTED" ]] || { echo "Staging mismatch ${actual} vs ${REGISTRY_EXPECTED}" >&2; exit 1; }
+
+      - name: Promote REFES into canonical registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$TARGET_DATABASE_URL" \
+            -v ON_ERROR_STOP=1 \
+            -v expected="$REGISTRY_EXPECTED" \
+            -v expected_master="$REGISTRY_EXPECTED_MASTER" \
+            -v source_key="ar_refes" \
+            -v country_code="AR" \
+            -v source_prefix_pattern="refes:%" \
+            -v source_display_name="Argentina REFES — Registro Federal de Establecimientos de Salud" \
+            -v data_source_name="Argentina REFES" \
+            -v source_notes="Official Argentina Ministry of Health national REFES registry; synchronized from the latest public bulk resource resolved through the government CKAN catalog" \
+            -f scripts/promote-staged-government-registry.sql
+
+      - name: Verify production Argentina source
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='ar_refes'")"
+          mapped_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='ar_refes' AND country_code='AR' AND lat IS NOT NULL AND lng IS NOT NULL")"
+          [[ "$source_count" == "$REGISTRY_EXPECTED" ]] || { echo "REFES lineage mismatch ${source_count} vs ${REGISTRY_EXPECTED}" >&2; exit 1; }
+          (( mapped_count >= 4000 )) || { echo "Only ${mapped_count} REFES providers map-renderable" >&2; exit 1; }
+          echo "Argentina REFES source records: ${source_count}"
+          echo "Argentina REFES map-renderable providers: ${mapped_count}"

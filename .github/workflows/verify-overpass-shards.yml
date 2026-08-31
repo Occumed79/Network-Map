@@ -22,17 +22,14 @@ jobs:
           node-version: 22
       - name: Install PostgreSQL client library
         run: npm install --no-save pg@8
-      - name: Verify and enable canonical reads for Overture shards
+      - name: Verify both Overture shards read-only
         shell: bash
         run: |
           node <<'NODE'
           const { Client } = require('pg');
 
-          async function inspectAndRepair(label, connectionString) {
-            if (!connectionString) {
-              throw new Error(`${label}: GitHub Actions secret is missing`);
-            }
-
+          async function inspect(label, connectionString, expectedCount) {
+            if (!connectionString) throw new Error(`${label}: GitHub Actions secret is missing`);
             const client = new Client({ connectionString, application_name: 'network-map-overpass-verifier' });
             await client.connect();
             try {
@@ -44,148 +41,44 @@ jobs:
               `);
               const hasMapView = schema.rows[0]?.has_map_view === true;
               const hasMedicalProviders = schema.rows[0]?.has_medical_providers === true;
-              let hasSchemaState = schema.rows[0]?.has_schema_state === true;
               if (!hasMapView) throw new Error(`${label}: provider_master_map_view is missing`);
               if (!hasMedicalProviders) throw new Error(`${label}: medical_providers is missing`);
 
-              const mapCount = await client.query(`SELECT count(*)::bigint AS total FROM public.provider_master_map_view`);
-              const medicalCount = await client.query(`SELECT count(*)::bigint AS total FROM public.medical_providers`);
-              const mapTotal = Number(mapCount.rows[0]?.total || 0);
-              const medicalTotal = Number(medicalCount.rows[0]?.total || 0);
-              if (mapTotal <= 0) throw new Error(`${label}: provider_master_map_view is empty`);
-              if (medicalTotal !== 0) {
-                throw new Error(`${label}: legacy medical_providers contains ${medicalTotal} rows; refusing automatic canonical-read switch`);
-              }
-
-              const sourceCounts = await client.query(`
-                SELECT lower(COALESCE(source_key, '')) AS source_key, count(*)::bigint AS total
-                FROM public.provider_master_map_view
-                GROUP BY 1
-                ORDER BY total DESC
-                LIMIT 10
+              const counts = await client.query(`
+                SELECT
+                  (SELECT count(*)::bigint FROM public.provider_master_map_view) AS canonical_total,
+                  (SELECT count(*)::bigint FROM public.medical_providers) AS legacy_total,
+                  (SELECT count(*)::bigint FROM public.provider_master_map_view WHERE lower(COALESCE(source_key, '')) = 'overture') AS overture_total
               `);
-              const overtureRows = Number(sourceCounts.rows.find((row) => row.source_key === 'overture')?.total || 0);
-              if (overtureRows !== mapTotal) {
-                throw new Error(`${label}: canonical view is not Overture-only (${overtureRows}/${mapTotal}); refusing state repair`);
-              }
-
-              let stateCreated = false;
-              if (!hasSchemaState) {
-                await client.query('BEGIN');
-                try {
-                  await client.query(`
-                    CREATE TABLE IF NOT EXISTS public.provider_schema_state (
-                      id smallint PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-                      canonical_schema text NOT NULL DEFAULT 'provider_master',
-                      canonical_read_enabled boolean NOT NULL DEFAULT false,
-                      migration_after_legacy_id bigint NOT NULL DEFAULT 0,
-                      expected_eligible_rows bigint,
-                      migrated_eligible_rows bigint NOT NULL DEFAULT 0,
-                      migration_completed_at timestamptz,
-                      verification_notes text,
-                      updated_at timestamptz NOT NULL DEFAULT now()
-                    )
-                  `);
-                  await client.query(`
-                    INSERT INTO public.provider_schema_state (
-                      id, canonical_schema, canonical_read_enabled,
-                      expected_eligible_rows, migrated_eligible_rows,
-                      migration_completed_at, verification_notes
-                    ) VALUES (1, 'provider_master', false, $1, $1, now(), $2)
-                    ON CONFLICT (id) DO NOTHING
-                  `, [
-                    mapTotal,
-                    `Overture shard state initialized after verification: provider_master_map_view=${mapTotal}, medical_providers=0`,
-                  ]);
-                  await client.query('COMMIT');
-                  stateCreated = true;
-                  hasSchemaState = true;
-                } catch (error) {
-                  await client.query('ROLLBACK');
-                  throw error;
-                }
-              }
-
-              const stateBeforeResult = await client.query(`
-                SELECT id, canonical_schema, canonical_read_enabled, migrated_eligible_rows,
-                       expected_eligible_rows, migration_completed_at, verification_notes
-                FROM public.provider_schema_state
-                WHERE id = 1
-              `);
-              const stateBefore = stateBeforeResult.rows[0] || null;
-              if (!stateBefore) throw new Error(`${label}: provider_schema_state row id=1 is missing after initialization`);
-              if (stateBefore.canonical_schema !== 'provider_master') {
-                throw new Error(`${label}: canonical_schema is ${stateBefore.canonical_schema}; refusing automatic switch`);
-              }
-
-              let repaired = false;
-              if (stateBefore.canonical_read_enabled !== true) {
-                const repair = await client.query(`
-                  UPDATE public.provider_schema_state
-                  SET canonical_read_enabled = true,
-                      migrated_eligible_rows = $1,
-                      expected_eligible_rows = $1,
-                      migration_completed_at = COALESCE(migration_completed_at, now()),
-                      verification_notes = $2,
-                      updated_at = now()
-                  WHERE id = 1
-                    AND canonical_schema = 'provider_master'
-                    AND canonical_read_enabled = false
-                  RETURNING canonical_read_enabled
-                `, [
-                  mapTotal,
-                  `Overture shard canonical reads enabled after verification: provider_master_map_view=${mapTotal}, medical_providers=0, overture_rows=${overtureRows}`,
-                ]);
-                repaired = repair.rowCount === 1;
-              }
-
-              const stateAfterResult = await client.query(`
-                SELECT id, canonical_schema, canonical_read_enabled, migrated_eligible_rows,
-                       expected_eligible_rows, migration_completed_at, verification_notes
-                FROM public.provider_schema_state
-                WHERE id = 1
-              `);
-              const stateAfter = stateAfterResult.rows[0] || null;
-              if (stateAfter?.canonical_read_enabled !== true) {
-                throw new Error(`${label}: canonical_read_enabled is still false after guarded repair`);
-              }
-
-              const mapCountAfter = await client.query(`SELECT count(*)::bigint AS total FROM public.provider_master_map_view`);
-              const medicalCountAfter = await client.query(`SELECT count(*)::bigint AS total FROM public.medical_providers`);
-              const mapTotalAfter = Number(mapCountAfter.rows[0]?.total || 0);
-              const medicalTotalAfter = Number(medicalCountAfter.rows[0]?.total || 0);
-              if (mapTotalAfter !== mapTotal || medicalTotalAfter !== medicalTotal) {
-                throw new Error(`${label}: provider row counts changed during state repair`);
-              }
+              const canonicalTotal = Number(counts.rows[0]?.canonical_total || 0);
+              const legacyTotal = Number(counts.rows[0]?.legacy_total || 0);
+              const overtureTotal = Number(counts.rows[0]?.overture_total || 0);
+              if (canonicalTotal !== expectedCount) throw new Error(`${label}: expected ${expectedCount} canonical rows, got ${canonicalTotal}`);
+              if (legacyTotal !== 0) throw new Error(`${label}: legacy medical_providers unexpectedly contains ${legacyTotal} rows`);
+              if (overtureTotal !== canonicalTotal) throw new Error(`${label}: canonical view is not Overture-only (${overtureTotal}/${canonicalTotal})`);
 
               console.log(JSON.stringify({
                 shard: label,
                 connected: true,
                 hasMapView,
                 hasMedicalProviders,
-                hasSchemaState,
-                stateCreated,
-                providerMasterMapViewCount: mapTotalAfter,
-                medicalProvidersCount: medicalTotalAfter,
-                stateBefore,
-                stateAfter,
-                canonicalReadRepaired: repaired,
-                topSourceCounts: sourceCounts.rows.map((row) => ({ source_key: row.source_key, total: Number(row.total) })),
+                hasSchemaState: schema.rows[0]?.has_schema_state === true,
+                canonicalTotal,
+                legacyTotal,
+                overtureTotal,
               }));
-              return mapTotalAfter;
+              return canonicalTotal;
             } finally {
               await client.end();
             }
           }
 
           (async () => {
-            const first = await inspectAndRepair('overpass-project-1', process.env.OVERPASS_DATABASE_URL);
-            const second = await inspectAndRepair('overpass-project-2', process.env.OVERPASS_DATABASE_URL_2);
+            const first = await inspect('overpass-project-1', process.env.OVERPASS_DATABASE_URL, 335000);
+            const second = await inspect('overpass-project-2', process.env.OVERPASS_DATABASE_URL_2, 148736);
             const combined = first + second;
             console.log(JSON.stringify({ combinedProviderMasterMapViewCount: combined }));
-            if (combined !== 483736) {
-              throw new Error(`Combined Overture count changed: expected 483736, got ${combined}`);
-            }
+            if (combined !== 483736) throw new Error(`Combined Overture count changed: expected 483736, got ${combined}`);
           })().catch((error) => {
             console.error(error);
             process.exit(1);

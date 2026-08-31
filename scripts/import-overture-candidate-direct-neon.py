@@ -123,6 +123,17 @@ CREATE TEMP TABLE overture_import (
 
 \copy overture_import FROM :'tsv_path' WITH (FORMAT csv, DELIMITER E'\t', QUOTE '"', ENCODING 'UTF8')
 
+WITH canonical AS (
+  SELECT DISTINCT ON (i.master_key) i.*
+  FROM overture_import i
+  ORDER BY i.master_key, COALESCE(i.confidence,0.5) DESC, i.source_record_id
+), type_union AS (
+  SELECT i.master_key,
+         array_agg(DISTINCT t.type_key ORDER BY t.type_key) FILTER (WHERE t.type_key <> '') AS capability_tags
+  FROM overture_import i
+  CROSS JOIN LATERAL regexp_split_to_table(i.provider_types,'\|') AS t(type_key)
+  GROUP BY i.master_key
+)
 INSERT INTO public.provider_master (
   master_key,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,
   lat,lng,phone,website,email,primary_provider_type,capability_tags,primary_source_key,quality_score,
@@ -132,8 +143,9 @@ SELECT
   i.master_key,i.name,i.normalized_name,NULLIF(i.address_line1,''),NULLIF(i.address_line1,''),NULLIF(i.city,''),
   NULLIF(i.state_region,''),NULLIF(i.postal_code,''),COALESCE(NULLIF(i.country_code,''),'US'),i.lat,i.lng,
   NULLIF(i.phone,''),NULLIF(i.website,''),NULLIF(i.email,''),i.primary_provider_type,
-  string_to_array(i.provider_types,'|'),'overture',COALESCE(i.confidence,0.5),true,now(),now()
-FROM overture_import i
+  COALESCE(tu.capability_tags,ARRAY[i.primary_provider_type]::text[]),'overture',COALESCE(i.confidence,0.5),true,now(),now()
+FROM canonical i
+LEFT JOIN type_union tu ON tu.master_key=i.master_key
 ON CONFLICT (master_key) DO UPDATE SET
   name=CASE WHEN NULLIF(btrim(provider_master.name),'') IS NULL THEN EXCLUDED.name ELSE provider_master.name END,
   normalized_name=CASE WHEN NULLIF(btrim(provider_master.normalized_name),'') IS NULL THEN EXCLUDED.normalized_name ELSE provider_master.normalized_name END,
@@ -158,14 +170,20 @@ ON CONFLICT (master_key) DO UPDATE SET
   active=true,last_seen_at=now(),updated_at=now();
 
 INSERT INTO public.provider_master_types (master_provider_id,type_key,source_key,confidence_score)
-SELECT DISTINCT pm.id,t.type_key,'overture',COALESCE(i.confidence,0.5)
+SELECT pm.id,t.type_key,'overture',MAX(COALESCE(i.confidence,0.5))
 FROM overture_import i
 JOIN public.provider_master pm ON pm.master_key=i.master_key
 CROSS JOIN LATERAL regexp_split_to_table(i.provider_types,'\|') AS t(type_key)
 WHERE t.type_key <> ''
+GROUP BY pm.id,t.type_key
 ON CONFLICT (master_provider_id,type_key) DO UPDATE SET
   confidence_score=GREATEST(COALESCE(provider_master_types.confidence_score,0),COALESCE(EXCLUDED.confidence_score,0));
 
+WITH source_dedup AS (
+  SELECT DISTINCT ON (i.source_record_id) i.*
+  FROM overture_import i
+  ORDER BY i.source_record_id, COALESCE(i.confidence,0.5) DESC, i.master_key
+)
 INSERT INTO public.provider_master_sources (
   master_provider_id,source_key,source_record_id,source_url,source_confidence_score,raw_payload,updated_at
 )
@@ -178,7 +196,7 @@ SELECT
     'confidence',i.confidence,'operating_status',i.operating_status,'primary_provider_type',i.primary_provider_type,
     'provider_types',i.provider_types,'taxonomy',i.taxonomy
   ),now()
-FROM overture_import i
+FROM source_dedup i
 JOIN public.provider_master pm ON pm.master_key=i.master_key
 ON CONFLICT (source_key,source_record_id) WHERE source_record_id IS NOT NULL DO UPDATE SET
   master_provider_id=EXCLUDED.master_provider_id,

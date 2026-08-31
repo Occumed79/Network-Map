@@ -1,0 +1,79 @@
+name: Verify Overture Neon Shards
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/verify-overpass-shards.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OVERPASS_DATABASE_URL: ${{ secrets.OVERPASS_DATABASE_URL }}
+      OVERPASS_DATABASE_URL_2: ${{ secrets.OVERPASS_DATABASE_URL_2 }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install PostgreSQL client library
+        run: npm install --no-save pg@8
+      - name: Verify both Overture shards and row counts
+        shell: bash
+        run: |
+          node <<'NODE'
+          const { Client } = require('pg');
+
+          async function inspect(label, connectionString) {
+            if (!connectionString) {
+              throw new Error(`${label}: GitHub Actions secret is missing`);
+            }
+            const client = new Client({ connectionString, application_name: 'network-map-overpass-verifier' });
+            await client.connect();
+            try {
+              const schema = await client.query(`
+                SELECT
+                  to_regclass('public.provider_master_map_view') IS NOT NULL AS has_map_view,
+                  to_regclass('public.medical_providers') IS NOT NULL AS has_medical_providers
+              `);
+              const hasMapView = schema.rows[0]?.has_map_view === true;
+              const hasMedicalProviders = schema.rows[0]?.has_medical_providers === true;
+              if (!hasMapView) throw new Error(`${label}: provider_master_map_view is missing`);
+              if (!hasMedicalProviders) throw new Error(`${label}: medical_providers is missing`);
+
+              const mapCount = await client.query(`SELECT count(*)::bigint AS total FROM public.provider_master_map_view`);
+              const medicalCount = await client.query(`SELECT count(*)::bigint AS total FROM public.medical_providers`);
+              const sourceCounts = await client.query(`
+                SELECT lower(COALESCE(source_key, '')) AS source_key, count(*)::bigint AS total
+                FROM public.provider_master_map_view
+                GROUP BY 1
+                ORDER BY total DESC
+                LIMIT 10
+              `);
+
+              const mapTotal = Number(mapCount.rows[0]?.total || 0);
+              const medicalTotal = Number(medicalCount.rows[0]?.total || 0);
+              console.log(JSON.stringify({
+                shard: label,
+                connected: true,
+                hasMapView,
+                hasMedicalProviders,
+                providerMasterMapViewCount: mapTotal,
+                medicalProvidersCount: medicalTotal,
+                topSourceCounts: sourceCounts.rows.map((row) => ({ source_key: row.source_key, total: Number(row.total) })),
+              }));
+              if (mapTotal <= 0) throw new Error(`${label}: provider_master_map_view is empty`);
+              return mapTotal;
+            } finally {
+              await client.end();
+            }
+          }
+
+          const first = await inspect('overpass-project-1', process.env.OVERPASS_DATABASE_URL);
+          const second = await inspect('overpass-project-2', process.env.OVERPASS_DATABASE_URL_2);
+          console.log(JSON.stringify({ combinedProviderMasterMapViewCount: first + second }));
+          NODE

@@ -8,10 +8,15 @@ const router = Router();
 const MAX_PAGE_SIZE = 5000;
 
 type Bounds = { north: number; south: number; east: number; west: number };
-type StoredRegistryDefinition = { sourceKey: string; countryCode: string };
+type StoredRegistryDefinition = {
+  sourceKey: string;
+  countryCode: string;
+  countryName: string;
+};
 
 const REGISTRIES: Record<string, StoredRegistryDefinition> = {
-  "brazil-cnes": { sourceKey: "br_cnes", countryCode: "BR" },
+  "brazil-cnes": { sourceKey: "br_cnes", countryCode: "BR", countryName: "Brazil" },
+  "czechia-nrpzs": { sourceKey: "cz_nrpzs", countryCode: "CZ", countryName: "Czechia" },
 };
 
 function addParam(params: unknown[], value: unknown): string {
@@ -110,7 +115,11 @@ async function loadProjectPage(
   return rows;
 }
 
-function toProvider(row: Record<string, unknown>, source: string): Record<string, unknown> {
+function toProvider(
+  row: Record<string, unknown>,
+  source: string,
+  definition: StoredRegistryDefinition,
+): Record<string, unknown> {
   const type = String(row.primary_provider_type || "unknown");
   const tags = Array.isArray(row.capability_tags) ? row.capability_tags.map(String) : [type];
   return {
@@ -124,8 +133,8 @@ function toProvider(row: Record<string, unknown>, source: string): Record<string
     state: row.admin_area ?? null,
     postal_code: row.postal_code ?? null,
     zip: row.postal_code ?? null,
-    country: "Brazil",
-    country_code: row.country_code ?? "BR",
+    country: definition.countryName,
+    country_code: row.country_code ?? definition.countryCode,
     lat: Number(row.lat),
     lng: Number(row.lng),
     phone: row.phone ?? null,
@@ -136,8 +145,8 @@ function toProvider(row: Record<string, unknown>, source: string): Record<string
     services: tags,
     categories: tags,
     types: tags,
-    source: String(row.source_key || "br_cnes"),
-    data_source: String(row.source_key || "br_cnes"),
+    source: String(row.source_key || definition.sourceKey),
+    data_source: String(row.source_key || definition.sourceKey),
     source_kind: String(row.source_kind || "government_registry"),
     trust_tier: "registry",
     confidence_score: row.quality_score == null ? null : Number(row.quality_score),
@@ -194,7 +203,7 @@ router.get("/stored-international-registry-layers/:source", async (req: Request,
       offset = 0;
     }
 
-    const providers = rows.map((row) => toProvider(row, source));
+    const providers = rows.map((row) => toProvider(row, source, definition));
     res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
     res.json({
       providers,

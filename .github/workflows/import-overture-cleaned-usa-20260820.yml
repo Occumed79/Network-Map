@@ -46,6 +46,18 @@ jobs:
           sudo apt-get install --yes -qq postgresql-client
           test -s /tmp/overture-candidate/overture_cleaned_usa.sqlite
 
+      - name: Fix local TSV path for psql copy
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/import-overture-candidate-direct-neon.py')
+          s=p.read_text()
+          s=s.replace('fd, tsv_path = tempfile.mkstemp(prefix="overture_candidate_", suffix=".tsv")\nos.close(fd)', 'tsv_path = "/tmp/overture_candidate.tsv"')
+          s=s.replace("\\copy overture_import FROM :'tsv_path'", "\\copy overture_import FROM '/tmp/overture_candidate.tsv'")
+          p.write_text(s)
+          PY
+
       - name: Import available Overture candidate rows directly to production Neon
         shell: bash
         run: |

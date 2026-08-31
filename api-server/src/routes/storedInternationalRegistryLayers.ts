@@ -17,6 +17,7 @@ type StoredRegistryDefinition = {
 const REGISTRIES: Record<string, StoredRegistryDefinition> = {
   "brazil-cnes": { sourceKey: "br_cnes", countryCode: "BR", countryName: "Brazil" },
   "czechia-nrpzs": { sourceKey: "cz_nrpzs", countryCode: "CZ", countryName: "Czechia" },
+  "argentina-refes": { sourceKey: "ar_refes", countryCode: "AR", countryName: "Argentina" },
 };
 
 function addParam(params: unknown[], value: unknown): string {

@@ -82,6 +82,7 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   liveRegistrySource('singapore-chas', 'Singapore — MOH CHAS Clinics', '#0d9488'),
   liveRegistrySource('mexico-clues', 'Mexico — CLUES Healthcare Facilities', '#15803d'),
   liveRegistrySource('taiwan-nlsc-medical', 'Taiwan — NLSC Medical Facilities', '#9333ea'),
+  liveRegistrySource('new-zealand-health-facilities', 'New Zealand — Health NZ Facilities', '#0284c7'),
   synchronizedRegistrySource('brazil-cnes', 'Brazil — CNES (Daily Sync)', '#16a34a'),
   synchronizedRegistrySource('czechia-nrpzs', 'Czechia — NRPZS (Monthly Sync)', '#0369a1'),
 

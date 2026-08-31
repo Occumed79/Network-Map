@@ -8,6 +8,8 @@ const expectedSha = (process.env.EXPECTED_GIT_SHA || "").trim();
 const previousSha = process.env.PREVIOUS_GIT_SHA || "";
 const revisionAttempts = Math.max(1, Number.parseInt(process.env.PRODUCTION_REVISION_ATTEMPTS || "30", 10) || 30);
 const revisionDelayMs = Math.max(0, Number.parseInt(process.env.PRODUCTION_REVISION_DELAY_MS || "10000", 10) || 10_000);
+const minimumOvertureProviderCount = Math.max(1, Number.parseInt(process.env.MINIMUM_OVERTURE_PROVIDER_COUNT || "483736", 10) || 483_736);
+const secondShardBoundaryPage = Math.max(2, Number.parseInt(process.env.OVERTURE_SECOND_SHARD_BOUNDARY_PAGE || "335001", 10) || 335_001);
 if (!baseUrl) throw new Error("NETWORK_MAP_PRODUCTION_URL is required");
 if (!expectedSha) throw new Error("EXPECTED_GIT_SHA is required");
 
@@ -86,6 +88,30 @@ fs.writeFileSync(
   JSON.stringify(["overpass-project-1", "overpass-project-2"].map((name) => readinessDependencies.get(name)), null, 2),
 );
 
+const overtureFirst = await fetchJson("/api/provider-explorer?source=overture&includeLive=false&includeCandidates=false&includeSaved=false&limit=1&page=1");
+fs.writeFileSync(path.join(artifactDir, "overture-first-page.json"), JSON.stringify(resultSummary(overtureFirst), null, 2));
+assert.match(overtureFirst.contentType, /application\/json/i, `Overture Provider Explorer did not return JSON: ${JSON.stringify(resultSummary(overtureFirst))}`);
+assert.equal(overtureFirst.response.status, 200, `Overture Provider Explorer failed: ${JSON.stringify(resultSummary(overtureFirst))}`);
+assert.ok(Number(overtureFirst.body?.total || 0) >= minimumOvertureProviderCount, `production Overture total fell below ${minimumOvertureProviderCount}: ${JSON.stringify(resultSummary(overtureFirst))}`);
+for (const name of ["overpass-project-1", "overpass-project-2"]) {
+  assert.ok(Array.isArray(overtureFirst.body?.databaseProjects) && overtureFirst.body.databaseProjects.includes(name), `Overture Provider Explorer did not query ${name}: ${JSON.stringify(resultSummary(overtureFirst))}`);
+}
+assert.equal(String(overtureFirst.body?.providers?.[0]?.source || "").toLowerCase(), "overture", `first Overture provider was not returned from stored Overture data: ${JSON.stringify(resultSummary(overtureFirst))}`);
+
+const overtureSecondShard = await fetchJson(`/api/provider-explorer?source=overture&includeLive=false&includeCandidates=false&includeSaved=false&limit=1&page=${secondShardBoundaryPage}`);
+fs.writeFileSync(path.join(artifactDir, "overture-second-shard-page.json"), JSON.stringify(resultSummary(overtureSecondShard), null, 2));
+assert.equal(overtureSecondShard.response.status, 200, `Overture second-shard boundary query failed: ${JSON.stringify(resultSummary(overtureSecondShard))}`);
+assert.equal(String(overtureSecondShard.body?.providers?.[0]?.source || "").toLowerCase(), "overture", `production could not return an Overture provider beyond the first shard boundary: ${JSON.stringify(resultSummary(overtureSecondShard))}`);
+assert.ok(Number(overtureSecondShard.body?.total || 0) >= minimumOvertureProviderCount, `second-shard boundary query reported too few Overture providers: ${JSON.stringify(resultSummary(overtureSecondShard))}`);
+
+fs.writeFileSync(path.join(artifactDir, "overture-runtime-summary.json"), JSON.stringify({
+  total: Number(overtureFirst.body?.total || 0),
+  databaseProjects: overtureFirst.body?.databaseProjects || [],
+  firstProvider: overtureFirst.body?.providers?.[0] || null,
+  secondShardBoundaryPage,
+  secondShardBoundaryProvider: overtureSecondShard.body?.providers?.[0] || null,
+}, null, 2));
+
 const browser = await chromium.launch({ headless: true });
 try {
   for (const route of ["", "?p2-preview=1"]) {
@@ -114,4 +140,4 @@ try {
   await browser.close();
 }
 
-console.log(`Production exact-revision acceptance passed for ${expectedSha}.`);
+console.log(`Production exact-revision acceptance passed for ${expectedSha}. Overture runtime total: ${Number(overtureFirst.body?.total || 0)}.`);

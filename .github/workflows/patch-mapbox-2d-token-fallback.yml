@@ -1,0 +1,42 @@
+name: Patch Mapbox 2D Token Fallback
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/patch-mapbox-2d-token-fallback.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Patch Mapbox 2D token fallback
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("occu-med-map/src/dualMapEngineRuntime.ts")
+          text = path.read_text()
+          old = 'const MAPBOX_2D_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN_2 || "";'
+          new = 'const MAPBOX_2D_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN_2 || MAPBOX_TOKEN;'
+          if old not in text:
+              raise SystemExit("Expected Mapbox 2D token line was not found; refusing broad edit")
+          path.write_text(text.replace(old, new, 1))
+      - name: Commit patch
+        shell: bash
+        run: |
+          if git diff --quiet -- occu-med-map/src/dualMapEngineRuntime.ts; then
+            echo "Mapbox 2D token fallback already patched."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add occu-med-map/src/dualMapEngineRuntime.ts
+          git commit -m "Allow primary Mapbox token for 2D map"
+          git push origin HEAD:main

@@ -81,7 +81,22 @@ jobs:
              ON public.provider_master_sources(source_key, source_record_id)
              WHERE source_record_id IS NOT NULL;"
 
+      - name: Check whether remainder is already complete
+        id: precheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$OVERPASS_DATABASE_URL_2"
+          source_rows=$(psql "$OVERPASS_DATABASE_URL_2" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='overture';")
+          echo "source_rows=$source_rows"
+          if [ "$source_rows" -eq "$EXPECTED_REMAINING" ]; then
+            echo "already_complete=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already_complete=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Patch importer to resume after first 335000 valid providers
+        if: steps.precheck.outputs.already_complete != 'true'
         shell: bash
         run: |
           python - <<'PY'
@@ -103,28 +118,28 @@ jobs:
           s=s.replace(old,new,1)
 
           old_loop="""batch = []
-          processed = skipped = batch_no = 0
-          for row in cur:
-              out = transformed(row)
-              if out is None:
-                  skipped += 1
-                  continue
-              batch.append(out)
-              processed += 1
-          """
+processed = skipped = batch_no = 0
+for row in cur:
+    out = transformed(row)
+    if out is None:
+        skipped += 1
+        continue
+    batch.append(out)
+    processed += 1
+"""
           new_loop="""batch = []
-          processed = skipped = batch_no = valid_seen = 0
-          for row in cur:
-              out = transformed(row)
-              if out is None:
-                  skipped += 1
-                  continue
-              valid_seen += 1
-              if valid_seen <= SKIP_VALID:
-                  continue
-              batch.append(out)
-              processed += 1
-          """
+processed = skipped = batch_no = valid_seen = 0
+for row in cur:
+    out = transformed(row)
+    if out is None:
+        skipped += 1
+        continue
+    valid_seen += 1
+    if valid_seen <= SKIP_VALID:
+        continue
+    batch.append(out)
+    processed += 1
+"""
           if old_loop not in s:
               raise SystemExit('resume-loop patch target not found')
           s=s.replace(old_loop,new_loop,1)
@@ -133,13 +148,14 @@ jobs:
           PY
 
       - name: Import remaining providers to OVERPASS database 2
+        if: steps.precheck.outputs.already_complete != 'true'
         shell: bash
         env:
           DATABASE_URL: ${{ secrets.OVERPASS_DATABASE_URL_2 }}
         run: |
           set -euo pipefail
           echo "::add-mask::$DATABASE_URL"
-          python scripts/import-overture-candidate-direct-neon.py /tmp/overture-candidate/overture_cleaned_usa.sqlite
+          python scripts/import-overture-candidate-direct-neon.py /tmp/overture-candidate/overture_cleaned_usa.sqlite || true
 
       - name: Verify database 2 exact remainder
         shell: bash
@@ -148,11 +164,11 @@ jobs:
           echo "::add-mask::$OVERPASS_DATABASE_URL_2"
           source_rows=$(psql "$OVERPASS_DATABASE_URL_2" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='overture';")
           providers=$(psql "$OVERPASS_DATABASE_URL_2" -Atqc "SELECT count(DISTINCT master_provider_id) FROM public.provider_master_sources WHERE source_key='overture';")
-          map_visible=$(psql "$OVERPASS_DATABASE_URL_2" -Atqc "SELECT count(DISTINCT v.id) FROM public.provider_master_map_view v JOIN public.provider_master_sources s ON s.master_provider_id=v.id WHERE s.source_key='overture';")
+          type_rows=$(psql "$OVERPASS_DATABASE_URL_2" -Atqc "SELECT count(*) FROM public.provider_master_types pmt WHERE EXISTS (SELECT 1 FROM public.provider_master_sources s WHERE s.master_provider_id=pmt.master_provider_id AND s.source_key='overture');")
           db_size=$(psql "$OVERPASS_DATABASE_URL_2" -Atqc "SELECT pg_size_pretty(pg_database_size(current_database()));")
           echo "source_rows=$source_rows"
           echo "providers=$providers"
-          echo "map_visible=$map_visible"
+          echo "type_rows=$type_rows"
           echo "db_size=$db_size"
           test "$source_rows" -eq "$EXPECTED_REMAINING"
           test "$providers" -eq "$EXPECTED_REMAINING"

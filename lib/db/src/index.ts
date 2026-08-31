@@ -11,6 +11,7 @@ let db: ReturnType<typeof drizzle> | null = null;
 let closingPromise: Promise<void> | null = null;
 
 const PROVIDER_DATABASE_FAMILIES = [
+  { family: "overpass", prefix: "OVERPASS_DATABASE_URL", maximum: 2 },
   { family: "healthsites", prefix: "HEALTHSITES_DATABASE_URL", maximum: 8 },
   { family: "usa-embassy", prefix: "USA_EMBASSY_DATABASE_URL", maximum: 4 },
 ] as const;
@@ -19,7 +20,7 @@ export type ProviderDatabaseProject = {
   slot: number;
   id: string;
   environmentVariable: string;
-  family: "primary" | "healthsites" | "usa-embassy";
+  family: "primary" | "overpass" | "healthsites" | "usa-embassy";
   primary: boolean;
   pool: pg.Pool;
 };
@@ -97,9 +98,10 @@ export function getPool(): pg.Pool {
  * model or API contract.
  *
  * DATABASE_URL(_POOLED) remains the primary application project.
- * HEALTHSITES_DATABASE_URL through _8 and USA_EMBASSY_DATABASE_URL through _4
- * add their respective provider database projects. DATABASE_URL_2 remains
- * reserved for scoring.
+ * OVERPASS_DATABASE_URL and OVERPASS_DATABASE_URL_2 are the two Overture Maps
+ * provider shards. HEALTHSITES_DATABASE_URL through _8 and
+ * USA_EMBASSY_DATABASE_URL through _4 add their respective provider database
+ * projects. DATABASE_URL_2 remains reserved for scoring.
  */
 export function getProviderDatabaseProjects(): ProviderDatabaseProject[] {
   const primaryUrl = getDatabaseUrl();

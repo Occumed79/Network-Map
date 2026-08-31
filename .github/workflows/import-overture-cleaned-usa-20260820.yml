@@ -76,15 +76,31 @@ jobs:
             done
           fi
 
-      - name: Fix local TSV path for psql copy
+      - name: Ensure Overture source identity index
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$OVERPASS_DATABASE_URL"
+          psql "$OVERPASS_DATABASE_URL" -v ON_ERROR_STOP=1 -c \
+            "CREATE UNIQUE INDEX IF NOT EXISTS overpass_provider_master_sources_source_record_uq
+             ON public.provider_master_sources(source_key, source_record_id)
+             WHERE source_record_id IS NOT NULL;"
+
+      - name: Patch importer for OVERPASS batch source upsert
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
           p=Path('scripts/import-overture-candidate-direct-neon.py')
           s=p.read_text()
-          s=s.replace('fd, tsv_path = tempfile.mkstemp(prefix="overture_candidate_", suffix=".tsv")\nos.close(fd)', 'tsv_path = "/tmp/overture_candidate.tsv"')
-          s=s.replace("\\copy overture_import FROM :'tsv_path'", "\\copy overture_import FROM '/tmp/overture_candidate.tsv'")
+          old="""ON CONFLICT (source_key,source_record_id) WHERE source_record_id IS NOT NULL DO UPDATE SET
+            master_provider_id=EXCLUDED.master_provider_id,
+            source_confidence_score=GREATEST(COALESCE(provider_master_sources.source_confidence_score,0),COALESCE(EXCLUDED.source_confidence_score,0)),
+            updated_at=now();"""
+          new="ON CONFLICT DO NOTHING;"
+          if old not in s:
+              raise SystemExit('source upsert patch target not found')
+          s=s.replace(old,new)
           p.write_text(s)
           PY
 

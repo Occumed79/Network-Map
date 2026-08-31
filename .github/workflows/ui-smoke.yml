@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      NETWORK_MAP_SMOKE_URL: https://network-map-tool-mqib.onrender.com
+      NETWORK_MAP_SMOKE_URL: https://network-map-v846.onrender.com
     steps:
       - name: Check out validated revision
         uses: actions/checkout@v4

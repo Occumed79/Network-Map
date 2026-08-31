@@ -73,6 +73,12 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   liveRegistrySource('germany-klinik-atlas', 'Germany — Bundes-Klinik-Atlas', '#2563eb'),
   liveRegistrySource('canada-odhf', 'Canada — ODHF', '#dc2626'),
   liveRegistrySource('australia-healthdirect', 'Australia — HealthDirect', '#059669'),
+  liveRegistrySource('croatia-hzzo-primary-care', 'Croatia — HZZO Primary Care', '#0f766e'),
+  liveRegistrySource('chile-minsal', 'Chile — MINSAL Establishments', '#be123c'),
+  liveRegistrySource('colombia-reps', 'Colombia — REPS / SISPRO', '#eab308'),
+  liveRegistrySource('ireland-hse-health-centres', 'Ireland — HSE Health Centres', '#16a34a'),
+  liveRegistrySource('latvia-medical-facilities', 'Latvia — Medical Facilities', '#7c3aed'),
+  liveRegistrySource('lithuania-vaspvt', 'Lithuania — Licensed Facilities', '#0284c7'),
   synchronizedRegistrySource('brazil-cnes', 'Brazil — CNES (Daily Sync)', '#16a34a'),
 
   source('international-providers', 'International Providers', 'healthsites_osm', '#06b6d4', 'SOURCE / NETWORK OVERLAYS'),

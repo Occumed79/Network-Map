@@ -83,6 +83,7 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   liveRegistrySource('scotland-nhs-hospitals', 'Scotland — NHS Hospitals', '#1d4ed8'),
   liveRegistrySource('montenegro-health-facilities', 'Montenegro — Ministry of Health Facilities', '#b91c1c'),
   liveRegistrySource('cyprus-state-hospitals', 'Cyprus — State Hospitals', '#0e7490'),
+  liveRegistrySource('moldova-health-institutions', 'Moldova — Ministry of Health Institutions', '#2563eb'),
 
   liveRegistrySource('gisco-hospitals-albania', 'Albania — Eurostat/GISCO Hospitals', '#0f766e'),
   liveRegistrySource('gisco-hospitals-austria', 'Austria — Eurostat/GISCO Hospitals', '#be123c'),

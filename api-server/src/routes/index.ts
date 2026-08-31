@@ -25,6 +25,7 @@ import moreInternationalRegistryLayersRouter from "./moreInternationalRegistryLa
 import europeLiveRegistryLayersRouter from "./europeLiveRegistryLayers";
 import cyprusHospitalRegistryLayerRouter from "./cyprusHospitalRegistryLayer";
 import europeGiscoHospitalLayersRouter from "./europeGiscoHospitalLayers";
+import scotlandNhsHospitalsLayerRouter from "./scotlandNhsHospitalsLayer";
 import newZealandHealthFacilitiesRouter from "./newZealandHealthFacilities";
 import croatiaHzzoRegistryLayerRouter from "./croatiaHzzoRegistryLayer";
 import storedInternationalRegistryLayersRouter from "./storedInternationalRegistryLayers";
@@ -68,6 +69,7 @@ router.use(moreInternationalRegistryLayersRouter);
 router.use(europeLiveRegistryLayersRouter);
 router.use(cyprusHospitalRegistryLayerRouter);
 router.use(europeGiscoHospitalLayersRouter);
+router.use(scotlandNhsHospitalsLayerRouter);
 router.use(newZealandHealthFacilitiesRouter);
 router.use(internationalRegistryLayersRouter);
 router.use(storedInternationalRegistryLayersRouter);

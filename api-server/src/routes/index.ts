@@ -21,6 +21,7 @@ import providerLayersRouter from "./providerLayers";
 import providerCategoryLayersRouter from "./providerCategoryLayers";
 import internationalRegistryLayersRouter from "./internationalRegistryLayers";
 import additionalInternationalRegistryLayersRouter from "./additionalInternationalRegistryLayers";
+import moreInternationalRegistryLayersRouter from "./moreInternationalRegistryLayers";
 import croatiaHzzoRegistryLayerRouter from "./croatiaHzzoRegistryLayer";
 import storedInternationalRegistryLayersRouter from "./storedInternationalRegistryLayers";
 import providerUploadCategoriesRouter from "./providerUploadCategories";
@@ -59,6 +60,7 @@ router.use(nacchoLhdRouter);
 // /international-registry-layers/:source handler.
 router.use(croatiaHzzoRegistryLayerRouter);
 router.use(additionalInternationalRegistryLayersRouter);
+router.use(moreInternationalRegistryLayersRouter);
 router.use(internationalRegistryLayersRouter);
 router.use(storedInternationalRegistryLayersRouter);
 router.use(stabilizeProviderLayerRequests);

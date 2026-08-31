@@ -50,7 +50,7 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   providerType('cardiology', 'Cardiology', 'cardiology', '#ef4444', 'SPECIALISTS'),
   providerType('gastroenterology', 'Gastroenterology', 'gastroenterology', '#f97316', 'SPECIALISTS'),
   providerType('ent', 'ENT / Otolaryngology', 'ent', '#eab308', 'SPECIALISTS'),
-  providerType('neurotology', 'Neurotology', 'neurotology', '#84b5cf6', 'SPECIALISTS'),
+  providerType('neurotology', 'Neurotology', 'neurotology', '#84cc16', 'SPECIALISTS'),
   providerType('orthopedics', 'Orthopedics', 'orthopedics', '#14b8a6', 'SPECIALISTS'),
   providerType('pulmonology', 'Pulmonology', 'pulmonology', '#06b6d4', 'SPECIALISTS'),
   providerType('psychiatry', 'Psychiatry', 'psychiatry', '#8b5cf6', 'SPECIALISTS'),
@@ -79,7 +79,7 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   liveRegistrySource('ireland-hse-health-centres', 'Ireland — HSE Health Centres', '#16a34a'),
   liveRegistrySource('latvia-medical-facilities', 'Latvia — Medical Facilities', '#7c3aed'),
   liveRegistrySource('lithuania-vaspvt', 'Lithuania — Licensed Facilities', '#0284c7'),
-  synchronizedRegistrySource('brazil-cnes', 'Brazil — CNES (Daily Sync)', '#15803d'),
+  synchronizedRegistrySource('brazil-cnes', 'Brazil — CNES (Daily Sync)', '#16a34a'),
 
   source('international-providers', 'International Providers', 'healthsites_osm', '#06b6d4', 'SOURCE / NETWORK OVERLAYS'),
   source('usa-embassy-recommended', 'U.S. Embassy Recommended', 'embassy_clinic_docs', '#facc15', 'SOURCE / NETWORK OVERLAYS'),

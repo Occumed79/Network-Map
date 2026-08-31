@@ -31,15 +31,17 @@ export async function detectProviderSchema(pool: ReturnType<typeof getPool>): Pr
   // populated Overture/Healthsites/Embassy shard from falling through to an
   // empty legacy medical_providers table.
   if (rows[0]?.canonical_view && !rows[0]?.canonical_state) {
-    const fallback = await pool.query(`
-      SELECT
-        EXISTS (SELECT 1 FROM public.provider_master_map_view LIMIT 1) AS canonical_has_rows,
-        CASE
-          WHEN to_regclass('public.medical_providers') IS NULL THEN false
-          ELSE EXISTS (SELECT 1 FROM public.medical_providers LIMIT 1)
-        END AS legacy_has_rows
+    const canonical = await pool.query(`
+      SELECT EXISTS (SELECT 1 FROM public.provider_master_map_view LIMIT 1) AS canonical_has_rows
     `);
-    if (fallback.rows[0]?.canonical_has_rows === true && fallback.rows[0]?.legacy_has_rows !== true) {
+    let legacyHasRows = false;
+    if (rows[0]?.legacy) {
+      const legacy = await pool.query(`
+        SELECT EXISTS (SELECT 1 FROM public.medical_providers LIMIT 1) AS legacy_has_rows
+      `);
+      legacyHasRows = legacy.rows[0]?.legacy_has_rows === true;
+    }
+    if (canonical.rows[0]?.canonical_has_rows === true && !legacyHasRows) {
       return "canonical";
     }
   }

@@ -52,7 +52,7 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   providerType('ent', 'ENT / Otolaryngology', 'ent', '#eab308', 'SPECIALISTS'),
   providerType('neurotology', 'Neurotology', 'neurotology', '#84cc16', 'SPECIALISTS'),
   providerType('orthopedics', 'Orthopedics', 'orthopedics', '#14b8a6', 'SPECIALISTS'),
-  providerType('pulmonology', 'Pulmonology', '#06b6d4', '#06b6d4', 'SPECIALISTS'),
+  providerType('pulmonology', 'Pulmonology', 'pulmonology', '#06b6d4', 'SPECIALISTS'),
   providerType('psychiatry', 'Psychiatry', 'psychiatry', '#8b5cf6', 'SPECIALISTS'),
   providerType('sports-medicine', 'Sports Medicine', 'sports_medicine', '#ec4899', 'SPECIALISTS'),
 
@@ -83,6 +83,7 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   liveRegistrySource('mexico-clues', 'Mexico — CLUES Healthcare Facilities', '#15803d'),
   liveRegistrySource('taiwan-nlsc-medical', 'Taiwan — NLSC Medical Facilities', '#9333ea'),
   synchronizedRegistrySource('brazil-cnes', 'Brazil — CNES (Daily Sync)', '#16a34a'),
+  synchronizedRegistrySource('czechia-nrpzs', 'Czechia — NRPZS (Monthly Sync)', '#0369a1'),
 
   source('international-providers', 'International Providers', 'healthsites_osm', '#06b6d4', 'SOURCE / NETWORK OVERLAYS'),
   source('usa-embassy-recommended', 'U.S. Embassy Recommended', 'embassy_clinic_docs', '#facc15', 'SOURCE / NETWORK OVERLAYS'),

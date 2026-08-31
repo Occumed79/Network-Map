@@ -4,7 +4,10 @@ import { fetchExternalJson } from "../providerSources/externalSourceRuntime";
 
 const router = Router();
 const MAX_PAGE_SIZE = 2000;
-const CKAN_FETCH_LIMIT = 10000;
+// Transport chunks only. CKAN and ArcGIS sources are walked until the requested
+// page or registry-reported total is exhausted; neither value is a facility cap.
+const CKAN_PAGE_SIZE = 5000;
+const ARCGIS_PAGE_SIZE = 500;
 
 const CHILE_RESOURCE_ID = "2c44d782-3365-44e3-aefb-2c8b8363a1bc";
 const CHILE_CKAN_URL = "https://datos.gob.cl/ne/api/3/action/datastore_search";
@@ -74,21 +77,50 @@ function stableId(prefix: string, values: unknown[]): string {
   return `${prefix}:${hash}`;
 }
 
-function ckanUrl(base: string, resourceId: string): string {
-  const params = new URLSearchParams({ resource_id: resourceId, limit: String(CKAN_FETCH_LIMIT) });
+function ckanUrl(base: string, resourceId: string, offset: number): string {
+  const params = new URLSearchParams({
+    resource_id: resourceId,
+    limit: String(CKAN_PAGE_SIZE),
+    offset: String(offset),
+  });
   return `${base}?${params.toString()}`;
 }
 
 async function fetchCkan(source: string, base: string, resourceId: string): Promise<Record<string, unknown>[]> {
-  const payload = await fetchExternalJson<CkanPayload>(
-    source,
-    ckanUrl(base, resourceId),
-    { headers: { accept: "application/json" } },
-  );
-  if (payload.success !== true || !payload.result || !Array.isArray(payload.result.records)) {
-    throw new Error(`${source} returned an invalid CKAN DataStore payload`);
+  const rows: Record<string, unknown>[] = [];
+  let offset = 0;
+  let reportedTotal: number | null = null;
+
+  while (reportedTotal === null || rows.length < reportedTotal) {
+    const payload = await fetchExternalJson<CkanPayload>(
+      source,
+      ckanUrl(base, resourceId, offset),
+      { headers: { accept: "application/json" } },
+    );
+    if (payload.success !== true || !payload.result || !Array.isArray(payload.result.records)) {
+      throw new Error(`${source} returned an invalid CKAN DataStore payload`);
+    }
+
+    const pageRows = payload.result.records;
+    const pageTotal = Number(payload.result.total);
+    if (Number.isFinite(pageTotal) && pageTotal >= 0) {
+      reportedTotal = Math.max(reportedTotal ?? 0, pageTotal);
+    } else if (reportedTotal === null) {
+      reportedTotal = rows.length + pageRows.length;
+    }
+
+    if (pageRows.length === 0) {
+      if (reportedTotal !== null && rows.length < reportedTotal) {
+        throw new Error(`${source} stopped at ${rows.length.toLocaleString()} of ${reportedTotal.toLocaleString()} CKAN rows`);
+      }
+      break;
+    }
+
+    rows.push(...pageRows);
+    offset += pageRows.length;
   }
-  return payload.result.records;
+
+  return rows;
 }
 
 function chileType(row: Record<string, unknown>): string {
@@ -229,6 +261,8 @@ async function loadArcGisLayer(options: {
   queryUrl: string;
   where?: string;
   outFields: string;
+  orderByFields?: string;
+  upstreamPageSize?: number;
   bounds: Bounds | null;
   limit: number;
   page: number;
@@ -248,25 +282,49 @@ async function loadArcGisLayer(options: {
   const countError = arcGisError(countPayload);
   if (countError) throw new Error(countError);
 
-  const params = new URLSearchParams(common);
-  params.set("outFields", options.outFields);
-  params.set("returnGeometry", "true");
-  params.set("outSR", "4326");
-  params.set("resultOffset", String((options.page - 1) * options.limit));
-  params.set("resultRecordCount", String(options.limit));
-  const payload = await fetchExternalJson<ArcGisPayload>(
-    options.source,
-    `${options.queryUrl}?${params.toString()}`,
-    { headers: { accept: "application/json" } },
-  );
-  const error = arcGisError(payload);
-  if (error) throw new Error(error);
+  const total = Number(countPayload.count || 0);
+  const requestedStart = (options.page - 1) * options.limit;
+  const requestedEnd = Math.min(requestedStart + options.limit, total);
+  const rawFeatures: ArcGisFeature[] = [];
+  let resultOffset = requestedStart;
+  const upstreamPageSize = Math.max(1, Math.min(options.upstreamPageSize || ARCGIS_PAGE_SIZE, ARCGIS_PAGE_SIZE));
 
-  const providers = (payload.features || [])
+  while (resultOffset < requestedEnd) {
+    const chunkSize = Math.min(upstreamPageSize, requestedEnd - resultOffset);
+    const params = new URLSearchParams(common);
+    params.set("outFields", options.outFields);
+    params.set("returnGeometry", "true");
+    params.set("outSR", "4326");
+    if (options.orderByFields) params.set("orderByFields", options.orderByFields);
+    params.set("resultOffset", String(resultOffset));
+    params.set("resultRecordCount", String(chunkSize));
+
+    const payload = await fetchExternalJson<ArcGisPayload>(
+      options.source,
+      `${options.queryUrl}?${params.toString()}`,
+      { headers: { accept: "application/json" } },
+    );
+    const error = arcGisError(payload);
+    if (error) throw new Error(error);
+
+    const pageFeatures = payload.features || [];
+    if (pageFeatures.length === 0) {
+      throw new Error(`${options.source} stopped at ArcGIS offset ${resultOffset.toLocaleString()} before the reported total was exhausted`);
+    }
+
+    rawFeatures.push(...pageFeatures);
+    resultOffset += pageFeatures.length;
+
+    if (pageFeatures.length < chunkSize && payload.exceededTransferLimit !== true && resultOffset < requestedEnd) {
+      throw new Error(`${options.source} returned an incomplete ArcGIS page at offset ${resultOffset.toLocaleString()}`);
+    }
+  }
+
+  const providers = rawFeatures
     .map(options.normalize)
     .filter((provider): provider is Record<string, unknown> => Boolean(provider))
     .filter((provider) => inBounds(Number(provider.lat), Number(provider.lng), options.bounds));
-  return { providers, total: Number(countPayload.count || 0) };
+  return { providers, total };
 }
 
 function normalizeIreland(feature: ArcGisFeature): Record<string, unknown> | null {
@@ -425,8 +483,7 @@ function lithuaniaNormalizer(metadata: ArcGisLayerMetadata): ArcGisNormalizer {
     const lng = numberValue(feature.geometry?.x);
     const lat = numberValue(feature.geometry?.y);
     if (lat === null || lng === null || lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
-    const name = nameField ? text(row[nameField]) : "";
-    if (!name) return null;
+    const name = (nameField ? text(row[nameField]) : "") || "Licensed healthcare facility";
     const code = codeField ? text(row[codeField]) : "";
     const objectId = objectIdField ? text(row[objectIdField]) : "";
     const sourceId = code || objectId;
@@ -471,6 +528,7 @@ async function loadIreland(bounds: Bounds | null, limit: number, page: number) {
     source: "ie-hse-health-centres",
     queryUrl: IRELAND_QUERY_URL,
     outFields: "OBJECTID,Service_name,Alternative_name,Address,County",
+    orderByFields: "OBJECTID ASC",
     bounds,
     limit,
     page,
@@ -484,6 +542,7 @@ async function loadColombia(bounds: Bounds | null, limit: number, page: number) 
     queryUrl: COLOMBIA_QUERY_URL,
     where: "IndicadorHabilitacion = 1 AND (MetodoUbicacion <> 4 OR MetodoUbicacion IS NULL)",
     outFields: "OBJECTID,CodigoHabilitacion,ClaseDePrestador,NaturalezaJuridica,NivelAtencion,Nombre,CodigoPrestador,NombrePrestador,Direccion,URL,Barrio,Telefono,CentroPoblado,NOM_DPTO,NOM_MPIO,MetodoUbicacion",
+    orderByFields: "OBJECTID ASC",
     bounds,
     limit,
     page,
@@ -497,6 +556,8 @@ async function loadLithuania(bounds: Bounds | null, limit: number, page: number)
     source: "lt-vaspvt-licensed-facilities",
     queryUrl: `${layerUrl}/query`,
     outFields: "*",
+    orderByFields: metadata.objectIdField ? `${metadata.objectIdField} ASC` : undefined,
+    upstreamPageSize: Math.min(Number(metadata.maxRecordCount) || ARCGIS_PAGE_SIZE, ARCGIS_PAGE_SIZE),
     bounds,
     limit,
     page,

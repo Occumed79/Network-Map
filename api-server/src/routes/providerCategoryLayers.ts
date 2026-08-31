@@ -158,7 +158,7 @@ function categoryWhere(definition: CategoryDefinition, bounds: Bounds | null, pa
       lower(COALESCE(pmv.primary_provider_type, '')) = ANY(${placeholder}::text[])
       OR EXISTS (
         SELECT 1 FROM public.provider_master_types pmt
-        WHERE pmt.master_provider_id = pmv.id::bigint
+        WHERE pmt.master_provider_id::text = pmv.id::text
           AND lower(pmt.type_key) = ANY(${placeholder}::text[])
       )
     )`);

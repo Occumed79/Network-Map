@@ -73,6 +73,19 @@ assert.match(ready.contentType, /application\/json/i, `production readiness did 
 assert.equal(ready.response.status, 200, `production readiness failed: ${JSON.stringify(resultSummary(ready))}`);
 assert.equal(ready.body?.ok, true, `production readiness body was not ready: ${JSON.stringify(resultSummary(ready))}`);
 
+const readinessDependencies = new Map(
+  (Array.isArray(ready.body?.dependencies) ? ready.body.dependencies : []).map((dependency) => [dependency?.name, dependency]),
+);
+for (const name of ["overpass-project-1", "overpass-project-2"]) {
+  const dependency = readinessDependencies.get(name);
+  assert.ok(dependency, `production readiness is missing ${name}; Render does not have that Overture shard configured: ${JSON.stringify(resultSummary(ready))}`);
+  assert.equal(dependency.ok, true, `production ${name} is configured but unavailable: ${JSON.stringify(dependency)}`);
+}
+fs.writeFileSync(
+  path.join(artifactDir, "overture-shards.json"),
+  JSON.stringify(["overpass-project-1", "overpass-project-2"].map((name) => readinessDependencies.get(name)), null, 2),
+);
+
 const browser = await chromium.launch({ headless: true });
 try {
   for (const route of ["", "?p2-preview=1"]) {

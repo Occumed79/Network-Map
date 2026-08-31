@@ -1,0 +1,16 @@
+name: Sync Brazil CNES healthcare establishments
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "20 9 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Brazil CNES sync"

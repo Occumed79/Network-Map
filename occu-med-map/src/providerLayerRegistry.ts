@@ -87,6 +87,7 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   synchronizedRegistrySource('czechia-nrpzs', 'Czechia — NRPZS (Monthly Sync)', '#0369a1'),
   synchronizedRegistrySource('argentina-refes', 'Argentina — REFES (Registry Sync)', '#38bdf8'),
   synchronizedRegistrySource('finland-ptv-healthcare', 'Finland — Suomi.fi Healthcare (Registry Sync)', '#1d4ed8'),
+  synchronizedRegistrySource('france-finess', 'France — FINESS+ (Daily Sync)', '#0055a4'),
 
   source('international-providers', 'International Providers', 'healthsites_osm', '#06b6d4', 'SOURCE / NETWORK OVERLAYS'),
   source('usa-embassy-recommended', 'U.S. Embassy Recommended', 'embassy_clinic_docs', '#facc15', 'SOURCE / NETWORK OVERLAYS'),

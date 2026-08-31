@@ -1,0 +1,54 @@
+name: Patch Provider Layer Canonical Fallback
+
+on:
+  push:
+    paths:
+      - .github/workflows/patch-provider-layer-canonical.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Patch provider layer storage detection
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("api-server/src/routes/providerLayers.ts")
+          text = path.read_text()
+          old = '''async function detectLayerStorage(pool: ReturnType<typeof getPool>): Promise<ProviderLayerStorage> {
+            if (await canonicalReadsEnabled(pool)) return "provider_master";
+            const schema = await detectProviderSchema(pool);
+            if (schema === "legacy") return "medical_providers";
+            if (schema === "normalized") return "providers";
+            return "none";
+          }'''
+          new = '''async function detectLayerStorage(pool: ReturnType<typeof getPool>): Promise<ProviderLayerStorage> {
+            if (await canonicalReadsEnabled(pool)) return "provider_master";
+            const schema = await detectProviderSchema(pool);
+            if (schema === "canonical") return "provider_master";
+            if (schema === "legacy") return "medical_providers";
+            if (schema === "normalized") return "providers";
+            return "none";
+          }'''
+          if old not in text:
+              raise SystemExit("Expected detectLayerStorage block was not found; refusing broad edit")
+          path.write_text(text.replace(old, new, 1))
+      - name: Commit patch
+        shell: bash
+        run: |
+          if git diff --quiet -- api-server/src/routes/providerLayers.ts; then
+            echo "Provider layer already patched."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add api-server/src/routes/providerLayers.ts
+          git commit -m "Use canonical storage for populated provider shards"
+          git push origin HEAD:main

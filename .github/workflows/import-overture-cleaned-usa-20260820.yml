@@ -39,12 +39,20 @@ jobs:
           repository: ${{ github.repository }}
           run-id: 33302987142
 
-      - name: Install PostgreSQL client
+      - name: Install PostgreSQL 18 client
         shell: bash
         run: |
           set -euo pipefail
+          sudo install -d -m 0755 /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor --yes -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
           sudo apt-get update -qq
-          sudo apt-get install --yes -qq postgresql-client
+          sudo apt-get install --yes -qq postgresql-client-18
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+          /usr/lib/postgresql/18/bin/pg_dump --version
           test -s /tmp/overture-candidate/overture_cleaned_usa.sqlite
 
       - name: Validate OVERPASS connection and initialize provider schema
@@ -100,4 +108,4 @@ jobs:
           psql "$OVERPASS_DATABASE_URL" -Atqc "SELECT 'map_visible='||count(DISTINCT v.id) FROM public.provider_master_map_view v JOIN public.provider_master_sources s ON s.master_provider_id=v.id WHERE s.source_key='overture';"
           psql "$OVERPASS_DATABASE_URL" -Atqc "SELECT 'db_size='||pg_size_pretty(pg_database_size(current_database()));"
 
-# Triggered after OVERPASS_DATABASE_URL secret was added on 2026-08-30.
+# PostgreSQL 18 client required because the source Neon database runs PostgreSQL 18.

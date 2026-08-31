@@ -1,84 +1,64 @@
-name: Overture exact-import preparation
+name: Import Overture candidate directly to Neon
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
+      - overture-exact-import-20260830
     paths:
       - .github/workflows/import-overture-cleaned-usa-20260820.yml
-      - scripts/import-overture-cleaned-usa-20260820.py
-      - tmp/overture-exact-patch/**
+      - scripts/import-overture-candidate-direct-neon.py
 
 permissions:
   contents: read
+  actions: read
+
+concurrency:
+  group: overture-direct-neon-import-20260830
+  cancel-in-progress: false
 
 jobs:
-  build-overture-candidate-artifact:
+  import-overture-candidate:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 90
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          persist-credentials: false
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --disable-pip-version-check duckdb
-          sudo apt-get update -qq
-          sudo apt-get install --yes -qq zstd
-
-      - name: Patch historical syntax typo
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('scripts/import-overture-cleaned-usa-20260820.py')
-          lines = p.read_text().splitlines()
-          lines[120] = '    return {norm(p.strip(" \'\\\"")) for p in re.split(r"[,|;]+", s) if p.strip(" \'\\\"")}'
-          p.write_text('\n'.join(lines) + '\n')
-          compile(p.read_text(), str(p), 'exec')
-          PY
-
-      - name: Build candidate SQLite without Render upload
-        run: |
-          python - <<'PY'
-          import importlib.util
-          p='scripts/import-overture-cleaned-usa-20260820.py'
-          spec=importlib.util.spec_from_file_location('overture_import',p)
-          m=importlib.util.module_from_spec(spec)
-          spec.loader.exec_module(m)
-          class ExportComplete(Exception): pass
-          def stop_after_extract(*args, **kwargs): raise ExportComplete()
-          m.post_chunk=stop_after_extract
-          try:
-              m.main()
-          except ExportComplete:
-              pass
-          PY
-          test -s overture_cleaned_usa.sqlite
-
-      - name: Reconstruct and inspect exact patch
-        run: |
-          set -euo pipefail
-          cat tmp/overture-exact-patch/part-*.b64 | base64 --decode > /tmp/overture-exact-patch.zst
-          zstd --decompress --stdout /tmp/overture-exact-patch.zst > /tmp/overture-exact-patch
-          echo "patch bytes: $(wc -c < /tmp/overture-exact-patch)"
-          file /tmp/overture-exact-patch
-          python - <<'PY'
-          from pathlib import Path
-          p=Path('/tmp/overture-exact-patch')
-          b=p.read_bytes()[:512]
-          print('patch_prefix_hex=', b[:32].hex())
-          print('patch_prefix_text=', b.decode('utf-8','replace')[:400].replace('\n','\\n'))
-          PY
-
-      - name: Upload candidate SQLite
-        uses: actions/upload-artifact@v4
+      - name: Download completed Overture candidate artifact
+        uses: actions/download-artifact@v4
         with:
           name: overture-candidate-sqlite
-          path: overture_cleaned_usa.sqlite
-          compression-level: 9
-          retention-days: 2
+          path: /tmp/overture-candidate
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 33302987142
+
+      - name: Install PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install --yes -qq postgresql-client
+          test -s /tmp/overture-candidate/overture_cleaned_usa.sqlite
+
+      - name: Import available Overture candidate rows directly to production Neon
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DATABASE_URL" == postgres* ]] || { echo 'DATABASE_URL secret is missing' >&2; exit 1; }
+          echo "::add-mask::$DATABASE_URL"
+          python scripts/import-overture-candidate-direct-neon.py /tmp/overture-candidate/overture_cleaned_usa.sqlite
+
+      - name: Final production verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$DATABASE_URL"
+          psql "$DATABASE_URL" -Atqc "SELECT 'source_rows='||count(*) FROM public.provider_master_sources WHERE source_key='overture';"
+          psql "$DATABASE_URL" -Atqc "SELECT 'providers='||count(DISTINCT master_provider_id) FROM public.provider_master_sources WHERE source_key='overture';"
+          psql "$DATABASE_URL" -Atqc "SELECT 'map_visible='||count(DISTINCT v.id) FROM public.provider_master_map_view v JOIN public.provider_master_sources s ON s.master_provider_id=v.id WHERE s.source_key='overture';"

@@ -1,6 +1,7 @@
 name: Patch Provider Layer Canonical Fallback
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - .github/workflows/patch-provider-layer-canonical.yml

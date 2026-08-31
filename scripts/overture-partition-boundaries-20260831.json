@@ -1,0 +1,16 @@
+{
+  "candidate_rows": 483795,
+  "valid_importable_rows": 483736,
+  "invalid_skipped_rows": 59,
+  "current_overpass_loaded_valid_rows": 335000,
+  "current_overpass_skipped_before_boundary": 38,
+  "current_overpass_last_loaded_overture_id": "b7069c6c-8c26-46f0-8232-dc809340b479",
+  "current_overpass_next_overture_id": "b706a46b-1c0e-4de7-ba3d-2b5850fab37f",
+  "remaining_valid_rows_after_current_overpass": 148736,
+  "equal_two_way_split_valid_rows_each": 241868,
+  "equal_split_part1_last_overture_id": "8706e6f1-dfae-4061-b083-251acde32ca9",
+  "equal_split_part2_first_overture_id": "87071eda-b75a-4a49-9d53-0e500ffdc262",
+  "invalid_rows_before_equal_split_boundary": 30,
+  "ordering": "accepted ORDER BY overture_id",
+  "notes": "Current OVERPASS import committed batches through valid row 335000. Batch 68 failed and rolled back. For a remainder-only second database, start with overture_id > current_overpass_last_loaded_overture_id. For an even two-database rebuild, part 1 contains valid rows 1..241868 and part 2 contains valid rows 241869..483736."
+}

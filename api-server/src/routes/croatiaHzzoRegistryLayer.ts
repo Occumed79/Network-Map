@@ -5,7 +5,9 @@ import { fetchExternalJson } from "../providerSources/externalSourceRuntime";
 const router = Router();
 const RESOURCE_ID = "ff94a497-d7d1-44b3-abbb-1b5a19f19db1";
 const CKAN_SEARCH_URL = "https://data.gov.hr/ckan/hr/api/3/action/datastore_search";
-const CKAN_FETCH_LIMIT = 32000;
+// Transport chunk only. The loader follows CKAN offset pagination until the
+// registry-reported total has been exhausted, so this is not a facility cap.
+const CKAN_PAGE_SIZE = 5000;
 const MAX_PAGE_SIZE = 2000;
 
 type Bounds = { north: number; south: number; east: number; west: number };
@@ -124,19 +126,45 @@ function normalizeRow(row: Record<string, unknown>): Record<string, unknown> | n
 }
 
 async function loadAllCroatiaRows(): Promise<Record<string, unknown>[]> {
-  const params = new URLSearchParams({
-    resource_id: RESOURCE_ID,
-    limit: String(CKAN_FETCH_LIMIT),
-  });
-  const payload = await fetchExternalJson<CkanPayload>(
-    "hr-hzzo-pzz-ckan",
-    `${CKAN_SEARCH_URL}?${params.toString()}`,
-    { headers: { accept: "application/json" } },
-  );
-  if (payload.success !== true || !payload.result || !Array.isArray(payload.result.records)) {
-    throw new Error("Croatia HZZO CKAN returned an invalid DataStore payload");
+  const rows: Record<string, unknown>[] = [];
+  let offset = 0;
+  let reportedTotal: number | null = null;
+
+  while (reportedTotal === null || rows.length < reportedTotal) {
+    const params = new URLSearchParams({
+      resource_id: RESOURCE_ID,
+      limit: String(CKAN_PAGE_SIZE),
+      offset: String(offset),
+    });
+    const payload = await fetchExternalJson<CkanPayload>(
+      "hr-hzzo-pzz-ckan",
+      `${CKAN_SEARCH_URL}?${params.toString()}`,
+      { headers: { accept: "application/json" } },
+    );
+    if (payload.success !== true || !payload.result || !Array.isArray(payload.result.records)) {
+      throw new Error("Croatia HZZO CKAN returned an invalid DataStore payload");
+    }
+
+    const pageRows = payload.result.records;
+    const pageTotal = Number(payload.result.total);
+    if (Number.isFinite(pageTotal) && pageTotal >= 0) {
+      reportedTotal = Math.max(reportedTotal ?? 0, pageTotal);
+    } else if (reportedTotal === null) {
+      reportedTotal = rows.length + pageRows.length;
+    }
+
+    if (pageRows.length === 0) {
+      if (reportedTotal !== null && rows.length < reportedTotal) {
+        throw new Error(`Croatia HZZO CKAN stopped at ${rows.length.toLocaleString()} of ${reportedTotal.toLocaleString()} rows`);
+      }
+      break;
+    }
+
+    rows.push(...pageRows);
+    offset += pageRows.length;
   }
-  return payload.result.records;
+
+  return rows;
 }
 
 router.get("/international-registry-layers/croatia-hzzo-primary-care", async (req: Request, res: Response) => {

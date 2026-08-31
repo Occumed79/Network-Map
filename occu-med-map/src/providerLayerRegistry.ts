@@ -85,6 +85,7 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   liveRegistrySource('new-zealand-health-facilities', 'New Zealand — Health NZ Facilities', '#0284c7'),
   synchronizedRegistrySource('brazil-cnes', 'Brazil — CNES (Daily Sync)', '#16a34a'),
   synchronizedRegistrySource('czechia-nrpzs', 'Czechia — NRPZS (Monthly Sync)', '#0369a1'),
+  synchronizedRegistrySource('argentina-refes', 'Argentina — REFES (Registry Sync)', '#38bdf8'),
 
   source('international-providers', 'International Providers', 'healthsites_osm', '#06b6d4', 'SOURCE / NETWORK OVERLAYS'),
   source('usa-embassy-recommended', 'U.S. Embassy Recommended', 'embassy_clinic_docs', '#facc15', 'SOURCE / NETWORK OVERLAYS'),

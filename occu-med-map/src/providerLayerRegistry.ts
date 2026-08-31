@@ -28,6 +28,11 @@ function liveRegistrySource(id: string, label: string, color: string): ProviderL
     endpoint: `/api/international-registry-layers/${id}` };
 }
 
+function synchronizedRegistrySource(id: string, label: string, color: string): ProviderLayerCategory {
+  return { id, label, section: 'LIVE INTERNATIONAL REGISTRIES', kind: 'source', channel: `registry-${id}`, color,
+    endpoint: `/api/stored-international-registry-layers/${id}` };
+}
+
 /**
  * Ordered UI registry for on-demand provider layers. `typeKey` is the canonical
  * provider_type_catalog key; source overlays deliberately have no type key.
@@ -68,6 +73,7 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   liveRegistrySource('germany-klinik-atlas', 'Germany — Bundes-Klinik-Atlas', '#2563eb'),
   liveRegistrySource('canada-odhf', 'Canada — ODHF', '#dc2626'),
   liveRegistrySource('australia-healthdirect', 'Australia — HealthDirect', '#059669'),
+  synchronizedRegistrySource('brazil-cnes', 'Brazil — CNES (Daily Sync)', '#16a34a'),
 
   source('international-providers', 'International Providers', 'healthsites_osm', '#06b6d4', 'SOURCE / NETWORK OVERLAYS'),
   source('usa-embassy-recommended', 'U.S. Embassy Recommended', 'embassy_clinic_docs', '#facc15', 'SOURCE / NETWORK OVERLAYS'),

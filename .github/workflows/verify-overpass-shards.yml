@@ -73,7 +73,12 @@ jobs:
             }
           }
 
-          const first = await inspect('overpass-project-1', process.env.OVERPASS_DATABASE_URL);
-          const second = await inspect('overpass-project-2', process.env.OVERPASS_DATABASE_URL_2);
-          console.log(JSON.stringify({ combinedProviderMasterMapViewCount: first + second }));
+          (async () => {
+            const first = await inspect('overpass-project-1', process.env.OVERPASS_DATABASE_URL);
+            const second = await inspect('overpass-project-2', process.env.OVERPASS_DATABASE_URL_2);
+            console.log(JSON.stringify({ combinedProviderMasterMapViewCount: first + second }));
+          })().catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
           NODE

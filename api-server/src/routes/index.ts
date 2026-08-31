@@ -20,6 +20,7 @@ import providerDatasetUploadsRouter from "./providerDatasetUploads";
 import providerLayersRouter from "./providerLayers";
 import providerCategoryLayersRouter from "./providerCategoryLayers";
 import internationalRegistryLayersRouter from "./internationalRegistryLayers";
+import croatiaHzzoRegistryLayerRouter from "./croatiaHzzoRegistryLayer";
 import storedInternationalRegistryLayersRouter from "./storedInternationalRegistryLayers";
 import providerUploadCategoriesRouter from "./providerUploadCategories";
 import googlePlacesRouter from "./googlePlaces";
@@ -53,6 +54,9 @@ router.use(nacchoRecoveryStatusRouter);
 router.use(nacchoLhdRouter);
 // Public national registries are normalized server-side before the generic
 // provider-layer stabilizer so the browser never calls foreign APIs directly.
+// Croatia owns a specific path that must be mounted before the generic
+// /international-registry-layers/:source handler.
+router.use(croatiaHzzoRegistryLayerRouter);
 router.use(internationalRegistryLayersRouter);
 router.use(storedInternationalRegistryLayersRouter);
 router.use(stabilizeProviderLayerRequests);

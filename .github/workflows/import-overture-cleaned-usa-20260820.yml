@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/import-overture-cleaned-usa-20260820.yml
       - scripts/import-overture-cleaned-usa-20260820.py
+      - tmp/overture-exact-patch/**
 
 permissions:
   contents: read
@@ -24,8 +25,11 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install DuckDB
-        run: python -m pip install --disable-pip-version-check duckdb
+      - name: Install dependencies
+        run: |
+          python -m pip install --disable-pip-version-check duckdb
+          sudo apt-get update -qq
+          sudo apt-get install --yes -qq zstd
 
       - name: Patch historical syntax typo
         run: |
@@ -55,6 +59,21 @@ jobs:
               pass
           PY
           test -s overture_cleaned_usa.sqlite
+
+      - name: Reconstruct and inspect exact patch
+        run: |
+          set -euo pipefail
+          cat tmp/overture-exact-patch/part-*.b64 | base64 --decode > /tmp/overture-exact-patch.zst
+          zstd --decompress --stdout /tmp/overture-exact-patch.zst > /tmp/overture-exact-patch
+          echo "patch bytes: $(wc -c < /tmp/overture-exact-patch)"
+          file /tmp/overture-exact-patch
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/overture-exact-patch')
+          b=p.read_bytes()[:512]
+          print('patch_prefix_hex=', b[:32].hex())
+          print('patch_prefix_text=', b.decode('utf-8','replace')[:400].replace('\n','\\n'))
+          PY
 
       - name: Upload candidate SQLite
         uses: actions/upload-artifact@v4

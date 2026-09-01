@@ -5,6 +5,8 @@ import { fetchExternalJson } from "../providerSources/externalSourceRuntime";
 const router = Router();
 const MAX_PAGE_SIZE = 5000;
 const GISCO_BASE_URL = "https://gisco-services.ec.europa.eu/pub/healthcare/2023/geojson";
+const SPAIN_HOSPITAL_CSV = "https://www.sanidad.gob.es/ciudadanos/centros.do?6578706f7274=1&accion=Consultar&botonHospitales=2&comunidad=&d-4015021-e=1&dependenciaFuncional=&dependenciaTipoCentro=&finalidadAsistencial=&nombreHosp=&provincia=";
+const SPAIN_CATALOG_PAGE = "https://www.sanidad.gob.es/ciudadanos/centrosCA.do";
 
 type Bounds = { north: number; south: number; east: number; west: number };
 type GeoJsonFeature = {
@@ -13,6 +15,22 @@ type GeoJsonFeature = {
   properties?: Record<string, unknown>;
 };
 type GeoJsonCollection = { type?: string; features?: GeoJsonFeature[] };
+type SpainCatalogEntry = {
+  code: string;
+  name: string;
+  address: string;
+  city: string;
+  province: string;
+  postalCode: string;
+  dependency: string;
+  purpose: string;
+  raw: Record<string, string>;
+};
+type SpainCatalogIndex = {
+  byNamePostal: Map<string, SpainCatalogEntry>;
+  byNameCity: Map<string, SpainCatalogEntry>;
+  uniqueByName: Map<string, SpainCatalogEntry>;
+};
 
 type GiscoCountry = {
   slug: string;
@@ -47,6 +65,7 @@ const COUNTRIES: readonly GiscoCountry[] = [
 ] as const;
 
 const COUNTRY_BY_SLUG = new Map(COUNTRIES.map((country) => [country.slug, country]));
+let spainCatalogCache: { expiresAt: number; value: SpainCatalogIndex } | null = null;
 
 function text(value: unknown): string {
   return value === null || value === undefined ? "" : String(value).trim();
@@ -56,6 +75,26 @@ function numberValue(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   const parsed = Number(text(value).replace(",", "."));
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function lookupText(value: unknown): string {
+  return text(value)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .toLowerCase()
+    .replace(/\b(hospital|hosp\.?|clinica|clínica|centro|universitario|universitaria|general|de|del|la|el)\b/giu, " ")
+    .replace(/[^a-z0-9]+/gu, " ")
+    .trim()
+    .replace(/\s+/gu, " ");
+}
+
+function headerKey(value: unknown): string {
+  return text(value)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, " ")
+    .trim();
 }
 
 function parseBounds(req: Request): Bounds | null {
@@ -160,6 +199,163 @@ function normalize(feature: GeoJsonFeature, country: GiscoCountry): Record<strin
   };
 }
 
+function detectDelimiter(raw: string): string {
+  const line = raw.replace(/^\uFEFF/u, "").split(/\r?\n/u).find((value) => value.trim()) || "";
+  return [";", ",", "\t"].sort((a, b) => line.split(b).length - line.split(a).length)[0];
+}
+
+function parseDelimited(raw: string): string[][] {
+  const delimiter = detectDelimiter(raw);
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let quoted = false;
+  raw = raw.replace(/^\uFEFF/u, "");
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index];
+    if (quoted) {
+      if (char === '"') {
+        if (raw[index + 1] === '"') { field += '"'; index += 1; }
+        else quoted = false;
+      } else field += char;
+      continue;
+    }
+    if (char === '"') quoted = true;
+    else if (char === delimiter) { row.push(field); field = ""; }
+    else if (char === "\n") { row.push(field.replace(/\r$/u, "")); rows.push(row); row = []; field = ""; }
+    else field += char;
+  }
+  if (field.length || row.length) { row.push(field.replace(/\r$/u, "")); rows.push(row); }
+  return rows;
+}
+
+function catalogField(row: Record<string, string>, exact: string[], contains: string[]): string {
+  for (const candidate of exact) {
+    const value = text(row[headerKey(candidate)]);
+    if (value) return value;
+  }
+  for (const [key, value] of Object.entries(row)) {
+    if (contains.some((candidate) => key.includes(candidate)) && text(value)) return text(value);
+  }
+  return "";
+}
+
+function parseSpainCatalog(raw: string): SpainCatalogEntry[] {
+  const rows = parseDelimited(raw);
+  const headerIndex = rows.slice(0, 20).map((row, index) => {
+    const keys = row.map(headerKey);
+    const score = ["nombre", "hospital", "provincia", "municipio", "direccion", "codigo"].reduce((sum, signal) => sum + (keys.some((key) => key.includes(signal)) ? 1 : 0), 0);
+    return { index, score, populated: keys.filter(Boolean).length };
+  }).filter((entry) => entry.populated >= 3).sort((a, b) => b.score - a.score || b.populated - a.populated)[0];
+  if (!headerIndex || headerIndex.score < 2) throw new Error("Spain Ministry hospital CSV header could not be identified");
+  const headers = rows[headerIndex.index].map((value, index) => headerKey(value) || `column ${index}`);
+  return rows.slice(headerIndex.index + 1)
+    .filter((row) => row.some((value) => text(value)))
+    .map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""])))
+    .map((row) => ({
+      code: catalogField(row, ["codigo cnh", "codigo", "cod cnh"], ["codigo", "cod cnh"]),
+      name: catalogField(row, ["nombre del hospital", "nombre hospital", "nombre del centro", "nombre"], ["nombre hospital", "nombre centro", "denominacion"]),
+      address: catalogField(row, ["direccion", "domicilio"], ["direccion", "domicilio"]),
+      city: catalogField(row, ["municipio", "localidad"], ["municipio", "localidad"]),
+      province: catalogField(row, ["provincia"], ["provincia"]),
+      postalCode: catalogField(row, ["codigo postal", "cp"], ["codigo postal", "postal"]),
+      dependency: catalogField(row, ["dependencia funcional", "dependencia"], ["dependencia funcional", "dependencia"]),
+      purpose: catalogField(row, ["finalidad asistencial", "finalidad"], ["finalidad asistencial", "finalidad"]),
+      raw: row,
+    }))
+    .filter((entry) => Boolean(entry.name));
+}
+
+function catalogKey(name: string, place: string): string {
+  return `${lookupText(name)}|${lookupText(place)}`;
+}
+
+async function loadSpainCatalog(): Promise<SpainCatalogIndex> {
+  if (spainCatalogCache && spainCatalogCache.expiresAt > Date.now()) return spainCatalogCache.value;
+  const response = await fetch(SPAIN_HOSPITAL_CSV, {
+    headers: {
+      accept: "text/csv,*/*",
+      referer: SPAIN_CATALOG_PAGE,
+      "user-agent": "Occu-Med-Network-Map/1.0 (+https://github.com/Occumed79/Network-Map)",
+    },
+    redirect: "follow",
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) throw new Error(`Spain Ministry hospital catalog HTTP ${response.status}`);
+  const entries = parseSpainCatalog(await response.text());
+  const byNamePostal = new Map<string, SpainCatalogEntry>();
+  const byNameCity = new Map<string, SpainCatalogEntry>();
+  const counts = new Map<string, number>();
+  const candidates = new Map<string, SpainCatalogEntry>();
+  for (const entry of entries) {
+    const name = lookupText(entry.name);
+    if (!name) continue;
+    if (entry.postalCode) byNamePostal.set(catalogKey(entry.name, entry.postalCode), entry);
+    if (entry.city) byNameCity.set(catalogKey(entry.name, entry.city), entry);
+    counts.set(name, (counts.get(name) || 0) + 1);
+    candidates.set(name, entry);
+  }
+  const uniqueByName = new Map<string, SpainCatalogEntry>();
+  for (const [name, entry] of candidates) if (counts.get(name) === 1) uniqueByName.set(name, entry);
+  const value = { byNamePostal, byNameCity, uniqueByName };
+  spainCatalogCache = { expiresAt: Date.now() + 6 * 60 * 60_000, value };
+  return value;
+}
+
+function findSpainCatalogEntry(provider: Record<string, unknown>, index: SpainCatalogIndex): SpainCatalogEntry | null {
+  const names = [text(provider.name), text(provider.name).split(" — ")[0]].filter(Boolean);
+  const postal = text(provider.postal_code);
+  const city = text(provider.city);
+  for (const name of names) {
+    if (postal) {
+      const match = index.byNamePostal.get(catalogKey(name, postal));
+      if (match) return match;
+    }
+    if (city) {
+      const match = index.byNameCity.get(catalogKey(name, city));
+      if (match) return match;
+    }
+  }
+  for (const name of names) {
+    const match = index.uniqueByName.get(lookupText(name));
+    if (match) return match;
+  }
+  return null;
+}
+
+async function enrichSpain(providers: Record<string, unknown>[]): Promise<Record<string, unknown>[]> {
+  try {
+    const index = await loadSpainCatalog();
+    return providers.map((provider) => {
+      const match = findSpainCatalogEntry(provider, index);
+      if (!match) return provider;
+      const services = Array.isArray(provider.services) ? provider.services.map(String) : ["hospital"];
+      if (match.purpose && !services.includes(match.purpose)) services.push(match.purpose);
+      return {
+        ...provider,
+        address: provider.address || match.address || null,
+        address_1: provider.address_1 || match.address || null,
+        city: provider.city || match.city || null,
+        admin_area: match.province || provider.admin_area || null,
+        state: match.province || provider.state || null,
+        postal_code: provider.postal_code || match.postalCode || null,
+        zip: provider.zip || match.postalCode || null,
+        services,
+        national_registry_id: match.code || null,
+        ministry_catalog_name: match.name,
+        ministry_dependency: match.dependency || null,
+        ministry_purpose: match.purpose || null,
+        ministry_catalog_source: SPAIN_CATALOG_PAGE,
+        source_authority: "Spain Ministry of Health National Hospital Catalogue + Eurostat GISCO",
+        registry_enriched: true,
+      };
+    });
+  } catch (error) {
+    console.warn("[EuropeGiscoHospitalLayers] Spain Ministry enrichment unavailable:", error instanceof Error ? error.message : String(error));
+    return providers;
+  }
+}
+
 async function loadCountry(country: GiscoCountry): Promise<Record<string, unknown>[]> {
   const payload = await fetchExternalJson<GeoJsonCollection>(
     `eu-gisco-hospitals-${country.giscoCode.toLowerCase()}`,
@@ -171,9 +367,10 @@ async function loadCountry(country: GiscoCountry): Promise<Record<string, unknow
       ),
     },
   );
-  return (payload.features || [])
+  const providers = (payload.features || [])
     .map((feature) => normalize(feature, country))
     .filter((provider): provider is Record<string, unknown> => Boolean(provider));
+  return country.slug === "spain" ? enrichSpain(providers) : providers;
 }
 
 router.get("/international-registry-layers/gisco-hospitals-:country", async (req: Request, res: Response) => {
@@ -209,6 +406,7 @@ router.get("/international-registry-layers/gisco-hospitals-:country", async (req
       source: `gisco-hospitals-${country.slug}`,
       officialRegistry: true,
       harmonizedBy: "Eurostat GISCO",
+      ...(country.slug === "spain" ? { enrichedBy: "Spain Ministry of Health National Hospital Catalogue" } : {}),
       live: true,
       visibleCapped: false,
     });

@@ -26,7 +26,7 @@ jobs:
           npm init -y >/dev/null
           npm install playwright@1.55.0 >/dev/null
           npx playwright install --with-deps chromium >/dev/null
-      - name: Trace Iceland export and Armenia facility API
+      - name: Inspect Iceland controls and Armenia facility action
         working-directory: /tmp/registry-probe
         run: |
           node <<'NODE'
@@ -37,68 +37,49 @@ jobs:
 
             async function probeIceland() {
               const page = await browser.newPage({locale:'is-IS', acceptDownloads:true});
-              const network = [];
-              page.on('response', async r => {
-                if (r.url().includes('landlaeknir.is') && ['xhr','fetch','document'].includes(r.request().resourceType())) {
-                  network.push({status:r.status(), type:r.request().resourceType(), method:r.request().method(), url:r.url()});
-                }
-              });
               await page.goto('https://vefkerfi.landlaeknir.is/apex/f?p=2600:7', {waitUntil:'domcontentloaded', timeout:90000});
               await page.waitForTimeout(1500);
-              fs.writeFileSync('/tmp/registry-probe/iceland-before.html', await page.content());
-              console.log('ICELAND initial title=', await page.title());
-              console.log('ICELAND initial buttons=', await page.locator('button').evaluateAll(els => els.map(e => ({id:e.id,title:e.title,aria:e.getAttribute('aria-label'),text:(e.innerText||'').trim(),onclick:e.getAttribute('onclick')}))));
-              console.log('ICELAND initial hidden=', await page.locator('input[type=hidden]').evaluateAll(els => els.filter(e=>/^P7_/.test(e.id)).map(e=>({id:e.id,value:e.value})).filter(x=>/TAKKI|ROWS|TUNGUMAL/.test(x.id))));
-              await page.locator('#leita').click();
-              await page.waitForLoadState('domcontentloaded');
-              await page.waitForTimeout(1800);
-              console.log('ICELAND result url=', page.url());
-              console.log('ICELAND result title=', await page.title());
-              console.log('ICELAND result tables=', await page.locator('table').count(), 'rows=', await page.locator('table tr').count());
-              console.log('ICELAND first rows=', await page.locator('table tr').evaluateAll(rows => rows.slice(0,8).map(r => [...r.querySelectorAll('th,td')].map(c => c.innerText.trim()))));
-              console.log('ICELAND result buttons=', await page.locator('button').evaluateAll(els => els.map(e => ({id:e.id,title:e.title,aria:e.getAttribute('aria-label'),text:(e.innerText||'').trim(),onclick:e.getAttribute('onclick')}))));
-              console.log('ICELAND csv-ish links=', await page.locator('a').evaluateAll(as => as.map(a=>({text:(a.innerText||'').trim(),href:a.href,title:a.title})).filter(x=>/csv|hlaða|download/i.test((x.text||'')+(x.href||'')+(x.title||'')))));
-              const downloadCandidates = page.locator('button,a').filter({hasText:/Hlaða niður|Download/i});
-              console.log('ICELAND download text candidates=', await downloadCandidates.count());
-              for (const selector of ['button[title*="Hlaða"]','button[aria-label*="Hlaða"]','a[title*="Hlaða"]','button[title*="csv" i]','a[href*="csv" i]']) {
-                const loc = page.locator(selector);
-                if (await loc.count()) {
-                  console.log('ICELAND trying download selector=', selector);
-                  try {
-                    const [download] = await Promise.all([page.waitForEvent('download',{timeout:10000}), loc.first().click()]);
-                    const save='/tmp/registry-probe/iceland.csv';
-                    await download.saveAs(save);
-                    console.log('ICELAND DOWNLOAD success filename=', download.suggestedFilename(), 'bytes=', fs.statSync(save).size);
-                    console.log('ICELAND CSV HEAD=', fs.readFileSync(save,'utf8').slice(0,2500));
-                    break;
-                  } catch (e) { console.log('ICELAND download attempt failed=', selector, String(e)); }
-                }
-              }
-              console.log('ICELAND network=', network);
-              fs.writeFileSync('/tmp/registry-probe/iceland-after.html', await page.content());
+              console.log('ICELAND controls=', JSON.stringify(await page.locator('input,select,button').evaluateAll(els => els.map(e => ({
+                tag:e.tagName,id:e.id,name:e.name,type:e.type,value:e.value,title:e.title,
+                placeholder:e.placeholder,aria:e.getAttribute('aria-label'),text:(e.innerText||'').trim(),
+                options:e.tagName==='SELECT'?[...e.options].map(o=>({text:o.text,value:o.value})).slice(0,40):undefined
+              })).filter(x => (x.id||'').startsWith('P7_') || x.id==='leita' || /rekstr|vinnu|starf|post|póst|sveitar|land|leit/i.test((x.id||'')+' '+(x.name||'')+' '+(x.title||'')+' '+(x.placeholder||'')+' '+(x.text||''))), null, 2));
+              console.log('ICELAND labels=', JSON.stringify(await page.locator('label').evaluateAll(els => els.map(e=>({for:e.htmlFor,text:e.innerText.trim()})).filter(x=>x.text)),null,2));
+              console.log('ICELAND P7 items=', await page.locator('[id^="P7_"]').evaluateAll(els => els.map(e=>({tag:e.tagName,id:e.id,text:(e.innerText||'').trim(),value:e.value||'',class:e.className})).slice(0,100)));
+              fs.writeFileSync('/tmp/registry-probe/iceland.html', await page.content());
               await page.close();
             }
 
             async function probeArmenia() {
               const page = await browser.newPage({locale:'en-US'});
-              const traffic=[];
+              const posts=[];
               page.on('response', async r => {
-                if (!r.url().includes('uhif.am')) return;
-                const type=r.request().resourceType();
-                if (!['xhr','fetch','document'].includes(type)) return;
-                const item={status:r.status(),type,method:r.request().method(),url:r.url(),requestPostData:r.request().postData()};
-                const ct=r.headers()['content-type']||'';
-                if (/json|text/.test(ct)) {
-                  try { item.body=(await r.text()).slice(0,5000); } catch {}
+                const req=r.request();
+                if (r.url()==='https://www.uhif.am/en/hospitals' && req.method()==='POST') {
+                  let body='';
+                  try { body=(await r.body()).toString('utf8').slice(0,30000); } catch(e) { body='BODY_ERROR '+String(e); }
+                  posts.push({status:r.status(), requestHeaders:req.headers(), responseHeaders:r.headers(), postData:req.postData(), body});
                 }
-                traffic.push(item);
               });
               await page.goto('https://www.uhif.am/en/hospitals', {waitUntil:'networkidle', timeout:90000});
               await page.waitForTimeout(2500);
-              console.log('ARMENIA title=', await page.title());
               console.log('ARMENIA result=', await page.locator('h2').allTextContents());
-              console.log('ARMENIA inputs=', await page.locator('input,select').evaluateAll(els=>els.map(e=>({tag:e.tagName,id:e.id,name:e.name,type:e.type,value:e.value,placeholder:e.placeholder}))));
-              console.log('ARMENIA traffic=', JSON.stringify(traffic,null,2));
+              console.log('ARMENIA POST ACTIONS=', JSON.stringify(posts,null,2));
+              console.log('ARMENIA buttons=', await page.locator('button').allTextContents());
+              console.log('ARMENIA links sample=', await page.locator('a').evaluateAll(as=>as.map(a=>({text:a.innerText.trim(),href:a.href})).filter(x=>x.text).slice(0,100)));
+              console.log('ARMENIA phone-like=', await page.locator('body').evaluate(() => [...document.querySelectorAll('body *')].filter(e=>/^\s*(?:\+374|0\d{2})/.test(e.textContent||'') && e.children.length===0).slice(0,30).map(e=>({tag:e.tagName,text:e.textContent.trim(),parent:(e.parentElement?.innerText||'').trim().slice(0,800)}))));
+              console.log('ARMENIA address-like=', await page.locator('body').evaluate(() => [...document.querySelectorAll('body *')].filter(e=>/Yerevan|Երևան|Gyumri|Գյումրի|Vanadzor|Վանաձոր/i.test(e.textContent||'') && e.children.length===0).slice(0,30).map(e=>({tag:e.tagName,text:e.textContent.trim(),parent:(e.parentElement?.innerText||'').trim().slice(0,1000)}))));
+              let clicks=0;
+              while (clicks<80) {
+                const load=page.getByRole('button',{name:/load more/i});
+                if (!(await load.count()) || !(await load.first().isVisible().catch(()=>false))) break;
+                await load.first().click();
+                await page.waitForTimeout(300);
+                clicks++;
+              }
+              console.log('ARMENIA loadMoreClicks=', clicks);
+              console.log('ARMENIA final text size=', (await page.locator('body').innerText()).length);
+              console.log('ARMENIA repeated card candidates=', await page.locator('article,[class*="card" i],[class*="hospital" i]').evaluateAll(els=>els.slice(0,20).map(e=>(e.innerText||'').trim().slice(0,1200))));
               fs.writeFileSync('/tmp/registry-probe/armenia.html', await page.content());
               await page.close();
             }
@@ -108,10 +89,10 @@ jobs:
             await browser.close();
           })().catch(e=>{console.error(e);process.exit(1)});
           NODE
-      - name: Upload probe artifacts
+      - name: Upload probe HTML
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: remaining-europe-registry-probe
-          path: /tmp/registry-probe/*
+          path: /tmp/registry-probe/*.html
           if-no-files-found: warn

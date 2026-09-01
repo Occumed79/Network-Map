@@ -67,7 +67,7 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   providerType('public-health-clinics', 'Public Health Clinics', 'public_health', '#22c55e', 'FACILITIES / PUBLIC HEALTH'),
 
   providerType('faa-examiners', 'FAA Examiners', 'faa_examiner', '#f59e0b', 'EXAMINER / SPECIAL NETWORKS', 'faa_provider'),
-  providerType('dot-examiners', 'DOT Examiners', 'dot_examiner', '#fb923c', 'EXAMINER / SPECIAL NETWORKS', 'dot_provider'),
+  providerType('dot-examiners', 'DOT Examiners', 'dot_examiner', '#fb923c', 'EXAMINER / SPECIAL NETWORKS', 'faa_provider'),
   source('blue-hive', 'Blue Hive', 'bluehive', '#60a5fa', 'EXAMINER / SPECIAL NETWORKS'),
 
   liveRegistrySource('germany-klinik-atlas', 'Germany — Bundes-Klinik-Atlas', '#2563eb'),
@@ -125,6 +125,7 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   synchronizedRegistrySource('liechtenstein-lkv', 'Liechtenstein — LKV Health Providers', '#9333ea'),
   synchronizedRegistrySource('san-marino-authorized', 'San Marino — Authorized Health Facilities', '#0f766e'),
   synchronizedRegistrySource('turkey-moh-health-tourism', 'Türkiye — MOH Authorized Health Facilities', '#dc2626'),
+  synchronizedRegistrySource('north-macedonia-moh', 'North Macedonia — MOH Health Centers', '#e11d48'),
 
   source('international-providers', 'International Providers', 'healthsites_osm', '#06b6d4', 'SOURCE / NETWORK OVERLAYS'),
   source('usa-embassy-recommended', 'U.S. Embassy Recommended', 'embassy_clinic_docs', '#facc15', 'SOURCE / NETWORK OVERLAYS'),

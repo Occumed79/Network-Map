@@ -1,4 +1,4 @@
-name: Sync UK official healthcare registries
+name: Sync England CQC healthcare registry
 
 on:
   workflow_dispatch:
@@ -16,12 +16,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: uk-official-healthcare-provider-sync
+  group: england-cqc-healthcare-provider-sync
   cancel-in-progress: false
 
 jobs:
   sync:
-    name: Sync England CQC and Northern Ireland GP practices
+    name: Sync England CQC healthcare locations
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
@@ -77,6 +77,7 @@ jobs:
               quality_score numeric,
               master_key text NOT NULL
             );
+            TRUNCATE public.source5_import_staging;
           "
 
       - name: Normalize England CQC healthcare locations
@@ -103,7 +104,6 @@ jobs:
         run: |
           set -euo pipefail
           columns="source_record_id,source_url,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,primary_provider_type,capability_tags,quality_score,master_key"
-          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "TRUNCATE public.source5_import_staging;"
           psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 \
             -c "\\copy public.source5_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" \
             < /tmp/uk-healthcare/england.tsv
@@ -119,52 +119,10 @@ jobs:
             -v source_notes="Official Care Quality Commission care directory; clinically relevant regulated locations synchronized from the current bulk directory with native CQC coordinates" \
             -f scripts/promote-staged-government-registry.sql
 
-      - name: Normalize Northern Ireland GP practices
-        shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/sync-uk-healthcare.mjs --source northern-ireland-gp --output /tmp/uk-healthcare/northern-ireland.tsv
-          expected=$(( $(wc -l < /tmp/uk-healthcare/northern-ireland.tsv) - 1 ))
-          distinct_master="$(tail -n +2 /tmp/uk-healthcare/northern-ireland.tsv | cut -f19 | sort -u | wc -l | tr -d ' ')"
-          (( expected >= 250 )) || { echo "Only ${expected} Northern Ireland GP practices; refusing promotion" >&2; exit 1; }
-          (( distinct_master >= 200 )) || { echo "Only ${distinct_master} Northern Ireland canonical practices; refusing promotion" >&2; exit 1; }
-          previous="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='gb_ni_gp'" || echo 0)"
-          previous="${previous:-0}"
-          if (( previous >= 250 )); then
-            minimum=$(( previous * 60 / 100 ))
-            (( expected >= minimum )) || { echo "Northern Ireland GP source shrank from ${previous} to ${expected}; refusing replacement" >&2; exit 1; }
-          fi
-          echo "NI_EXPECTED=${expected}" >> "$GITHUB_ENV"
-          echo "NI_MASTER=${distinct_master}" >> "$GITHUB_ENV"
-
-      - name: Promote Northern Ireland GP practices
-        shell: bash
-        run: |
-          set -euo pipefail
-          columns="source_record_id,source_url,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,primary_provider_type,capability_tags,quality_score,master_key"
-          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "TRUNCATE public.source5_import_staging;"
-          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 \
-            -c "\\copy public.source5_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" \
-            < /tmp/uk-healthcare/northern-ireland.tsv
-          psql "$TARGET_DATABASE_URL" \
-            -v ON_ERROR_STOP=1 \
-            -v expected="$NI_EXPECTED" \
-            -v expected_master="$NI_MASTER" \
-            -v source_key="gb_ni_gp" \
-            -v country_code="GB" \
-            -v source_prefix_pattern="ni-gp:%" \
-            -v source_display_name="Northern Ireland BSO — Active GP Practices" \
-            -v data_source_name="Northern Ireland GP Practices" \
-            -v source_notes="Official Business Services Organisation/OpenDataNI active GP Practice Reference File; postcode coordinates resolved through postcodes.io for map placement" \
-            -f scripts/promote-staged-government-registry.sql
-
-      - name: Verify UK sources
+      - name: Verify England source
         shell: bash
         run: |
           set -euo pipefail
           england="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='gb_cqc_healthcare' AND country_code='GB' AND lat IS NOT NULL AND lng IS NOT NULL")"
-          ni="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='gb_ni_gp' AND country_code='GB' AND lat IS NOT NULL AND lng IS NOT NULL")"
           (( england >= 4500 )) || { echo "Only ${england} England CQC locations map-renderable" >&2; exit 1; }
-          (( ni >= 200 )) || { echo "Only ${ni} Northern Ireland GP practices map-renderable" >&2; exit 1; }
           echo "England CQC map-renderable healthcare locations: ${england}"
-          echo "Northern Ireland map-renderable GP practices: ${ni}"

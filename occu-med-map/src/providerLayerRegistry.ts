@@ -60,7 +60,7 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   providerType('labs', 'Labs', 'lab', '#34d399', 'ANCILLARY / DIAGNOSTIC'),
   providerType('imaging', 'Imaging', 'imaging', '#f472b6', 'ANCILLARY / DIAGNOSTIC'),
   providerType('audiology', 'Audiology', 'audiology', '#2dd4bf', 'ANCILLARY / DIAGNOSTIC'),
-  providerType('hearing-aid-providers', 'Hearing Aid Providers', 'hearing_aid', '#10b981', 'ANCILLARY / DIAGNOSTIC'),
+  providerType('hearing-aid-providers', 'Hearing Aid Providers', '#10b981', 'ANCILLARY / DIAGNOSTIC'),
   providerType('pharmacy', 'Pharmacy', 'pharmacy', '#4ade80', 'ANCILLARY / DIAGNOSTIC', 'pharmacy_vaccination'),
 
   providerType('hospitals', 'Hospitals', 'hospital', '#f43f5e', 'FACILITIES / PUBLIC HEALTH'),
@@ -127,6 +127,9 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   synchronizedRegistrySource('turkey-moh-health-tourism', 'Türkiye — MOH Authorized Health Facilities', '#dc2626'),
   synchronizedRegistrySource('north-macedonia-moh', 'North Macedonia — MOH Health Centers', '#e11d48'),
   synchronizedRegistrySource('andorra-cass', 'Andorra — CASS Healthcare Providers', '#9333ea'),
+  synchronizedRegistrySource('georgia-fcdo-medical', 'Georgia — FCDO Medical Facilities', '#be123c'),
+  synchronizedRegistrySource('armenia-fcdo-medical', 'Armenia — FCDO Medical Facilities', '#f97316'),
+  synchronizedRegistrySource('bosnia-herzegovina-fcdo-medical', 'Bosnia & Herzegovina — FCDO Medical Facilities', '#0f766e'),
 
   source('international-providers', 'International Providers', 'healthsites_osm', '#06b6d4', 'SOURCE / NETWORK OVERLAYS'),
   source('usa-embassy-recommended', 'U.S. Embassy Recommended', 'embassy_clinic_docs', '#facc15', 'SOURCE / NETWORK OVERLAYS'),

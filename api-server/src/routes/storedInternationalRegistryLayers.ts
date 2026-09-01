@@ -27,6 +27,7 @@ const REGISTRIES: Record<string, StoredRegistryDefinition> = {
   "azerbaijan-tabib": { sourceKey: "az_tabib_healthcare", countryCode: "AZ", countryName: "Azerbaijan" },
   "liechtenstein-lkv": { sourceKey: "li_lkv_okp", countryCode: "LI", countryName: "Liechtenstein" },
   "san-marino-authorized": { sourceKey: "sm_authorized_healthcare", countryCode: "SM", countryName: "San Marino" },
+  "turkey-moh-health-tourism": { sourceKey: "tr_moh_health_tourism", countryCode: "TR", countryName: "Türkiye" },
 };
 
 function addParam(params: unknown[], value: unknown): string {

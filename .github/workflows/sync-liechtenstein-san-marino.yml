@@ -1,0 +1,168 @@
+name: Sync Liechtenstein and San Marino healthcare registries
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/sync-liechtenstein-san-marino.yml"
+      - "scripts/sync-liechtenstein-lkv.mjs"
+      - "scripts/sync-san-marino-authorized.mjs"
+      - "scripts/promote-staged-government-registry.sql"
+  schedule:
+    - cron: "15 10 10 * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: liechtenstein-san-marino-provider-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync Liechtenstein LKV and San Marino authorized facilities
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      TARGET_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
+
+    steps:
+      - name: Check out importer
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install system tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client poppler-utils
+
+      - name: Validate provider database and prepare staging
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "HEALTHSITES_DATABASE_URL is missing" >&2; exit 1; }
+          echo "::add-mask::${TARGET_DATABASE_URL}"
+          test "$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT to_regclass('public.provider_master_map_view') IS NOT NULL")" = "t"
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+            CREATE TABLE IF NOT EXISTS public.source5_import_staging (
+              source_record_id text PRIMARY KEY,
+              source_url text,
+              name text NOT NULL,
+              normalized_name text,
+              address_line1 text,
+              formatted_address text,
+              city text,
+              state_region text,
+              postal_code text,
+              country_code text NOT NULL,
+              lat double precision NOT NULL,
+              lng double precision NOT NULL,
+              phone text,
+              website text,
+              email text,
+              primary_provider_type text,
+              capability_tags text[] NOT NULL DEFAULT ARRAY[]::text[],
+              quality_score numeric,
+              master_key text NOT NULL
+            );
+          "
+          mkdir -p /tmp/europe-small
+
+      - name: Normalize Liechtenstein LKV providers
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/sync-liechtenstein-lkv.mjs --output /tmp/europe-small/liechtenstein.tsv
+          test -s /tmp/europe-small/liechtenstein.tsv
+          expected=$(( $(wc -l < /tmp/europe-small/liechtenstein.tsv) - 1 ))
+          distinct_master="$(tail -n +2 /tmp/europe-small/liechtenstein.tsv | cut -f19 | sort -u | wc -l | tr -d ' ')"
+          (( expected >= 25 )) || { echo "Only ${expected} map-renderable Liechtenstein LKV providers; refusing promotion" >&2; exit 1; }
+          (( distinct_master >= 20 )) || { echo "Only ${distinct_master} Liechtenstein canonical providers; refusing promotion" >&2; exit 1; }
+          previous="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='li_lkv_okp'" || echo 0)"
+          previous="${previous:-0}"
+          if (( previous >= 25 )); then
+            minimum=$(( previous * 60 / 100 ))
+            (( expected >= minimum )) || { echo "Liechtenstein LKV shrank from ${previous} to ${expected}; refusing replacement" >&2; exit 1; }
+          fi
+          echo "LI_EXPECTED=${expected}" >> "$GITHUB_ENV"
+          echo "LI_MASTER=${distinct_master}" >> "$GITHUB_ENV"
+
+      - name: Promote Liechtenstein LKV providers
+        shell: bash
+        run: |
+          set -euo pipefail
+          columns="source_record_id,source_url,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,primary_provider_type,capability_tags,quality_score,master_key"
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "TRUNCATE public.source5_import_staging;"
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "\\copy public.source5_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" \
+            < /tmp/europe-small/liechtenstein.tsv
+          psql "$TARGET_DATABASE_URL" \
+            -v ON_ERROR_STOP=1 \
+            -v expected="$LI_EXPECTED" \
+            -v expected_master="$LI_MASTER" \
+            -v source_key="li_lkv_okp" \
+            -v country_code="LI" \
+            -v source_prefix_pattern="li-lkv:%" \
+            -v source_display_name="Liechtenstein LKV — Health Providers" \
+            -v data_source_name="Liechtenstein LKV Provider List" \
+            -v source_notes="Current Liechtenstein Health Insurance Association provider directory referenced by the government; local 949x providers only, with category/contact metadata and map geocoding" \
+            -f scripts/promote-staged-government-registry.sql
+
+      - name: Normalize San Marino authorized healthcare facilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/sync-san-marino-authorized.mjs --output /tmp/europe-small/san-marino.tsv
+          test -s /tmp/europe-small/san-marino.tsv
+          expected=$(( $(wc -l < /tmp/europe-small/san-marino.tsv) - 1 ))
+          distinct_master="$(tail -n +2 /tmp/europe-small/san-marino.tsv | cut -f19 | sort -u | wc -l | tr -d ' ')"
+          (( expected >= 12 )) || { echo "Only ${expected} map-renderable San Marino authorized facilities; refusing promotion" >&2; exit 1; }
+          (( distinct_master >= 10 )) || { echo "Only ${distinct_master} San Marino canonical facilities; refusing promotion" >&2; exit 1; }
+          previous="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='sm_authorized_healthcare'" || echo 0)"
+          previous="${previous:-0}"
+          if (( previous >= 12 )); then
+            minimum=$(( previous * 60 / 100 ))
+            (( expected >= minimum )) || { echo "San Marino authorized source shrank from ${previous} to ${expected}; refusing replacement" >&2; exit 1; }
+          fi
+          echo "SM_EXPECTED=${expected}" >> "$GITHUB_ENV"
+          echo "SM_MASTER=${distinct_master}" >> "$GITHUB_ENV"
+
+      - name: Promote San Marino authorized facilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          columns="source_record_id,source_url,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,primary_provider_type,capability_tags,quality_score,master_key"
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "TRUNCATE public.source5_import_staging;"
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "\\copy public.source5_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" \
+            < /tmp/europe-small/san-marino.tsv
+          psql "$TARGET_DATABASE_URL" \
+            -v ON_ERROR_STOP=1 \
+            -v expected="$SM_EXPECTED" \
+            -v expected_master="$SM_MASTER" \
+            -v source_key="sm_authorized_healthcare" \
+            -v country_code="SM" \
+            -v source_prefix_pattern="sm-authority:%" \
+            -v source_display_name="San Marino Authority — Authorized Healthcare Facilities" \
+            -v data_source_name="San Marino Authorized Healthcare Facilities" \
+            -v source_notes="Official San Marino Health Authority list of authorized health, socio-health and socio-educational structures, current 19 February 2026 edition; healthcare structures normalized and geocoded for the map" \
+            -f scripts/promote-staged-government-registry.sql
+
+      - name: Verify small-country sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          liechtenstein="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='li_lkv_okp' AND country_code='LI' AND lat IS NOT NULL AND lng IS NOT NULL")"
+          san_marino="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='sm_authorized_healthcare' AND country_code='SM' AND lat IS NOT NULL AND lng IS NOT NULL")"
+          (( liechtenstein >= 20 )) || { echo "Only ${liechtenstein} Liechtenstein providers map-renderable" >&2; exit 1; }
+          (( san_marino >= 10 )) || { echo "Only ${san_marino} San Marino facilities map-renderable" >&2; exit 1; }
+          echo "Liechtenstein LKV providers: ${liechtenstein}"
+          echo "San Marino authorized facilities: ${san_marino}"

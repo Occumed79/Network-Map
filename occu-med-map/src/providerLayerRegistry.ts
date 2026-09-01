@@ -124,6 +124,7 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   synchronizedRegistrySource('azerbaijan-tabib', 'Azerbaijan — TABIB Medical Institutions', '#0891b2'),
   synchronizedRegistrySource('liechtenstein-lkv', 'Liechtenstein — LKV Health Providers', '#9333ea'),
   synchronizedRegistrySource('san-marino-authorized', 'San Marino — Authorized Health Facilities', '#0f766e'),
+  synchronizedRegistrySource('turkey-moh-health-tourism', 'Türkiye — MOH Authorized Health Facilities', '#dc2626'),
 
   source('international-providers', 'International Providers', 'healthsites_osm', '#06b6d4', 'SOURCE / NETWORK OVERLAYS'),
   source('usa-embassy-recommended', 'U.S. Embassy Recommended', 'embassy_clinic_docs', '#facc15', 'SOURCE / NETWORK OVERLAYS'),

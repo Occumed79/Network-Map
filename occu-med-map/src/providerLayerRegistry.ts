@@ -60,7 +60,7 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   providerType('labs', 'Labs', 'lab', '#34d399', 'ANCILLARY / DIAGNOSTIC'),
   providerType('imaging', 'Imaging', 'imaging', '#f472b6', 'ANCILLARY / DIAGNOSTIC'),
   providerType('audiology', 'Audiology', 'audiology', '#2dd4bf', 'ANCILLARY / DIAGNOSTIC'),
-  providerType('hearing-aid-providers', 'Hearing Aid Providers', '#10b981', 'ANCILLARY / DIAGNOSTIC'),
+  providerType('hearing-aid-providers', 'Hearing Aid Providers', 'hearing_aid', '#10b981', 'ANCILLARY / DIAGNOSTIC'),
   providerType('pharmacy', 'Pharmacy', 'pharmacy', '#4ade80', 'ANCILLARY / DIAGNOSTIC', 'pharmacy_vaccination'),
 
   providerType('hospitals', 'Hospitals', 'hospital', '#f43f5e', 'FACILITIES / PUBLIC HEALTH'),

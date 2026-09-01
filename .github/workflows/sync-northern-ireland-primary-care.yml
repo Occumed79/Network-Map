@@ -69,12 +69,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          previous="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='gb_ni_primarycare'" || echo 0)"
+          previous="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='gb_ni_gp'" || echo 0)"
           previous="${previous:-0}"
-          if (( previous >= 400 )); then
+          if (( previous >= 250 )); then
             minimum=$(( previous * 60 / 100 ))
             (( REGISTRY_EXPECTED >= minimum )) || {
-              echo "Northern Ireland primary-care source shrank from ${previous} to ${REGISTRY_EXPECTED}; refusing automatic replacement" >&2
+              echo "Northern Ireland source shrank from ${previous} to ${REGISTRY_EXPECTED}; refusing automatic replacement" >&2
               exit 1
             }
           fi
@@ -122,11 +122,11 @@ jobs:
             -v ON_ERROR_STOP=1 \
             -v expected="$REGISTRY_EXPECTED" \
             -v expected_master="$REGISTRY_EXPECTED_MASTER" \
-            -v source_key="gb_ni_primarycare" \
+            -v source_key="gb_ni_gp" \
             -v country_code="GB" \
             -v source_prefix_pattern="ni-health:%" \
             -v source_display_name="Northern Ireland — Active Primary Care Providers" \
-            -v data_source_name="Northern Ireland BSO Primary Care" \
+            -v data_source_name="Northern Ireland GP Practices" \
             -v source_notes="Official OpenDataNI/Business Services Organisation active GP practices, dental surgeries and ophthalmic surgeries; postcodes resolved through postcodes.io for map placement" \
             -f scripts/promote-staged-government-registry.sql
 
@@ -134,11 +134,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          source_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='gb_ni_primarycare'")"
-          mapped_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='gb_ni_primarycare' AND country_code='GB' AND lat IS NOT NULL AND lng IS NOT NULL")"
-          gp_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='gb_ni_primarycare' AND 'northern_ireland_gp'=ANY(capability_tags)")"
-          dental_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='gb_ni_primarycare' AND 'northern_ireland_dental_surgery'=ANY(capability_tags)")"
-          oph_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='gb_ni_primarycare' AND 'northern_ireland_ophthalmic_surgery'=ANY(capability_tags)")"
+          source_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='gb_ni_gp'")"
+          mapped_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='gb_ni_gp' AND country_code='GB' AND lat IS NOT NULL AND lng IS NOT NULL")"
+          gp_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='gb_ni_gp' AND 'northern_ireland_gp'=ANY(capability_tags)")"
+          dental_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='gb_ni_gp' AND 'northern_ireland_dental_surgery'=ANY(capability_tags)")"
+          oph_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='gb_ni_gp' AND 'northern_ireland_ophthalmic_surgery'=ANY(capability_tags)")"
           [[ "$source_count" == "$REGISTRY_EXPECTED" ]] || { echo "Northern Ireland lineage mismatch ${source_count} vs ${REGISTRY_EXPECTED}" >&2; exit 1; }
           (( mapped_count >= 350 )) || { echo "Only ${mapped_count} Northern Ireland providers map-renderable" >&2; exit 1; }
           (( gp_count >= 200 && dental_count >= 100 && oph_count >= 50 )) || { echo "Category validation failed GP=${gp_count} dental=${dental_count} ophthalmic=${oph_count}" >&2; exit 1; }

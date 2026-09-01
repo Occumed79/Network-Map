@@ -1,0 +1,129 @@
+name: Sync Denmark SOR healthcare institutions
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/sync-denmark-sor.yml"
+      - "scripts/sync-denmark-sor.py"
+      - "scripts/promote-staged-government-registry.sql"
+  schedule:
+    - cron: "20 5 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: denmark-sor-healthcare-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Fetch and promote Denmark SOR healthcare institutions
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      TARGET_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
+
+    steps:
+      - name: Check out importer
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install sync dependencies
+        run: |
+          python -m pip install --disable-pip-version-check requests pyproj
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Validate provider database
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "HEALTHSITES_DATABASE_URL is missing" >&2; exit 1; }
+          echo "::add-mask::${TARGET_DATABASE_URL}"
+          test "$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT to_regclass('public.provider_master_map_view') IS NOT NULL")" = "t"
+
+      - name: Fetch and normalize daily Denmark SOR
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/denmark-sor
+          python scripts/sync-denmark-sor.py --output /tmp/denmark-sor/provider.tsv
+          test -s /tmp/denmark-sor/provider.tsv
+          expected=$(( $(wc -l < /tmp/denmark-sor/provider.tsv) - 1 ))
+          distinct_master="$(tail -n +2 /tmp/denmark-sor/provider.tsv | cut -f19 | sort -u | wc -l | tr -d ' ')"
+          (( expected >= 1000 )) || { echo "Only ${expected} map-renderable Denmark SOR institutions; refusing promotion" >&2; exit 1; }
+          (( distinct_master >= 800 )) || { echo "Only ${distinct_master} Denmark canonical institutions; refusing promotion" >&2; exit 1; }
+          echo "REGISTRY_EXPECTED=${expected}" >> "$GITHUB_ENV"
+          echo "REGISTRY_EXPECTED_MASTER=${distinct_master}" >> "$GITHUB_ENV"
+
+      - name: Protect against unexpected SOR collapse
+        shell: bash
+        run: |
+          set -euo pipefail
+          previous="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='dk_sor_healthcare'" || echo 0)"
+          previous="${previous:-0}"
+          if (( previous >= 1000 )); then
+            minimum=$(( previous * 60 / 100 ))
+            (( REGISTRY_EXPECTED >= minimum )) || {
+              echo "Denmark SOR source shrank from ${previous} to ${REGISTRY_EXPECTED}; refusing replacement" >&2
+              exit 1
+            }
+          fi
+
+      - name: Stage Denmark SOR rows
+        shell: bash
+        run: |
+          set -euo pipefail
+          columns="source_record_id,source_url,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,primary_provider_type,capability_tags,quality_score,master_key"
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+            CREATE TABLE IF NOT EXISTS public.source5_import_staging (
+              source_record_id text PRIMARY KEY, source_url text, name text NOT NULL, normalized_name text,
+              address_line1 text, formatted_address text, city text, state_region text, postal_code text,
+              country_code text NOT NULL, lat double precision NOT NULL, lng double precision NOT NULL,
+              phone text, website text, email text, primary_provider_type text,
+              capability_tags text[] NOT NULL DEFAULT ARRAY[]::text[], quality_score numeric, master_key text NOT NULL
+            );
+            TRUNCATE public.source5_import_staging;
+          "
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "\\copy public.source5_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" \
+            < /tmp/denmark-sor/provider.tsv
+          actual="$(psql "$TARGET_DATABASE_URL" -Atqc 'SELECT count(*) FROM public.source5_import_staging')"
+          [[ "$actual" == "$REGISTRY_EXPECTED" ]] || { echo "Staging mismatch ${actual} vs ${REGISTRY_EXPECTED}" >&2; exit 1; }
+
+      - name: Promote Denmark SOR into canonical registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$TARGET_DATABASE_URL" \
+            -v ON_ERROR_STOP=1 \
+            -v expected="$REGISTRY_EXPECTED" \
+            -v expected_master="$REGISTRY_EXPECTED_MASTER" \
+            -v source_key="dk_sor_healthcare" \
+            -v country_code="DK" \
+            -v source_prefix_pattern="dk-sor:%" \
+            -v source_display_name="Denmark SOR — Healthcare Institutions" \
+            -v data_source_name="Denmark Sundhedsvæsenets Organisationsregister" \
+            -v source_notes="Official Danish Health Data Authority SOR2 SorEntity_daily feed; active health institutions with native address, contact, type, speciality and ETRS89 coordinates synchronized daily" \
+            -f scripts/promote-staged-government-registry.sql
+
+      - name: Verify production Denmark SOR source
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='dk_sor_healthcare'")"
+          mapped_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='dk_sor_healthcare' AND country_code='DK' AND lat IS NOT NULL AND lng IS NOT NULL")"
+          [[ "$source_count" == "$REGISTRY_EXPECTED" ]] || { echo "Denmark SOR lineage mismatch ${source_count} vs ${REGISTRY_EXPECTED}" >&2; exit 1; }
+          (( mapped_count >= 800 )) || { echo "Only ${mapped_count} Denmark SOR institutions map-renderable" >&2; exit 1; }
+          echo "Denmark SOR source records: ${source_count}"
+          echo "Denmark SOR map-renderable institutions: ${mapped_count}"

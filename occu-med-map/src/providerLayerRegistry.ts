@@ -90,7 +90,7 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   liveRegistrySource('gisco-hospitals-belgium', 'Belgium — Eurostat/GISCO Hospitals', '#7c3aed'),
   liveRegistrySource('gisco-hospitals-bulgaria', 'Bulgaria — Eurostat/GISCO Hospitals', '#0284c7'),
   liveRegistrySource('gisco-hospitals-switzerland', 'Switzerland — Eurostat/GISCO Hospitals', '#475569'),
-  liveRegistrySource('gisco-hospitals-denmark', 'Denmark — Eurostat/GISCO Hospitals', '#dc2626'),
+  synchronizedRegistrySource('denmark-sor-healthcare', 'Denmark — SOR Healthcare (Daily Sync)', '#dc2626'),
   liveRegistrySource('gisco-hospitals-estonia', 'Estonia — Eurostat/GISCO Hospitals', '#2563eb'),
   liveRegistrySource('gisco-hospitals-greece', 'Greece — Eurostat/GISCO Hospitals', '#1d4ed8'),
   liveRegistrySource('gisco-hospitals-spain', 'Spain — Eurostat/GISCO Hospitals', '#f59e0b'),

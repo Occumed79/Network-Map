@@ -17,10 +17,16 @@ services:
         sync: false
       - key: DATABASE_URL_POOLED
         sync: false
+      - key: OVERPASS_DATABASE_URL
+        sync: false
+      - key: OVERPASS_DATABASE_URL_2
+        sync: false
       - key: WRITE_API_TOKEN
         sync: false
       - key: PGPOOL_MAX
         value: 4
+      - key: PGPOOL_PROVIDER_PROJECT_MAX
+        value: 2
       - key: PGPOOL_CONNECTION_TIMEOUT_MS
         value: 8000
       - key: PGPOOL_IDLE_TIMEOUT_MS

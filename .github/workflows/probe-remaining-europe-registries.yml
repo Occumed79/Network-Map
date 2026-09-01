@@ -39,11 +39,12 @@ jobs:
               const page = await browser.newPage({locale:'is-IS', acceptDownloads:true});
               await page.goto('https://vefkerfi.landlaeknir.is/apex/f?p=2600:7', {waitUntil:'domcontentloaded', timeout:90000});
               await page.waitForTimeout(1500);
-              console.log('ICELAND controls=', JSON.stringify(await page.locator('input,select,button').evaluateAll(els => els.map(e => ({
+              const controls = await page.locator('input,select,button').evaluateAll(els => els.map(e => ({
                 tag:e.tagName,id:e.id,name:e.name,type:e.type,value:e.value,title:e.title,
                 placeholder:e.placeholder,aria:e.getAttribute('aria-label'),text:(e.innerText||'').trim(),
                 options:e.tagName==='SELECT'?[...e.options].map(o=>({text:o.text,value:o.value})).slice(0,40):undefined
-              })).filter(x => (x.id||'').startsWith('P7_') || x.id==='leita' || /rekstr|vinnu|starf|post|póst|sveitar|land|leit/i.test((x.id||'')+' '+(x.name||'')+' '+(x.title||'')+' '+(x.placeholder||'')+' '+(x.text||''))), null, 2));
+              })).filter(x => (x.id||'').startsWith('P7_') || x.id==='leita' || /rekstr|vinnu|starf|post|póst|sveitar|land|leit/i.test((x.id||'')+' '+(x.name||'')+' '+(x.title||'')+' '+(x.placeholder||'')+' '+(x.text||''))));
+              console.log('ICELAND controls=', JSON.stringify(controls, null, 2));
               console.log('ICELAND labels=', JSON.stringify(await page.locator('label').evaluateAll(els => els.map(e=>({for:e.htmlFor,text:e.innerText.trim()})).filter(x=>x.text)),null,2));
               console.log('ICELAND P7 items=', await page.locator('[id^="P7_"]').evaluateAll(els => els.map(e=>({tag:e.tagName,id:e.id,text:(e.innerText||'').trim(),value:e.value||'',class:e.className})).slice(0,100)));
               fs.writeFileSync('/tmp/registry-probe/iceland.html', await page.content());

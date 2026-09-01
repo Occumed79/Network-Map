@@ -22,6 +22,27 @@ jobs:
           python-version: "3.12"
       - name: Install parser dependencies
         run: python -m pip install --disable-pip-version-check beautifulsoup4 requests pandas xlrd openpyxl
+      - name: Inspect official RS XLS links
+        run: |
+          python <<'PY'
+          import re, requests
+          from bs4 import BeautifulSoup
+          from urllib.parse import urljoin
+          url='https://zdravstvo-srpske.org/sa-kim-fzo-ima-potpisan-ugovor/cjenovnici-i-sifarnici/'
+          html=requests.get(url,timeout=60,headers={'User-Agent':'Occu-Med-Network-Map/1.0'}).text
+          soup=BeautifulSoup(html,'html.parser')
+          for a in soup.find_all('a',href=True):
+              href=urljoin(url,a['href'])
+              if re.search(r'\.xlsx?(?:\?|$)',href,re.I):
+                  contexts=[]
+                  node=a
+                  for depth in range(6):
+                      if not node: break
+                      contexts.append(' '.join(node.get_text(' ',strip=True).split())[:500])
+                      node=node.parent
+                  print('XLS',href)
+                  print('CONTEXTS',contexts)
+          PY
       - name: Run source extraction without database promotion
         run: |
           mkdir -p /tmp/bosnia

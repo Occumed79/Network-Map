@@ -1,0 +1,151 @@
+name: Sync Georgia Armenia and Bosnia medical facilities
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/sync-final-europe-fcdo.yml"
+      - "scripts/sync-fcdo-final-europe.py"
+      - "scripts/promote-staged-government-registry.sql"
+  schedule:
+    - cron: "25 10 * * 4"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: final-europe-fcdo-provider-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Fetch and promote Georgia Armenia and Bosnia medical facilities
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      TARGET_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
+
+    steps:
+      - name: Check out importer
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install scraper and PostgreSQL client
+        run: |
+          python -m pip install --disable-pip-version-check beautifulsoup4
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Validate provider database
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "HEALTHSITES_DATABASE_URL is missing" >&2; exit 1; }
+          echo "::add-mask::${TARGET_DATABASE_URL}"
+          test "$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT to_regclass('public.provider_master_map_view') IS NOT NULL")" = "t"
+
+      - name: Fetch and normalize current official-curated facility lists
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/final-europe
+          python scripts/sync-fcdo-final-europe.py --source georgia --output /tmp/final-europe/georgia.tsv
+          python scripts/sync-fcdo-final-europe.py --source armenia --output /tmp/final-europe/armenia.tsv
+          python scripts/sync-fcdo-final-europe.py --source bosnia --output /tmp/final-europe/bosnia.tsv
+
+          georgia=$(( $(wc -l < /tmp/final-europe/georgia.tsv) - 1 ))
+          armenia=$(( $(wc -l < /tmp/final-europe/armenia.tsv) - 1 ))
+          bosnia=$(( $(wc -l < /tmp/final-europe/bosnia.tsv) - 1 ))
+          (( georgia >= 5 )) || { echo "Only ${georgia} Georgia facilities; refusing promotion" >&2; exit 1; }
+          (( armenia >= 5 )) || { echo "Only ${armenia} Armenia facilities; refusing promotion" >&2; exit 1; }
+          (( bosnia >= 15 )) || { echo "Only ${bosnia} Bosnia and Herzegovina facilities; refusing promotion" >&2; exit 1; }
+
+      - name: Stage and promote all three registries
+        shell: bash
+        run: |
+          set -euo pipefail
+          columns="source_record_id,source_url,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,primary_provider_type,capability_tags,quality_score,master_key"
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+            CREATE TABLE IF NOT EXISTS public.source5_import_staging (
+              source_record_id text PRIMARY KEY,
+              source_url text,
+              name text NOT NULL,
+              normalized_name text,
+              address_line1 text,
+              formatted_address text,
+              city text,
+              state_region text,
+              postal_code text,
+              country_code text NOT NULL,
+              lat double precision NOT NULL,
+              lng double precision NOT NULL,
+              phone text,
+              website text,
+              email text,
+              primary_provider_type text,
+              capability_tags text[] NOT NULL DEFAULT ARRAY[]::text[],
+              quality_score numeric,
+              master_key text NOT NULL
+            );
+          "
+
+          promote_one() {
+            local file="$1" source_key="$2" country_code="$3" prefix="$4" display_name="$5" data_name="$6" notes="$7" minimum="$8"
+            local expected distinct_master previous collapse_floor actual mapped source_count
+            expected=$(( $(wc -l < "$file") - 1 ))
+            distinct_master="$(tail -n +2 "$file" | cut -f19 | sort -u | wc -l | tr -d ' ')"
+            (( expected >= minimum )) || { echo "${display_name}: only ${expected} rows" >&2; exit 1; }
+            (( distinct_master >= minimum )) || { echo "${display_name}: only ${distinct_master} canonical rows" >&2; exit 1; }
+
+            previous="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='${source_key}'" || echo 0)"
+            previous="${previous:-0}"
+            if (( previous >= minimum )); then
+              collapse_floor=$(( previous * 60 / 100 ))
+              (( expected >= collapse_floor )) || { echo "${display_name} shrank from ${previous} to ${expected}; refusing replacement" >&2; exit 1; }
+            fi
+
+            psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "TRUNCATE public.source5_import_staging;"
+            psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 \
+              -c "\\copy public.source5_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" \
+              < "$file"
+            actual="$(psql "$TARGET_DATABASE_URL" -Atqc 'SELECT count(*) FROM public.source5_import_staging')"
+            [[ "$actual" == "$expected" ]] || { echo "${display_name}: staging mismatch ${actual} vs ${expected}" >&2; exit 1; }
+
+            psql "$TARGET_DATABASE_URL" \
+              -v ON_ERROR_STOP=1 \
+              -v expected="$expected" \
+              -v expected_master="$distinct_master" \
+              -v source_key="$source_key" \
+              -v country_code="$country_code" \
+              -v source_prefix_pattern="${prefix}:%" \
+              -v source_display_name="$display_name" \
+              -v data_source_name="$data_name" \
+              -v source_notes="$notes" \
+              -f scripts/promote-staged-government-registry.sql
+
+            source_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='${source_key}'")"
+            mapped="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='${source_key}' AND country_code='${country_code}' AND lat IS NOT NULL AND lng IS NOT NULL")"
+            [[ "$source_count" == "$expected" ]] || { echo "${display_name}: lineage mismatch ${source_count} vs ${expected}" >&2; exit 1; }
+            (( mapped >= minimum )) || { echo "${display_name}: only ${mapped} map-renderable facilities" >&2; exit 1; }
+            echo "${display_name}: ${source_count} source records, ${mapped} map-renderable"
+          }
+
+          promote_one "/tmp/final-europe/georgia.tsv" "ge_fcdo_medical" "GE" "ge-fcdo" \
+            "Georgia — FCDO Medical Facilities" "Georgia FCDO Medical Facilities" \
+            "Current UK Foreign Commonwealth and Development Office curated medical-facility list for Georgia; facility-level addresses, contacts, specialties, public/private status and accreditation where published; explicitly non-exhaustive" 5
+
+          promote_one "/tmp/final-europe/armenia.tsv" "am_fcdo_medical" "AM" "am-fcdo" \
+            "Armenia — FCDO Medical Facilities" "Armenia FCDO Medical Facilities" \
+            "Current UK Foreign Commonwealth and Development Office curated medical-facility list for Armenia; facility-level addresses, contacts, specialties, public/private status and Ministry accreditation where published; explicitly non-exhaustive" 5
+
+          promote_one "/tmp/final-europe/bosnia.tsv" "ba_fcdo_medical" "BA" "ba-fcdo" \
+            "Bosnia and Herzegovina — FCDO Medical Facilities" "Bosnia and Herzegovina FCDO Medical Facilities" \
+            "Current UK Foreign Commonwealth and Development Office curated medical-facility list spanning major Bosnia and Herzegovina cities; facility-level addresses, contacts, specialties and public/private status where published; multi-address facilities are split to individual map sites; explicitly non-exhaustive" 15

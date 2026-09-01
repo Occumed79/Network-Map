@@ -31,9 +31,6 @@ const REGISTRIES: Record<string, StoredRegistryDefinition> = {
   "north-macedonia-moh": { sourceKey: "mk_moh_health_centers", countryCode: "MK", countryName: "North Macedonia" },
   "denmark-sor-healthcare": { sourceKey: "dk_sor_healthcare", countryCode: "DK", countryName: "Denmark" },
   "andorra-cass": { sourceKey: "ad_cass_healthcare", countryCode: "AD", countryName: "Andorra" },
-  "georgia-fcdo-medical": { sourceKey: "ge_fcdo_medical", countryCode: "GE", countryName: "Georgia" },
-  "armenia-fcdo-medical": { sourceKey: "am_fcdo_medical", countryCode: "AM", countryName: "Armenia" },
-  "bosnia-herzegovina-fcdo-medical": { sourceKey: "ba_fcdo_medical", countryCode: "BA", countryName: "Bosnia and Herzegovina" },
 };
 
 function addParam(params: unknown[], value: unknown): string {

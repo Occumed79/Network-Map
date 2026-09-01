@@ -256,9 +256,9 @@ def scrape_usk(records):
 def scrape_bpk(records):
     soup = BeautifulSoup(session_get(BPK).text, "html.parser")
     count = 0
-    heading = soup.find(lambda tag: tag.name in ["h1", "h2", "h3"] and "ugovorne zdravstvene ustanove" in norm(tag.get_text(" ", strip=True)))
-    root = heading.parent if heading and heading.parent else soup
-    for li in root.find_all("li"):
+    # The institution lists are siblings beneath the article body, not children of the page heading.
+    # Scan the full official page and keep the strict healthcare-name filter below so navigation items are ignored.
+    for li in soup.find_all("li"):
         name = clean(li.get_text(" ", strip=True))
         if len(name) < 5 or any(x in norm(name) for x in ["pocetna", "kontakt", "novosti", "dokumenti"]):
             continue

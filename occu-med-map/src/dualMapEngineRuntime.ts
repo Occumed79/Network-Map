@@ -21,7 +21,7 @@ declare global {
 (window as any).mapboxgl = mapboxgl;
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || import.meta.env.VITE_MAPBOX_ACCESS_TOKEN || "";
-const MAPBOX_2D_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN_2 || MAPBOX_TOKEN;
+const MAPBOX_2D_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN_2 || "";
 const MAP_LOAD_TIMEOUT_MS = 30_000;
 
 let currentMode: MapMode = "2d";

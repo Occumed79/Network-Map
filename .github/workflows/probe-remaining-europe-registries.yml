@@ -32,6 +32,7 @@ jobs:
           node <<'NODE'
           const { chromium } = require('playwright');
           const fs = require('fs');
+          (async () => {
           const browser = await chromium.launch({headless:true});
 
           async function probeIceland() {
@@ -91,6 +92,7 @@ jobs:
           try { await probeIceland(); } catch (e) { console.error('ICELAND ERROR', e); process.exitCode=1; }
           try { await probeArmenia(); } catch (e) { console.error('ARMENIA ERROR', e); process.exitCode=1; }
           await browser.close();
+          })().catch((error) => { console.error(error); process.exit(1); });
           NODE
       - name: Upload rendered HTML
         if: always()

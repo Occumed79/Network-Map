@@ -1,0 +1,145 @@
+name: Sync Northern Ireland primary care providers
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/sync-northern-ireland-primary-care.yml"
+      - "scripts/sync-northern-ireland-primary-care.mjs"
+      - "scripts/promote-staged-government-registry.sql"
+  schedule:
+    - cron: "45 12 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: northern-ireland-primary-care-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync GP, dental and ophthalmic surgeries
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      TARGET_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
+
+    steps:
+      - name: Check out importer
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Validate provider database
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "HEALTHSITES_DATABASE_URL is missing" >&2; exit 1; }
+          echo "::add-mask::${TARGET_DATABASE_URL}"
+          test "$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT to_regclass('public.provider_master_map_view') IS NOT NULL")" = "t"
+
+      - name: Fetch and normalize Northern Ireland primary care
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ni-primary-care
+          node scripts/sync-northern-ireland-primary-care.mjs --output /tmp/ni-primary-care/provider.tsv
+          test -s /tmp/ni-primary-care/provider.tsv
+          expected=$(( $(wc -l < /tmp/ni-primary-care/provider.tsv) - 1 ))
+          distinct_master="$(tail -n +2 /tmp/ni-primary-care/provider.tsv | cut -f19 | sort -u | wc -l | tr -d ' ')"
+          (( expected >= 400 )) || { echo "Only ${expected} Northern Ireland primary-care locations; refusing promotion" >&2; exit 1; }
+          (( distinct_master >= 350 )) || { echo "Only ${distinct_master} Northern Ireland canonical locations; refusing promotion" >&2; exit 1; }
+          echo "REGISTRY_EXPECTED=${expected}" >> "$GITHUB_ENV"
+          echo "REGISTRY_EXPECTED_MASTER=${distinct_master}" >> "$GITHUB_ENV"
+
+      - name: Protect against unexpected registry collapse
+        shell: bash
+        run: |
+          set -euo pipefail
+          previous="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='gb_ni_primarycare'" || echo 0)"
+          previous="${previous:-0}"
+          if (( previous >= 400 )); then
+            minimum=$(( previous * 60 / 100 ))
+            (( REGISTRY_EXPECTED >= minimum )) || {
+              echo "Northern Ireland primary-care source shrank from ${previous} to ${REGISTRY_EXPECTED}; refusing automatic replacement" >&2
+              exit 1
+            }
+          fi
+
+      - name: Stage normalized Northern Ireland rows
+        shell: bash
+        run: |
+          set -euo pipefail
+          columns="source_record_id,source_url,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,primary_provider_type,capability_tags,quality_score,master_key"
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+            CREATE TABLE IF NOT EXISTS public.source5_import_staging (
+              source_record_id text PRIMARY KEY,
+              source_url text,
+              name text NOT NULL,
+              normalized_name text,
+              address_line1 text,
+              formatted_address text,
+              city text,
+              state_region text,
+              postal_code text,
+              country_code text NOT NULL,
+              lat double precision NOT NULL,
+              lng double precision NOT NULL,
+              phone text,
+              website text,
+              email text,
+              primary_provider_type text,
+              capability_tags text[] NOT NULL DEFAULT ARRAY[]::text[],
+              quality_score numeric,
+              master_key text NOT NULL
+            );
+            TRUNCATE public.source5_import_staging;
+          "
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "\\copy public.source5_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" \
+            < /tmp/ni-primary-care/provider.tsv
+          actual="$(psql "$TARGET_DATABASE_URL" -Atqc 'SELECT count(*) FROM public.source5_import_staging')"
+          [[ "$actual" == "$REGISTRY_EXPECTED" ]] || { echo "Staging mismatch ${actual} vs ${REGISTRY_EXPECTED}" >&2; exit 1; }
+
+      - name: Promote Northern Ireland primary care
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$TARGET_DATABASE_URL" \
+            -v ON_ERROR_STOP=1 \
+            -v expected="$REGISTRY_EXPECTED" \
+            -v expected_master="$REGISTRY_EXPECTED_MASTER" \
+            -v source_key="gb_ni_primarycare" \
+            -v country_code="GB" \
+            -v source_prefix_pattern="ni-health:%" \
+            -v source_display_name="Northern Ireland — Active Primary Care Providers" \
+            -v data_source_name="Northern Ireland BSO Primary Care" \
+            -v source_notes="Official OpenDataNI/Business Services Organisation active GP practices, dental surgeries and ophthalmic surgeries; postcodes resolved through postcodes.io for map placement" \
+            -f scripts/promote-staged-government-registry.sql
+
+      - name: Verify production Northern Ireland source
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='gb_ni_primarycare'")"
+          mapped_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='gb_ni_primarycare' AND country_code='GB' AND lat IS NOT NULL AND lng IS NOT NULL")"
+          gp_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='gb_ni_primarycare' AND 'northern_ireland_gp'=ANY(capability_tags)")"
+          dental_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='gb_ni_primarycare' AND 'northern_ireland_dental_surgery'=ANY(capability_tags)")"
+          oph_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='gb_ni_primarycare' AND 'northern_ireland_ophthalmic_surgery'=ANY(capability_tags)")"
+          [[ "$source_count" == "$REGISTRY_EXPECTED" ]] || { echo "Northern Ireland lineage mismatch ${source_count} vs ${REGISTRY_EXPECTED}" >&2; exit 1; }
+          (( mapped_count >= 350 )) || { echo "Only ${mapped_count} Northern Ireland providers map-renderable" >&2; exit 1; }
+          (( gp_count >= 200 && dental_count >= 100 && oph_count >= 50 )) || { echo "Category validation failed GP=${gp_count} dental=${dental_count} ophthalmic=${oph_count}" >&2; exit 1; }
+          echo "Northern Ireland mapped: total=${mapped_count}, GP=${gp_count}, dental=${dental_count}, ophthalmic=${oph_count}"

@@ -1,0 +1,143 @@
+name: Sync Bosnia domestic healthcare registries
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/sync-bosnia-domestic-healthcare.yml"
+      - "scripts/sync-bosnia-domestic-healthcare.py"
+      - "scripts/promote-staged-government-registry.sql"
+  schedule:
+    - cron: "50 6 * * 4"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bosnia-domestic-healthcare-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Fetch and promote Bosnia domestic healthcare authority lists
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      TARGET_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
+
+    steps:
+      - name: Check out importer
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install sync dependencies
+        run: |
+          python -m pip install --disable-pip-version-check beautifulsoup4 requests pandas xlrd openpyxl
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Validate provider database
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "HEALTHSITES_DATABASE_URL is missing" >&2; exit 1; }
+          echo "::add-mask::${TARGET_DATABASE_URL}"
+          test "$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT to_regclass('public.provider_master_map_view') IS NOT NULL")" = "t"
+
+      - name: Fetch and normalize domestic Bosnia healthcare lists
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/bosnia-domestic
+          python scripts/sync-bosnia-domestic-healthcare.py --output /tmp/bosnia-domestic/provider.tsv
+          test -s /tmp/bosnia-domestic/provider.tsv
+          expected=$(( $(wc -l < /tmp/bosnia-domestic/provider.tsv) - 1 ))
+          distinct_master="$(tail -n +2 /tmp/bosnia-domestic/provider.tsv | cut -f19 | sort -u | wc -l | tr -d ' ')"
+          (( expected >= 55 )) || { echo "Only ${expected} Bosnia domestic-authority providers; refusing promotion" >&2; exit 1; }
+          (( distinct_master >= 45 )) || { echo "Only ${distinct_master} Bosnia canonical providers; refusing promotion" >&2; exit 1; }
+          echo "REGISTRY_EXPECTED=${expected}" >> "$GITHUB_ENV"
+          echo "REGISTRY_EXPECTED_MASTER=${distinct_master}" >> "$GITHUB_ENV"
+
+      - name: Protect against unexpected registry collapse
+        shell: bash
+        run: |
+          set -euo pipefail
+          previous="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='ba_domestic_healthcare'" || echo 0)"
+          previous="${previous:-0}"
+          if (( previous >= 55 )); then
+            minimum=$(( previous * 60 / 100 ))
+            (( REGISTRY_EXPECTED >= minimum )) || {
+              echo "Bosnia domestic source shrank from ${previous} to ${REGISTRY_EXPECTED}; refusing replacement" >&2
+              exit 1
+            }
+          fi
+
+      - name: Stage normalized Bosnia rows
+        shell: bash
+        run: |
+          set -euo pipefail
+          columns="source_record_id,source_url,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,primary_provider_type,capability_tags,quality_score,master_key"
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+            CREATE TABLE IF NOT EXISTS public.source5_import_staging (
+              source_record_id text PRIMARY KEY,
+              source_url text,
+              name text NOT NULL,
+              normalized_name text,
+              address_line1 text,
+              formatted_address text,
+              city text,
+              state_region text,
+              postal_code text,
+              country_code text NOT NULL,
+              lat double precision NOT NULL,
+              lng double precision NOT NULL,
+              phone text,
+              website text,
+              email text,
+              primary_provider_type text,
+              capability_tags text[] NOT NULL DEFAULT ARRAY[]::text[],
+              quality_score numeric,
+              master_key text NOT NULL
+            );
+            TRUNCATE public.source5_import_staging;
+          "
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "\\copy public.source5_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" \
+            < /tmp/bosnia-domestic/provider.tsv
+          actual="$(psql "$TARGET_DATABASE_URL" -Atqc 'SELECT count(*) FROM public.source5_import_staging')"
+          [[ "$actual" == "$REGISTRY_EXPECTED" ]] || { echo "Staging mismatch ${actual} vs ${REGISTRY_EXPECTED}" >&2; exit 1; }
+
+      - name: Promote Bosnia into canonical registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$TARGET_DATABASE_URL" \
+            -v ON_ERROR_STOP=1 \
+            -v expected="$REGISTRY_EXPECTED" \
+            -v expected_master="$REGISTRY_EXPECTED_MASTER" \
+            -v source_key="ba_domestic_healthcare" \
+            -v country_code="BA" \
+            -v source_prefix_pattern="ba-domestic:%" \
+            -v source_display_name="Bosnia & Herzegovina — Domestic Healthcare Authorities" \
+            -v data_source_name="Bosnia Domestic Healthcare Authorities" \
+            -v source_notes="Composite official domestic healthcare layer built from competent Bosnia and Herzegovina authorities: FZO Republika Srpska institution register, FZO Brčko contracted institutions, HNŽ/K contracted institutions, USK healthcare institutions, and BPK Goražde contracted institutions. Foreign contracted facilities are excluded from the Bosnia map layer." \
+            -f scripts/promote-staged-government-registry.sql
+
+      - name: Verify production Bosnia source
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='ba_domestic_healthcare'")"
+          mapped_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='ba_domestic_healthcare' AND country_code='BA' AND lat IS NOT NULL AND lng IS NOT NULL")"
+          [[ "$source_count" == "$REGISTRY_EXPECTED" ]] || { echo "Bosnia lineage mismatch ${source_count} vs ${REGISTRY_EXPECTED}" >&2; exit 1; }
+          (( mapped_count >= 45 )) || { echo "Only ${mapped_count} Bosnia providers map-renderable" >&2; exit 1; }
+          echo "Bosnia domestic source records: ${source_count}"
+          echo "Bosnia domestic map-renderable providers: ${mapped_count}"

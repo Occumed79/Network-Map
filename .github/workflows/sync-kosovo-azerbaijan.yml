@@ -1,0 +1,174 @@
+name: Sync Kosovo and Azerbaijan healthcare registries
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/sync-kosovo-azerbaijan.yml"
+      - "scripts/sync-kosovo-healthcare.py"
+      - "scripts/sync-azerbaijan-tabib.mjs"
+      - "scripts/promote-staged-government-registry.sql"
+  schedule:
+    - cron: "40 11 3 * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kosovo-azerbaijan-provider-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync Kosovo MOH and Azerbaijan TABIB facilities
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      TARGET_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
+
+    steps:
+      - name: Check out importer
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install sync dependencies
+        run: |
+          python -m pip install --disable-pip-version-check requests openpyxl
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Validate provider database and prepare staging
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "HEALTHSITES_DATABASE_URL is missing" >&2; exit 1; }
+          echo "::add-mask::${TARGET_DATABASE_URL}"
+          test "$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT to_regclass('public.provider_master_map_view') IS NOT NULL")" = "t"
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+            CREATE TABLE IF NOT EXISTS public.source5_import_staging (
+              source_record_id text PRIMARY KEY,
+              source_url text,
+              name text NOT NULL,
+              normalized_name text,
+              address_line1 text,
+              formatted_address text,
+              city text,
+              state_region text,
+              postal_code text,
+              country_code text NOT NULL,
+              lat double precision NOT NULL,
+              lng double precision NOT NULL,
+              phone text,
+              website text,
+              email text,
+              primary_provider_type text,
+              capability_tags text[] NOT NULL DEFAULT ARRAY[]::text[],
+              quality_score numeric,
+              master_key text NOT NULL
+            );
+          "
+          mkdir -p /tmp/europe-finish
+
+      - name: Normalize Kosovo licensed private healthcare institutions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/sync-kosovo-healthcare.py --output /tmp/europe-finish/kosovo.tsv
+          test -s /tmp/europe-finish/kosovo.tsv
+          expected=$(( $(wc -l < /tmp/europe-finish/kosovo.tsv) - 1 ))
+          distinct_master="$(tail -n +2 /tmp/europe-finish/kosovo.tsv | cut -f19 | sort -u | wc -l | tr -d ' ')"
+          (( expected >= 40 )) || { echo "Only ${expected} map-renderable Kosovo licensed institutions; refusing promotion" >&2; exit 1; }
+          (( distinct_master >= 35 )) || { echo "Only ${distinct_master} Kosovo canonical institutions; refusing promotion" >&2; exit 1; }
+          previous="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='xk_moh_private_licensed'" || echo 0)"
+          previous="${previous:-0}"
+          if (( previous >= 40 )); then
+            minimum=$(( previous * 60 / 100 ))
+            (( expected >= minimum )) || { echo "Kosovo source shrank from ${previous} to ${expected}; refusing replacement" >&2; exit 1; }
+          fi
+          echo "KOSOVO_EXPECTED=${expected}" >> "$GITHUB_ENV"
+          echo "KOSOVO_MASTER=${distinct_master}" >> "$GITHUB_ENV"
+
+      - name: Promote Kosovo healthcare registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          columns="source_record_id,source_url,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,primary_provider_type,capability_tags,quality_score,master_key"
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "TRUNCATE public.source5_import_staging;"
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "\\copy public.source5_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" \
+            < /tmp/europe-finish/kosovo.tsv
+          psql "$TARGET_DATABASE_URL" \
+            -v ON_ERROR_STOP=1 \
+            -v expected="$KOSOVO_EXPECTED" \
+            -v expected_master="$KOSOVO_MASTER" \
+            -v source_key="xk_moh_private_licensed" \
+            -v country_code="XK" \
+            -v source_prefix_pattern="xk-moh:%" \
+            -v source_display_name="Kosovo Ministry of Health — Licensed Private Healthcare Institutions" \
+            -v data_source_name="Kosovo MOH Licensed Private Institutions" \
+            -v source_notes="Official Kosovo Ministry of Health licensed private healthcare institution workbook (2021-2026); addresses normalized and geocoded server-side for map placement" \
+            -f scripts/promote-staged-government-registry.sql
+
+      - name: Normalize Azerbaijan TABIB healthcare institutions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --max-old-space-size=4096 scripts/sync-azerbaijan-tabib.mjs --output /tmp/europe-finish/azerbaijan.tsv
+          test -s /tmp/europe-finish/azerbaijan.tsv
+          expected=$(( $(wc -l < /tmp/europe-finish/azerbaijan.tsv) - 1 ))
+          distinct_master="$(tail -n +2 /tmp/europe-finish/azerbaijan.tsv | cut -f19 | sort -u | wc -l | tr -d ' ')"
+          (( expected >= 100 )) || { echo "Only ${expected} map-renderable Azerbaijan TABIB institutions; refusing promotion" >&2; exit 1; }
+          (( distinct_master >= 80 )) || { echo "Only ${distinct_master} Azerbaijan canonical institutions; refusing promotion" >&2; exit 1; }
+          previous="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='az_tabib_healthcare'" || echo 0)"
+          previous="${previous:-0}"
+          if (( previous >= 100 )); then
+            minimum=$(( previous * 60 / 100 ))
+            (( expected >= minimum )) || { echo "Azerbaijan source shrank from ${previous} to ${expected}; refusing replacement" >&2; exit 1; }
+          fi
+          echo "AZ_EXPECTED=${expected}" >> "$GITHUB_ENV"
+          echo "AZ_MASTER=${distinct_master}" >> "$GITHUB_ENV"
+
+      - name: Promote Azerbaijan TABIB healthcare registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          columns="source_record_id,source_url,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,primary_provider_type,capability_tags,quality_score,master_key"
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "TRUNCATE public.source5_import_staging;"
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "\\copy public.source5_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" \
+            < /tmp/europe-finish/azerbaijan.tsv
+          psql "$TARGET_DATABASE_URL" \
+            -v ON_ERROR_STOP=1 \
+            -v expected="$AZ_EXPECTED" \
+            -v expected_master="$AZ_MASTER" \
+            -v source_key="az_tabib_healthcare" \
+            -v country_code="AZ" \
+            -v source_prefix_pattern="az-tabib:%" \
+            -v source_display_name="Azerbaijan TABIB — Public Medical Institutions" \
+            -v data_source_name="Azerbaijan TABIB Medical Institutions" \
+            -v source_notes="Official Azerbaijan IDDA Open Data Portal TABIB direct and subordinate medical-institution datasets; combined and deduplicated with map geocoding" \
+            -f scripts/promote-staged-government-registry.sql
+
+      - name: Verify Kosovo and Azerbaijan production sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          kosovo="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='xk_moh_private_licensed' AND country_code='XK' AND lat IS NOT NULL AND lng IS NOT NULL")"
+          azerbaijan="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='az_tabib_healthcare' AND country_code='AZ' AND lat IS NOT NULL AND lng IS NOT NULL")"
+          (( kosovo >= 35 )) || { echo "Only ${kosovo} Kosovo institutions map-renderable" >&2; exit 1; }
+          (( azerbaijan >= 80 )) || { echo "Only ${azerbaijan} Azerbaijan TABIB institutions map-renderable" >&2; exit 1; }
+          echo "Kosovo licensed private institutions: ${kosovo}"
+          echo "Azerbaijan TABIB facilities: ${azerbaijan}"

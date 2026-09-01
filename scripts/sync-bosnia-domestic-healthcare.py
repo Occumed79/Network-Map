@@ -19,7 +19,6 @@ from bs4 import BeautifulSoup
 USER_AGENT = "Occu-Med-Network-Map/1.0 (+https://github.com/Occumed79/Network-Map)"
 NOMINATIM = "https://nominatim.openstreetmap.org/search"
 RS_CATALOG = "https://zdravstvo-srpske.org/sa-kim-fzo-ima-potpisan-ugovor/cjenovnici-i-sifarnici/"
-RS_PDF_FALLBACK = "https://zdravstvo-srpske.org/wp-content/uploads/2025/11/szustanova.pdf"
 BRCKO = "https://fzobrcko.ba/ugovorne-zdravstvene-ustanove"
 HNZ = "https://www.zzo.ba/hr/ugovorne-zdravstvene-ustanove"
 USK = "https://www.zzousk.ba/zdravstvene-ustanove"
@@ -127,18 +126,38 @@ def discover_rs_workbook():
     candidates = []
     for anchor in soup.find_all("a", href=True):
         href = urljoin(RS_CATALOG, anchor["href"])
-        lower_href = href.lower()
-        if not re.search(r"\.xlsx?(?:\?|$)", lower_href):
+        if not re.search(r"\.xlsx?(?:\?|$)", href.lower()):
             continue
-        context = clean(anchor.parent.get_text(" ", strip=True) if anchor.parent else anchor.get_text(" ", strip=True))
+
+        contexts = []
+        node = anchor
+        for _ in range(6):
+            if node is None:
+                break
+            text = clean(node.get_text(" ", strip=True))
+            if text and text not in contexts:
+                contexts.append(text)
+            node = node.parent
+        context = " ".join(contexts)
+        normalized_context = norm(context)
+
         score = 0
-        if "ustanov" in norm(context) or "ustanov" in norm(href): score += 10
-        if "spisak" in norm(context): score += 5
+        if "zdravstven" in normalized_context and "ustanov" in normalized_context:
+            score += 20
+        elif "ustanov" in normalized_context:
+            score += 10
+        if "spisak" in normalized_context:
+            score += 5
+        if "2026" in normalized_context:
+            score += 3
+        if "sifre zu" in norm(href) or "sifre zu i apoteka" in norm(href):
+            score += 8
         candidates.append((score, href))
+
     if not candidates:
         raise RuntimeError("FZO RS catalog did not expose the healthcare-institution XLS link")
-    candidates.sort(reverse=True)
-    if candidates[0][0] < 10:
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    if candidates[0][0] < 20:
         raise RuntimeError("FZO RS XLS candidates were found, but none matched the healthcare-institution list")
     return candidates[0][1]
 
@@ -167,8 +186,10 @@ def scrape_rs(records):
         code = ""
         branch = ""
         for value in values[:name_col]:
-            if re.fullmatch(r"\d{4}", value): code = value
-            elif re.fullmatch(r"\d{1,2}", value): branch = value
+            if re.fullmatch(r"\d{4}", value):
+                code = value
+            elif re.fullmatch(r"\d{1,2}", value):
+                branch = value
         add_record(records, "fzo-rs", workbook_url, name, city=infer_city(name), source_code=f"{branch}:{code}" if code else "")
         parsed += 1
     if parsed < 40:
@@ -186,7 +207,7 @@ def table_rows(url):
 
 def scrape_hnz(records):
     count = 0
-    for tr, cells in table_rows(HNZ):
+    for _, cells in table_rows(HNZ):
         if len(cells) < 4 or "zdravstvena ustanova" in norm(cells[0]):
             continue
         name, contact, address, phone = cells[0], cells[1], cells[2], cells[3]
@@ -258,7 +279,12 @@ def geocode(record):
     queries.append(", ".join(x for x in [record["name"], record["city"], "Bosnia and Herzegovina"] if x))
     for query in dict.fromkeys(queries):
         try:
-            response = requests.get(NOMINATIM, params={"format": "jsonv2", "addressdetails": 1, "limit": 1, "countrycodes": "ba", "q": query}, timeout=45, headers={"User-Agent": USER_AGENT, "Accept-Language": "bs,hr,sr,en"})
+            response = requests.get(
+                NOMINATIM,
+                params={"format": "jsonv2", "addressdetails": 1, "limit": 1, "countrycodes": "ba", "q": query},
+                timeout=45,
+                headers={"User-Agent": USER_AGENT, "Accept-Language": "bs,hr,sr,en"},
+            )
             response.raise_for_status()
             payload = response.json()
         except Exception:
@@ -272,7 +298,8 @@ def geocode(record):
             continue
         address = item.get("address") or {}
         return {
-            "lat": lat, "lng": lng,
+            "lat": lat,
+            "lng": lng,
             "city": clean(address.get("city") or address.get("town") or address.get("village") or address.get("municipality") or record["city"]),
             "region": clean(address.get("state") or address.get("county")),
             "postal": clean(address.get("postcode")),
@@ -335,9 +362,14 @@ def main():
     skipped_path = output.with_suffix(".skipped.json")
     skipped_path.write_text(json.dumps(skipped, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({
-        "source": "ba_domestic_healthcare", "official_sources": source_counts, "rs_workbook": rs_url,
-        "parsed_unique": len(records), "map_rows": len(rows), "skipped_unplaced": len(skipped),
-        "output": str(output), "skipped_output": str(skipped_path),
+        "source": "ba_domestic_healthcare",
+        "official_sources": source_counts,
+        "rs_workbook": rs_url,
+        "parsed_unique": len(records),
+        "map_rows": len(rows),
+        "skipped_unplaced": len(skipped),
+        "output": str(output),
+        "skipped_output": str(skipped_path),
     }, ensure_ascii=False))
 
 

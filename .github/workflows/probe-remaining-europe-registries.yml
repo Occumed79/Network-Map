@@ -1,0 +1,101 @@
+name: Probe remaining Europe registry interfaces
+
+on:
+  push:
+    branches:
+      - international-europe-wave-1
+    paths:
+      - ".github/workflows/probe-remaining-europe-registries.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Playwright
+        run: |
+          mkdir -p /tmp/registry-probe
+          cd /tmp/registry-probe
+          npm init -y >/dev/null
+          npm install playwright@1.55.0 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+      - name: Probe rendered registry interfaces
+        working-directory: /tmp/registry-probe
+        run: |
+          node <<'NODE'
+          const { chromium } = require('playwright');
+          const fs = require('fs');
+          const browser = await chromium.launch({headless:true});
+
+          async function probeIceland() {
+            const page = await browser.newPage({locale:'is-IS'});
+            await page.goto('https://vefkerfi.landlaeknir.is/apex/f?p=2600:7', {waitUntil:'domcontentloaded', timeout:90000});
+            await page.waitForTimeout(2500);
+            console.log('ICELAND title=', await page.title());
+            console.log('ICELAND inputs=', await page.locator('input').evaluateAll(els => els.map(e => ({id:e.id,name:e.name,type:e.type,value:e.value,placeholder:e.placeholder})).slice(0,40)));
+            console.log('ICELAND buttons=', await page.locator('button,input[type=submit],input[type=button]').evaluateAll(els => els.map(e => ({tag:e.tagName,id:e.id,name:e.name,type:e.type,text:(e.innerText||e.value||'').trim()})).slice(0,40)));
+            console.log('ICELAND selects=', await page.locator('select').evaluateAll(els => els.map(e => ({id:e.id,name:e.name,options:[...e.options].slice(0,8).map(o=>({text:o.text,value:o.value}))})).slice(0,20)));
+            let clicked = false;
+            for (const loc of [page.getByRole('button', {name:/leita|search/i}), page.locator('input[type=submit]')]) {
+              if (await loc.count()) { try { await loc.first().click(); clicked=true; break; } catch {} }
+            }
+            if (!clicked) {
+              const textInput = page.locator('input[type=text]').first();
+              if (await textInput.count()) { await textInput.press('Enter').catch(()=>{}); }
+            }
+            await page.waitForTimeout(3000);
+            console.log('ICELAND tables=', await page.locator('table').count());
+            console.log('ICELAND rows=', await page.locator('table tr').count());
+            console.log('ICELAND firstRows=', await page.locator('table tr').evaluateAll(rows => rows.slice(0,15).map(r => [...r.querySelectorAll('th,td')].map(c => c.innerText.trim()))));
+            console.log('ICELAND resultLinks=', await page.locator('a').evaluateAll(as => as.filter(a => /2600|rekstr|starfs/i.test((a.href||'')+(a.innerText||''))).slice(0,30).map(a=>({text:a.innerText.trim(),href:a.href}))));
+            fs.writeFileSync('/tmp/registry-probe/iceland.html', await page.content());
+            await page.close();
+          }
+
+          async function probeArmenia() {
+            const page = await browser.newPage({locale:'en-US'});
+            await page.goto('https://www.uhif.am/en/hospitals', {waitUntil:'domcontentloaded', timeout:90000});
+            await page.waitForTimeout(5000);
+            console.log('ARMENIA title=', await page.title());
+            console.log('ARMENIA buttons=', await page.locator('button').evaluateAll(els => els.map(e => (e.innerText||'').trim()).filter(Boolean).slice(0,80)));
+            console.log('ARMENIA headingsBefore=', await page.locator('h2,h3,h4').evaluateAll(els => els.map(e => ({tag:e.tagName,text:e.innerText.trim()})).filter(x=>x.text).slice(0,80)));
+            let loops = 0;
+            while (loops < 100) {
+              const load = page.getByRole('button', {name:/load more/i});
+              if (!(await load.count()) || !(await load.first().isVisible().catch(()=>false))) break;
+              const before = await page.locator('h3,h4').count();
+              await load.first().click().catch(()=>{});
+              await page.waitForTimeout(500);
+              const after = await page.locator('h3,h4').count();
+              loops++;
+              if (after <= before && loops > 2) break;
+            }
+            console.log('ARMENIA loadLoops=', loops);
+            console.log('ARMENIA headingsAfterCount=', await page.locator('h2,h3,h4').count());
+            console.log('ARMENIA headingsAfter=', await page.locator('h2,h3,h4').evaluateAll(els => els.map(e => ({tag:e.tagName,text:e.innerText.trim()})).filter(x=>x.text).slice(0,120)));
+            console.log('ARMENIA cardSamples=', await page.locator('h3,h4').evaluateAll(heads => heads.slice(0,30).map(h => {
+              let n=h; for(let i=0;i<5 && n;i++,n=n.parentElement){ const t=(n.innerText||'').trim(); if(/\+374/.test(t)) return {heading:h.innerText.trim(),tag:h.tagName,text:t.slice(0,700)}; } return {heading:h.innerText.trim(),tag:h.tagName,text:(h.parentElement?.innerText||'').trim().slice(0,700)};
+            })));
+            console.log('ARMENIA links=', await page.locator('a').evaluateAll(as => as.filter(a => /hospital|clinic|medical|map|facility/i.test((a.href||'')+(a.innerText||''))).slice(0,50).map(a=>({text:a.innerText.trim(),href:a.href}))));
+            fs.writeFileSync('/tmp/registry-probe/armenia.html', await page.content());
+            await page.close();
+          }
+
+          try { await probeIceland(); } catch (e) { console.error('ICELAND ERROR', e); process.exitCode=1; }
+          try { await probeArmenia(); } catch (e) { console.error('ARMENIA ERROR', e); process.exitCode=1; }
+          await browser.close();
+          NODE
+      - name: Upload rendered HTML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: remaining-europe-registry-probe
+          path: /tmp/registry-probe/*.html
+          if-no-files-found: warn

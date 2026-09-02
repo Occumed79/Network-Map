@@ -21,19 +21,30 @@ jobs:
           node-version: 22
       - name: Install Playwright
         run: |
-          mkdir -p /tmp/registry-probe
-          cd /tmp/registry-probe
+          rm -rf /tmp/registry-probe-deps /tmp/registry-probe-out
+          mkdir -p /tmp/registry-probe-deps /tmp/registry-probe-out
+          cd /tmp/registry-probe-deps
           npm init -y >/dev/null
           npm install playwright@1.55.0 >/dev/null
           npx playwright install --with-deps chromium >/dev/null
-      - name: Probe Armenia pagination and Iceland CSV export
-        working-directory: /tmp/registry-probe
+      - name: Probe Armenia pagination and Iceland doctor export
+        working-directory: /tmp/registry-probe-deps
         run: |
           node <<'NODE'
           const { chromium } = require('playwright');
           const fs = require('fs');
+          const OUT = '/tmp/registry-probe-out';
 
-          const countMatches = (text, needle) => (text.match(new RegExp(needle, 'g')) || []).length;
+          function parseRscData(text) {
+            for (const line of text.split(/\r?\n/)) {
+              if (!line.startsWith('1:')) continue;
+              try {
+                const value = JSON.parse(line.slice(2));
+                if (value && typeof value === 'object') return value;
+              } catch (_) {}
+            }
+            return null;
+          }
 
           (async () => {
             const browser = await chromium.launch({ headless: true });
@@ -41,6 +52,7 @@ jobs:
             async function probeArmenia() {
               const page = await browser.newPage({ locale: 'en-US' });
               let facilityRequest = null;
+              const languageResponses = [];
 
               page.on('request', req => {
                 if (req.url() !== 'https://www.uhif.am/en/hospitals' || req.method() !== 'POST') return;
@@ -48,6 +60,26 @@ jobs:
                 if (/^\[\{\"page\":1,\"search\":\"\",\"region\":\"\",\"serviceId\":\"\",\"serviceGroupId\":\"\",\"lang\":\"en\"\}\]$/.test(body)) {
                   facilityRequest = { headers: req.headers(), body };
                 }
+              });
+
+              page.on('response', response => {
+                const req = response.request();
+                if (response.url() !== 'https://www.uhif.am/en/hospitals' || req.method() !== 'POST') return;
+                const body = req.postData() || '';
+                if (body !== '["en"]') return;
+                languageResponses.push((async () => {
+                  try {
+                    const text = await response.text();
+                    const parsed = parseRscData(text);
+                    const keys = parsed ? Object.keys(parsed) : [];
+                    const summary = { action: req.headers()['next-action'] || '', status: response.status(), bytes: text.length, keys };
+                    if (parsed?.hospitals) summary.hospitals = parsed.hospitals.length;
+                    if (parsed?.data) summary.data = Array.isArray(parsed.data) ? parsed.data.length : typeof parsed.data;
+                    return summary;
+                  } catch (e) {
+                    return { action: req.headers()['next-action'] || '', error: String(e) };
+                  }
+                })());
               });
 
               await page.goto('https://www.uhif.am/en/hospitals', { waitUntil: 'networkidle', timeout: 90000 });
@@ -59,12 +91,12 @@ jobs:
               const action = headers['next-action'];
               const routerState = headers['next-router-state-tree'];
               if (!action) throw new Error('UHIF facility request did not expose next-action');
-              console.log('ARMENIA ACTION=', action);
+              console.log('ARMENIA SEARCH ACTION=', action);
 
-              for (const pageNum of [1, 2, 10, 56, 57, 58]) {
+              for (const pageNum of [1, 2, 10, 50, 51, 52, 53, 54, 55, 56]) {
                 const response = await page.evaluate(async ({ pageNum, action, routerState }) => {
                   const requestHeaders = {
-                    'accept': 'text/x-component',
+                    accept: 'text/x-component',
                     'content-type': 'text/plain;charset=UTF-8',
                     'next-action': action,
                   };
@@ -76,13 +108,14 @@ jobs:
                   });
                   return { status: r.status, text: await r.text() };
                 }, { pageNum, action, routerState });
-                const hospitalCount = countMatches(response.text, '\\"type\\":\\"hospital\\"');
-                const coordinateCount = countMatches(response.text, '\\"lat\\":');
-                console.log(`ARMENIA PAGE ${pageNum} status=${response.status} bytes=${response.text.length} hospitals=${hospitalCount} coords=${coordinateCount}`);
-                fs.writeFileSync(`/tmp/registry-probe/armenia-page-${pageNum}.txt`, response.text);
+                const parsed = parseRscData(response.text);
+                console.log(`ARMENIA PAGE ${pageNum} status=${response.status} data=${parsed?.data?.length ?? 'NA'} pagination=${JSON.stringify(parsed?.pagination ?? null)}`);
+                fs.writeFileSync(`${OUT}/armenia-page-${pageNum}.txt`, response.text);
               }
 
-              fs.writeFileSync('/tmp/registry-probe/armenia.html', await page.content());
+              const summaries = await Promise.all(languageResponses);
+              console.log('ARMENIA LANGUAGE ACTIONS=', JSON.stringify(summaries, null, 2));
+              fs.writeFileSync(`${OUT}/armenia.html`, await page.content());
               await page.close();
             }
 
@@ -91,18 +124,18 @@ jobs:
               await page.goto('https://vefkerfi.landlaeknir.is/apex/f?p=2600:7', { waitUntil: 'domcontentloaded', timeout: 90000 });
               await page.waitForTimeout(1000);
 
+              await page.selectOption('#P7_STARFSSTETT', 'LK');
+              await page.locator('#P7_ROWS').evaluate(el => { el.value = '5000'; });
               await Promise.all([
                 page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 90000 }),
                 page.click('#leita'),
               ]);
-              await page.waitForTimeout(1500);
+              await page.waitForTimeout(1800);
 
               const body = await page.locator('body').innerText();
-              const tables = await page.locator('table').count();
-              const rows = await page.locator('table tr').count();
-              const cells = await page.locator('td').count();
-              console.log(`ICELAND SEARCH tables=${tables} rows=${rows} cells=${cells} bodyBytes=${body.length}`);
-              console.log('ICELAND TABLE SAMPLE=', (await page.locator('table').allTextContents()).slice(0, 4));
+              console.log(`ICELAND DOCTOR SEARCH bodyBytes=${body.length}`);
+              console.log('ICELAND BODY SAMPLE=', body.slice(0, 12000));
+              console.log('ICELAND tables=', await page.locator('table').count(), 'rows=', await page.locator('table tr').count());
 
               const controls = await page.locator('button,a,input').evaluateAll(els => els.map(e => ({
                 tag: e.tagName,
@@ -112,36 +145,36 @@ jobs:
                 text: (e.innerText || e.value || '').trim(),
                 href: e.href || '',
                 onclick: e.getAttribute('onclick') || '',
-              })).filter(x => /csv|hlaða|niður|download/i.test(`${x.id} ${x.title} ${x.text} ${x.href} ${x.onclick}`)));
-              console.log('ICELAND DOWNLOAD CONTROLS=', JSON.stringify(controls, null, 2));
+                aria: e.getAttribute('aria-label') || '',
+                className: typeof e.className === 'string' ? e.className : '',
+              })).filter(x => /csv|hlaða|niður|download|export/i.test(`${x.id} ${x.title} ${x.text} ${x.href} ${x.onclick} ${x.aria} ${x.className}`)));
+              console.log('ICELAND EXPORT CONTROLS=', JSON.stringify(controls, null, 2));
 
-              const html = await page.content();
-              fs.writeFileSync('/tmp/registry-probe/iceland-search.html', html);
-
-              const candidates = page.locator('button,a').filter({ hasText: /Hlaða niður/i });
-              const titleCandidates = page.locator('[title*="csv" i], [aria-label*="csv" i], [title*="Hlaða" i], [aria-label*="Hlaða" i]');
+              const likely = page.locator('button,a,[role="button"]').filter({ hasText: /Hlaða niður|csv|export/i });
+              const titled = page.locator('[title*="csv" i], [aria-label*="csv" i], [title*="Hlaða" i], [aria-label*="Hlaða" i], [title*="export" i], [aria-label*="export" i]');
               let target = null;
-              if (await candidates.count()) target = candidates.first();
-              else if (await titleCandidates.count()) target = titleCandidates.first();
+              if (await likely.count()) target = likely.first();
+              else if (await titled.count()) target = titled.first();
 
               if (target) {
-                console.log('ICELAND DOWNLOAD TARGET=', await target.evaluate(e => ({ tag:e.tagName,id:e.id,title:e.title,text:(e.innerText||'').trim(),href:e.href||'',onclick:e.getAttribute('onclick')||'' })));
+                const targetInfo = await target.evaluate(e => ({ tag:e.tagName,id:e.id,title:e.title,text:(e.innerText||'').trim(),href:e.href||'',onclick:e.getAttribute('onclick')||'',aria:e.getAttribute('aria-label')||'' }));
+                console.log('ICELAND EXPORT TARGET=', targetInfo);
                 try {
                   const downloadPromise = page.waitForEvent('download', { timeout: 30000 });
                   await target.click();
                   const download = await downloadPromise;
-                  const filePath = '/tmp/registry-probe/' + (download.suggestedFilename() || 'iceland.csv');
+                  const filePath = `${OUT}/${download.suggestedFilename() || 'iceland.csv'}`;
                   await download.saveAs(filePath);
                   console.log('ICELAND DOWNLOADED=', filePath);
-                  const sample = fs.readFileSync(filePath).toString('utf8').slice(0, 5000);
-                  console.log('ICELAND CSV SAMPLE=', sample);
+                  console.log('ICELAND CSV SAMPLE=', fs.readFileSync(filePath).toString('utf8').slice(0, 10000));
                 } catch (e) {
-                  console.log('ICELAND DOWNLOAD CLICK FAILED=', String(e));
+                  console.log('ICELAND EXPORT CLICK FAILED=', String(e));
                 }
               } else {
-                console.log('ICELAND DOWNLOAD TARGET=none');
+                console.log('ICELAND EXPORT TARGET=none');
               }
 
+              fs.writeFileSync(`${OUT}/iceland-doctors.html`, await page.content());
               await page.close();
             }
 
@@ -155,5 +188,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: remaining-europe-registry-probe
-          path: /tmp/registry-probe/*
+          path: /tmp/registry-probe-out/*
           if-no-files-found: warn

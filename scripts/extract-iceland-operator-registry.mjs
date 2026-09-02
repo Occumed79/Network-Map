@@ -8,6 +8,8 @@ const REGISTRY_URL = "https://vefkerfi.landlaeknir.is/apex/f?p=2600:7";
 const OUTPUT_TITLE = "Hlaða niður (.csv)";
 const SEARCH_BUTTON = "#leita";
 const PROFESSION_SELECT = "#P7_STARFSSTETT";
+const REPORT_REGION = "#R23585399921957877";
+const WORKPLACE_CELLS = `${REPORT_REGION} td[headers="ADSETUR"]`;
 
 function argument(name, fallback = "") {
   const index = process.argv.indexOf(`--${name}`);
@@ -86,9 +88,31 @@ function csvField(value) {
   return `"${encoded}"`;
 }
 
-function resultCount(bodyText) {
+function numericResultCount(bodyText) {
   const match = String(bodyText).match(/Niðurstaða leitar:\s*\d+\s*-\s*\d+\s*af\s*(\d+)/iu);
   return match ? Number(match[1]) : null;
+}
+
+async function verifiedResultCount(page, bodyText, profession) {
+  const numeric = numericResultCount(bodyText);
+  if (Number.isInteger(numeric) && numeric >= 0) return numeric;
+
+  // APEX does not render a numeric "0 results" pagination string for an empty
+  // profession. Accept zero only when the submitted profession remains selected,
+  // the official report region rendered successfully, and it contains no
+  // workplace result cells. This prevents treating a navigation/source failure
+  // as a legitimate empty registry slice.
+  const selected = await page.inputValue(PROFESSION_SELECT).catch(() => "");
+  const regionCount = await page.locator(REPORT_REGION).count();
+  const workplaceCells = await page.locator(WORKPLACE_CELLS).count();
+  const fatalAlerts = await page.locator(".t-Alert--danger,.a-Alert--danger,.t-Alert--warning").allTextContents().catch(() => []);
+  const fatalText = fatalAlerts.map(clean).filter(Boolean).join(" | ");
+
+  if (selected === profession.value && regionCount === 1 && workplaceCells === 0 && !fatalText) {
+    return 0;
+  }
+
+  throw new Error(`Could not determine the Directorate result count for ${profession.label} (${profession.value}); selected=${selected} region=${regionCount} workplaceCells=${workplaceCells} alerts=${fatalText || "none"}`);
 }
 
 async function openSearch(page, professionValue) {
@@ -134,10 +158,7 @@ try {
     const slug = `${String(index + 1).padStart(2, "0")}-${profession.value}`;
     await openSearch(page, profession.value);
     const bodyText = await page.locator("body").innerText();
-    const expected = resultCount(bodyText);
-    if (!Number.isInteger(expected) || expected < 0) {
-      throw new Error(`Could not determine the Directorate result count for ${profession.label} (${profession.value})`);
-    }
+    const expected = await verifiedResultCount(page, bodyText, profession);
 
     if (expected === 0) {
       const visibleRows = await page.locator("table tr").count();

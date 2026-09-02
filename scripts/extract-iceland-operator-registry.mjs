@@ -68,8 +68,6 @@ function parseDelimited(text, delimiter = ";") {
 }
 
 function decodeRegistryCsv(bytes) {
-  // The Directorate export currently uses ISO-8859-1. TextDecoder's latin1
-  // alias preserves the Icelandic characters correctly for this export.
   return new TextDecoder("iso-8859-1").decode(bytes);
 }
 
@@ -97,11 +95,6 @@ async function verifiedResultCount(page, bodyText, profession) {
   const numeric = numericResultCount(bodyText);
   if (Number.isInteger(numeric) && numeric >= 0) return numeric;
 
-  // APEX does not render a numeric "0 results" pagination string for an empty
-  // profession. Accept zero only when the submitted profession remains selected,
-  // the official report region rendered successfully, and it contains no
-  // workplace result cells. This prevents treating a navigation/source failure
-  // as a legitimate empty registry slice.
   const selected = await page.inputValue(PROFESSION_SELECT).catch(() => "");
   const regionCount = await page.locator(REPORT_REGION).count();
   const workplaceCells = await page.locator(WORKPLACE_CELLS).count();
@@ -115,15 +108,52 @@ async function verifiedResultCount(page, bodyText, profession) {
   throw new Error(`Could not determine the Directorate result count for ${profession.label} (${profession.value}); selected=${selected} region=${regionCount} workplaceCells=${workplaceCells} alerts=${fatalText || "none"}`);
 }
 
+async function searchStateReady(page, professionValue) {
+  if (page.isClosed()) return false;
+  try {
+    const selected = await page.inputValue(PROFESSION_SELECT, { timeout: 10_000 });
+    const regionCount = await page.locator(REPORT_REGION).count();
+    return selected === professionValue && regionCount === 1;
+  } catch (_) {
+    return false;
+  }
+}
+
 async function openSearch(page, professionValue) {
-  await page.goto(REGISTRY_URL, { waitUntil: "domcontentloaded", timeout: 90_000 });
-  await page.waitForTimeout(700);
-  await page.selectOption(PROFESSION_SELECT, professionValue);
-  await Promise.all([
-    page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 90_000 }),
-    page.click(SEARCH_BUTTON),
-  ]);
-  await page.waitForTimeout(700);
+  let lastError = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      await page.goto(REGISTRY_URL, { waitUntil: "domcontentloaded", timeout: 90_000 });
+      await page.waitForTimeout(700);
+      await page.selectOption(PROFESSION_SELECT, professionValue);
+
+      const navigation = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 90_000 });
+      await page.click(SEARCH_BUTTON);
+      try {
+        await navigation;
+      } catch (error) {
+        lastError = error;
+        // Oracle APEX occasionally aborts the browser's tracked navigation while
+        // completing the form post successfully. Validate the resulting page
+        // state before deciding it was a real failure.
+        await page.waitForTimeout(1400).catch(() => {});
+        if (await searchStateReady(page, professionValue)) {
+          console.log(JSON.stringify({ apexNavigationRecovered: true, professionValue, attempt, error: String(error) }));
+          return;
+        }
+        throw error;
+      }
+
+      await page.waitForTimeout(700);
+      if (await searchStateReady(page, professionValue)) return;
+      throw new Error(`APEX search returned without the selected profession/report state (${professionValue})`);
+    } catch (error) {
+      lastError = error;
+      console.warn(JSON.stringify({ apexSearchRetry: true, professionValue, attempt, error: String(error) }));
+      if (attempt < 3) await page.waitForTimeout(900 * attempt).catch(() => {});
+    }
+  }
+  throw new Error(`Iceland APEX search failed after 3 attempts for ${professionValue}: ${String(lastError)}`);
 }
 
 async function downloadCurrentExport(page, tempDir, slug) {

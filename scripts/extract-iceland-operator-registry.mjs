@@ -127,11 +127,17 @@ async function openSearch(page, professionValue) {
       await page.waitForTimeout(700);
       await page.selectOption(PROFESSION_SELECT, professionValue);
 
-      const navigation = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 90_000 });
+      // Attach rejection handling immediately. Oracle APEX sometimes aborts the
+      // browser's tracked navigation even though the form post completes; if the
+      // rejection is left bare until after click(), Node can treat it as an
+      // unhandled rejection before this function has a chance to validate state.
+      const navigation = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 90_000 })
+        .then(() => ({ ok: true, error: null }))
+        .catch((error) => ({ ok: false, error }));
       await page.click(SEARCH_BUTTON);
-      try {
-        await navigation;
-      } catch (error) {
+      const navigationResult = await navigation;
+      if (!navigationResult.ok) {
+        const error = navigationResult.error;
         lastError = error;
         // Oracle APEX occasionally aborts the browser's tracked navigation while
         // completing the form post successfully. Validate the resulting page

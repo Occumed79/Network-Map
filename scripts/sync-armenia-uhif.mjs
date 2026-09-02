@@ -9,8 +9,36 @@ const DIRECTORY_URL = "https://www.uhif.am/en/hospitals";
 const COUNTRY_CODE = "AM";
 const COUNTRY_NAME = "Armenia";
 const MIN_FACILITIES = 500;
-const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
-const USER_AGENT = "Occu-Med-Network-Map/1.0 (+https://github.com/Occumed79/Network-Map)";
+
+// UHIF currently publishes malformed coordinates for exactly these two stable facility IDs.
+// Corrections are pinned to the official UHIF address and independently verified against
+// exact-address map records. No other invalid coordinate is allowed through this importer.
+const VERIFIED_COORDINATE_CORRECTIONS = new Map([
+  [
+    "cmpktazp300000bjbtpc6ad52",
+    {
+      expectedName: "Sole Proprietor Petros Petrosyan",
+      expectedAddress: "Yerevanian Highway 107/1",
+      expectedCommunity: "Gyumri",
+      expectedRegion: "Shirak",
+      lat: 40.769079,
+      lng: 43.846254,
+      verificationUrl: "https://2gis.am/gyumri/directions/points/%7C43.846254%2C40.769079%3B70030076832040043",
+    },
+  ],
+  [
+    "cmpwow4vm000204jr6ay66ihr",
+    {
+      expectedName: "Dclinic Group",
+      expectedAddress: "Margaryan 6/1",
+      expectedCommunity: "HAT",
+      expectedRegion: "Yerevan",
+      lat: 40.207535,
+      lng: 44.477683,
+      verificationUrl: "https://yandex.com/maps/10262/yerevan/house/margaryan_poghots_6_1/YE0YcgBnT00EQFpqfX5xdnlgYA%3D%3D/",
+    },
+  ],
+]);
 
 const COLUMNS = [
   "source_record_id", "source_url", "name", "normalized_name", "address_line1",
@@ -29,7 +57,6 @@ if (!outputPath) throw new Error("--output is required");
 
 const text = (value) => value === null || value === undefined ? "" : String(value).trim();
 const hash = (value) => createHash("sha256").update(String(value)).digest("hex");
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function normalizedKey(value) {
   return text(value)
@@ -93,38 +120,27 @@ function headingTotal(headings) {
   return null;
 }
 
-async function geocodeFallback(facility) {
-  const name = text(facility?.name);
-  const address = text(facility?.address);
-  const community = text(facility?.community);
-  const region = text(facility?.region);
-  const queries = [
-    [address, community, region, COUNTRY_NAME],
-    [name, address, community, region, COUNTRY_NAME],
-    [name, community, region, COUNTRY_NAME],
-  ].map((parts) => parts.filter(Boolean).join(", ")).filter(Boolean);
+function verifiedCorrection(facility) {
+  const facilityId = text(facility?.id);
+  const correction = VERIFIED_COORDINATE_CORRECTIONS.get(facilityId);
+  if (!correction) return null;
 
-  for (const query of [...new Set(queries)]) {
-    const url = new URL(NOMINATIM_URL);
-    url.searchParams.set("format", "jsonv2");
-    url.searchParams.set("limit", "1");
-    url.searchParams.set("countrycodes", "am");
-    url.searchParams.set("q", query);
-    try {
-      const response = await fetch(url, {
-        headers: { "User-Agent": USER_AGENT, "Accept-Language": "en,hy" },
-      });
-      if (response.ok) {
-        const payload = await response.json();
-        const item = Array.isArray(payload) ? payload[0] : null;
-        const lat = Number(item?.lat);
-        const lng = Number(item?.lon);
-        if (validCoordinates(lat, lng)) return { lat, lng, query };
-      }
-    } catch (_) {}
-    await sleep(1100);
+  const actualName = normalizedKey(facility?.name);
+  const actualAddress = normalizedKey(facility?.address);
+  const actualCommunity = normalizedKey(facility?.community);
+  const actualRegion = normalizedKey(facility?.region);
+  if (
+    actualName !== normalizedKey(correction.expectedName)
+    || actualAddress !== normalizedKey(correction.expectedAddress)
+    || actualCommunity !== normalizedKey(correction.expectedCommunity)
+    || actualRegion !== normalizedKey(correction.expectedRegion)
+  ) {
+    throw new Error(`UHIF correction guard failed for ${facilityId}: source identity/address changed; manual re-verification required`);
   }
-  return null;
+  if (!validCoordinates(correction.lat, correction.lng)) {
+    throw new Error(`Verified correction for ${facilityId} is outside Armenia bounds`);
+  }
+  return correction;
 }
 
 async function replayLanguageAction(page, action, routerState) {
@@ -205,8 +221,9 @@ try {
 
   const rows = new Map();
   let unnamed = 0;
-  let fallbackGeocoded = 0;
-  const unresolved = [];
+  let correctedCoordinates = 0;
+  const unresolvedInvalidCoordinates = [];
+  const correctionsSeen = new Set();
 
   for (const facility of facilities) {
     const facilityId = text(facility?.id);
@@ -220,17 +237,34 @@ try {
     let lng = Number(facility?.lng);
     let coordinateSource = "uhif";
     if (!validCoordinates(lat, lng)) {
-      console.log(JSON.stringify({ missingOfficialCoordinates: true, id: facilityId, name, address: facility?.address, community: facility?.community, region: facility?.region, lat: facility?.lat, lng: facility?.lng }));
-      const fallback = await geocodeFallback(facility);
-      if (!fallback) {
-        unresolved.push({ id: facilityId, name, address: text(facility?.address), community: text(facility?.community), region: text(facility?.region) });
+      const correction = verifiedCorrection(facility);
+      if (!correction) {
+        unresolvedInvalidCoordinates.push({
+          id: facilityId,
+          name,
+          address: text(facility?.address),
+          community: text(facility?.community),
+          region: text(facility?.region),
+          lat: facility?.lat,
+          lng: facility?.lng,
+        });
         continue;
       }
-      lat = fallback.lat;
-      lng = fallback.lng;
-      coordinateSource = "nominatim_fallback";
-      fallbackGeocoded += 1;
-      console.log(JSON.stringify({ fallbackGeocoded: true, id: facilityId, name, query: fallback.query, lat, lng }));
+      lat = correction.lat;
+      lng = correction.lng;
+      coordinateSource = "address_verified_correction";
+      correctedCoordinates += 1;
+      correctionsSeen.add(facilityId);
+      console.log(JSON.stringify({
+        coordinateCorrectionApplied: true,
+        id: facilityId,
+        name,
+        sourceLat: facility?.lat,
+        sourceLng: facility?.lng,
+        correctedLat: lat,
+        correctedLng: lng,
+        verificationUrl: correction.verificationUrl,
+      }));
     }
 
     const address = text(facility?.address);
@@ -238,7 +272,9 @@ try {
     const community = text(facility?.community);
     const phone = text(facility?.phone);
     const classification = classify(name);
-    const tags = coordinateSource === "uhif" ? classification.tags : [...classification.tags, "coordinate_source:nominatim_fallback"];
+    const tags = coordinateSource === "uhif"
+      ? classification.tags
+      : [...classification.tags, "coordinate_source:address_verified_correction"];
     const formatted = [address, community, region, COUNTRY_NAME]
       .filter(Boolean)
       .filter((value, index, all) => all.findIndex((candidate) => normalizedKey(candidate) === normalizedKey(value)) === index)
@@ -255,12 +291,17 @@ try {
     rows.set(sourceId, [
       sourceId, DIRECTORY_URL, name, normalizedKey(name), address, formatted,
       community || region, region, "", COUNTRY_CODE, lat, lng, phone, "", "",
-      classification.primary, postgresArray(tags), coordinateSource === "uhif" ? 0.995 : 0.985, masterKey,
+      classification.primary, postgresArray(tags), coordinateSource === "uhif" ? 0.995 : 0.99, masterKey,
     ]);
   }
 
   if (unnamed !== 0) throw new Error(`${unnamed} UHIF facilities lacked a stable id or name; refusing incomplete output`);
-  if (unresolved.length !== 0) throw new Error(`UHIF coordinate fallback failed for ${JSON.stringify(unresolved)}`);
+  if (unresolvedInvalidCoordinates.length !== 0) {
+    throw new Error(`UHIF published new/unverified invalid coordinates: ${JSON.stringify(unresolvedInvalidCoordinates)}`);
+  }
+  if (correctionsSeen.size !== VERIFIED_COORDINATE_CORRECTIONS.size) {
+    throw new Error(`Expected ${VERIFIED_COORDINATE_CORRECTIONS.size} known UHIF coordinate corrections but applied ${correctionsSeen.size}; re-verify source changes before promotion`);
+  }
   if (rows.size !== reportedTotal) throw new Error(`UHIF output guard failed: ${rows.size} unique map rows vs ${reportedTotal} official facilities`);
 
   const sorted = [...rows.values()].sort((a, b) => String(a[2]).localeCompare(String(b[2])) || String(a[0]).localeCompare(String(b[0])));
@@ -272,7 +313,7 @@ try {
     officialFacilityTotal: reportedTotal,
     mapPayloadFacilities: facilities.length,
     mapRows: sorted.length,
-    fallbackGeocoded,
+    correctedCoordinates,
     discoveredLanguageActions: languageActions.size,
     payloadActionDiscoveredDynamically: Boolean(captured.action),
     payloadBytes: captured.bytes,

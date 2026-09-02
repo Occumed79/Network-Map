@@ -1,0 +1,48 @@
+name: Probe Iceland Directorate operator registry source
+
+on:
+  push:
+    branches:
+      - international-europe-wave-1
+    paths:
+      - ".github/workflows/probe-iceland-operator-registry-source.yml"
+      - "scripts/extract-iceland-operator-registry.mjs"
+
+permissions:
+  contents: read
+
+jobs:
+  probe-iceland-operator-registry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Playwright
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium >/dev/null
+      - name: Extract all profession slices and deduplicate workplaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/iceland-operator-registry
+          node scripts/extract-iceland-operator-registry.mjs \
+            --output /tmp/iceland-operator-registry/workplaces.tsv \
+            --summary /tmp/iceland-operator-registry/summary.json
+          test -s /tmp/iceland-operator-registry/workplaces.tsv
+          test -s /tmp/iceland-operator-registry/summary.json
+          cat /tmp/iceland-operator-registry/summary.json
+          workplaces=$(( $(wc -l < /tmp/iceland-operator-registry/workplaces.tsv) - 1 ))
+          (( workplaces >= 150 )) || { echo "Only ${workplaces} Iceland workplaces" >&2; exit 1; }
+          echo "Iceland unique workplace/postal rows: ${workplaces}"
+          head -n 8 /tmp/iceland-operator-registry/workplaces.tsv
+      - name: Upload Iceland extraction
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iceland-operator-registry-extraction
+          path: /tmp/iceland-operator-registry/*
+          if-no-files-found: warn

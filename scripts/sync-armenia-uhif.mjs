@@ -127,28 +127,56 @@ async function geocodeFallback(facility) {
   return null;
 }
 
+async function replayLanguageAction(page, action, routerState) {
+  return await page.evaluate(async ({ action, routerState }) => {
+    const headers = {
+      accept: "text/x-component",
+      "content-type": "text/plain;charset=UTF-8",
+      "next-action": action,
+    };
+    if (routerState) headers["next-router-state-tree"] = routerState;
+    const response = await fetch("/en/hospitals", {
+      method: "POST",
+      headers,
+      body: '["en"]',
+    });
+    return { status: response.status, body: await response.text() };
+  }, { action, routerState });
+}
+
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ locale: "en-US" });
-const payloadPromises = [];
+const languageActions = new Map();
 
-page.on("response", (response) => {
-  const request = response.request();
-  if (response.url() !== DIRECTORY_URL || request.method() !== "POST") return;
+page.on("request", (request) => {
+  if (request.url() !== DIRECTORY_URL || request.method() !== "POST") return;
   if ((request.postData() || "") !== '["en"]') return;
+  const headers = request.headers();
+  const action = headers["next-action"] || "";
+  if (!action) return;
+  languageActions.set(action, {
+    action,
+    routerState: headers["next-router-state-tree"] || "",
+  });
+});
 
-  payloadPromises.push((async () => {
+async function discoverCompletePayload() {
+  const candidates = [];
+  for (const descriptor of languageActions.values()) {
     try {
-      const raw = await response.text();
-      const parsed = parseRscData(raw);
+      const response = await replayLanguageAction(page, descriptor.action, descriptor.routerState);
+      if (response.status !== 200) continue;
+      const parsed = parseRscData(response.body);
       if (parsed && Array.isArray(parsed.hospitals)) {
-        return { hospitals: parsed.hospitals, action: request.headers()["next-action"] || "", bytes: raw.length };
+        candidates.push({ hospitals: parsed.hospitals, action: descriptor.action, bytes: response.body.length });
       }
     } catch (error) {
-      console.warn(`UHIF response body could not be read: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`UHIF action replay failed for ${descriptor.action.slice(0, 10)}…: ${error instanceof Error ? error.message : String(error)}`);
     }
-    return null;
-  })());
-});
+  }
+  candidates.sort((a, b) => b.hospitals.length - a.hospitals.length);
+  return candidates[0] || null;
+}
 
 try {
   await page.goto(DIRECTORY_URL, { waitUntil: "networkidle", timeout: 90_000 });
@@ -159,20 +187,18 @@ try {
     throw new Error(`UHIF page did not expose a plausible facility total; saw ${reportedTotal}`);
   }
 
-  let captured = (await Promise.all(payloadPromises)).filter(Boolean);
-  if (!captured.length) {
+  let captured = await discoverCompletePayload();
+  if (!captured) {
     const mapButton = page.getByRole("button", { name: /^\s*Map\s*$/i });
     if (await mapButton.count()) {
-      const before = payloadPromises.length;
       await mapButton.first().click();
       await page.waitForTimeout(2500);
-      captured = (await Promise.all(payloadPromises.slice(before))).filter(Boolean);
+      captured = await discoverCompletePayload();
     }
   }
-  if (!captured.length) throw new Error("UHIF did not expose its medical-center map payload");
+  if (!captured) throw new Error(`UHIF did not expose a replayable medical-center payload; discovered ${languageActions.size} language actions`);
 
-  captured.sort((a, b) => b.hospitals.length - a.hospitals.length);
-  const facilities = captured[0].hospitals;
+  const facilities = captured.hospitals;
   if (facilities.length !== reportedTotal) {
     throw new Error(`UHIF completeness guard failed: page reports ${reportedTotal}, map payload contains ${facilities.length}`);
   }
@@ -247,8 +273,9 @@ try {
     mapPayloadFacilities: facilities.length,
     mapRows: sorted.length,
     fallbackGeocoded,
-    payloadActionDiscoveredDynamically: Boolean(captured[0].action),
-    payloadBytes: captured[0].bytes,
+    discoveredLanguageActions: languageActions.size,
+    payloadActionDiscoveredDynamically: Boolean(captured.action),
+    payloadBytes: captured.bytes,
     output: outputPath,
   }));
 } finally {

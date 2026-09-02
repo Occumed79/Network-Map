@@ -1,0 +1,44 @@
+name: Probe Armenia UHIF healthcare source
+
+on:
+  push:
+    branches:
+      - international-europe-wave-1
+    paths:
+      - ".github/workflows/probe-armenia-uhif-source.yml"
+      - "scripts/sync-armenia-uhif.mjs"
+
+permissions:
+  contents: read
+
+jobs:
+  probe-armenia-uhif:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Playwright
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium >/dev/null
+      - name: Extract complete UHIF registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/armenia-uhif
+          node scripts/sync-armenia-uhif.mjs --output /tmp/armenia-uhif/provider.tsv
+          test -s /tmp/armenia-uhif/provider.tsv
+          rows=$(( $(wc -l < /tmp/armenia-uhif/provider.tsv) - 1 ))
+          (( rows >= 500 )) || { echo "Only ${rows} Armenia UHIF branch rows" >&2; exit 1; }
+          echo "Armenia UHIF branch rows: ${rows}"
+          head -n 6 /tmp/armenia-uhif/provider.tsv
+      - name: Upload normalized source sample
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: armenia-uhif-normalized
+          path: /tmp/armenia-uhif/provider.tsv
+          if-no-files-found: warn

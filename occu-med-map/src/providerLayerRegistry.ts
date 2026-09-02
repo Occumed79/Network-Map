@@ -127,6 +127,7 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   synchronizedRegistrySource('turkey-moh-health-tourism', 'Türkiye — MOH Authorized Health Facilities', '#dc2626'),
   synchronizedRegistrySource('north-macedonia-moh', 'North Macedonia — MOH Health Centers', '#e11d48'),
   synchronizedRegistrySource('andorra-cass', 'Andorra — CASS Healthcare Providers', '#9333ea'),
+  synchronizedRegistrySource('armenia-uhif', 'Armenia — UHIF Medical Organizations', '#d97706'),
   synchronizedRegistrySource('bosnia-domestic', 'Bosnia & Herzegovina — Domestic Healthcare Authorities', '#2563eb'),
 
   source('international-providers', 'International Providers', 'healthsites_osm', '#06b6d4', 'SOURCE / NETWORK OVERLAYS'),

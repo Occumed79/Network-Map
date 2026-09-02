@@ -1,0 +1,85 @@
+name: Probe Bosnia domestic source inventory
+
+on:
+  push:
+    branches:
+      - international-europe-wave-1
+    paths:
+      - ".github/workflows/probe-bosnia-source-inventory.yml"
+      - "scripts/sync-bosnia-domestic-healthcare.py"
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install source parsers
+        run: python -m pip install --disable-pip-version-check beautifulsoup4 requests pandas xlrd openpyxl
+      - name: Parse official sources without geocoding
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/bosnia-inventory
+          python <<'PY'
+          import csv
+          import importlib.util
+          import json
+          from collections import Counter, OrderedDict
+          from pathlib import Path
+
+          source_path = Path('scripts/sync-bosnia-domestic-healthcare.py')
+          spec = importlib.util.spec_from_file_location('bosnia_sync', source_path)
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+
+          records = OrderedDict()
+          rs_url, rs_count = module.scrape_rs(records)
+          counts = {
+              'fzo-rs': rs_count,
+              'fzo-brcko': module.scrape_brcko(records),
+              'zzo-hnz': module.scrape_hnz(records),
+              'zzo-usk': module.scrape_usk(records),
+              'zzo-bpk': module.scrape_bpk(records),
+          }
+
+          rows = list(records.values())
+          authority = Counter(row['authority'] for row in rows)
+          address = Counter(row['authority'] for row in rows if row.get('address'))
+          city = Counter(row['authority'] for row in rows if row.get('city'))
+          phone = Counter(row['authority'] for row in rows if row.get('phone'))
+          website = Counter(row['authority'] for row in rows if row.get('website'))
+          email = Counter(row['authority'] for row in rows if row.get('email'))
+
+          summary = {
+              'parserCounts': counts,
+              'dedupedRecords': len(rows),
+              'byAuthority': dict(authority),
+              'withStreetAddress': dict(address),
+              'withCity': dict(city),
+              'withPhone': dict(phone),
+              'withWebsite': dict(website),
+              'withEmail': dict(email),
+              'recordsMissingBothAddressAndCity': sum(1 for row in rows if not row.get('address') and not row.get('city')),
+          }
+          print(json.dumps(summary, ensure_ascii=False, indent=2))
+          Path('/tmp/bosnia-inventory/summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+          fields = ['authority','source_url','source_code','name','city','address','phone','website','email']
+          with open('/tmp/bosnia-inventory/records.tsv', 'w', encoding='utf-8', newline='') as handle:
+              writer = csv.DictWriter(handle, fieldnames=fields, delimiter='\t', quoting=csv.QUOTE_MINIMAL)
+              writer.writeheader()
+              writer.writerows([{field: row.get(field, '') for field in fields} for row in rows])
+          PY
+          head -n 20 /tmp/bosnia-inventory/records.tsv
+      - name: Upload inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: bosnia-domestic-source-inventory
+          path: /tmp/bosnia-inventory/*

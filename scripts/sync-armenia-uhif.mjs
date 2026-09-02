@@ -9,6 +9,8 @@ const DIRECTORY_URL = "https://www.uhif.am/en/hospitals";
 const COUNTRY_CODE = "AM";
 const COUNTRY_NAME = "Armenia";
 const MIN_FACILITIES = 500;
+const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
+const USER_AGENT = "Occu-Med-Network-Map/1.0 (+https://github.com/Occumed79/Network-Map)";
 
 const COLUMNS = [
   "source_record_id", "source_url", "name", "normalized_name", "address_line1",
@@ -27,6 +29,7 @@ if (!outputPath) throw new Error("--output is required");
 
 const text = (value) => value === null || value === undefined ? "" : String(value).trim();
 const hash = (value) => createHash("sha256").update(String(value)).digest("hex");
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function normalizedKey(value) {
   return text(value)
@@ -90,6 +93,40 @@ function headingTotal(headings) {
   return null;
 }
 
+async function geocodeFallback(facility) {
+  const name = text(facility?.name);
+  const address = text(facility?.address);
+  const community = text(facility?.community);
+  const region = text(facility?.region);
+  const queries = [
+    [address, community, region, COUNTRY_NAME],
+    [name, address, community, region, COUNTRY_NAME],
+    [name, community, region, COUNTRY_NAME],
+  ].map((parts) => parts.filter(Boolean).join(", ")).filter(Boolean);
+
+  for (const query of [...new Set(queries)]) {
+    const url = new URL(NOMINATIM_URL);
+    url.searchParams.set("format", "jsonv2");
+    url.searchParams.set("limit", "1");
+    url.searchParams.set("countrycodes", "am");
+    url.searchParams.set("q", query);
+    try {
+      const response = await fetch(url, {
+        headers: { "User-Agent": USER_AGENT, "Accept-Language": "en,hy" },
+      });
+      if (response.ok) {
+        const payload = await response.json();
+        const item = Array.isArray(payload) ? payload[0] : null;
+        const lat = Number(item?.lat);
+        const lng = Number(item?.lon);
+        if (validCoordinates(lat, lng)) return { lat, lng, query };
+      }
+    } catch (_) {}
+    await sleep(1100);
+  }
+  return null;
+}
+
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ locale: "en-US" });
 const payloadPromises = [];
@@ -123,21 +160,16 @@ try {
   }
 
   let captured = (await Promise.all(payloadPromises)).filter(Boolean);
-
   if (!captured.length) {
     const mapButton = page.getByRole("button", { name: /^\s*Map\s*$/i });
     if (await mapButton.count()) {
       const before = payloadPromises.length;
       await mapButton.first().click();
       await page.waitForTimeout(2500);
-      const additional = await Promise.all(payloadPromises.slice(before));
-      captured = additional.filter(Boolean);
+      captured = (await Promise.all(payloadPromises.slice(before))).filter(Boolean);
     }
   }
-
-  if (!captured.length) {
-    throw new Error("UHIF did not expose its medical-center map payload");
-  }
+  if (!captured.length) throw new Error("UHIF did not expose its medical-center map payload");
 
   captured.sort((a, b) => b.hospitals.length - a.hospitals.length);
   const facilities = captured[0].hospitals;
@@ -146,8 +178,9 @@ try {
   }
 
   const rows = new Map();
-  let invalidCoordinates = 0;
   let unnamed = 0;
+  let fallbackGeocoded = 0;
+  const unresolved = [];
 
   for (const facility of facilities) {
     const facilityId = text(facility?.id);
@@ -157,11 +190,21 @@ try {
       continue;
     }
 
-    const lat = Number(facility?.lat);
-    const lng = Number(facility?.lng);
+    let lat = Number(facility?.lat);
+    let lng = Number(facility?.lng);
+    let coordinateSource = "uhif";
     if (!validCoordinates(lat, lng)) {
-      invalidCoordinates += 1;
-      continue;
+      console.log(JSON.stringify({ missingOfficialCoordinates: true, id: facilityId, name, address: facility?.address, community: facility?.community, region: facility?.region, lat: facility?.lat, lng: facility?.lng }));
+      const fallback = await geocodeFallback(facility);
+      if (!fallback) {
+        unresolved.push({ id: facilityId, name, address: text(facility?.address), community: text(facility?.community), region: text(facility?.region) });
+        continue;
+      }
+      lat = fallback.lat;
+      lng = fallback.lng;
+      coordinateSource = "nominatim_fallback";
+      fallbackGeocoded += 1;
+      console.log(JSON.stringify({ fallbackGeocoded: true, id: facilityId, name, query: fallback.query, lat, lng }));
     }
 
     const address = text(facility?.address);
@@ -169,6 +212,7 @@ try {
     const community = text(facility?.community);
     const phone = text(facility?.phone);
     const classification = classify(name);
+    const tags = coordinateSource === "uhif" ? classification.tags : [...classification.tags, "coordinate_source:nominatim_fallback"];
     const formatted = [address, community, region, COUNTRY_NAME]
       .filter(Boolean)
       .filter((value, index, all) => all.findIndex((candidate) => normalizedKey(candidate) === normalizedKey(value)) === index)
@@ -185,19 +229,13 @@ try {
     rows.set(sourceId, [
       sourceId, DIRECTORY_URL, name, normalizedKey(name), address, formatted,
       community || region, region, "", COUNTRY_CODE, lat, lng, phone, "", "",
-      classification.primary, postgresArray(classification.tags), 0.995, masterKey,
+      classification.primary, postgresArray(tags), coordinateSource === "uhif" ? 0.995 : 0.985, masterKey,
     ]);
   }
 
-  if (unnamed !== 0) {
-    throw new Error(`${unnamed} UHIF facilities lacked a stable id or name; refusing incomplete output`);
-  }
-  if (invalidCoordinates !== 0) {
-    throw new Error(`${invalidCoordinates} UHIF facilities lacked valid official Armenia coordinates; refusing incomplete map output`);
-  }
-  if (rows.size !== reportedTotal) {
-    throw new Error(`UHIF output guard failed: ${rows.size} unique map rows vs ${reportedTotal} official facilities`);
-  }
+  if (unnamed !== 0) throw new Error(`${unnamed} UHIF facilities lacked a stable id or name; refusing incomplete output`);
+  if (unresolved.length !== 0) throw new Error(`UHIF coordinate fallback failed for ${JSON.stringify(unresolved)}`);
+  if (rows.size !== reportedTotal) throw new Error(`UHIF output guard failed: ${rows.size} unique map rows vs ${reportedTotal} official facilities`);
 
   const sorted = [...rows.values()].sort((a, b) => String(a[2]).localeCompare(String(b[2])) || String(a[0]).localeCompare(String(b[0])));
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
@@ -208,6 +246,7 @@ try {
     officialFacilityTotal: reportedTotal,
     mapPayloadFacilities: facilities.length,
     mapRows: sorted.length,
+    fallbackGeocoded,
     payloadActionDiscoveredDynamically: Boolean(captured[0].action),
     payloadBytes: captured[0].bytes,
     output: outputPath,

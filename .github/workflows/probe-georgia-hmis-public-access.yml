@@ -1,0 +1,198 @@
+name: Probe Georgia HMIS public healthcare registry access
+
+on:
+  push:
+    branches:
+      - international-europe-wave-1
+    paths:
+      - ".github/workflows/probe-georgia-hmis-public-access.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe-georgia-hmis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install HTTP/HTML probe dependencies
+        run: python -m pip install --disable-pip-version-check requests beautifulsoup4
+      - name: Inspect official HMIS module and unauthenticated export surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/georgia-hmis
+          python <<'PY'
+          import json
+          import re
+          from pathlib import Path
+          from urllib.parse import urljoin, urlparse
+
+          import requests
+          from bs4 import BeautifulSoup
+
+          OUT = Path('/tmp/georgia-hmis')
+          ORIGIN = 'https://ehealth.moh.gov.ge'
+          PORTAL = f'{ORIGIN}/Hmis/Portal/List.aspx?languagePair=en-US'
+          UA = 'Occu-Med-Network-Map/1.0 (+https://github.com/Occumed79/Network-Map)'
+          session = requests.Session()
+          session.headers.update({'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9,ka;q=0.8'})
+
+          def clean(value):
+              return re.sub(r'\s+', ' ', str(value or '')).strip()
+
+          def same_official_host(url):
+              host = (urlparse(url).hostname or '').lower()
+              return host in {'ehealth.moh.gov.ge', 'www.ehealth.moh.gov.ge'}
+
+          def fetch(url, label):
+              try:
+                  r = session.get(url, timeout=60, allow_redirects=True)
+                  content_type = r.headers.get('content-type', '')
+                  text = r.text if ('text' in content_type.lower() or 'html' in content_type.lower() or not content_type) else ''
+                  (OUT / f'{label}.html').write_text(text, encoding='utf-8', errors='replace')
+                  return r, text
+              except Exception as exc:
+                  print(json.dumps({'fetchError': True, 'url': url, 'error': str(exc)}, ensure_ascii=False))
+                  return None, ''
+
+          portal_response, portal_html = fetch(PORTAL, 'portal-list')
+          if portal_response is None:
+              raise SystemExit('Official HMIS portal could not be fetched')
+
+          portal_soup = BeautifulSoup(portal_html, 'html.parser')
+          portal_links = []
+          for anchor in portal_soup.find_all('a', href=True):
+              href = urljoin(portal_response.url, anchor.get('href'))
+              text = clean(anchor.get_text(' ', strip=True))
+              blob = f'{text} {href}'.lower()
+              if any(token in blob for token in ['licens', 'permit', 'regulation', 'healthcare facilit', 'medical activ']):
+                  portal_links.append({'text': text, 'url': href})
+
+          # The official manual itself names this route; probe it too, but do not
+          # treat it as the facility registry unless the returned page says so.
+          manual_named = f'{ORIGIN}/Hmis/Doctors/Pages/DoctorsList.aspx'
+          candidates = []
+          seen = set()
+          for item in portal_links + [{'text': 'official manual named route', 'url': manual_named}]:
+              url = item['url']
+              if not same_official_host(url) or url in seen:
+                  continue
+              seen.add(url)
+              candidates.append(item)
+
+          findings = {
+              'portal': {
+                  'requested': PORTAL,
+                  'status': portal_response.status_code,
+                  'finalUrl': portal_response.url,
+                  'candidateLinks': portal_links,
+              },
+              'pages': [],
+          }
+
+          export_pattern = re.compile(r'excel|export|download|\.xls[xm]?|csv|FLOW_EXCEL|save.*file', re.I)
+          login_pattern = re.compile(r'login|sign\s*in|authorization|username|password|ავტორიზ|მომხმარებ|პაროლ', re.I)
+          facility_pattern = re.compile(r'healthcare facilit|medical facilit|organization registry|facility database|სამედიცინო დაწესებულ|ორგანიზაცი', re.I)
+
+          for index, item in enumerate(candidates, start=1):
+              response, html = fetch(item['url'], f'candidate-{index}')
+              if response is None:
+                  findings['pages'].append({'sourceText': item['text'], 'requested': item['url'], 'fetchFailed': True})
+                  continue
+              soup = BeautifulSoup(html, 'html.parser')
+              forms = []
+              for form in soup.find_all('form'):
+                  forms.append({
+                      'method': clean(form.get('method') or 'GET').upper(),
+                      'action': urljoin(response.url, form.get('action') or response.url),
+                      'inputs': [clean(node.get('name') or node.get('id')) for node in form.find_all(['input','select','button']) if clean(node.get('name') or node.get('id'))][:100],
+                  })
+              export_controls = []
+              for node in soup.find_all(['a','button','input'], limit=5000):
+                  href = urljoin(response.url, node.get('href')) if node.get('href') else ''
+                  onclick = clean(node.get('onclick'))
+                  text = clean(node.get_text(' ', strip=True) or node.get('value') or node.get('title') or node.get('aria-label'))
+                  blob = f'{text} {href} {onclick}'
+                  if export_pattern.search(blob):
+                      export_controls.append({'tag': node.name, 'text': text, 'href': href, 'onclick': onclick})
+              scripts = [urljoin(response.url, node.get('src')) for node in soup.find_all('script', src=True)]
+              script_hits = []
+              for script_index, script_url in enumerate(scripts[:80], start=1):
+                  if not same_official_host(script_url):
+                      continue
+                  try:
+                      script_response = session.get(script_url, timeout=30)
+                      script_text = script_response.text if script_response.ok else ''
+                  except Exception:
+                      continue
+                  hits = sorted(set(match.group(0) for match in re.finditer(r'[^\s"\'<>]{0,80}(?:excel|export|download|\.xls[xm]?|\.asmx|\.ashx|PageMethods|WebMethod)[^\s"\'<>]{0,120}', script_text, re.I)))[:30]
+                  if hits:
+                      script_hits.append({'url': script_url, 'hits': hits})
+                      (OUT / f'candidate-{index}-script-{script_index}.txt').write_text(script_text, encoding='utf-8', errors='replace')
+
+              body_text = clean(soup.get_text(' ', strip=True))
+              page_info = {
+                  'sourceText': item['text'],
+                  'requested': item['url'],
+                  'status': response.status_code,
+                  'finalUrl': response.url,
+                  'redirected': response.url != item['url'],
+                  'contentType': response.headers.get('content-type', ''),
+                  'bytes': len(response.content),
+                  'loginSignals': sorted(set(m.group(0) for m in login_pattern.finditer(body_text)))[:20],
+                  'facilitySignals': sorted(set(m.group(0) for m in facility_pattern.finditer(body_text)))[:20],
+                  'title': clean(soup.title.get_text(' ', strip=True) if soup.title else ''),
+                  'forms': forms,
+                  'exportControls': export_controls[:100],
+                  'scriptHits': script_hits,
+              }
+              findings['pages'].append(page_info)
+              print(json.dumps(page_info, ensure_ascii=False, indent=2))
+
+          # Probe only same-host URLs explicitly surfaced by the returned public
+          # HTML/JS. We do not guess protected endpoints or submit login forms.
+          surfaced_export_urls = []
+          for page in findings['pages']:
+              for control in page.get('exportControls', []):
+                  url = control.get('href') or ''
+                  if url and same_official_host(url) and url not in surfaced_export_urls:
+                      surfaced_export_urls.append(url)
+
+          export_results = []
+          for index, url in enumerate(surfaced_export_urls[:30], start=1):
+              try:
+                  r = session.get(url, timeout=60, allow_redirects=True)
+                  ctype = r.headers.get('content-type', '')
+                  disposition = r.headers.get('content-disposition', '')
+                  export_results.append({
+                      'requested': url,
+                      'status': r.status_code,
+                      'finalUrl': r.url,
+                      'contentType': ctype,
+                      'contentDisposition': disposition,
+                      'bytes': len(r.content),
+                      'looksLikeWorkbook': ('spreadsheet' in ctype.lower() or 'excel' in ctype.lower() or '.xls' in disposition.lower()),
+                      'looksLikeLogin': bool(login_pattern.search(r.text[:100000])) if ('html' in ctype.lower() or 'text' in ctype.lower()) else False,
+                  })
+                  if len(r.content) < 5_000_000:
+                      (OUT / f'export-probe-{index}.bin').write_bytes(r.content)
+              except Exception as exc:
+                  export_results.append({'requested': url, 'error': str(exc)})
+          findings['surfacedExportResults'] = export_results
+
+          (OUT / 'findings.json').write_text(json.dumps(findings, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          print(json.dumps({'georgiaHmisProbeSummary': {'portalCandidateLinks': len(portal_links), 'candidatePages': len(findings['pages']), 'surfacedExportUrls': len(surfaced_export_urls), 'publicWorkbookResponses': sum(1 for item in export_results if item.get('looksLikeWorkbook'))}}, ensure_ascii=False))
+          PY
+      - name: Upload Georgia HMIS probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: georgia-hmis-public-access-probe
+          path: /tmp/georgia-hmis/*
+          if-no-files-found: warn

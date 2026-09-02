@@ -135,8 +135,25 @@ try {
     await openSearch(page, profession.value);
     const bodyText = await page.locator("body").innerText();
     const expected = resultCount(bodyText);
-    if (!Number.isInteger(expected) || expected <= 0) {
-      throw new Error(`Could not determine a positive result count for ${profession.label} (${profession.value})`);
+    if (!Number.isInteger(expected) || expected < 0) {
+      throw new Error(`Could not determine the Directorate result count for ${profession.label} (${profession.value})`);
+    }
+
+    if (expected === 0) {
+      const visibleRows = await page.locator("table tr").count();
+      const exportButtons = await page.locator(`button[title="${OUTPUT_TITLE}"],button[aria-label="${OUTPUT_TITLE}"]`).count();
+      professionStats.push({ code: profession.value, profession: profession.label, records: 0 });
+      console.log(JSON.stringify({
+        profession: profession.label,
+        code: profession.value,
+        records: 0,
+        officialZeroResult: true,
+        visibleTableRows: visibleRows,
+        exportButtons,
+        completed: index + 1,
+        totalProfessions: professions.length,
+      }));
+      continue;
     }
 
     const filePath = await downloadCurrentExport(page, tempDir, slug);
@@ -221,6 +238,7 @@ try {
     professions: professions.length,
     rawRecords: rawRecords.length,
     uniqueWorkplaces: sorted.length,
+    zeroResultProfessions: professionStats.filter((item) => item.records === 0).length,
     professionStats,
   };
   if (summaryPath) {

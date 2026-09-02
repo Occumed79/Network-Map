@@ -32,15 +32,36 @@ COLUMNS = [
 ]
 
 BA_BOUNDS = (42.50, 45.35, 15.70, 19.70)
+
+# The domestic authority lists frequently put the municipality/locality in the
+# institution name rather than a dedicated address column. Keep this list tied
+# to localities actually encountered in the source inventories and use exact
+# normalized phrase matching below; substring matching caused false positives
+# such as Mrkonjić Grad -> Konjic.
 KNOWN_CITIES = [
     "Banja Luka", "Gradiška", "Srbac", "Laktaši", "Prijedor", "Kozarska Dubica", "Modriča",
-    "Doboj", "Bijeljina", "Ugljevik", "Istočno Sarajevo", "Pale", "Sokolac", "Zvornik",
-    "Milići", "Bratunac", "Nevesinje", "Trebinje", "Foča", "Mostar", "Čapljina", "Čitluk",
-    "Jablanica", "Konjic", "Neum", "Ravno", "Stolac", "Prozor", "Bihać", "Cazin", "Ključ",
-    "Sanski Most", "Velika Kladuša", "Bosanska Krupa", "Bosanski Petrovac", "Bužim", "Goražde",
-    "Ustikolina", "Prača", "Sarajevo", "Tuzla", "Fojnica", "Olovo", "Živinice", "Gradačac",
-    "Brčko", "Dvorovi", "Doboj Istok",
+    "Doboj", "Doboj Istok", "Bijeljina", "Ugljevik", "Istočno Sarajevo", "Istočni Stari Grad",
+    "Istočni Drvar", "Pale", "Sokolac", "Zvornik", "Milići", "Bratunac", "Vlasenica",
+    "Srebrenica", "Šekovići", "Rogatica", "Han Pijesak", "Trnovo", "Nevesinje", "Trebinje",
+    "Foča", "Gacko", "Bileća", "Berkovići", "Ljubinje", "Kalinovik", "Čajniče", "Višegrad",
+    "Rudo", "Mostar", "Čapljina", "Čitluk", "Jablanica", "Konjic", "Neum", "Ravno", "Stolac",
+    "Prozor", "Prozor-Rama", "Bihać", "Cazin", "Ključ", "Sanski Most", "Velika Kladuša",
+    "Bosanska Krupa", "Bosanski Petrovac", "Bužim", "Goražde", "Ustikolina", "Prača",
+    "Sarajevo", "Ilidža", "Tuzla", "Fojnica", "Olovo", "Živinice", "Gradačac", "Brčko",
+    "Dvorovi", "Ribnik", "Čelinac", "Drinić", "Kneževo", "Kotor Varoš", "Prnjavor", "Šipovo",
+    "Mrkonjić Grad", "Novi Grad", "Krupa na Uni", "Oštra Luka", "Kostajnica", "Teslić", "Petrovo",
+    "Stanari", "Derventa", "Brod", "Šamac", "Lopare", "Uzinovići",
 ]
+CITY_ALIASES = {
+    "bl": "Banja Luka",
+    "b luka": "Banja Luka",
+    "banja l": "Banja Luka",
+    "bn": "Bijeljina",
+    "i sarajevo": "Istočno Sarajevo",
+    "i sarajevu": "Istočno Sarajevo",
+    "foci": "Foča",
+    "rama": "Prozor-Rama",
+}
 FOREIGN_CITIES = {"beograd", "novi sad", "osijek", "banja koviljaca", "b koviljaca", "gornja trepca"}
 
 
@@ -53,6 +74,13 @@ def norm(value):
     value = "".join(ch for ch in value if not unicodedata.combining(ch)).lower()
     value = re.sub(r"[^a-z0-9]+", " ", value)
     return re.sub(r"\s+", " ", value).strip()
+
+
+def phrase_present(haystack, needle):
+    needle = norm(needle)
+    if not needle:
+        return False
+    return re.search(rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])", haystack) is not None
 
 
 def sha(value):
@@ -74,12 +102,11 @@ def pg_array(values):
 
 def infer_city(text):
     n = norm(text)
-    aliases = {"bl": "Banja Luka", "b luka": "Banja Luka", "banja l": "Banja Luka", "i sarajevo": "Istočno Sarajevo"}
-    for alias, city in aliases.items():
-        if re.search(rf"\b{re.escape(norm(alias))}\b", n):
+    for alias, city in sorted(CITY_ALIASES.items(), key=lambda item: len(norm(item[0])), reverse=True):
+        if phrase_present(n, alias):
             return city
-    for city in sorted(KNOWN_CITIES, key=len, reverse=True):
-        if norm(city) in n:
+    for city in sorted(KNOWN_CITIES, key=lambda value: len(norm(value)), reverse=True):
+        if phrase_present(n, city):
             return city
     return ""
 
@@ -94,9 +121,9 @@ def classify(name):
         return "lab", ["lab", "healthcare_facility", "domestic_authority_registry"]
     if any(x in n for x in ["radiolog", "magnet", "imaging", "dijagnost"]):
         return "imaging", ["imaging", "healthcare_facility", "domestic_authority_registry"]
-    if any(x in n for x in ["bolnica", "klinicki centar", "klinički centar", "hospital", "klinika"]):
+    if any(x in n for x in ["bolnica", "klinicki centar", "hospital", "klinika"]):
         return "hospital", ["hospital", "healthcare_facility", "domestic_authority_registry"]
-    if any(x in n for x in ["dom zdravlja", "ambulanta", "opste medicine", "opće medicine", "porodicne medicine", "porodične medicine"]):
+    if any(x in n for x in ["dom zdravlja", "ambulanta", "opste medicine", "opce medicine", "porodicne medicine"]):
         return "general_practitioner", ["general_practitioner", "healthcare_facility", "domestic_authority_registry"]
     return "healthcare_facility", ["healthcare_facility", "domestic_authority_registry"]
 
@@ -134,9 +161,9 @@ def discover_rs_workbook():
         for _ in range(6):
             if node is None:
                 break
-            text = clean(node.get_text(" ", strip=True))
-            if text and text not in contexts:
-                contexts.append(text)
+            node_text = clean(node.get_text(" ", strip=True))
+            if node_text and node_text not in contexts:
+                contexts.append(node_text)
             node = node.parent
         context = " ".join(contexts)
         normalized_context = norm(context)
@@ -177,11 +204,17 @@ def scrape_rs(records):
             break
     if header_row is None:
         raise RuntimeError("FZO RS workbook schema changed: provider-name header not found")
+
     parsed = 0
+    skipped_group_headers = 0
     for _, row in frame.iloc[header_row + 1:].iterrows():
         values = [clean(v) for v in row.tolist()]
         name = clean(values[name_col] if name_col < len(values) else "")
-        if not name or name.lower() == "nan" or "fond zdravstvenog" in norm(name):
+        normalized_name = norm(name)
+        if not name or name.lower() == "nan" or "fond zdravstvenog" in normalized_name:
+            continue
+        if normalized_name == "filijala" or normalized_name.startswith("filijala "):
+            skipped_group_headers += 1
             continue
         code = ""
         branch = ""
@@ -194,6 +227,7 @@ def scrape_rs(records):
         parsed += 1
     if parsed < 40:
         raise RuntimeError(f"Only {parsed} FZO RS institutions parsed; refusing incomplete source")
+    print(json.dumps({"fzoRsParsed": parsed, "skippedGroupHeaders": skipped_group_headers}, ensure_ascii=False))
     return workbook_url, parsed
 
 
@@ -243,7 +277,8 @@ def scrape_usk(records):
         if len(cells) < 2 or not re.fullmatch(r"\d+", cells[0]):
             continue
         name = cells[1]
-        if not any(token in norm(name) for token in ["zu ", "jzu", "pzu", "bolnica", "dom zdravlja", "ordinacija", "zavod", "ljeciliste", "lječiliste", "poliklinika"]):
+        normalized_name = norm(name)
+        if not any(token in normalized_name for token in ["zu ", "jzu", "pzu", "bolnica", "dom zdravlja", "ordinacija", "zavod", "ljeciliste", "poliklinika"]):
             continue
         city = infer_city(name)
         add_record(records, "zzo-usk", USK, name, city=city, source_code=sha(name)[:12])
@@ -256,13 +291,12 @@ def scrape_usk(records):
 def scrape_bpk(records):
     soup = BeautifulSoup(session_get(BPK).text, "html.parser")
     count = 0
-    # The institution lists are siblings beneath the article body, not children of the page heading.
-    # Scan the full official page and keep the strict healthcare-name filter below so navigation items are ignored.
     for li in soup.find_all("li"):
         name = clean(li.get_text(" ", strip=True))
-        if len(name) < 5 or any(x in norm(name) for x in ["pocetna", "kontakt", "novosti", "dokumenti"]):
+        normalized_name = norm(name)
+        if len(name) < 5 or any(x in normalized_name for x in ["pocetna", "kontakt", "novosti", "dokumenti", "strateski plan"]):
             continue
-        if not any(x in norm(name) for x in ["bolnica", "dom zdravlja", "klinicki", "klinički", "zavod", "ljeciliste", "lječilište", "poliklinika", "laborator", "medicana", "aquaterm"]):
+        if not any(x in normalized_name for x in ["bolnica", "dom zdravlja", "klinicki", "zavod", "ljeciliste", "poliklinika", "laborator", "medicana", "aquaterm"]):
             continue
         add_record(records, "zzo-bpk", BPK, name, city=infer_city(name), source_code=sha(name)[:12])
         count += 1

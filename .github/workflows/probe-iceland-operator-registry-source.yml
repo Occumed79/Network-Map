@@ -7,6 +7,7 @@ on:
     paths:
       - ".github/workflows/probe-iceland-operator-registry-source.yml"
       - "scripts/extract-iceland-operator-registry.mjs"
+      - "scripts/geocode-iceland-operator-registry.py"
 
 permissions:
   contents: read
@@ -20,10 +21,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install Playwright
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install extraction dependencies
         run: |
           npm install --no-save playwright@1.55.0
           npx playwright install --with-deps chromium >/dev/null
+          python -m pip install --disable-pip-version-check requests
       - name: Extract all profession slices and deduplicate workplaces
         shell: bash
         run: |
@@ -36,9 +41,22 @@ jobs:
           test -s /tmp/iceland-operator-registry/summary.json
           cat /tmp/iceland-operator-registry/summary.json
           workplaces=$(( $(wc -l < /tmp/iceland-operator-registry/workplaces.tsv) - 1 ))
-          (( workplaces >= 150 )) || { echo "Only ${workplaces} Iceland workplaces" >&2; exit 1; }
+          (( workplaces >= 1000 )) || { echo "Only ${workplaces} Iceland workplaces" >&2; exit 1; }
           echo "Iceland unique workplace/postal rows: ${workplaces}"
-          head -n 8 /tmp/iceland-operator-registry/workplaces.tsv
+      - name: Match official workplaces to exact map locations
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/geocode-iceland-operator-registry.py \
+            --input /tmp/iceland-operator-registry/workplaces.tsv \
+            --output /tmp/iceland-operator-registry/provider.tsv \
+            --skipped /tmp/iceland-operator-registry/skipped.json \
+            --workers 10
+          test -s /tmp/iceland-operator-registry/provider.tsv
+          rows=$(( $(wc -l < /tmp/iceland-operator-registry/provider.tsv) - 1 ))
+          (( rows >= 200 )) || { echo "Only ${rows} Iceland map-ready official workplaces" >&2; exit 1; }
+          echo "Iceland map-ready official workplaces: ${rows}"
+          head -n 8 /tmp/iceland-operator-registry/provider.tsv
       - name: Upload Iceland extraction
         if: always()
         uses: actions/upload-artifact@v4

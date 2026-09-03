@@ -18,6 +18,7 @@ from bs4 import BeautifulSoup
 
 USER_AGENT = "Occu-Med-Network-Map/1.0 (+https://github.com/Occumed79/Network-Map)"
 NOMINATIM = "https://nominatim.openstreetmap.org/search"
+PHOTON = "https://photon.komoot.io/api/"
 RS_CATALOG = "https://zdravstvo-srpske.org/sa-kim-fzo-ima-potpisan-ugovor/cjenovnici-i-sifarnici/"
 BRCKO = "https://fzobrcko.ba/ugovorne-zdravstvene-ustanove"
 HNZ = "https://www.zzo.ba/hr/ugovorne-zdravstvene-ustanove"
@@ -33,11 +34,6 @@ COLUMNS = [
 
 BA_BOUNDS = (42.50, 45.35, 15.70, 19.70)
 
-# The domestic authority lists frequently put the municipality/locality in the
-# institution name rather than a dedicated address column. Keep this list tied
-# to localities actually encountered in the source inventories and use exact
-# normalized phrase matching below; substring matching caused false positives
-# such as Mrkonjić Grad -> Konjic.
 KNOWN_CITIES = [
     "Banja Luka", "Gradiška", "Srbac", "Laktaši", "Prijedor", "Kozarska Dubica", "Modriča",
     "Doboj", "Doboj Istok", "Bijeljina", "Ugljevik", "Istočno Sarajevo", "Istočni Stari Grad",
@@ -155,7 +151,6 @@ def discover_rs_workbook():
         href = urljoin(RS_CATALOG, anchor["href"])
         if not re.search(r"\.xlsx?(?:\?|$)", href.lower()):
             continue
-
         contexts = []
         node = anchor
         for _ in range(6):
@@ -167,7 +162,6 @@ def discover_rs_workbook():
             node = node.parent
         context = " ".join(contexts)
         normalized_context = norm(context)
-
         score = 0
         if "zdravstven" in normalized_context and "ustanov" in normalized_context:
             score += 20
@@ -180,7 +174,6 @@ def discover_rs_workbook():
         if "sifre zu" in norm(href) or "sifre zu i apoteka" in norm(href):
             score += 8
         candidates.append((score, href))
-
     if not candidates:
         raise RuntimeError("FZO RS catalog did not expose the healthcare-institution XLS link")
     candidates.sort(key=lambda item: item[0], reverse=True)
@@ -204,7 +197,6 @@ def scrape_rs(records):
             break
     if header_row is None:
         raise RuntimeError("FZO RS workbook schema changed: provider-name header not found")
-
     parsed = 0
     skipped_group_headers = 0
     for _, row in frame.iloc[header_row + 1:].iterrows():
@@ -305,40 +297,147 @@ def scrape_bpk(records):
     return count
 
 
-def geocode(record):
+def simplified_name(name):
+    value = clean(name)
+    value = re.sub(r"^[\s\"'„“”]+|[\s\"'„“”]+$", "", value)
+    value = re.sub(r"^(?:JZU|PZU|ZU|JU|Javna zdravstvena ustanova|Privatna zdravstvena ustanova)\s+", "", value, flags=re.I)
+    value = re.sub(r"\s+(?:a\.d\.|d\.o\.o\.|doo|ad)\s*$", "", value, flags=re.I)
+    return clean(value)
+
+
+def geocode_queries(record):
+    names = list(dict.fromkeys([record["name"], simplified_name(record["name"])]))
     queries = []
     if record["address"]:
-        queries.append(", ".join(x for x in [record["name"], record["address"], record["city"], "Bosnia and Herzegovina"] if x))
+        for name in names:
+            queries.append(", ".join(x for x in [name, record["address"], record["city"], "Bosnia and Herzegovina"] if x))
         queries.append(", ".join(x for x in [record["address"], record["city"], "Bosnia and Herzegovina"] if x))
-    queries.append(", ".join(x for x in [record["name"], record["city"], "Bosnia and Herzegovina"] if x))
-    for query in dict.fromkeys(queries):
-        try:
-            response = requests.get(
-                NOMINATIM,
-                params={"format": "jsonv2", "addressdetails": 1, "limit": 1, "countrycodes": "ba", "q": query},
-                timeout=45,
-                headers={"User-Agent": USER_AGENT, "Accept-Language": "bs,hr,sr,en"},
-            )
-            response.raise_for_status()
-            payload = response.json()
-        except Exception:
-            payload = []
-        time.sleep(1.05)
-        if not payload:
+    for name in names:
+        queries.append(", ".join(x for x in [name, record["city"], "Bosnia and Herzegovina"] if x))
+    return list(dict.fromkeys(q for q in queries if q))
+
+
+def in_ba_bounds(lat, lng):
+    return BA_BOUNDS[0] <= lat <= BA_BOUNDS[1] and BA_BOUNDS[2] <= lng <= BA_BOUNDS[3]
+
+
+def token_overlap(source, candidate):
+    stop = {"jzu", "pzu", "zu", "ju", "zdravstvena", "ustanova", "zdravstvene", "ustanova", "bosna", "hercegovina"}
+    a = {t for t in norm(source).split() if len(t) >= 3 and t not in stop}
+    b = {t for t in norm(candidate).split() if len(t) >= 3 and t not in stop}
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a)
+
+
+def strict_location_match(record, candidate_name, candidate_context):
+    city = norm(record["city"])
+    context = norm(candidate_context)
+    city_ok = not city or phrase_present(context, city)
+    if not city_ok:
+        return False
+    name_score = token_overlap(simplified_name(record["name"]), candidate_name or candidate_context)
+    if record["address"]:
+        address_score = token_overlap(record["address"], candidate_context)
+        return name_score >= 0.34 or address_score >= 0.45
+    return name_score >= 0.45
+
+
+def photon_geocode(record, query):
+    try:
+        response = requests.get(
+            PHOTON,
+            params={"q": query, "limit": 5},
+            timeout=25,
+            headers={"User-Agent": USER_AGENT, "Accept-Language": "bs,hr,sr,en"},
+        )
+        response.raise_for_status()
+        features = (response.json() or {}).get("features") or []
+    except Exception:
+        return None
+    for feature in features:
+        geometry = feature.get("geometry") or {}
+        coordinates = geometry.get("coordinates") or []
+        if len(coordinates) < 2:
             continue
-        item = payload[0]
+        lng, lat = float(coordinates[0]), float(coordinates[1])
+        if not in_ba_bounds(lat, lng):
+            continue
+        props = feature.get("properties") or {}
+        country_code = norm(props.get("countrycode") or props.get("country_code"))
+        if country_code and country_code not in {"ba", "bih"}:
+            continue
+        candidate_name = clean(props.get("name"))
+        context_parts = [
+            candidate_name, props.get("street"), props.get("housenumber"), props.get("postcode"),
+            props.get("city"), props.get("town"), props.get("village"), props.get("district"),
+            props.get("county"), props.get("state"), props.get("country"),
+        ]
+        context = ", ".join(clean(x) for x in context_parts if clean(x))
+        if not strict_location_match(record, candidate_name, context):
+            continue
+        return {
+            "lat": lat,
+            "lng": lng,
+            "city": clean(props.get("city") or props.get("town") or props.get("village") or record["city"]),
+            "region": clean(props.get("state") or props.get("county")),
+            "postal": clean(props.get("postcode")),
+            "display": context,
+            "geocoder": "photon",
+        }
+    return None
+
+
+def nominatim_geocode(record, query):
+    try:
+        response = requests.get(
+            NOMINATIM,
+            params={"format": "jsonv2", "addressdetails": 1, "limit": 3, "countrycodes": "ba", "q": query},
+            timeout=35,
+            headers={"User-Agent": USER_AGENT, "Accept-Language": "bs,hr,sr,en"},
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception:
+        return None
+    time.sleep(1.02)
+    for item in payload:
         lat, lng = float(item["lat"]), float(item["lon"])
-        if not (BA_BOUNDS[0] <= lat <= BA_BOUNDS[1] and BA_BOUNDS[2] <= lng <= BA_BOUNDS[3]):
+        if not in_ba_bounds(lat, lng):
             continue
         address = item.get("address") or {}
+        display = clean(item.get("display_name"))
+        candidate_name = clean(item.get("name") or display.split(",", 1)[0])
+        if not strict_location_match(record, candidate_name, display):
+            continue
         return {
             "lat": lat,
             "lng": lng,
             "city": clean(address.get("city") or address.get("town") or address.get("village") or address.get("municipality") or record["city"]),
             "region": clean(address.get("state") or address.get("county")),
             "postal": clean(address.get("postcode")),
-            "display": clean(item.get("display_name")),
+            "display": display,
+            "geocoder": "nominatim",
         }
+    return None
+
+
+def geocode(record):
+    queries = geocode_queries(record)
+    # Photon is an indexed OSM search and is fast enough to try all strict name
+    # variants first. We still require source-city + facility-name agreement, so
+    # a city centroid can never pass as a provider point.
+    for query in queries:
+        geo = photon_geocode(record, query)
+        if geo:
+            return geo
+        time.sleep(0.12)
+    # Nominatim remains a conservative fallback. Limit it to the strongest two
+    # variants so a single public service cannot dominate the sync runtime.
+    for query in queries[:2]:
+        geo = nominatim_geocode(record, query)
+        if geo:
+            return geo
     return None
 
 
@@ -361,11 +460,13 @@ def main():
 
     rows = []
     skipped = []
+    geocoder_counts = {}
     for record in records.values():
         geo = geocode(record)
         if not geo:
             skipped.append({"authority": record["authority"], "name": record["name"], "city": record["city"]})
             continue
+        geocoder_counts[geo.get("geocoder", "unknown")] = geocoder_counts.get(geo.get("geocoder", "unknown"), 0) + 1
         primary, tags = classify(record["name"])
         tags.append(f"authority:{record['authority']}")
         source_id = "ba-domestic:" + sha("|".join([record["authority"], record["source_code"], record["name"], record["city"], record["address"]]))[:24]
@@ -402,6 +503,7 @@ def main():
         "parsed_unique": len(records),
         "map_rows": len(rows),
         "skipped_unplaced": len(skipped),
+        "geocoders": geocoder_counts,
         "output": str(output),
         "skipped_output": str(skipped_path),
     }, ensure_ascii=False))

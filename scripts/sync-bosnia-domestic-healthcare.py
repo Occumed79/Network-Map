@@ -9,6 +9,7 @@ import re
 import time
 import unicodedata
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -322,7 +323,7 @@ def in_ba_bounds(lat, lng):
 
 
 def token_overlap(source, candidate):
-    stop = {"jzu", "pzu", "zu", "ju", "zdravstvena", "ustanova", "zdravstvene", "ustanova", "bosna", "hercegovina"}
+    stop = {"jzu", "pzu", "zu", "ju", "zdravstvena", "ustanova", "zdravstvene", "bosna", "hercegovina"}
     a = {t for t in norm(source).split() if len(t) >= 3 and t not in stop}
     b = {t for t in norm(candidate).split() if len(t) >= 3 and t not in stop}
     if not a or not b:
@@ -348,7 +349,7 @@ def photon_geocode(record, query):
         response = requests.get(
             PHOTON,
             params={"q": query, "limit": 5},
-            timeout=25,
+            timeout=20,
             headers={"User-Agent": USER_AGENT, "Accept-Language": "bs,hr,sr,en"},
         )
         response.raise_for_status()
@@ -388,6 +389,14 @@ def photon_geocode(record, query):
     return None
 
 
+def photon_geocode_record(record):
+    for query in geocode_queries(record):
+        geo = photon_geocode(record, query)
+        if geo:
+            return geo
+    return None
+
+
 def nominatim_geocode(record, query):
     try:
         response = requests.get(
@@ -399,8 +408,8 @@ def nominatim_geocode(record, query):
         response.raise_for_status()
         payload = response.json()
     except Exception:
-        return None
-    time.sleep(1.02)
+        payload = []
+    time.sleep(1.05)
     for item in payload:
         lat, lng = float(item["lat"]), float(item["lon"])
         if not in_ba_bounds(lat, lng):
@@ -422,23 +431,47 @@ def nominatim_geocode(record, query):
     return None
 
 
-def geocode(record):
-    queries = geocode_queries(record)
-    # Photon is an indexed OSM search and is fast enough to try all strict name
-    # variants first. We still require source-city + facility-name agreement, so
-    # a city centroid can never pass as a provider point.
-    for query in queries:
-        geo = photon_geocode(record, query)
-        if geo:
-            return geo
-        time.sleep(0.12)
-    # Nominatim remains a conservative fallback. Limit it to the strongest two
-    # variants so a single public service cannot dominate the sync runtime.
-    for query in queries[:2]:
+def nominatim_geocode_record(record):
+    for query in geocode_queries(record)[:2]:
         geo = nominatim_geocode(record, query)
         if geo:
             return geo
     return None
+
+
+def geocode_records(records, target_minimum=55):
+    geocoded = {}
+    # Photon is safe to parallelize and gives us the bulk exact-name OSM pass in
+    # seconds rather than serializing hundreds of provider lookups.
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(photon_geocode_record, record): index for index, record in enumerate(records)}
+        for future in as_completed(futures):
+            index = futures[future]
+            try:
+                geo = future.result()
+            except Exception:
+                geo = None
+            if geo:
+                geocoded[index] = geo
+
+    print(json.dumps({"photonExactMatches": len(geocoded), "officialFacilities": len(records)}, ensure_ascii=False))
+
+    # Nominatim is deliberately serial and rate-limited. Only use it when the
+    # fast exact pass has not yet satisfied the map-safety floor, and stop as
+    # soon as we have a healthy buffer above the 55-row gate.
+    desired = max(target_minimum, 70)
+    if len(geocoded) < desired:
+        unmatched = [index for index in range(len(records)) if index not in geocoded]
+        unmatched.sort(key=lambda index: (0 if records[index]["address"] else 1, 0 if records[index]["city"] else 1))
+        for index in unmatched:
+            geo = nominatim_geocode_record(records[index])
+            if geo:
+                geocoded[index] = geo
+            if len(geocoded) >= desired:
+                break
+
+    print(json.dumps({"exactMappedAfterFallback": len(geocoded), "minimumRequired": target_minimum}, ensure_ascii=False))
+    return geocoded
 
 
 def main():
@@ -458,11 +491,13 @@ def main():
     if len(records) < 90:
         raise SystemExit(f"Only {len(records)} unique Bosnia domestic-authority facilities parsed; refusing output")
 
+    official_records = list(records.values())
+    mapped = geocode_records(official_records, target_minimum=55)
     rows = []
     skipped = []
     geocoder_counts = {}
-    for record in records.values():
-        geo = geocode(record)
+    for index, record in enumerate(official_records):
+        geo = mapped.get(index)
         if not geo:
             skipped.append({"authority": record["authority"], "name": record["name"], "city": record["city"]})
             continue

@@ -34,6 +34,17 @@ jobs:
       - name: Install DuckDB
         run: python -m pip install --disable-pip-version-check duckdb
 
+      - name: Patch importer syntax typo
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/import-overture-cleaned-usa-20260820.py')
+          lines = p.read_text().splitlines()
+          lines[120] = '    return {norm(p.strip(" \'\\\"")) for p in re.split(r"[,|;]+", s) if p.strip(" \'\\\"")}'
+          p.write_text('\n'.join(lines) + '\n')
+          compile(p.read_text(), str(p), 'exec')
+          PY
+
       - name: Extract, clean, and import Overture USA providers
         env:
           NETWORK_MAP_API_URL: https://network-map-tool-mqib.onrender.com/api/my-clinics/upload
@@ -43,3 +54,4 @@ jobs:
         run: echo "Overture USA import workflow completed"
 
 # retrigger after production API-security migration: 2026-08-21T13:44:00-07:00
+# pull-request trigger: 2026-08-21T13:45:00-07:00

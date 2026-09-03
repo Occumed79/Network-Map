@@ -51,7 +51,8 @@ jobs:
             --input /tmp/iceland-operator-registry/workplaces.tsv \
             --output /tmp/iceland-operator-registry/provider.tsv \
             --skipped /tmp/iceland-operator-registry/skipped.json \
-            --workers 10
+            --workers 10 \
+            --max-variants 2
           test -s /tmp/iceland-operator-registry/provider.tsv
           rows=$(( $(wc -l < /tmp/iceland-operator-registry/provider.tsv) - 1 ))
           (( rows >= 200 )) || { echo "Only ${rows} Iceland map-ready official workplaces" >&2; exit 1; }

@@ -33,6 +33,7 @@ const REGISTRIES: Record<string, StoredRegistryDefinition> = {
   "andorra-cass": { sourceKey: "ad_cass_healthcare", countryCode: "AD", countryName: "Andorra" },
   "armenia-uhif": { sourceKey: "am_uhif_healthcare", countryCode: "AM", countryName: "Armenia" },
   "bosnia-domestic": { sourceKey: "ba_domestic_healthcare", countryCode: "BA", countryName: "Bosnia & Herzegovina" },
+  "iceland-doh": { sourceKey: "is_doh_healthcare_operators", countryCode: "IS", countryName: "Iceland" },
 };
 
 function addParam(params: unknown[], value: unknown): string {

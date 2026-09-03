@@ -137,10 +137,13 @@ def candidate_score(record, props):
     return score
 
 
-def geocode_record(record):
+def geocode_record(record, max_variants=0):
     best = None
     best_score = 0.0
-    for query in query_variants(record):
+    queries = query_variants(record)
+    if max_variants and max_variants > 0:
+        queries = queries[:max_variants]
+    for query in queries:
         try:
             features = photon_search(query)
         except Exception:
@@ -204,6 +207,7 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--skipped")
     parser.add_argument("--workers", type=int, default=10)
+    parser.add_argument("--max-variants", type=int, default=0, help="Limit geocoder query variants per workplace; 0 means all variants")
     args = parser.parse_args()
 
     records = load_rows(args.input)
@@ -212,7 +216,7 @@ def main():
 
     matched = {}
     with ThreadPoolExecutor(max_workers=max(2, min(args.workers, 12))) as executor:
-        futures = {executor.submit(geocode_record, record): index for index, record in enumerate(records)}
+        futures = {executor.submit(geocode_record, record, args.max_variants): index for index, record in enumerate(records)}
         for future in as_completed(futures):
             index = futures[future]
             try:
@@ -274,6 +278,7 @@ def main():
         "map_rows": len(rows),
         "skipped_unmatched": len(skipped),
         "minimum_name_match": 0.60,
+        "query_variants_per_workplace": args.max_variants or "all",
         "geocoder": "Photon / OpenStreetMap exact-name+locality matching",
         "output": str(output),
         "skipped_output": str(skipped_path),

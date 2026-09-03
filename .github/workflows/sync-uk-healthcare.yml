@@ -1,0 +1,128 @@
+name: Sync England CQC healthcare registry
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/sync-uk-healthcare.yml"
+      - "scripts/sync-uk-healthcare.mjs"
+      - "scripts/promote-staged-government-registry.sql"
+  schedule:
+    - cron: "20 13 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: england-cqc-healthcare-provider-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync England CQC healthcare locations
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      TARGET_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
+
+    steps:
+      - name: Check out importer
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Validate provider database
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "HEALTHSITES_DATABASE_URL is missing" >&2; exit 1; }
+          echo "::add-mask::${TARGET_DATABASE_URL}"
+          test "$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT to_regclass('public.provider_master_map_view') IS NOT NULL")" = "t"
+
+      - name: Prepare staging table
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+            CREATE TABLE IF NOT EXISTS public.source5_import_staging (
+              source_record_id text PRIMARY KEY,
+              source_url text,
+              name text NOT NULL,
+              normalized_name text,
+              address_line1 text,
+              formatted_address text,
+              city text,
+              state_region text,
+              postal_code text,
+              country_code text NOT NULL,
+              lat double precision NOT NULL,
+              lng double precision NOT NULL,
+              phone text,
+              website text,
+              email text,
+              primary_provider_type text,
+              capability_tags text[] NOT NULL DEFAULT ARRAY[]::text[],
+              quality_score numeric,
+              master_key text NOT NULL
+            );
+            TRUNCATE public.source5_import_staging;
+          "
+
+      - name: Normalize England CQC healthcare locations
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/uk-healthcare
+          node --max-old-space-size=4096 scripts/sync-uk-healthcare.mjs --source england-cqc --output /tmp/uk-healthcare/england.tsv
+          expected=$(( $(wc -l < /tmp/uk-healthcare/england.tsv) - 1 ))
+          distinct_master="$(tail -n +2 /tmp/uk-healthcare/england.tsv | cut -f19 | sort -u | wc -l | tr -d ' ')"
+          (( expected >= 5000 )) || { echo "Only ${expected} England CQC healthcare locations; refusing promotion" >&2; exit 1; }
+          (( distinct_master >= 4500 )) || { echo "Only ${distinct_master} England canonical locations; refusing promotion" >&2; exit 1; }
+          previous="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='gb_cqc_healthcare'" || echo 0)"
+          previous="${previous:-0}"
+          if (( previous >= 5000 )); then
+            minimum=$(( previous * 60 / 100 ))
+            (( expected >= minimum )) || { echo "England CQC shrank from ${previous} to ${expected}; refusing replacement" >&2; exit 1; }
+          fi
+          echo "ENGLAND_EXPECTED=${expected}" >> "$GITHUB_ENV"
+          echo "ENGLAND_MASTER=${distinct_master}" >> "$GITHUB_ENV"
+
+      - name: Promote England CQC healthcare locations
+        shell: bash
+        run: |
+          set -euo pipefail
+          columns="source_record_id,source_url,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,primary_provider_type,capability_tags,quality_score,master_key"
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "\\copy public.source5_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" \
+            < /tmp/uk-healthcare/england.tsv
+          psql "$TARGET_DATABASE_URL" \
+            -v ON_ERROR_STOP=1 \
+            -v expected="$ENGLAND_EXPECTED" \
+            -v expected_master="$ENGLAND_MASTER" \
+            -v source_key="gb_cqc_healthcare" \
+            -v country_code="GB" \
+            -v source_prefix_pattern="cqc:%" \
+            -v source_display_name="England CQC — Regulated Healthcare Locations" \
+            -v data_source_name="England CQC Healthcare" \
+            -v source_notes="Official Care Quality Commission care directory; clinically relevant regulated locations synchronized from the current bulk directory with native CQC coordinates" \
+            -f scripts/promote-staged-government-registry.sql
+
+      - name: Verify England source
+        shell: bash
+        run: |
+          set -euo pipefail
+          england="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='gb_cqc_healthcare' AND country_code='GB' AND lat IS NOT NULL AND lng IS NOT NULL")"
+          (( england >= 4500 )) || { echo "Only ${england} England CQC locations map-renderable" >&2; exit 1; }
+          echo "England CQC map-renderable healthcare locations: ${england}"

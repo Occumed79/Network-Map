@@ -1,0 +1,29 @@
+name: Probe Bosnia domestic healthcare extraction
+
+on:
+  push:
+    branches:
+      - international-europe-wave-1
+    paths:
+      - ".github/workflows/probe-bosnia-domestic-source.yml"
+      - "scripts/sync-bosnia-domestic-healthcare.py"
+      - "scripts/probe-bosnia-photon-fast.py"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install parser dependencies
+        run: python -m pip install --disable-pip-version-check beautifulsoup4 requests pandas xlrd openpyxl
+      - name: Validate official source inventory and fast exact-map coverage
+        run: |
+          set -euo pipefail
+          python scripts/probe-bosnia-photon-fast.py

@@ -1,0 +1,189 @@
+name: Sync Iceland Directorate healthcare operators
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/sync-iceland-doh-operators.yml"
+      - "scripts/extract-iceland-operator-registry.mjs"
+      - "scripts/geocode-iceland-operator-registry.py"
+      - "scripts/promote-staged-government-registry.sql"
+  schedule:
+    - cron: "30 12 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iceland-doh-operator-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Fetch and promote Iceland Directorate healthcare operators
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      TARGET_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install extraction and database dependencies
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium >/dev/null
+          python -m pip install --disable-pip-version-check requests
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Validate provider database
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "HEALTHSITES_DATABASE_URL is missing" >&2; exit 1; }
+          echo "::add-mask::${TARGET_DATABASE_URL}"
+          test "$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT to_regclass('public.provider_master_map_view') IS NOT NULL")" = "t"
+
+      - name: Extract complete Directorate registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/iceland-doh
+          node scripts/extract-iceland-operator-registry.mjs \
+            --output /tmp/iceland-doh/workplaces.tsv \
+            --summary /tmp/iceland-doh/summary.json
+          test -s /tmp/iceland-doh/workplaces.tsv
+          raw=$(( $(wc -l < /tmp/iceland-doh/workplaces.tsv) - 1 ))
+          (( raw >= 1000 )) || { echo "Only ${raw} Iceland official workplaces; refusing sync" >&2; exit 1; }
+          echo "REGISTRY_RAW=${raw}" >> "$GITHUB_ENV"
+          cat /tmp/iceland-doh/summary.json
+
+      - name: Preserve complete official workplace inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+            CREATE TABLE IF NOT EXISTS public.iceland_doh_operator_registry_raw (
+              workplace text NOT NULL,
+              postal_code text,
+              locality text,
+              record_count integer NOT NULL,
+              professions text,
+              operators text,
+              responsible_people text,
+              imported_at timestamptz NOT NULL DEFAULT now(),
+              PRIMARY KEY (workplace, postal_code, locality)
+            );
+            TRUNCATE public.iceland_doh_operator_registry_raw;
+          "
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "\\copy public.iceland_doh_operator_registry_raw (workplace,postal_code,locality,record_count,professions,operators,responsible_people) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', QUOTE '\"', ESCAPE '\"')" \
+            < /tmp/iceland-doh/workplaces.tsv
+          actual="$(psql "$TARGET_DATABASE_URL" -Atqc 'SELECT count(*) FROM public.iceland_doh_operator_registry_raw')"
+          [[ "$actual" == "$REGISTRY_RAW" ]] || { echo "Raw Iceland inventory mismatch ${actual} vs ${REGISTRY_RAW}" >&2; exit 1; }
+
+      - name: Match official workplaces to exact OSM locations
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/geocode-iceland-operator-registry.py \
+            --input /tmp/iceland-doh/workplaces.tsv \
+            --output /tmp/iceland-doh/provider.tsv \
+            --skipped /tmp/iceland-doh/skipped.json \
+            --workers 10
+          test -s /tmp/iceland-doh/provider.tsv
+          expected=$(( $(wc -l < /tmp/iceland-doh/provider.tsv) - 1 ))
+          distinct_master="$(tail -n +2 /tmp/iceland-doh/provider.tsv | cut -f19 | sort -u | wc -l | tr -d ' ')"
+          (( expected >= 200 )) || { echo "Only ${expected} Iceland official workplaces mapped exactly; refusing promotion" >&2; exit 1; }
+          (( distinct_master >= 190 )) || { echo "Only ${distinct_master} Iceland canonical locations; refusing promotion" >&2; exit 1; }
+          echo "REGISTRY_EXPECTED=${expected}" >> "$GITHUB_ENV"
+          echo "REGISTRY_EXPECTED_MASTER=${distinct_master}" >> "$GITHUB_ENV"
+
+      - name: Protect against unexpected mapped-layer collapse
+        shell: bash
+        run: |
+          set -euo pipefail
+          previous="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='is_doh_healthcare_operators'" || echo 0)"
+          previous="${previous:-0}"
+          if (( previous >= 200 )); then
+            minimum=$(( previous * 60 / 100 ))
+            (( REGISTRY_EXPECTED >= minimum )) || {
+              echo "Iceland mapped layer shrank from ${previous} to ${REGISTRY_EXPECTED}; refusing automatic replacement" >&2
+              exit 1
+            }
+          fi
+
+      - name: Stage mapped Iceland rows
+        shell: bash
+        run: |
+          set -euo pipefail
+          columns="source_record_id,source_url,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,primary_provider_type,capability_tags,quality_score,master_key"
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+            CREATE TABLE IF NOT EXISTS public.source5_import_staging (
+              source_record_id text PRIMARY KEY,
+              source_url text,
+              name text NOT NULL,
+              normalized_name text,
+              address_line1 text,
+              formatted_address text,
+              city text,
+              state_region text,
+              postal_code text,
+              country_code text NOT NULL,
+              lat double precision NOT NULL,
+              lng double precision NOT NULL,
+              phone text,
+              website text,
+              email text,
+              primary_provider_type text,
+              capability_tags text[] NOT NULL DEFAULT ARRAY[]::text[],
+              quality_score numeric,
+              master_key text NOT NULL
+            );
+            TRUNCATE public.source5_import_staging;
+          "
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "\\copy public.source5_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" \
+            < /tmp/iceland-doh/provider.tsv
+          actual="$(psql "$TARGET_DATABASE_URL" -Atqc 'SELECT count(*) FROM public.source5_import_staging')"
+          [[ "$actual" == "$REGISTRY_EXPECTED" ]] || { echo "Staging mismatch ${actual} vs ${REGISTRY_EXPECTED}" >&2; exit 1; }
+
+      - name: Promote Iceland into canonical registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$TARGET_DATABASE_URL" \
+            -v ON_ERROR_STOP=1 \
+            -v expected="$REGISTRY_EXPECTED" \
+            -v expected_master="$REGISTRY_EXPECTED_MASTER" \
+            -v source_key="is_doh_healthcare_operators" \
+            -v country_code="IS" \
+            -v source_prefix_pattern="is-doh:%" \
+            -v source_display_name="Iceland Directorate of Health — Rekstraraðilaskrá" \
+            -v data_source_name="Iceland Directorate Healthcare Operators" \
+            -v source_notes="Official Directorate of Health Rekstraraðilaskrá. Complete official workplace inventory is preserved in iceland_doh_operator_registry_raw; the map layer includes only workplaces whose official name/postal locality can be matched to an exact OpenStreetMap location." \
+            -f scripts/promote-staged-government-registry.sql
+
+      - name: Verify production Iceland source
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw_count="$(psql "$TARGET_DATABASE_URL" -Atqc 'SELECT count(*) FROM public.iceland_doh_operator_registry_raw')"
+          source_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='is_doh_healthcare_operators'")"
+          mapped_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='is_doh_healthcare_operators' AND country_code='IS' AND lat IS NOT NULL AND lng IS NOT NULL")"
+          [[ "$raw_count" == "$REGISTRY_RAW" ]] || { echo "Iceland raw inventory mismatch" >&2; exit 1; }
+          [[ "$source_count" == "$REGISTRY_EXPECTED" ]] || { echo "Iceland lineage mismatch ${source_count} vs ${REGISTRY_EXPECTED}" >&2; exit 1; }
+          (( mapped_count >= 200 )) || { echo "Only ${mapped_count} Iceland providers map-renderable" >&2; exit 1; }
+          echo "Iceland official workplaces preserved: ${raw_count}"
+          echo "Iceland exact mapped workplaces: ${mapped_count}"

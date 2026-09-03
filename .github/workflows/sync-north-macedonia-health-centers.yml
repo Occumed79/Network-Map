@@ -1,0 +1,110 @@
+name: Sync North Macedonia Ministry health centers
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/sync-north-macedonia-health-centers.yml"
+      - "scripts/sync-north-macedonia-health-centers.mjs"
+      - "scripts/promote-staged-government-registry.sql"
+  schedule:
+    - cron: "50 10 8 * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: north-macedonia-health-centers-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync North Macedonia MOH health centers
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      TARGET_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
+
+    steps:
+      - name: Check out importer
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Validate provider database
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "HEALTHSITES_DATABASE_URL is missing" >&2; exit 1; }
+          echo "::add-mask::${TARGET_DATABASE_URL}"
+          test "$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT to_regclass('public.provider_master_map_view') IS NOT NULL")" = "t"
+
+      - name: Normalize North Macedonia Ministry health centers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/north-macedonia
+          node scripts/sync-north-macedonia-health-centers.mjs --output /tmp/north-macedonia/provider.tsv
+          test -s /tmp/north-macedonia/provider.tsv
+          expected=$(( $(wc -l < /tmp/north-macedonia/provider.tsv) - 1 ))
+          distinct_master="$(tail -n +2 /tmp/north-macedonia/provider.tsv | cut -f19 | sort -u | wc -l | tr -d ' ')"
+          (( expected >= 20 )) || { echo "Only ${expected} map-renderable North Macedonia health centers; refusing promotion" >&2; exit 1; }
+          (( distinct_master >= 18 )) || { echo "Only ${distinct_master} North Macedonia canonical health centers; refusing promotion" >&2; exit 1; }
+          previous="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='mk_moh_health_centers'" || echo 0)"
+          previous="${previous:-0}"
+          if (( previous >= 20 )); then
+            minimum=$(( previous * 60 / 100 ))
+            (( expected >= minimum )) || { echo "North Macedonia source shrank from ${previous} to ${expected}; refusing replacement" >&2; exit 1; }
+          fi
+          echo "REGISTRY_EXPECTED=${expected}" >> "$GITHUB_ENV"
+          echo "REGISTRY_EXPECTED_MASTER=${distinct_master}" >> "$GITHUB_ENV"
+
+      - name: Stage and promote North Macedonia rows
+        shell: bash
+        run: |
+          set -euo pipefail
+          columns="source_record_id,source_url,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,primary_provider_type,capability_tags,quality_score,master_key"
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+            CREATE TABLE IF NOT EXISTS public.source5_import_staging (
+              source_record_id text PRIMARY KEY, source_url text, name text NOT NULL, normalized_name text,
+              address_line1 text, formatted_address text, city text, state_region text, postal_code text,
+              country_code text NOT NULL, lat double precision NOT NULL, lng double precision NOT NULL,
+              phone text, website text, email text, primary_provider_type text,
+              capability_tags text[] NOT NULL DEFAULT ARRAY[]::text[], quality_score numeric, master_key text NOT NULL
+            );
+            TRUNCATE public.source5_import_staging;
+          "
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "\\copy public.source5_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" \
+            < /tmp/north-macedonia/provider.tsv
+          psql "$TARGET_DATABASE_URL" \
+            -v ON_ERROR_STOP=1 \
+            -v expected="$REGISTRY_EXPECTED" \
+            -v expected_master="$REGISTRY_EXPECTED_MASTER" \
+            -v source_key="mk_moh_health_centers" \
+            -v country_code="MK" \
+            -v source_prefix_pattern="mk-moh:%" \
+            -v source_display_name="North Macedonia Ministry of Health — Health Centers" \
+            -v data_source_name="North Macedonia MOH Health Centers" \
+            -v source_notes="Current Ministry of Health public health-center, polyclinic, health-station and specialist institute address directory; contact fields retained and addresses geocoded for the map" \
+            -f scripts/promote-staged-government-registry.sql
+
+      - name: Verify production North Macedonia source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapped="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='mk_moh_health_centers' AND country_code='MK' AND lat IS NOT NULL AND lng IS NOT NULL")"
+          (( mapped >= 18 )) || { echo "Only ${mapped} North Macedonia health centers map-renderable" >&2; exit 1; }
+          echo "North Macedonia map-renderable health centers: ${mapped}"

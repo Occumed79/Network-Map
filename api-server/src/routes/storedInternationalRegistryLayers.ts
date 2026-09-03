@@ -19,6 +19,21 @@ const REGISTRIES: Record<string, StoredRegistryDefinition> = {
   "czechia-nrpzs": { sourceKey: "cz_nrpzs", countryCode: "CZ", countryName: "Czechia" },
   "argentina-refes": { sourceKey: "ar_refes", countryCode: "AR", countryName: "Argentina" },
   "finland-ptv-healthcare": { sourceKey: "fi_ptv_healthcare", countryCode: "FI", countryName: "Finland" },
+  "france-finess": { sourceKey: "fr_finess", countryCode: "FR", countryName: "France" },
+  "england-cqc": { sourceKey: "gb_cqc_healthcare", countryCode: "GB", countryName: "England" },
+  "northern-ireland-gp": { sourceKey: "gb_ni_gp", countryCode: "GB", countryName: "Northern Ireland" },
+  "ukraine-nhsu": { sourceKey: "ua_nhsu_pmg", countryCode: "UA", countryName: "Ukraine" },
+  "kosovo-moh-private": { sourceKey: "xk_moh_private_licensed", countryCode: "XK", countryName: "Kosovo" },
+  "azerbaijan-tabib": { sourceKey: "az_tabib_healthcare", countryCode: "AZ", countryName: "Azerbaijan" },
+  "liechtenstein-lkv": { sourceKey: "li_lkv_okp", countryCode: "LI", countryName: "Liechtenstein" },
+  "san-marino-authorized": { sourceKey: "sm_authorized_healthcare", countryCode: "SM", countryName: "San Marino" },
+  "turkey-moh-health-tourism": { sourceKey: "tr_moh_health_tourism", countryCode: "TR", countryName: "Türkiye" },
+  "north-macedonia-moh": { sourceKey: "mk_moh_health_centers", countryCode: "MK", countryName: "North Macedonia" },
+  "denmark-sor-healthcare": { sourceKey: "dk_sor_healthcare", countryCode: "DK", countryName: "Denmark" },
+  "andorra-cass": { sourceKey: "ad_cass_healthcare", countryCode: "AD", countryName: "Andorra" },
+  "armenia-uhif": { sourceKey: "am_uhif_healthcare", countryCode: "AM", countryName: "Armenia" },
+  "bosnia-domestic": { sourceKey: "ba_domestic_healthcare", countryCode: "BA", countryName: "Bosnia & Herzegovina" },
+  "iceland-doh": { sourceKey: "is_doh_healthcare_operators", countryCode: "IS", countryName: "Iceland" },
 };
 
 function addParam(params: unknown[], value: unknown): string {

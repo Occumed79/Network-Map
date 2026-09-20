@@ -31,7 +31,9 @@ type JwtClaims = {
   job_workflow_ref?: string;
 };
 
-type RegistryJwk = { kid?: string; [key: string]: unknown };\n\nlet jwksCache: { expiresAt: number; keys: RegistryJwk[] } | null = null;
+type RegistryJwk = { kid?: string; [key: string]: unknown };
+
+let jwksCache: { expiresAt: number; keys: RegistryJwk[] } | null = null;
 
 function decodeSegment<T>(value: string): T {
   return JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as T;
@@ -99,7 +101,7 @@ async function verifyGithubActionsToken(token: string): Promise<JwtClaims> {
   return claims;
 }
 
-router.post("/registry-sync/connection/:source", async (req: Request, res: Response) => {
+router.get("/registry-sync/connection/:source", async (req: Request, res: Response) => {
   res.setHeader("Cache-Control", "no-store");
   const source = String(Array.isArray(req.params.source) ? req.params.source[0] : req.params.source || "") as RegistryDatabaseId;
   if (!(source in REGISTRY_DATABASE_CONFIG)) {

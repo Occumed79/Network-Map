@@ -33,7 +33,6 @@ const requiredOwners: Record<string, string> = {
   "mapToolsPanelRegistry.ts": "map-tools-section-registry",
   "mapToolsCommandPanel.ts": "map-tools-command-panel",
   "mapControlsBridgeRuntime.ts": "map-controls-bridge",
-  "uploadedDatasetLabelRuntime.ts": "uploaded-dataset-labels",
   "providerLayerTelemetryRuntime.ts": "provider-layer-telemetry",
   "usDiagnosticsGate.ts": "us-diagnostics-gate",
   "routePlannerControlsRuntime.ts": "route-planner-controls",
@@ -52,7 +51,6 @@ for (const [file, id] of Object.entries(requiredOwners)) {
 
 const sharedObserverConsumers = [
   "mapControlsBridgeRuntime.ts",
-  "uploadedDatasetLabelRuntime.ts",
   "providerLayerTelemetryRuntime.ts",
   "usDiagnosticsGate.ts",
   "mapboxGlobeLoadHardeningRuntime.ts",

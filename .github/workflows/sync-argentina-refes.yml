@@ -6,6 +6,7 @@ on:
     branches:
       - main
     paths:
+      - ".github/actions/resolve-registry-database/action.yml"
       - ".github/workflows/sync-argentina-refes.yml"
       - "scripts/normalize-argentina-refes.py"
       - "scripts/official-registry-schema.sql"

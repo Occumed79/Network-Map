@@ -8,7 +8,8 @@ on:
     paths:
       - ".github/workflows/sync-brazil-cnes.yml"
       - "scripts/normalize-cnes-jsonl.mjs"
-      - "scripts/promote-brazil-cnes.sql"
+      - "scripts/official-registry-schema.sql"
+      - "scripts/import-official-registry.sh"
   schedule:
     - cron: "20 9 * * *"
 
@@ -27,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
-      TARGET_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
+      TARGET_DATABASE_URL: ${{ secrets.BRAZIL_REGISTRY_DATABASE_URL }}
       CNES_JSON_ZIP_URL: https://s3.sa-east-1.amazonaws.com/ckan.saude.gov.br/CNES/cnes_estabelecimentos_json.zip
 
     steps:
@@ -50,9 +51,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "HEALTHSITES_DATABASE_URL is missing" >&2; exit 1; }
+          [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "Dedicated registry database secret is missing" >&2; exit 1; }
           echo "::add-mask::${TARGET_DATABASE_URL}"
-          test "$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT to_regclass('public.provider_master_map_view') IS NOT NULL")" = "t"
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -Atqc "SELECT 1" >/dev/null
 
       - name: Download official CNES bulk JSON
         shell: bash
@@ -98,63 +99,20 @@ jobs:
           echo "CNES_EXPECTED_MASTER=${distinct_master}" >> "$GITHUB_ENV"
           echo "CNES geocoded records: ${expected}; canonical locations: ${distinct_master}"
 
-      - name: Stage normalized CNES rows
+      - name: Import compact dedicated registry
+        shell: bash
+        env:
+          REGISTRY_TSV: /tmp/cnes/cnes-provider.tsv
+          REGISTRY_EXPECTED: ${{ env.CNES_EXPECTED }}
+          REGISTRY_SOURCE_KEY: br_cnes
+          REGISTRY_COUNTRY_CODE: BR
+        run: scripts/import-official-registry.sh
+
+      - name: Verify dedicated Brazil CNES registry
         shell: bash
         run: |
           set -euo pipefail
-          columns="source_record_id,source_url,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,primary_provider_type,capability_tags,quality_score,master_key"
-
-          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "
-            CREATE TABLE IF NOT EXISTS public.official_registry_import_staging (
-              source_record_id text PRIMARY KEY,
-              source_url text,
-              name text NOT NULL,
-              normalized_name text,
-              address_line1 text,
-              formatted_address text,
-              city text,
-              state_region text,
-              postal_code text,
-              country_code text NOT NULL,
-              lat double precision NOT NULL,
-              lng double precision NOT NULL,
-              phone text,
-              website text,
-              email text,
-              primary_provider_type text,
-              capability_tags text[] NOT NULL DEFAULT ARRAY[]::text[],
-              quality_score numeric,
-              master_key text NOT NULL
-            );
-            TRUNCATE public.official_registry_import_staging;
-          "
-
-          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 \
-            -c "\\copy public.official_registry_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" \
-            < /tmp/cnes/cnes-provider.tsv
-
-          actual="$(psql "$TARGET_DATABASE_URL" -Atqc 'SELECT count(*) FROM public.official_registry_import_staging')"
-          [[ "$actual" == "$CNES_EXPECTED" ]] || { echo "Staging mismatch ${actual} vs ${CNES_EXPECTED}" >&2; exit 1; }
-          actual_master="$(psql "$TARGET_DATABASE_URL" -Atqc 'SELECT count(DISTINCT master_key) FROM public.official_registry_import_staging')"
-          echo "CNES_EXPECTED_MASTER=${actual_master}" >> "$GITHUB_ENV"
-
-      - name: Promote CNES into canonical registry
-        shell: bash
-        run: |
-          set -euo pipefail
-          psql "$TARGET_DATABASE_URL" \
-            -v ON_ERROR_STOP=1 \
-            -v expected="$CNES_EXPECTED" \
-            -v expected_master="$CNES_EXPECTED_MASTER" \
-            -f scripts/promote-brazil-cnes.sql
-
-      - name: Verify production Brazil source
-        shell: bash
-        run: |
-          set -euo pipefail
-          source_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='br_cnes'")"
-          mapped_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='br_cnes' AND country_code='BR' AND lat IS NOT NULL AND lng IS NOT NULL")"
-          [[ "$source_count" == "$CNES_EXPECTED" ]] || { echo "CNES lineage mismatch ${source_count} vs ${CNES_EXPECTED}" >&2; exit 1; }
-          (( mapped_count >= 20000 )) || { echo "Only ${mapped_count} CNES providers map-renderable" >&2; exit 1; }
-          echo "Brazil CNES source records: ${source_count}"
+          mapped_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.official_registry_providers")"
+          [[ "$mapped_count" == "$CNES_EXPECTED" ]] || { echo "Registry count mismatch ${mapped_count}" >&2; exit 1; }
+          (( mapped_count >= 20000 )) || { echo "Only ${mapped_count} providers map-renderable" >&2; exit 1; }
           echo "Brazil CNES map-renderable providers: ${mapped_count}"

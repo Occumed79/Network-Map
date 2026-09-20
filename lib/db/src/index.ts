@@ -7,6 +7,7 @@ const { Pool } = pg;
 let pool: pg.Pool | null = null;
 let scoringPool: pg.Pool | null = null;
 const providerProjectPools = new Map<string, pg.Pool>();
+const registryProjectPools = new Map<string, pg.Pool>();
 let db: ReturnType<typeof drizzle> | null = null;
 let closingPromise: Promise<void> | null = null;
 
@@ -22,6 +23,34 @@ export type ProviderDatabaseProject = {
   environmentVariable: string;
   family: "primary" | "overpass" | "healthsites" | "usa-embassy";
   primary: boolean;
+  pool: pg.Pool;
+};
+
+export const REGISTRY_DATABASE_CONFIG = {
+  "finland-ptv-healthcare": "FINLAND_REGISTRY_DATABASE_URL",
+  "argentina-refes": "ARGENTINA_REGISTRY_DATABASE_URL",
+  "czechia-nrpzs": "CZECHIA_REGISTRY_DATABASE_URL",
+  "brazil-cnes": "BRAZIL_REGISTRY_DATABASE_URL",
+  "new-zealand-health-facilities": "NEW_ZEALAND_REGISTRY_DATABASE_URL",
+  "taiwan-nlsc-medical": "TAIWAN_REGISTRY_DATABASE_URL",
+  "mexico-clues": "MEXICO_REGISTRY_DATABASE_URL",
+  "singapore-chas": "SINGAPORE_REGISTRY_DATABASE_URL",
+  "lithuania-vaspvt": "LITHUANIA_REGISTRY_DATABASE_URL",
+  "latvia-medical-facilities": "LATVIA_REGISTRY_DATABASE_URL",
+  "ireland-hse-health-centres": "IRELAND_REGISTRY_DATABASE_URL",
+  "colombia-reps": "COLOMBIA_REGISTRY_DATABASE_URL",
+  "chile-minsal": "CHILE_REGISTRY_DATABASE_URL",
+  "croatia-hzzo-primary-care": "CROATIA_REGISTRY_DATABASE_URL",
+  "australia-healthdirect": "AUSTRALIA_REGISTRY_DATABASE_URL",
+  "canada-odhf": "CANADA_REGISTRY_DATABASE_URL",
+  "germany-klinik-atlas": "GERMANY_REGISTRY_DATABASE_URL",
+} as const;
+
+export type RegistryDatabaseId = keyof typeof REGISTRY_DATABASE_CONFIG;
+
+export type RegistryDatabaseProject = {
+  id: RegistryDatabaseId;
+  environmentVariable: (typeof REGISTRY_DATABASE_CONFIG)[RegistryDatabaseId];
   pool: pg.Pool;
 };
 
@@ -52,10 +81,29 @@ export function getDatabaseConfigurationSummary() {
       ...additionalProviderProjects,
     ],
     scoring: process.env.DATABASE_URL_2 ? "DATABASE_URL_2" : "missing",
+    registryProjects: Object.entries(REGISTRY_DATABASE_CONFIG)
+      .filter(([, environmentVariable]) => Boolean(process.env[environmentVariable]))
+      .map(([id]) => id),
     providerPoolMax: positiveInteger(process.env.PGPOOL_MAX, 4, 1, 20),
     additionalProviderPoolMax: positiveInteger(process.env.PGPOOL_PROVIDER_PROJECT_MAX, 2, 1, 10),
     scoringPoolMax: positiveInteger(process.env.PGPOOL_SCORING_MAX, 2, 1, 10),
   } as const;
+}
+
+export function getRegistryDatabaseProject(id: RegistryDatabaseId): RegistryDatabaseProject | null {
+  const environmentVariable = REGISTRY_DATABASE_CONFIG[id];
+  const connectionString = process.env[environmentVariable];
+  if (!connectionString) return null;
+  let registryPool = registryProjectPools.get(id);
+  if (!registryPool) {
+    registryPool = createPool(
+      connectionString,
+      `${process.env.PGAPPNAME || "network-map-api"}-registry-${id}`,
+      positiveInteger(process.env.PGPOOL_REGISTRY_MAX, 2, 1, 5),
+    );
+    registryProjectPools.set(id, registryPool);
+  }
+  return { id, environmentVariable, pool: registryPool };
 }
 
 function getDatabaseUrl(): string {
@@ -208,6 +256,10 @@ export function getPoolDiagnostics() {
       project,
       ...describe(target),
     })),
+    registryProjects: [...registryProjectPools.entries()].map(([project, target]) => ({
+      project,
+      ...describe(target),
+    })),
     scoring: describe(scoringPool),
   };
 }
@@ -215,10 +267,11 @@ export function getPoolDiagnostics() {
 export async function closeDatabasePools(): Promise<void> {
   if (closingPromise) return closingPromise;
   closingPromise = (async () => {
-    const targets = [pool, scoringPool, ...providerProjectPools.values()].filter((target): target is pg.Pool => Boolean(target));
+    const targets = [pool, scoringPool, ...providerProjectPools.values(), ...registryProjectPools.values()].filter((target): target is pg.Pool => Boolean(target));
     pool = null;
     scoringPool = null;
     providerProjectPools.clear();
+    registryProjectPools.clear();
     db = null;
     await Promise.allSettled(targets.map((target) => target.end()));
   })().finally(() => { closingPromise = null; });

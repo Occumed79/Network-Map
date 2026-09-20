@@ -1,0 +1,78 @@
+name: Sync live country registries into dedicated databases
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/sync-live-country-registries.yml"
+      - "scripts/sync-live-registry-to-tsv.mjs"
+      - "scripts/import-official-registry.sh"
+      - "scripts/official-registry-schema.sql"
+  schedule:
+    - cron: "45 12 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-country-registry-sync
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync ${{ matrix.country_name }} registry
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - { source: germany-klinik-atlas, country: DE, country_name: Germany, source_key: de_klinikatlas, secret: GERMANY_REGISTRY_DATABASE_URL }
+          - { source: canada-odhf, country: CA, country_name: Canada, source_key: ca_odhf, secret: CANADA_REGISTRY_DATABASE_URL }
+          - { source: australia-healthdirect, country: AU, country_name: Australia, source_key: au_healthdirect, secret: AUSTRALIA_REGISTRY_DATABASE_URL }
+          - { source: croatia-hzzo-primary-care, country: HR, country_name: Croatia, source_key: hr_hzzo_pzz_ckan, secret: CROATIA_REGISTRY_DATABASE_URL }
+          - { source: chile-minsal, country: CL, country_name: Chile, source_key: cl_minsal_establishments, secret: CHILE_REGISTRY_DATABASE_URL }
+          - { source: colombia-reps, country: CO, country_name: Colombia, source_key: co_reps_sispro, secret: COLOMBIA_REGISTRY_DATABASE_URL }
+          - { source: ireland-hse-health-centres, country: IE, country_name: Ireland, source_key: ie_hse_health_centres, secret: IRELAND_REGISTRY_DATABASE_URL }
+          - { source: latvia-medical-facilities, country: LV, country_name: Latvia, source_key: lv_medical_facilities, secret: LATVIA_REGISTRY_DATABASE_URL }
+          - { source: lithuania-vaspvt, country: LT, country_name: Lithuania, source_key: lt_vaspvt_licensed_facilities, secret: LITHUANIA_REGISTRY_DATABASE_URL }
+          - { source: singapore-chas, country: SG, country_name: Singapore, source_key: sg_moh_chas, secret: SINGAPORE_REGISTRY_DATABASE_URL }
+          - { source: mexico-clues, country: MX, country_name: Mexico, source_key: mx_clues_2024, secret: MEXICO_REGISTRY_DATABASE_URL }
+          - { source: taiwan-nlsc-medical, country: TW, country_name: Taiwan, source_key: tw_nlsc_medical, secret: TAIWAN_REGISTRY_DATABASE_URL }
+          - { source: new-zealand-health-facilities, country: NZ, country_name: New-Zealand, source_key: nz_health_facilities, secret: NEW_ZEALAND_REGISTRY_DATABASE_URL }
+    env:
+      TARGET_DATABASE_URL: ${{ secrets[matrix.secret] }}
+      REGISTRY_API_BASE_URL: https://network-map-v846.onrender.com
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+      - name: Download and normalize the live official registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "${{ matrix.secret }} is missing" >&2; exit 1; }
+          echo "::add-mask::${TARGET_DATABASE_URL}"
+          mkdir -p /tmp/registry
+          count="$(node scripts/sync-live-registry-to-tsv.mjs --source "${{ matrix.source }}" --country "${{ matrix.country }}" --output /tmp/registry/provider.tsv)"
+          (( count > 0 )) || { echo "Registry returned no providers" >&2; exit 1; }
+          echo "REGISTRY_EXPECTED=${count}" >> "$GITHUB_ENV"
+      - name: Import compact dedicated registry
+        shell: bash
+        env:
+          REGISTRY_TSV: /tmp/registry/provider.tsv
+          REGISTRY_EXPECTED: ${{ env.REGISTRY_EXPECTED }}
+          REGISTRY_SOURCE_KEY: ${{ matrix.source_key }}
+          REGISTRY_COUNTRY_CODE: ${{ matrix.country }}
+        run: scripts/import-official-registry.sh

@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: network-map-tool-mqib
+    name: network-map
     runtime: node
     plan: free
     buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @workspace/occu-med-map build && pnpm --filter @workspace/api-server build
@@ -12,7 +12,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: CLIENT_ORIGIN
-        value: https://network-map-tool-mqib.onrender.com
+        value: https://network-map-v846.onrender.com
       - key: DATABASE_URL
         sync: false
       - key: DATABASE_URL_POOLED

@@ -68,15 +68,38 @@ function registryWhere(definition: StoredRegistryDefinition, bounds: Bounds | nu
   return conditions.join(" AND ");
 }
 
-async function countProject(project: ProviderDatabaseProject, definition: StoredRegistryDefinition, bounds: Bounds | null): Promise<number> {
+function registryBoundsWhere(bounds: Bounds | null, params: unknown[]): string {
+  if (!bounds) return "TRUE";
+  const conditions = [
+    `pmv.lat BETWEEN ${addParam(params, bounds.south)} AND ${addParam(params, bounds.north)}`,
+    bounds.west <= bounds.east
+      ? `pmv.lng BETWEEN ${addParam(params, bounds.west)} AND ${addParam(params, bounds.east)}`
+      : `(pmv.lng >= ${addParam(params, bounds.west)} OR pmv.lng <= ${addParam(params, bounds.east)})`,
+  ];
+  return conditions.join(" AND ");
+}
+
+async function countProject(
+  project: ProviderDatabaseProject,
+  definition: StoredRegistryDefinition,
+  bounds: Bounds | null,
+): Promise<{ total: number; nationalTotal: number }> {
   const params: unknown[] = [];
-  const where = registryWhere(definition, bounds, params);
+  const nationalWhere = registryWhere(definition, null, params);
+  const boundsWhere = registryBoundsWhere(bounds, params);
   const { rows } = await queryWithStatementTimeout(
     project.pool,
-    `SELECT count(*)::int AS total FROM public.provider_master_map_view pmv WHERE ${where}`,
+    `SELECT
+       count(*)::int AS national_total,
+       count(*) FILTER (WHERE ${boundsWhere})::int AS total
+     FROM public.provider_master_map_view pmv
+     WHERE ${nationalWhere}`,
     params,
   );
-  return Number(rows[0]?.total || 0);
+  return {
+    total: Number(rows[0]?.total || 0),
+    nationalTotal: Number(rows[0]?.national_total || 0),
+  };
 }
 
 async function loadProjectPage(
@@ -167,7 +190,12 @@ router.get("/stored-international-registry-layers/:source", async (req: Request,
 
   try {
     if (!isPersistenceConfigured()) {
-      res.json({ providers: [], count: 0, loaded: 0, total: 0, page: 1, limit: 0, hasMore: false, source, visibleCapped: false });
+      res.json({
+        providers: [], count: 0, loaded: 0, total: 0, nationalTotal: null,
+        page: 1, limit: 0, hasMore: false, source, visibleCapped: false,
+        registryState: "not_synchronized", synchronized: false,
+        warning: "Official registry data has not been synchronized into this deployment.",
+      });
       return;
     }
 
@@ -180,15 +208,16 @@ router.get("/stored-international-registry-layers/:source", async (req: Request,
       await Promise.all(getProviderDatabaseProjects().map(async (project) => {
         try {
           if (!(await canonicalViewAvailable(project))) throw new Error("canonical provider view is unavailable");
-          return { project, total: await countProject(project, definition, bounds) };
+          return { project, ...await countProject(project, definition, bounds) };
         } catch (error) {
           warnings.push(`${project.id}: ${error instanceof Error ? error.message : String(error)}`);
           return null;
         }
       }))
-    ).filter((probe): probe is { project: ProviderDatabaseProject; total: number } => Boolean(probe));
+    ).filter((probe): probe is { project: ProviderDatabaseProject; total: number; nationalTotal: number } => Boolean(probe));
 
     const total = probes.reduce((sum, probe) => sum + probe.total, 0);
+    const nationalTotal = probes.reduce((sum, probe) => sum + probe.nationalTotal, 0);
     let offset = (page - 1) * limit;
     let remaining = limit;
     const rows: Record<string, unknown>[] = [];
@@ -212,13 +241,20 @@ router.get("/stored-international-registry-layers/:source", async (req: Request,
       count: providers.length,
       loaded: providers.length,
       total,
+      nationalTotal,
       page,
       limit,
       hasMore: page * limit < total,
       source,
       databaseProjects: probes.map((probe) => probe.project.id),
       officialRegistry: true,
-      synchronized: true,
+      synchronized: nationalTotal > 0,
+      registryState: nationalTotal > 0
+        ? "ready"
+        : warnings.length > 0
+          ? "source_failed"
+          : "not_synchronized",
+      resultScope: bounds ? "viewport" : "national",
       live: false,
       partial: warnings.length > 0,
       ...(warnings.length ? { warnings, warning: warnings.join(" ") } : {}),
@@ -229,7 +265,7 @@ router.get("/stored-international-registry-layers/:source", async (req: Request,
     console.error(`[StoredInternationalRegistryLayers] ${source} failed:`, error);
     res.status(503).json({
       providers: [], count: 0, loaded: 0, total: 0, source,
-      warning, transientFailure: true, visibleCapped: false,
+      warning, transientFailure: true, registryState: "source_failed", visibleCapped: false,
     });
   }
 });

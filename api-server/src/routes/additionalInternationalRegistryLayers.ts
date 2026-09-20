@@ -14,7 +14,10 @@ const CHILE_CKAN_URL = "https://datos.gob.cl/ne/api/3/action/datastore_search";
 const LATVIA_RESOURCE_ID = "5ea6e4aa-ee21-462a-8590-283483d2b0a4";
 const LATVIA_CKAN_URL = "https://data.gov.lv/dati/api/3/action/datastore_search";
 const IRELAND_QUERY_URL = "https://services-eu1.arcgis.com/v5dOXTEOb7ZHdNyQ/arcgis/rest/services/Health_Centres/FeatureServer/0/query";
-const COLOMBIA_QUERY_URL = "https://sig.sispro.gov.co/arcgis_msp/rest/services/Visor/MPS_Proteccion_Social/MapServer/2/query";
+// FeatureServer is the official editable/queryable service and is indexed by
+// SISPRO as the current layer. The legacy MapServer endpoint repeatedly timed
+// out in production for the same queries.
+const COLOMBIA_QUERY_URL = "https://sig.sispro.gov.co/arcgis_msp/rest/services/Visor/MPS_Proteccion_Social/FeatureServer/2/query";
 const LITHUANIA_ARCGIS_ITEM_ID = "39ea3e5a8e7d4a78b329d5568f8973be";
 const LITHUANIA_LAYER_ID = 2;
 const ARCGIS_ITEM_URL = `https://www.arcgis.com/sharing/rest/content/items/${LITHUANIA_ARCGIS_ITEM_ID}`;
@@ -581,6 +584,9 @@ function handler(
         count: providers.length,
         loaded: providers.length,
         total,
+        nationalTotal: bounds ? null : total,
+        registryState: "ready",
+        resultScope: bounds ? "viewport" : "national",
         page,
         limit,
         hasMore: page * limit < total,
@@ -594,7 +600,8 @@ function handler(
       console.error(`[AdditionalInternationalRegistryLayers] ${source} failed:`, error);
       res.status(503).json({
         providers: [], count: 0, loaded: 0, total: 0, page, limit, hasMore: false,
-        source, officialRegistry: true, live: true, transientFailure: true, warning, visibleCapped: false,
+        source, officialRegistry: true, live: true, transientFailure: true,
+        registryState: "source_failed", warning, visibleCapped: false,
       });
     }
   });

@@ -2,6 +2,13 @@ name: Sync Brazil CNES healthcare establishments
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/sync-brazil-cnes.yml"
+      - "scripts/normalize-cnes-jsonl.mjs"
+      - "scripts/promote-brazil-cnes.sql"
   schedule:
     - cron: "20 9 * * *"
 
@@ -9,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: brazil-cnes-provider-sync
+  group: official-provider-registry-sync
   cancel-in-progress: false
 
 jobs:
@@ -67,7 +74,11 @@ jobs:
           [[ "${#json_files[@]}" -gt 0 ]] || { echo "CNES archive did not contain JSON files" >&2; exit 1; }
 
           for file in "${json_files[@]}"; do
-            jq -c '.. | objects | select(.codigo_cnes? != null)' "$file" \
+            # The current national export uses the legacy uppercase CNES schema
+            # (CO_CNES, NO_FANTASIA, NU_LATITUDE, ...). Keep accepting the
+            # lowercase API schema as well so either official representation is
+            # normalized without silently producing an empty file.
+            jq -c '.. | objects | select(.CO_CNES? != null or .codigo_cnes? != null or .cnes? != null)' "$file" \
               | node scripts/normalize-cnes-jsonl.mjs --output "$NORMALIZED"
           done
 

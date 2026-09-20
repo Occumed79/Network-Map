@@ -12,13 +12,16 @@ import {
 } from './providerLayerRegistry';
 
 type LayerDefinition = ProviderLayerCategory | typeof PUBLIC_HEALTH_LAYER;
+type RegistryState = 'unknown' | 'ready' | 'not_synchronized' | 'source_failed';
 type LayerState = {
   enabled: boolean;
   loading: boolean;
   count: number;
   total: number;
+  nationalTotal: number | null;
   error: string;
   warning: string;
+  registryState: RegistryState;
 };
 
 type LayerStateMap = Record<string, LayerState>;
@@ -28,8 +31,10 @@ const EMPTY_LAYER_STATE: LayerState = {
   loading: false,
   count: 0,
   total: 0,
+  nationalTotal: null,
   error: '',
   warning: '',
+  registryState: 'unknown',
 };
 
 function initialState(): LayerStateMap {
@@ -78,12 +83,18 @@ function providerPopup(provider: any, layer: LayerDefinition): string {
 }
 
 function layerStatus(state: LayerState): string {
-  if (state.loading) return 'Loading all records in view…';
-  if (state.error) return state.error;
-  if (!state.enabled) return state.total > 0 ? `${state.total.toLocaleString()} total · off` : 'Off';
-  const loaded = `${state.count.toLocaleString()} mapped`;
-  const total = state.total > state.count ? ` · ${state.total.toLocaleString()} matching` : '';
-  return `${loaded}${total}${state.warning ? ' · partial result' : ''}`;
+  if (state.loading) return 'Loading current view…';
+  if (state.registryState === 'source_failed' || state.error) return `Source failed · ${state.error || state.warning}`;
+  if (state.registryState === 'not_synchronized') return 'Not synchronized';
+  if (!state.enabled) {
+    if (state.registryState !== 'ready') return 'Off';
+    if (state.nationalTotal !== null) return `${state.nationalTotal.toLocaleString()} national · off`;
+    return state.total > 0 ? `${state.total.toLocaleString()} in last view · off` : 'No matches in last view · off';
+  }
+  const visible = state.count > 0 ? `${state.count.toLocaleString()} mapped` : 'No matches in current view';
+  const matching = state.total > state.count ? ` · ${state.total.toLocaleString()} in view` : '';
+  const national = state.nationalTotal !== null ? ` · ${state.nationalTotal.toLocaleString()} national` : '';
+  return `${visible}${matching}${national}${state.warning ? ' · partial result' : ''}`;
 }
 
 function Toggle({ definition, state, onChange }: {
@@ -172,6 +183,11 @@ export default function ProviderLayerRegistryPanel() {
         throw new Error(data?.warning || data?.error || `HTTP ${response.status}`);
       }
       const providers = Array.isArray(data?.providers) ? data.providers : [];
+      const registryState: RegistryState = data?.registryState === 'not_synchronized'
+        ? 'not_synchronized'
+        : data?.registryState === 'source_failed'
+          ? 'source_failed'
+          : 'ready';
       const mapped = renderProviderDataset(definition.channel, providers, {
         baseColor: definition.color,
         glow: false,
@@ -184,8 +200,12 @@ export default function ProviderLayerRegistryPanel() {
           loading: false,
           count: mapped,
           total: Number(data?.total ?? providers.length) || providers.length,
+          nationalTotal: data?.nationalTotal !== null && data?.nationalTotal !== undefined && Number.isFinite(Number(data.nationalTotal))
+            ? Number(data.nationalTotal)
+            : null,
           error: '',
           warning: String(data?.warning || ''),
+          registryState,
         },
       }));
     } catch (error) {
@@ -198,8 +218,10 @@ export default function ProviderLayerRegistryPanel() {
           loading: false,
           count: 0,
           total: 0,
+          nationalTotal: null,
           error: error instanceof Error ? error.message : 'Layer load failed',
           warning: '',
+          registryState: 'source_failed',
         },
       }));
     } finally {

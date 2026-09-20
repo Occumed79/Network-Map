@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { Router, type Request, type Response } from "express";
+import { croatiaHzzoCoordinates } from "../lib/croatiaHzzoCoordinates";
 import { fetchExternalJson } from "../providerSources/externalSourceRuntime";
 
 const router = Router();
@@ -52,18 +53,6 @@ function inBounds(lat: number, lng: number, bounds: Bounds | null): boolean {
     : lng >= bounds.west || lng <= bounds.east;
 }
 
-function croatiaCoordinates(row: Record<string, unknown>): { lat: number; lng: number } | null {
-  const x = numberValue(row.M_X);
-  const y = numberValue(row.M_Y);
-  if (x === null || y === null) return null;
-
-  // The HZZO resource exposes geocoded X/Y values as text. Croatia sits roughly
-  // between 13-20E and 42-47N; support either axis order defensively.
-  if (x >= 12 && x <= 21 && y >= 41 && y <= 48) return { lat: y, lng: x };
-  if (y >= 12 && y <= 21 && x >= 41 && x <= 48) return { lat: x, lng: y };
-  return null;
-}
-
 function stableId(row: Record<string, unknown>, address: string, lat: number, lng: number): string {
   const sourceId = text(row.GCQueueID) || text(row.PU);
   if (sourceId) return `hr-hzzo-pzz:${sourceId}`;
@@ -75,7 +64,7 @@ function stableId(row: Record<string, unknown>, address: string, lat: number, ln
 }
 
 function normalizeRow(row: Record<string, unknown>): Record<string, unknown> | null {
-  const coords = croatiaCoordinates(row);
+  const coords = croatiaHzzoCoordinates(row);
   if (!coords) return null;
 
   const street = text(row.M_Street) || text(row.Ulica) || text(row.UlicaOriginal);
@@ -174,10 +163,13 @@ router.get("/international-registry-layers/croatia-hzzo-primary-care", async (re
 
   try {
     const rows = await loadAllCroatiaRows();
-    const matching = rows
+    const normalized = rows
       .map(normalizeRow)
-      .filter((provider): provider is Record<string, unknown> => Boolean(provider))
-      .filter((provider) => inBounds(Number(provider.lat), Number(provider.lng), bounds));
+      .filter((provider): provider is Record<string, unknown> => Boolean(provider));
+    if (rows.length > 0 && normalized.length === 0) {
+      throw new Error(`Croatia HZZO returned ${rows.length.toLocaleString()} rows, but none had usable coordinates`);
+    }
+    const matching = normalized.filter((provider) => inBounds(Number(provider.lat), Number(provider.lng), bounds));
     const offset = (page - 1) * limit;
     const providers = matching.slice(offset, offset + limit);
 
@@ -187,6 +179,9 @@ router.get("/international-registry-layers/croatia-hzzo-primary-care", async (re
       count: providers.length,
       loaded: providers.length,
       total: matching.length,
+      nationalTotal: normalized.length,
+      registryState: "ready",
+      resultScope: bounds ? "viewport" : "national",
       page,
       limit,
       hasMore: offset + providers.length < matching.length,
@@ -211,6 +206,7 @@ router.get("/international-registry-layers/croatia-hzzo-primary-care", async (re
       officialRegistry: true,
       live: true,
       transientFailure: true,
+      registryState: "source_failed",
       warning,
       visibleCapped: false,
     });

@@ -13,11 +13,23 @@ SELECT (
 FROM public.source5_import_staging
 \gset
 
+SELECT
+  COUNT(*) AS staged_rows,
+  COUNT(DISTINCT source_record_id) AS distinct_source_rows,
+  COUNT(DISTINCT master_key) AS distinct_master_rows,
+  COUNT(*) FILTER (WHERE source_record_id NOT LIKE 'cnes:%') AS invalid_source_prefix_rows,
+  COUNT(*) FILTER (WHERE country_code <> 'BR') AS invalid_country_rows,
+  COUNT(*) FILTER (WHERE name IS NULL OR btrim(name) = '') AS invalid_name_rows,
+  COUNT(*) FILTER (WHERE lat NOT BETWEEN -90 AND 90 OR lng NOT BETWEEN -180 AND 180) AS invalid_coordinate_rows
+FROM public.source5_import_staging;
+
 \if :staging_ok
 \else
   \echo 'Brazil CNES staging validation failed'
   ROLLBACK;
-  \quit 2
+  -- psql 16 ignores status arguments passed to \quit. Force a SQL error so
+  -- ON_ERROR_STOP reliably fails the workflow after the rollback.
+  SELECT 1 / 0;
 \endif
 
 INSERT INTO public.provider_type_catalog
@@ -254,7 +266,7 @@ SELECT (
 \else
   \echo 'Brazil CNES production reconciliation failed'
   ROLLBACK;
-  \quit 3
+  SELECT 1 / 0;
 \endif
 
 TRUNCATE public.source5_import_staging;

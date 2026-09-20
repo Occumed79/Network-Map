@@ -225,11 +225,11 @@ def main():
             name = text(row.get("EntityName")) or text(row.get("HealthInstitutionEntityName"))
             entity_type = text(row.get("EntityTypeName"))
             institution_type = text(row.get("HealthInstitutionEntityTypeName")) or entity_type
-        elif sor_type == "OE":
-            # Current SOR exports carry the parent Health Institution and its
-            # inherited address on organizational-unit rows as well. This gives
-            # us a complete institution snapshot even when the SI row itself
-            # has no direct geolocation.
+        elif sor_type in {"OE", "IE"}:
+            # SOR2 frequently carries the usable inherited address/coordinates
+            # on organizational and production-unit rows, while the SI row is
+            # only the institution identity. Resolve those child rows back to
+            # their parent Health Institution and keep one map record per SI.
             sor_id = text(row.get("HealthInstitutionSorId"))
             name = text(row.get("HealthInstitutionEntityName"))
             entity_type = text(row.get("HealthInstitutionEntityTypeName"))

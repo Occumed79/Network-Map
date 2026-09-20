@@ -5,7 +5,8 @@ import fs from "node:fs";
 import path from "node:path";
 
 const SOURCE_URL = "https://zdravstvo.gov.mk/en-GB/ustanovi/adresi-na-zd";
-const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";\nconst PHOTON_URL = "https://photon.komoot.io/api/";
+const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
+const PHOTON_URL = "https://photon.komoot.io/api/";
 const USER_AGENT = "Occu-Med-Network-Map/1.0 (+https://github.com/Occumed79/Network-Map)";
 const columns = [
   "source_record_id", "source_url", "name", "normalized_name", "address_line1",

@@ -72,45 +72,40 @@ function candidateFacilities(rawText) {
     .filter(Boolean);
 
   const facilities = [];
-  let current = "";
-  const flush = () => {
-    const name = cleanFacilityName(current);
-    current = "";
-    if (!name || name.length < 4) return;
-    if (/^(elenco|strutture|authority|repubblica di san marino|aggiornato|autorizzate|sanitarie|socio sanitarie|socio-sanitarie|socio educative|socio-educative)$/iu.test(name)) return;
-    facilities.push(name);
+  let section = "";
+  const sectionForHeading = (line) => {
+    const key = normalized(line);
+    if (/^strutture sanitarie autorizzate/u.test(key)) return "healthcare";
+    if (/^strutture socio sanitarie autorizzate/u.test(key)) return "socio_healthcare";
+    if (/^ambulatori di medicina del lavoro interni alle aziende/u.test(key)) return "occupational_health";
+    if (/^(strutture socio educative|strutture veterinarie)/u.test(key)) return "exclude";
+    return "";
   };
 
-  let awaitingName = false;
   for (const line of lines) {
-    const numbered = line.match(/^\s*(\d{1,3})[.)\-]?\s+(.+)$/u);
-    if (numbered) {
-      flush();
-      current = numbered[2];
-      awaitingName = false;
+    const headingSection = sectionForHeading(line);
+    if (headingSection) {
+      section = headingSection;
       continue;
     }
-    if (/^\s*\d{1,3}[.)\-]?\s*$/u.test(line)) {
-      flush();
-      awaitingName = true;
-      continue;
-    }
-    if (awaitingName) {
-      if (/^(pagina|pag\.)\s*\d+/iu.test(line)) continue;
-      current = line;
-      awaitingName = false;
-      continue;
-    }
-    if (current && !/^\d+\s*$/u.test(line) && !/^(pagina|pag\.)\s*\d+/iu.test(line)) {
-      if (line.length <= 120) current += ` ${line}`;
-    }
+    if (!section || section === "exclude") continue;
+
+    const name = cleanFacilityName(line.replace(/^\s*\d{1,3}[.)\-]?\s*/u, ""));
+    if (!name || name.length < 3 || name.length > 180) continue;
+    if (/^(pagina|pag\.|repubblica di san marino|authority sanitaria|elenco strutture)/iu.test(name)) continue;
+    if (/^(via|strada|contrada|piazza|tel\.?|telefono|email|www\.)\b/iu.test(name)) continue;
+
+    facilities.push({ name, section });
   }
-  flush();
 
-  return [...new Set(facilities.map(cleanFacilityName))]
-    .filter((name) => !/^(via|strada|contrada|piazza|tel\.?|telefono|email|www\.)\b/iu.test(name));
+  const deduped = new Map();
+  for (const facility of facilities) {
+    const key = normalized(facility.name);
+    if (!key) continue;
+    if (!deduped.has(key) || facility.section === "occupational_health") deduped.set(key, facility);
+  }
+  return [...deduped.values()];
 }
-
 async function downloadPdf(filePath) {
   const response = await fetch(PDF_URL, {
     headers: { "user-agent": USER_AGENT, accept: "application/pdf,*/*", referer: AUTHORITY_PAGE },
@@ -174,13 +169,14 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "san-marino-authorized-"))
 const pdfPath = path.join(tempDir, "authorized.pdf");
 const txtPath = path.join(tempDir, "authorized.txt");
 await downloadPdf(pdfPath);
-const names = candidateFacilities(extractPdfText(pdfPath, txtPath));
-if (names.length < 15) throw new Error(`Only ${names.length} San Marino authorized facility names parsed; refusing output`);
+const facilities = candidateFacilities(extractPdfText(pdfPath, txtPath));
+if (facilities.length < 15) throw new Error(`Only ${facilities.length} San Marino authorized facility names parsed; refusing output`);
 
 const rows = [];
 let lastGeocodeAt = 0;
 let skippedUnplaced = 0;
-for (const name of names) {
+for (const facility of facilities) {
+  const name = facility.name;
   const wait = 1100 - (Date.now() - lastGeocodeAt);
   if (wait > 0) await sleep(wait);
   let geo = await geocode(`${name}, San Marino`);
@@ -194,7 +190,9 @@ for (const name of names) {
   }
   if (!geo) { skippedUnplaced += 1; continue; }
 
-  const classification = classify(name);
+  const classification = facility.section === "occupational_health"
+    ? { primary: "occupational_health_clinic", tags: ["occupational_health_clinic", "healthcare_facility", "san_marino_authorized", "internal_company_clinic"] }
+    : classify(name);
   const sourceId = `sm-authority:${hash(normalized(name)).slice(0, 20)}`;
   const formatted = [geo.address1, geo.postal, geo.city, "San Marino"].filter(Boolean).join(", ");
   const masterKey = `loc:${hash(JSON.stringify({
@@ -211,4 +209,4 @@ for (const name of names) {
 if (rows.length < 12) throw new Error(`Only ${rows.length} San Marino authorized facilities were map-renderable; refusing output`);
 fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 fs.writeFileSync(outputPath, `${[columns.join("\t"), ...rows.sort((a, b) => String(a[2]).localeCompare(String(b[2]))).map((row) => row.map(csvField).join("\t"))].join("\n")}\n`, "utf8");
-console.log(JSON.stringify({ source: "sm_authorized_healthcare", parsedAuthorizedNames: names.length, mapRows: rows.length, skippedUnplaced, outputPath }));
+console.log(JSON.stringify({ source: "sm_authorized_healthcare", parsedAuthorizedNames: facilities.length, mapRows: rows.length, skippedUnplaced, outputPath }));

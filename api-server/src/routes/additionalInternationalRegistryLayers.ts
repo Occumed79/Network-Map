@@ -10,7 +10,7 @@ const CKAN_PAGE_SIZE = 5000;
 const ARCGIS_PAGE_SIZE = 500;
 
 const CHILE_RESOURCE_ID = "2c44d782-3365-44e3-aefb-2c8b8363a1bc";
-const CHILE_CKAN_URL = "https://datos.gob.cl/ne/api/3/action/datastore_search";
+const CHILE_CKAN_URL = "https://datos.gob.cl/es/api/3/action/datastore_search";
 const LATVIA_RESOURCE_ID = "5ea6e4aa-ee21-462a-8590-283483d2b0a4";
 const LATVIA_CKAN_URL = "https://data.gov.lv/dati/api/3/action/datastore_search";
 const IRELAND_QUERY_URL = "https://services-eu1.arcgis.com/v5dOXTEOb7ZHdNyQ/arcgis/rest/services/Health_Centres/FeatureServer/0/query";

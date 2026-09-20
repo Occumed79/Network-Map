@@ -1,5 +1,5 @@
 import { registerMapboxMapInitializer } from "../../mapboxMapLifecycleRuntime";
-import { installNativeEtaRouteLayer } from "./mapSceneEtaRouteLayer";
+import { installNativeEtaRouteLayer } from "./mapboxEtaRouteLayer";
 
 let installed = false;
 

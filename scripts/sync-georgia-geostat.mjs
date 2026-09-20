@@ -148,14 +148,45 @@ async function runSearch(page,code){
     if(await checkbox.count() && !(await checkbox.isChecked().catch(()=>false))) await checkbox.check({force:true}).catch(()=>{});
   }
 
+  let submitted = false;
   const searchButton=page.getByRole("button",{name:/^Search$/i}).first();
-  if(await searchButton.count()) await searchButton.click();
-  else {
-    const submit=page.locator('input[type="submit"][value*="Search" i], input[type="button"][value*="Search" i]').first();
-    if(!(await submit.count())) throw new Error("GeoStat Search button not found");
-    await submit.click();
+  if(await searchButton.count()) {
+    await searchButton.click();
+    submitted = true;
   }
-  await page.waitForTimeout(1800);
+  if(!submitted) {
+    const submit=page.locator('input[type="submit"], input[type="button"], a, button').filter({hasText:/^\s*Search\s*$/i}).first();
+    if(await submit.count()) {
+      await submit.click();
+      submitted = true;
+    }
+  }
+  if(!submitted) {
+    submitted = await page.evaluate(() => {
+      const candidates=[...document.querySelectorAll("button,input,a,div,span")];
+      const target=candidates.find((el) => {
+        const label=(el.getAttribute("value") || el.textContent || "").trim();
+        return /^Search$/i.test(label);
+      });
+      if(target && typeof target.click === "function") {
+        target.click();
+        return true;
+      }
+      const activity=[...document.querySelectorAll("input,select")].find((el) => {
+        const parent=el.closest("form") || el.parentElement;
+        return /Economic Activity \(NACE Rev\.2\)/i.test(parent?.textContent || "");
+      });
+      const form=activity?.closest("form");
+      if(form) {
+        if(typeof form.requestSubmit === "function") form.requestSubmit();
+        else form.submit();
+        return true;
+      }
+      return false;
+    });
+  }
+  if(!submitted) throw new Error("GeoStat search form could not be submitted");
+  await page.waitForTimeout(2200);
 
   const urls=new Set();
   let stagnant=0;

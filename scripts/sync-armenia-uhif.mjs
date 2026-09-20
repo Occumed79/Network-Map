@@ -362,7 +362,7 @@ try {
   }
 
   if (!captured) captured = await discoverCompletePayload(reportedTotal);
-  if (!captured) {
+  if (!captured || uniqueFacilityIds(captured.hospitals) !== reportedTotal) {
     const mapButton = page.getByRole("button", { name: /^\s*Map\s*$/i });
     if (await mapButton.count()) {
       await mapButton.first().click();
@@ -372,8 +372,13 @@ try {
     }
   }
   let renderedFallback = null;
-  if (!captured) {
+  if (!captured || uniqueFacilityIds(captured.hospitals) !== reportedTotal) {
     const cards = await renderedHospitalCards(page);
+    console.log(JSON.stringify({
+      uhifRenderedCards: cards.length,
+      officialFacilityTotal: reportedTotal,
+      selectedPayloadIds: captured ? uniqueFacilityIds(captured.hospitals) : 0,
+    }));
     if (cards.length === reportedTotal) {
       const facilities = [];
       let cursor = 0;

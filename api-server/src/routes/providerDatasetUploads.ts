@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { Router, type NextFunction, type Request, type Response } from "express";
+import { Router, type Request, type Response } from "express";
 import { getPool } from "@workspace/db";
 import { isPersistenceConfigured } from "../lib/networkMapPersistence";
 import { hasValidCoordinates, parseOptionalNumber } from "../lib/providerCoordinates";
@@ -290,9 +290,25 @@ function classify(row: IncomingRow, name: string, notes: string, taxonomy: strin
 
 function normalizeRow(row: IncomingRow, index: number): NormalizedRow {
   const name = first(row, "name", "providerName", "provider_name", "clinicName", "clinic_name", "practiceName", "facility", "facilityName", "facility_name");
-  const address = first(row, "formattedAddress", "formatted_address", "address", "originalAddress", "original_address", "streetAddress", "street", "address1", "address_1", "addr");
-  const city = first(row, "geocodedCity", "geocoded_city", "originalCity", "original_city", "city", "town", "locality");
-  const state = first(row, "stateRegion", "state_region", "state", "st", "adminArea", "admin_area", "region", "province").toUpperCase().slice(0, 80);
+  const address = first(
+    row,
+    "formattedAddress", "formatted_address", "address", "originalAddress", "original_address",
+    "streetAddress", "street", "address1", "address_1", "addr",
+    "finalMatchedAddress", "final_matched_address", "matchedAddress", "matched_address",
+    "submittedAddress", "submitted_address", "originalCdcAddress", "original_cdc_address",
+  );
+  let city = first(row, "geocodedCity", "geocoded_city", "originalCity", "original_city", "city", "town", "locality");
+  let state = first(row, "stateRegion", "state_region", "state", "st", "adminArea", "admin_area", "region", "province").toUpperCase().slice(0, 80);
+  if (!city || !state) {
+    const location = first(row, "cdcCity", "cdc_city", "cityState", "city_state", "city/state");
+    const match = location.match(/^(.+?),\s*([A-Za-z]{2})$/);
+    if (match) {
+      if (!city) city = match[1].trim();
+      if (!state) state = match[2].toUpperCase();
+    } else if (!city && location) {
+      city = location;
+    }
+  }
   const postalCode = first(row, "postalCode", "postal_code", "zip", "zipcode", "zipCode", "postal");
   const countryCode = countryCodeFor(first(row, "countryCode", "country_code", "country"));
   const phone = first(row, "internationalPhone", "international_phone", "localPhone", "local_phone", "phone", "telephone", "tel");
@@ -302,11 +318,11 @@ function normalizeRow(row: IncomingRow, index: number): NormalizedRow {
   const npi = first(row, "npi", "npiNumber", "npi_number").replace(/\D/g, "");
   const taxonomyCode = first(row, "taxonomyCode", "taxonomy_code");
   const taxonomyDescription = first(row, "taxonomyDescription", "taxonomy_description", "taxonomy", "specialtiesServices", "specialties_services");
-  const lat = parseOptionalNumber(first(row, "lat", "latitude"));
-  const lng = parseOptionalNumber(first(row, "lng", "lon", "long", "longitude"));
+  const lat = parseOptionalNumber(first(row, "lat", "latitude", "finalLatitude", "final_latitude", "geocodedLatitude", "geocoded_latitude", "matchedLatitude", "matched_latitude"));
+  const lng = parseOptionalNumber(first(row, "lng", "lon", "long", "longitude", "finalLongitude", "final_longitude", "geocodedLongitude", "geocoded_longitude", "matchedLongitude", "matched_longitude"));
   const { primaryProviderType, capabilityTags } = classify(row, name, notes, taxonomyDescription);
   const normalizedName = first(row, "normalizedName", "normalized_name") || normalizedProviderName(name);
-  const sourceRecordId = first(row, "overtureId", "overture_id", "sourceRecordId", "source_record_id", "id", "sourceId", "source_id") || contentHash({
+  const sourceRecordId = first(row, "overtureId", "overture_id", "sourceRecordId", "source_record_id", "id", "sourceId", "source_id", "uniqueId", "unique_id", "recordId", "record_id", "registryId", "registry_id") || contentHash({
     name: normalizedName,
     address: address.toLowerCase(),
     city: city.toLowerCase(),
@@ -383,16 +399,7 @@ function uniqueBy<T>(values: T[], keyFor: (value: T) => string): T[] {
   return [...unique.values()];
 }
 
-function isBulkDatasetUpload(req: Request): boolean {
-  const filename = text(req.body?.filename || req.body?.originalFilename);
-  return Boolean(req.body?.sourceLabel || req.body?.datasetLabel || /\.(csv|xlsx?|xls)$/i.test(filename));
-}
-
-router.post("/my-clinics/upload", async (req: Request, res: Response, next: NextFunction) => {
-  if (!isBulkDatasetUpload(req)) {
-    next();
-    return;
-  }
+router.post("/my-clinics/upload", async (req: Request, res: Response) => {
   if (!isPersistenceConfigured()) {
     res.status(503).json({ error: "DATABASE_URL is required for provider dataset upload." });
     return;
@@ -416,7 +423,6 @@ router.post("/my-clinics/upload", async (req: Request, res: Response, next: Next
   }
 
   const dryRun = asBoolean(req.body?.dryRun) || asBoolean(req.query.dryRun);
-  const mirrorLegacy = req.body?.mirrorLegacy === undefined ? true : asBoolean(req.body?.mirrorLegacy);
   const originalFilename = text(req.body?.filename || req.body?.originalFilename) || "front-end-upload";
   const sourceLabel = normalizeSourceLabel(
     req.body?.sourceLabel || req.body?.datasetLabel || req.body?.groupName || req.body?.uploadLabel,
@@ -481,7 +487,7 @@ router.post("/my-clinics/upload", async (req: Request, res: Response, next: Next
         originalFilename,
         uploadedBy,
         rows.length,
-        JSON.stringify({ frontend: true, dryRun, mirrorLegacy, sourceLabel, sourceKey }),
+        JSON.stringify({ frontend: true, dryRun, sourceLabel, sourceKey }),
       ],
     );
     const batchId = batch.rows[0].id as string;
@@ -706,51 +712,6 @@ router.post("/my-clinics/upload", async (req: Request, res: Response, next: Next
         );
       }
 
-      if (mirrorLegacy) {
-        await client.query(
-          `INSERT INTO public.medical_providers (
-             place_id, name, formatted_address, lat, lng, types, category, phone, website,
-             country_code, locality, administrative_area_level_1, postal_code, data_source,
-             source_id, source_type, confidence_score, raw_data, scraped_at, updated_at
-           )
-           SELECT $2 || ':' || x.master_key,x.name,NULLIF(x.address,''),x.lat,x.lng,
-                  ARRAY(SELECT jsonb_array_elements_text(COALESCE(x.capability_tags,'[]'::jsonb))),
-                  x.primary_provider_type,x.phone,x.website,NULLIF(x.country_code,''),
-                  NULLIF(x.city,''),NULLIF(x.state,''),NULLIF(x.postal_code,''),$3,
-                  $2 || ':' || x.master_key,'user_upload',x.quality_score,
-                  x.raw_payload || jsonb_build_object(
-                    'provider_master_key',x.master_key,
-                    'source_key',$2,
-                    'source_label',$3,
-                    'upload_label',$4
-                  ),now(),now()
-           FROM jsonb_to_recordset($1::jsonb) AS x(
-             master_key text, name text, normalized_name text, address text, city text, state text,
-             postal_code text, country_code text, lat double precision, lng double precision,
-             phone text, email text, website text, npi text, primary_provider_type text,
-             capability_tags jsonb, quality_score double precision, raw_payload jsonb
-           )
-           ON CONFLICT (source_id) DO UPDATE SET
-             name=EXCLUDED.name,
-             formatted_address=EXCLUDED.formatted_address,
-             lat=EXCLUDED.lat,
-             lng=EXCLUDED.lng,
-             types=EXCLUDED.types,
-             category=EXCLUDED.category,
-             phone=EXCLUDED.phone,
-             website=EXCLUDED.website,
-             country_code=EXCLUDED.country_code,
-             locality=EXCLUDED.locality,
-             administrative_area_level_1=EXCLUDED.administrative_area_level_1,
-             postal_code=EXCLUDED.postal_code,
-             data_source=EXCLUDED.data_source,
-             source_type=EXCLUDED.source_type,
-             confidence_score=EXCLUDED.confidence_score,
-             raw_data=EXCLUDED.raw_data,
-             updated_at=now()`,
-          [JSON.stringify(masterPayload), sourceKey, sourceLabel, uploadLabel],
-        );
-      }
     }
 
     await client.query(
@@ -765,7 +726,7 @@ router.post("/my-clinics/upload", async (req: Request, res: Response, next: Next
         staged.length,
         mapReady.length,
         errorRows,
-        JSON.stringify({ dryRun, mirrorLegacy, needsGeocodeRows, duplicateMasterRows, sourceLabel, sourceKey }),
+        JSON.stringify({ dryRun, needsGeocodeRows, duplicateMasterRows, sourceLabel, sourceKey }),
       ],
     );
 
@@ -782,7 +743,6 @@ router.post("/my-clinics/upload", async (req: Request, res: Response, next: Next
       rawRows: prepared.length,
       stagedRows: staged.length,
       masteredRows: mapReady.length,
-      mirroredRows: mirrorLegacy ? masters.length : 0,
       needsGeocodeRows,
       duplicateMasterRows,
       errorRows,

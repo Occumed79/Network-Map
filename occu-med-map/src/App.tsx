@@ -1692,7 +1692,7 @@ export default function App() {
         setProviderExplorerStatus(`${aggregateStatus} · filters: ${filterSummary(filters).join(', ') || 'none'}`);
       }
       if(mode === 'pins' || mode === 'density-pins') {
-        const resp = await fetch(`/api/provider-explorer/map?${providerExplorerParams({...filters,useMapBounds:true}, 'pins')}`);
+        const resp = await fetchProviderLayer(`/api/provider-explorer/map?${providerExplorerParams({...filters,useMapBounds:true}, 'pins')}`);
         const data = await resp.json();
         if(!isCurrent()) return;
         const providers = Array.isArray(data.providers) ? data.providers as ProviderFeature[] : [];

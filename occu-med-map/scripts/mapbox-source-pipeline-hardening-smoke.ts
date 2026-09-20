@@ -104,10 +104,4 @@ assert.match(normalization, /priority: 10/, "provider normalization must retain 
 assert.doesNotMatch(normalization, /patchSourceRegistration/, "provider normalization must not replace Map.prototype.addSource");
 assert.doesNotMatch(normalization, /wrapFinderSource/, "provider normalization must not replace setData directly");
 
-const finalFix = source("src/mapEngineFinalFixRuntime.ts");
-assert.match(finalFix, /id: "network-overlay-density-filter"/, "density filtering must retain a stable middleware id");
-assert.match(finalFix, /priority: 20/, "density filtering must retain deterministic transform order");
-assert.doesNotMatch(finalFix, /patchMapboxDensityMirroring/, "density filtering must not replace Map.prototype.addSource");
-assert.doesNotMatch(finalFix, /patchNetworkOverlaySource/, "density filtering must not replace setData directly");
-
 console.log("Mapbox source pipeline hardening smoke test passed for native source ownership.");

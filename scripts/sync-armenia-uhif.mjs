@@ -91,12 +91,15 @@ function findHospitals(value, seen = new Set()) {
   function looksLikeFacilityArray(candidate) {
     if (!Array.isArray(candidate) || candidate.length === 0) return false;
     const sample = candidate.slice(0, Math.min(candidate.length, 40));
-    const facilityLike = sample.filter((item) =>
-      item && typeof item === "object"
-      && text(item.name)
-      && (text(item.id) || text(item.address) || text(item.region) || text(item.community))
-    ).length;
-    return facilityLike >= Math.max(1, Math.floor(sample.length * 0.7));
+    const facilityLike = sample.filter((item) => {
+      if (!item || typeof item !== "object" || !text(item.id) || !text(item.name)) return false;
+      const lat = Number(item.lat);
+      const lng = Number(item.lng);
+      const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng);
+      const hasLocationIdentity = text(item.address) && (text(item.region) || text(item.community));
+      return hasCoordinates || hasLocationIdentity;
+    }).length;
+    return facilityLike >= Math.max(1, Math.ceil(sample.length * 0.8));
   }
 
   function visit(node) {
@@ -343,16 +346,42 @@ try {
     throw new Error(`UHIF exposed no complete hospital payload; captured ${responsePayloads.length} response payloads and ${languageActions.size} language actions`);
   }
 
+  const candidateArrays = [...responsePayloads.map((entry) => entry.hospitals), captured.hospitals]
+    .filter((candidate) => Array.isArray(candidate) && candidate.length > 0 && candidate.length <= reportedTotal)
+    .sort((a, b) => b.length - a.length);
+
   const facilityById = new Map();
-  for (const candidate of [...responsePayloads.map((entry) => entry.hospitals), captured.hospitals]) {
-    for (const facility of candidate || []) {
+  const exact = candidateArrays.find((candidate) => {
+    const ids = new Set(candidate.map((facility) => text(facility?.id)).filter(Boolean));
+    return ids.size === reportedTotal;
+  });
+
+  if (exact) {
+    for (const facility of exact) {
       const id = text(facility?.id);
       if (id) facilityById.set(id, facility);
     }
+  } else {
+    for (const candidate of candidateArrays) {
+      const additions = [];
+      let overlap = 0;
+      for (const facility of candidate) {
+        const id = text(facility?.id);
+        if (!id) continue;
+        if (facilityById.has(id)) overlap += 1;
+        else additions.push([id, facility]);
+      }
+      if (!facilityById.size || overlap > 0 || facilityById.size + additions.length <= reportedTotal) {
+        if (facilityById.size + additions.length > reportedTotal) continue;
+        for (const [id, facility] of additions) facilityById.set(id, facility);
+      }
+      if (facilityById.size === reportedTotal) break;
+    }
   }
+
   const facilities = [...facilityById.values()];
   if (facilities.length !== reportedTotal) {
-    throw new Error(`UHIF completeness guard failed: page reports ${reportedTotal}, combined payload contains ${facilities.length}`);
+    throw new Error(`UHIF completeness guard failed: page reports ${reportedTotal}, selected ${facilities.length}; candidate sizes=${JSON.stringify(candidateArrays.map((candidate) => new Set(candidate.map((facility) => text(facility?.id)).filter(Boolean)).size))}`);
   }
 
   const rows = new Map();

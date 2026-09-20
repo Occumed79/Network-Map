@@ -1,4 +1,4 @@
-import { createPublicKey, verify, type JsonWebKey } from "node:crypto";
+import { createPublicKey, verify } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import {
   REGISTRY_DATABASE_CONFIG,
@@ -31,7 +31,7 @@ type JwtClaims = {
   job_workflow_ref?: string;
 };
 
-let jwksCache: { expiresAt: number; keys: JsonWebKey[] } | null = null;
+type RegistryJwk = { kid?: string; [key: string]: unknown };\n\nlet jwksCache: { expiresAt: number; keys: RegistryJwk[] } | null = null;
 
 function decodeSegment<T>(value: string): T {
   return JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as T;
@@ -53,14 +53,14 @@ function workflowAllowed(value: string | undefined): boolean {
   );
 }
 
-async function jwks(): Promise<JsonWebKey[]> {
+async function jwks(): Promise<RegistryJwk[]> {
   if (jwksCache && jwksCache.expiresAt > Date.now()) return jwksCache.keys;
   const response = await fetch(OIDC_JWKS_URL, {
     headers: { accept: "application/json", "user-agent": "Occu-Med-Network-Map/registry-sync" },
     signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) throw new Error(`GitHub OIDC JWKS returned HTTP ${response.status}`);
-  const payload = await response.json() as { keys?: JsonWebKey[] };
+  const payload = await response.json() as { keys?: RegistryJwk[] };
   if (!Array.isArray(payload.keys) || payload.keys.length === 0) throw new Error("GitHub OIDC JWKS contained no keys");
   jwksCache = { keys: payload.keys, expiresAt: Date.now() + 60 * 60 * 1000 };
   return payload.keys;
@@ -81,7 +81,7 @@ async function verifyGithubActionsToken(token: string): Promise<JwtClaims> {
   const verified = verify(
     "RSA-SHA256",
     Buffer.from(`${parts[0]}.${parts[1]}`),
-    createPublicKey({ key, format: "jwk" }),
+    createPublicKey({ key: key as never, format: "jwk" }),
     Buffer.from(parts[2], "base64url"),
   );
   if (!verified) throw new Error("Invalid GitHub Actions OIDC signature");

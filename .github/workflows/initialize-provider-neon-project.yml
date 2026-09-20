@@ -158,6 +158,8 @@ jobs:
               'provider_master_types',
               'provider_type_catalog',
               'medical_providers',
+              'provider_schema_state',
+              'schema_migration_versions',
               'provider_master_map_view'
             ] LOOP
               IF to_regclass('public.' || relation_name) IS NULL THEN
@@ -169,22 +171,42 @@ jobs:
             FROM public.provider_type_catalog
             WHERE active
               AND type_key IN (
-                'urgent_care',
-                'dot_provider',
-                'faa_provider',
-                'lab',
-                'general_practitioner',
-                'occupational_health_clinic',
+                'audiology',
+                'cardiology',
+                'concierge_medicine',
                 'dental',
-                'imaging',
-                'pharmacy_vaccination',
+                'dentist',
+                'dot_examiner',
+                'dot_provider',
+                'ent',
+                'faa_examiner',
+                'faa_provider',
+                'family_practice',
+                'gastroenterology',
+                'general_practitioner',
+                'hearing_aid',
                 'hospital',
+                'imaging',
+                'internal_medicine',
+                'lab',
+                'neurotology',
+                'occupational_health',
+                'occupational_health_clinic',
+                'orthopedics',
+                'pharmacy',
+                'pharmacy_vaccination',
+                'psychiatry',
+                'public_health',
+                'pulmonology',
                 'specialist',
-                'unknown'
+                'sports_medicine',
+                'unknown',
+                'urgent_care',
+                'walk_in_clinic'
               );
 
-            IF canonical_type_count <> 12 THEN
-              RAISE EXCEPTION 'Canonical provider type catalog is incomplete: expected 12 active types, found %', canonical_type_count;
+            IF canonical_type_count <> 32 THEN
+              RAISE EXCEPTION 'Canonical provider type catalog is incomplete: expected 32 active types, found %', canonical_type_count;
             END IF;
           END $$;
           SQL

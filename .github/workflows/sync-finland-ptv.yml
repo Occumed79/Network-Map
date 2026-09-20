@@ -27,7 +27,7 @@ jobs:
     name: Fetch and promote official Suomi.fi healthcare locations
     runs-on: ubuntu-latest
     timeout-minutes: 180
-    env:
+    env: {}
 
     steps:
       - name: Check out importer

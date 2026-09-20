@@ -50,6 +50,9 @@ console.log(`Production source findings: ${findings.length}`);
 for (const [kind, count] of [...byKind.entries()].sort()) console.log(`  ${kind}: ${count}`);
 for (const finding of findings) console.log(`${finding.kind}\t${finding.file}:${finding.line}\t${finding.text}`);
 
-// Inventory-only while the migration is active. The final commit flips this to
-// hard failure if any production compatibility finding remains.
-process.exitCode = 0;
+if (findings.length > 0) {
+  console.error(`Zero-Leaflet architecture violation: ${findings.length} production finding(s) remain.`);
+  process.exitCode = 1;
+} else {
+  console.log("Zero-Leaflet architecture gate passed.");
+}

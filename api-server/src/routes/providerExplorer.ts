@@ -2,7 +2,6 @@ import { Router, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { getPool, getProviderDatabaseProjects, type ProviderDatabaseProject } from "@workspace/db";
 import { isPersistenceConfigured } from "../lib/networkMapPersistence";
-import { detectProviderSchema, type ProviderSchema } from "../lib/providerSchema";
 import { queryWithStatementTimeout } from "../lib/queryWithStatementTimeout";
 import { classifyProvider } from "../lib/providerClassifier";
 import { parseOptionalNumber } from "../lib/providerCoordinates";
@@ -12,6 +11,7 @@ const router = Router();
 type Mode = "records" | "pins" | "density" | "hex" | "facets" | "live" | "compare";
 type SourceKind = "stored" | "live" | "saved" | "candidate";
 type SpatialEngine = "postgis" | "numeric-fallback";
+type ExplorerStoredSchema = "canonical" | "none";
 
 type ProviderFeature = {
   id: string; source: string; source_kind: SourceKind; name: string; normalized_name: string | null; clinic_type: string;
@@ -99,39 +99,35 @@ async function ensureProviderExplorerPersistence(pool: ReturnType<typeof getPool
   }
 }
 
-function storedExpressions(schema: ProviderSchema) {
+function storedExpressions() {
   return {
-    lat: schema === "canonical" ? "pmv.lat" : schema === "normalized" ? "pl.lat" : "mp.lat",
-    lng: schema === "canonical" ? "pmv.lng" : schema === "normalized" ? "pl.lng" : "mp.lng",
-    city: schema === "canonical" ? "pmv.city" : schema === "normalized" ? "pl.city" : "mp.locality",
-    admin: schema === "canonical" ? "pmv.admin_area" : schema === "normalized" ? "pl.state" : "mp.administrative_area_level_1",
-    postal: schema === "canonical" ? "pmv.postal_code" : schema === "normalized" ? "pl.postal_code" : "mp.postal_code",
-    name: schema === "canonical" ? "pmv.name" : schema === "normalized" ? "p.name" : "mp.name",
-    source: schema === "canonical" ? "pmv.source_key" : schema === "normalized" ? "psrc.source_label" : "mp.data_source",
-    country: schema === "canonical" ? "pmv.country" : schema === "normalized" ? "psrc.raw_data->>'country'" : "COALESCE(mp.country_code, mp.raw_data->>'country')",
-    service: schema === "canonical" ? "COALESCE(array_to_string(pmv.services, ' '), '')" : schema === "normalized" ? "COALESCE(svc.services_text, '')" : "COALESCE(mp.category, '') || ' ' || COALESCE(array_to_string(mp.types, ' '), '')",
-    geog: schema === "canonical" ? "ST_SetSRID(ST_MakePoint(pmv.lng, pmv.lat),4326)::geography" : schema === "normalized" ? "ST_SetSRID(ST_MakePoint(pl.lng, pl.lat),4326)::geography" : "ST_SetSRID(ST_MakePoint(mp.lng, mp.lat),4326)::geography",
+    lat: "pmv.lat",
+    lng: "pmv.lng",
+    city: "pmv.city",
+    admin: "pmv.admin_area",
+    postal: "pmv.postal_code",
+    name: "pmv.name",
+    source: "pmv.source_key",
+    country: "pmv.country",
+    service: "COALESCE(array_to_string(pmv.services, ' '), '')",
+    geog: "ST_SetSRID(ST_MakePoint(pmv.lng, pmv.lat),4326)::geography",
   };
 }
 
-function baseSql(schema: ProviderSchema) {
-  if (schema === "canonical") return `FROM public.provider_master_map_view pmv WHERE`;
-  if (schema === "legacy") return `FROM public.medical_providers mp WHERE`;
-  return `FROM providers p INNER JOIN provider_locations pl ON pl.provider_id=p.id LEFT JOIN provider_contacts pc ON pc.provider_id=p.id LEFT JOIN LATERAL (SELECT array_agg(DISTINCT service_type) services, string_agg(DISTINCT COALESCE(service_type,'') || ' ' || COALESCE(taxonomy,''), ' ') services_text FROM provider_services WHERE provider_id=p.id) svc ON true INNER JOIN LATERAL (SELECT source_label, source_url, trust_tier, raw_data, fetched_at, created_at FROM provider_sources WHERE provider_id=p.id ORDER BY CASE WHEN source_label='My Clinics' THEN 0 ELSE 1 END, id ASC LIMIT 1) psrc ON true WHERE`;
+function baseSql() {
+  return `FROM public.provider_master_map_view pmv WHERE`;
 }
 
-function selectSql(schema: ProviderSchema) {
-  if (schema === "canonical") {
-    return `SELECT pmv.id, pmv.name, pmv.normalized_name, pmv.address, pmv.city, pmv.admin_area, pmv.country, pmv.postal_code, pmv.lat, pmv.lng, pmv.phone, pmv.website, pmv.source_key AS source, pmv.source_kind, NULL::text AS source_url, pmv.confidence_score, pmv.clinic_type AS category, pmv.services, pmv.categories, NULL::jsonb AS raw_source_data, pmv.created_at AS imported_at, pmv.last_seen_at AS last_seen, CASE WHEN pmv.confidence_score >= 0.85 THEN 'verified' WHEN pmv.confidence_score >= 0.70 THEN 'registry' WHEN pmv.confidence_score >= 0.50 THEN 'directory' ELSE 'lead' END AS trust_tier, NULL::text status`;
-  }
-  if (schema === "legacy") {
-    return `SELECT COALESCE(NULLIF(mp.source_id, ''), 'legacy:' || mp.id::text) AS id, mp.name, lower(regexp_replace(COALESCE(mp.name,''),'[^a-zA-Z0-9]+',' ','g')) normalized_name, mp.formatted_address AS address, mp.locality AS city, mp.administrative_area_level_1 AS admin_area, COALESCE(mp.country_code, mp.raw_data->>'country','US') AS country, mp.postal_code, mp.lat, mp.lng, mp.phone, mp.website, mp.data_source AS source, CASE WHEN lower(COALESCE(mp.data_source,''))='my clinics' THEN 'saved' ELSE 'stored' END source_kind, COALESCE(mp.raw_data->>'source_url', mp.raw_data->>'url', mp.website)::text AS source_url, mp.confidence_score, mp.category, mp.types AS services, mp.types AS categories, mp.raw_data AS raw_source_data, COALESCE(mp.scraped_at, mp.updated_at) AS imported_at, mp.updated_at AS last_seen, CASE WHEN mp.confidence_score >= 0.85 THEN 'verified' WHEN mp.confidence_score >= 0.70 THEN 'registry' WHEN mp.confidence_score >= 0.50 THEN 'directory' ELSE 'lead' END AS trust_tier, NULL::text status`;
-  }
-  return `SELECT p.id::text AS id, p.name, lower(regexp_replace(COALESCE(p.name,''),'[^a-zA-Z0-9]+',' ','g')) normalized_name, pl.address, pl.city, pl.state AS admin_area, COALESCE(psrc.raw_data->>'country', psrc.raw_data->>'country_code') AS country, pl.postal_code, pl.lat, pl.lng, pc.phone, pc.website, psrc.source_label AS source, CASE WHEN psrc.source_label='My Clinics' THEN 'saved' ELSE 'stored' END source_kind, psrc.source_url, NULL::numeric AS confidence_score, NULL::text AS category, svc.services, svc.services AS categories, psrc.raw_data AS raw_source_data, psrc.created_at AS imported_at, psrc.fetched_at AS last_seen, psrc.trust_tier, NULL::text status`;
+function selectSql() {
+  return `SELECT pmv.id, pmv.name, pmv.normalized_name, pmv.address, pmv.city, pmv.admin_area, pmv.country, pmv.postal_code, pmv.lat, pmv.lng, pmv.phone, pmv.website, pmv.source_key AS source, pmv.source_kind, NULL::text AS source_url, pmv.confidence_score, pmv.clinic_type AS category, pmv.services, pmv.categories, NULL::jsonb AS raw_source_data, pmv.created_at AS imported_at, pmv.last_seen_at AS last_seen, CASE WHEN pmv.confidence_score >= 0.85 THEN 'verified' WHEN pmv.confidence_score >= 0.70 THEN 'registry' WHEN pmv.confidence_score >= 0.50 THEN 'directory' ELSE 'lead' END AS trust_tier, NULL::text status`;
 }
 
-export function legacyProviderSelectForTest(): string { return selectSql("legacy"); }
-
+async function detectExplorerStoredSchema(project: ProviderDatabaseProject): Promise<ExplorerStoredSchema> {
+  const result = await project.pool.query(`
+    SELECT to_regclass('public.provider_master_map_view') IS NOT NULL AS canonical_view
+  `);
+  return result.rows[0]?.canonical_view === true ? "canonical" : "none";
+}
 function addSharedFilters(where: string[], params: unknown[], ctx: QueryContext, expr: {name:string; city:string; admin:string; postal:string; country:string; service:string; lat:string; lng:string; geog?:string}, spatialEngine: SpatialEngine) {
   if (ctx.country) where.push(`LOWER(COALESCE(${expr.country}, 'US')) = LOWER(${addParam(params, ctx.country)})`);
   if (ctx.adminArea) where.push(`LOWER(${expr.admin}) = LOWER(${addParam(params, ctx.adminArea)})`);
@@ -156,41 +152,39 @@ function addSharedFilters(where: string[], params: unknown[], ctx: QueryContext,
   }
 }
 
-export function buildStoredWhereForTest(ctx: QueryContext, schema: ProviderSchema = "legacy", spatialEngine: SpatialEngine = "numeric-fallback") {
+export function buildStoredWhereForTest(
+  ctx: QueryContext,
+  spatialEngine: SpatialEngine = "numeric-fallback",
+) {
   const params: unknown[] = [];
-  const where = buildStoredWhere(ctx, schema, params, spatialEngine);
+  const where = buildStoredWhere(ctx, params, spatialEngine);
   return { where: where.join(" AND "), params };
 }
 
-function buildStoredWhere(ctx: QueryContext, schema: ProviderSchema, params: unknown[], spatialEngine: SpatialEngine) {
-  const e = storedExpressions(schema);
+function buildStoredWhere(ctx: QueryContext, params: unknown[], spatialEngine: SpatialEngine) {
+  const e = storedExpressions();
   const sourceTextExpr = `LOWER(COALESCE(${e.source}, ''))`;
   const where = [`${e.lat} IS NOT NULL`, `${e.lng} IS NOT NULL`, `${e.lat} BETWEEN -90 AND 90`, `${e.lng} BETWEEN -180 AND 180`, `(${e.lat} <> 0 OR ${e.lng} <> 0)`];
   if (!ctx.includeStored && !ctx.includeSaved) where.push("FALSE");
-  else if (!ctx.includeStored) where.push(schema === "canonical" ? "pmv.source_kind = 'saved'" : `${sourceTextExpr} = 'my clinics'`);
-  else if (!ctx.includeSaved) where.push(schema === "canonical" ? "pmv.source_kind = 'stored'" : `${sourceTextExpr} <> 'my clinics'`);
+  else if (!ctx.includeStored) where.push("pmv.source_kind = 'saved'");
+  else if (!ctx.includeSaved) where.push("pmv.source_kind = 'stored'");
   if (ctx.source === "live" || ctx.source === "candidates") where.push("FALSE");
   if (ctx.source && ctx.source !== "live" && ctx.source !== "candidates") {
     if (ctx.source === "indexed") {
-      where.push(schema === "canonical"
-        ? `${sourceTextExpr} NOT IN ('bluehive','dentist_dataset','my_clinics_upload')`
-        : `${sourceTextExpr} NOT IN ('bluehive','dentist dataset','my clinics')`);
+      where.push(`${sourceTextExpr} NOT IN ('bluehive','dentist_dataset','my_clinics_upload')`);
     } else {
-      const sourceLabel = schema === "canonical"
-        ? ({ bluehive: "bluehive", dentists: "dentist_dataset", "my-clinics": "my_clinics_upload" }[ctx.source] || ctx.source)
-        : SOURCE_LABELS[ctx.source] || ctx.source;
+      const sourceLabel = ({ bluehive: "bluehive", dentists: "dentist_dataset", "my-clinics": "my_clinics_upload" }[ctx.source] || ctx.source);
       where.push(`${sourceTextExpr} = LOWER(${addParam(params, sourceLabel)})`);
     }
   }
   if (ctx.sourceKind && ctx.sourceKind !== "all") {
-    if (ctx.sourceKind === "saved") where.push(schema === "canonical" ? "pmv.source_kind = 'saved'" : `${sourceTextExpr} = 'my clinics'`);
-    else if (ctx.sourceKind === "stored") where.push(schema === "canonical" ? "pmv.source_kind = 'stored'" : `${sourceTextExpr} <> 'my clinics'`);
+    if (ctx.sourceKind === "saved") where.push("pmv.source_kind = 'saved'");
+    else if (ctx.sourceKind === "stored") where.push("pmv.source_kind = 'stored'");
     else where.push("FALSE");
   }
   addSharedFilters(where, params, ctx, { ...e, geog: e.geog }, spatialEngine);
   return where;
 }
-
 function buildCandidateWhere(ctx: QueryContext, params: unknown[], spatialEngine: SpatialEngine) {
   const where = [`lat IS NOT NULL`, `lng IS NOT NULL`, `lat BETWEEN -90 AND 90`, `lng BETWEEN -180 AND 180`, `(lat <> 0 OR lng <> 0)`];
   if (ctx.source && !["saved", "candidates", "all"].includes(ctx.source)) where.push("FALSE");
@@ -226,22 +220,20 @@ function normalizeRows(rows: Array<Record<string, any>>): ProviderFeature[] {
   });
 }
 
-async function queryStored(pool: ReturnType<typeof getPool>, schema: ProviderSchema, ctx: QueryContext, mode: Mode, spatialEngine: SpatialEngine, page = 1, limit = 25, queryOffset?: number) {
-  if (schema === "none") return { providers: [] as ProviderFeature[], total: 0 };
+async function queryStored(pool: ReturnType<typeof getPool>, ctx: QueryContext, mode: Mode, spatialEngine: SpatialEngine, page = 1, limit = 25, queryOffset?: number) {
   const params: unknown[] = [];
-  const where = buildStoredWhere(ctx, schema, params, spatialEngine).join(" AND ");
-  const from = baseSql(schema);
+  const where = buildStoredWhere(ctx, params, spatialEngine).join(" AND ");
+  const from = baseSql();
   const total = Number((await queryWithStatementTimeout(pool, `SELECT count(*)::int AS total ${from} ${where}`, params)).rows[0]?.total || 0);
   if (mode === "density" || mode === "hex") return { providers: [] as ProviderFeature[], total };
   const offset = queryOffset ?? (page - 1) * limit;
   params.push(limit, offset);
-  const rows = (await queryWithStatementTimeout(pool, `${selectSql(schema)} ${from} ${where} ORDER BY id ASC LIMIT $${params.length - 1} OFFSET $${params.length}`, params)).rows;
+  const rows = (await queryWithStatementTimeout(pool, `${selectSql()} ${from} ${where} ORDER BY id ASC LIMIT ${params.length - 1} OFFSET ${params.length}`, params)).rows;
   return { providers: normalizeRows(rows), total };
 }
 
 type StoredProjectProbe = {
   project: ProviderDatabaseProject;
-  schema: Exclude<ProviderSchema, "none">;
   spatialEngine: SpatialEngine;
   total: number;
 };
@@ -257,10 +249,10 @@ async function queryStoredAcrossProviderProjects(
   const probeResults = await Promise.all(projects.map(async (project) => {
     try {
       const setup = await ensureProviderExplorerPersistence(project.pool);
-      const schema = await detectProviderSchema(project.pool);
-      if (schema === "none") throw new Error("provider schema is not initialized");
-      const result = await queryStored(project.pool, schema, ctx, "density", setup.spatialEngine, 1, 1);
-      return { project, schema, spatialEngine: setup.spatialEngine, total: result.total } satisfies StoredProjectProbe;
+      const schema = await detectExplorerStoredSchema(project);
+      if (schema === "none") throw new Error("canonical provider_master_map_view is not initialized");
+      const result = await queryStored(project.pool, ctx, "density", setup.spatialEngine, 1, 1);
+      return { project, spatialEngine: setup.spatialEngine, total: result.total } satisfies StoredProjectProbe;
     } catch (error) {
       warnings.push(`${project.id} is temporarily unavailable: ${error instanceof Error ? error.message : String(error)}`);
       return null;
@@ -370,20 +362,23 @@ async function handleRecords(req: Request, res: Response, forcedMode?: Mode) {
     res.json({ providers: [], records: [], cells: [], facets: [], total: 0, count: 0, page: 1, limit: 0, hasMore: false, mode, status: { persistenceConfigured: false, spatialEngine: "numeric-fallback" } }); return;
   }
   const providerProjects = getProviderDatabaseProjects();
-  const pool = providerProjects[0].pool; const setup = await ensureProviderExplorerPersistence(pool); const schema = await detectProviderSchema(pool);
+  const pool = providerProjects[0].pool;
+  const setup = await ensureProviderExplorerPersistence(pool);
+  const primaryProject = providerProjects[0];
+  const schema = await detectExplorerStoredSchema(primaryProject);
   if (mode === "live") { const live = await fetchLiveProviders(ctx); res.json({ mode, providers: live.providers, records: live.providers, total: live.providers.length, count: live.providers.length, warning: live.warning, status: { persistenceConfigured: true, schema, ...setup } }); return; }
-  if (mode === "compare") { const stored = providerProjects.length > 1 ? await queryStoredAcrossProviderProjects(providerProjects, ctx, "pins", 1, 1000) : { ...(await queryStored(pool, schema, ctx, "pins", setup.spatialEngine, 1, 1000)), warnings: [] as string[], databaseProjects: ["provider-project-1"] }; const live = await fetchLiveProviders(ctx); const matched = new Set<string>(); const liveOnly: ProviderFeature[] = []; for (const lp of live.providers) { const match = stored.providers.find((sp) => normalizeName(sp.name) === normalizeName(lp.name) || distanceMiles(sp, lp) <= 0.25); if (match) { matched.add(match.id); lp.match_reason = normalizeName(match.name) === normalizeName(lp.name) ? "normalized_name" : "distance_0.25mi"; lp.distance_miles = distanceMiles(match, lp); } else liveOnly.push({ ...lp, match_reason: "live_only" }); } const storedOnly = stored.providers.filter((p) => !matched.has(p.id)).map((p) => ({ ...p, match_reason: "stored_only" })); res.json({ mode, stored_count: stored.total, live_count: live.providers.length, matched_count: matched.size, live_only_count: liveOnly.length, stored_only_count: storedOnly.length, live_only: liveOnly, stored_only: storedOnly, warning: [live.warning, ...stored.warnings].filter(Boolean).join(" ") || undefined, partial: stored.warnings.length > 0, databaseProjects: stored.databaseProjects, status: { persistenceConfigured: true, schema, ...setup } }); return; }
+  if (mode === "compare") { const stored = providerProjects.length > 1 ? await queryStoredAcrossProviderProjects(providerProjects, ctx, "pins", 1, 1000) : schema === "canonical" ? { ...(await queryStored(pool, ctx, "pins", setup.spatialEngine, 1, 1000)), warnings: [] as string[], databaseProjects: ["provider-project-1"] } : { providers: [] as ProviderFeature[], total: 0, warnings: ["provider-project-1 has no canonical provider_master_map_view"], databaseProjects: [] as string[] }; const live = await fetchLiveProviders(ctx); const matched = new Set<string>(); const liveOnly: ProviderFeature[] = []; for (const lp of live.providers) { const match = stored.providers.find((sp) => normalizeName(sp.name) === normalizeName(lp.name) || distanceMiles(sp, lp) <= 0.25); if (match) { matched.add(match.id); lp.match_reason = normalizeName(match.name) === normalizeName(lp.name) ? "normalized_name" : "distance_0.25mi"; lp.distance_miles = distanceMiles(match, lp); } else liveOnly.push({ ...lp, match_reason: "live_only" }); } const storedOnly = stored.providers.filter((p) => !matched.has(p.id)).map((p) => ({ ...p, match_reason: "stored_only" })); res.json({ mode, stored_count: stored.total, live_count: live.providers.length, matched_count: matched.size, live_only_count: liveOnly.length, stored_only_count: storedOnly.length, live_only: liveOnly, stored_only: storedOnly, warning: [live.warning, ...stored.warnings].filter(Boolean).join(" ") || undefined, partial: stored.warnings.length > 0, databaseProjects: stored.databaseProjects, status: { persistenceConfigured: true, schema, ...setup } }); return; }
   if (mode === "facets") {
     const warnings: string[] = [];
     const results = await Promise.all(providerProjects.map(async (project) => {
       try {
         const projectSetup = await ensureProviderExplorerPersistence(project.pool);
-        const projectSchema = await detectProviderSchema(project.pool);
-        if (projectSchema === "none") throw new Error("provider schema is not initialized");
+        const projectSchema = await detectExplorerStoredSchema(project);
+        if (projectSchema === "none") throw new Error("canonical provider_master_map_view is not initialized");
         const params: unknown[] = [];
-        const where = buildStoredWhere(ctx, projectSchema, params, projectSetup.spatialEngine).join(" AND ");
-        const from = baseSql(projectSchema);
-        return (await queryWithStatementTimeout(project.pool, `SELECT source, source_kind, country, admin_area, city, clinic_type, service, count(*)::int count FROM (SELECT x.source, x.source_kind, x.country, x.admin_area, x.city, 'unknown' clinic_type, NULL::text service FROM (${selectSql(projectSchema)} ${from} ${where}) x UNION ALL SELECT NULL::text, NULL::text, NULL::text, NULL::text, NULL::text, NULL::text, unnest(COALESCE(x.services::text[], ARRAY[]::text[])) FROM (${selectSql(projectSchema)} ${from} ${where}) x) f GROUP BY GROUPING SETS ((source),(source_kind),(country),(admin_area),(city),(clinic_type),(service)) HAVING count(*) > 0`, params)).rows;
+        const where = buildStoredWhere(ctx, params, projectSetup.spatialEngine).join(" AND ");
+        const from = baseSql();
+        return (await queryWithStatementTimeout(project.pool, `SELECT source, source_kind, country, admin_area, city, clinic_type, service, count(*)::int count FROM (SELECT x.source, x.source_kind, x.country, x.admin_area, x.city, 'unknown' clinic_type, NULL::text service FROM (${selectSql()} ${from} ${where}) x UNION ALL SELECT NULL::text, NULL::text, NULL::text, NULL::text, NULL::text, NULL::text, unnest(COALESCE(x.services::text[], ARRAY[]::text[])) FROM (${selectSql()} ${from} ${where}) x) f GROUP BY GROUPING SETS ((source),(source_kind),(country),(admin_area),(city),(clinic_type),(service)) HAVING count(*) > 0`, params)).rows;
       } catch (error) {
         warnings.push(`${project.id} is temporarily unavailable: ${error instanceof Error ? error.message : String(error)}`);
         return [];
@@ -406,12 +401,12 @@ async function handleRecords(req: Request, res: Response, forcedMode?: Mode) {
     const results = await Promise.all(providerProjects.map(async (project) => {
       try {
         const projectSetup = await ensureProviderExplorerPersistence(project.pool);
-        const projectSchema = await detectProviderSchema(project.pool);
-        if (projectSchema === "none") throw new Error("provider schema is not initialized");
+        const projectSchema = await detectExplorerStoredSchema(project);
+        if (projectSchema === "none") throw new Error("canonical provider_master_map_view is not initialized");
         const params: unknown[] = [];
-        const e = storedExpressions(projectSchema);
-        const where = buildStoredWhere(ctx, projectSchema, params, projectSetup.spatialEngine).join(" AND ");
-        const from = baseSql(projectSchema);
+        const e = storedExpressions();
+        const where = buildStoredWhere(ctx, params, projectSetup.spatialEngine).join(" AND ");
+        const from = baseSql();
         const cells = (await queryWithStatementTimeout(project.pool, `SELECT round((${e.lat})::numeric, ${precision})::float lat, round((${e.lng})::numeric, ${precision})::float lng, count(*)::int count ${from} ${where} GROUP BY 1,2 ORDER BY count DESC LIMIT 2000`, params)).rows;
         const total = Number((await queryWithStatementTimeout(project.pool, `SELECT count(*)::int total ${from} ${where}`, params)).rows[0]?.total || 0);
         return { cells, total };
@@ -434,7 +429,9 @@ async function handleRecords(req: Request, res: Response, forcedMode?: Mode) {
   const page = Math.max(1, Number(req.query.page) || 1); const maxPageSize = mode === "pins" ? MAX_PIN_PAGE_SIZE : MAX_RECORD_PAGE_SIZE; const limit = Math.min(Math.max(1, Number(req.query.limit) || (mode === "pins" ? 1000 : 25)), maxPageSize);
   const stored = providerProjects.length > 1
     ? await queryStoredAcrossProviderProjects(providerProjects, ctx, mode, page, limit)
-    : { ...(await queryStored(pool, schema, ctx, mode, setup.spatialEngine, page, limit)), warnings: [] as string[], databaseProjects: ["provider-project-1"] };
+    : schema === "canonical"
+      ? { ...(await queryStored(pool, ctx, mode, setup.spatialEngine, page, limit)), warnings: [] as string[], databaseProjects: ["provider-project-1"] }
+      : { providers: [] as ProviderFeature[], total: 0, warnings: ["provider-project-1 has no canonical provider_master_map_view"], databaseProjects: [] as string[] };
   const cand = setup.candidatePersistence
     ? await queryCandidates(pool, ctx, setup.spatialEngine, page, limit)
     : { providers: [] as ProviderFeature[], total: 0 };
@@ -491,7 +488,12 @@ async function outreachTarget(req: Request, res: Response) {
 }
 async function status(req: Request, res: Response) {
   if (!isPersistenceConfigured()) { res.json({ persistenceConfigured: false, schema: "none", spatialEngine: "numeric-fallback", liveAdapters: ["osm-overpass"], candidatePersistence: false, savedPersistence: false }); return; }
-  const pool = getPool(); const setup = await ensureProviderExplorerPersistence(pool); const schema = await detectProviderSchema(pool); res.json({ persistenceConfigured: true, schema, ...setup, liveAdapters: ["osm-overpass"] });
+  const projects = getProviderDatabaseProjects();
+  const pool = projects[0].pool;
+  const setup = await ensureProviderExplorerPersistence(pool);
+  const schemas = await Promise.all(projects.map((project) => detectExplorerStoredSchema(project).catch(() => "none" as const)));
+  const schema: ExplorerStoredSchema = schemas.includes("canonical") ? "canonical" : "none";
+  res.json({ persistenceConfigured: true, schema, ...setup, liveAdapters: ["osm-overpass"] });
 }
 function routeHandler(forcedMode?: Mode) { return (req: Request, res: Response) => { void handleRecords(req, res, forcedMode).catch((e) => res.status(200).json({ providers: [], records: [], cells: [], facets: [], total: 0, count: 0, page: 1, limit: 0, hasMore: false, mode: forcedMode || req.query.mode || "records", error: "Provider explorer request failed" })); }; }
 function postHandler(fn: (req: Request, res: Response) => Promise<void>) { return (req: Request, res: Response) => { void fn(req, res).catch((e) => res.status(500).json({ error: e?.message || "Provider explorer write failed" })); }; }

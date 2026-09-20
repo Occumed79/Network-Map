@@ -122,7 +122,7 @@ async function runSearch(page,code){
     if(meta.tag==="select"){
       const option=meta.options.find(o=>o.text.includes(code)||o.value===code||o.text.startsWith(code));
       if(option){
-        const locator=meta.id?page.locator(`#${CSS.escape(meta.id)}`):page.locator(`select[name="${meta.name.replaceAll('"','\\\"')}"]`).first();
+        const locator=meta.id?page.locator(`select[id="${meta.id.replaceAll('"','\\\"')}"]`).first():page.locator(`select[name="${meta.name.replaceAll('"','\\\"')}"]`).first();
         await locator.selectOption(option.value);
         selected=true;
         await page.waitForTimeout(400);
@@ -163,7 +163,7 @@ async function runSearch(page,code){
     const found=await page.locator('a[href*="Stat_ID="][href*="action=History"]').evaluateAll(nodes=>nodes.map(a=>a.href));
     const before=urls.size; for(const url of found) urls.add(url);
     stagnant=urls.size===before?stagnant+1:0;
-    const next=page.locator('a[rel="next"], button:has-text("Next"), a:has-text("Next"), a:has-text("›"), a:has-text("»")').filter({visible:true}).first();
+    const next=page.locator('a[rel="next"], button:has-text("Next"), a:has-text("Next"), a:has-text("›"), a:has-text("»")').first();
     if(!(await next.count()) || !(await next.isVisible().catch(()=>false))) break;
     await next.click().catch(()=>{});
     await page.waitForTimeout(700);

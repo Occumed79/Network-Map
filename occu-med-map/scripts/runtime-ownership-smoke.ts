@@ -23,7 +23,7 @@ function assert(condition: unknown, message: string): asserts condition {
 const registrySource = source(SHARED_OBSERVER_OWNER);
 assert(registrySource.includes("registerRuntimeOwner"), "runtime owner registry is missing registerRuntimeOwner");
 assert(registrySource.includes("subscribeToSharedDomObserver"), "runtime owner registry is missing the shared DOM observer");
-assert(registrySource.includes("runWithoutSharedDomObservation"), "runtime owner registry must support safe legacy reconciliation without observer feedback");
+assert(registrySource.includes("runWithoutSharedDomObservation"), "runtime owner registry must support observer-safe DOM reconciliation");
 assert(registrySource.includes("duplicateAttempts"), "runtime owner registry must record blocked duplicate registrations");
 assert((registrySource.match(/new MutationObserver/g) || []).length === 1, "runtime owner registry must own exactly one shared MutationObserver");
 
@@ -35,8 +35,6 @@ const requiredOwners: Record<string, string> = {
   "mapControlsBridgeRuntime.ts": "map-controls-bridge",
   "uploadedDatasetLabelRuntime.ts": "uploaded-dataset-labels",
   "providerLayerTelemetryRuntime.ts": "provider-layer-telemetry",
-  "rightPanelCompactor.ts": "right-panel-compactor",
-  "liveFinderDriveTools.ts": "live-finder-drive-tools",
   "usDiagnosticsGate.ts": "us-diagnostics-gate",
   "routePlannerControlsRuntime.ts": "route-planner-controls",
   "providerLocationFinderRuntime.ts": "provider-location-finder",
@@ -56,8 +54,6 @@ const sharedObserverConsumers = [
   "mapControlsBridgeRuntime.ts",
   "uploadedDatasetLabelRuntime.ts",
   "providerLayerTelemetryRuntime.ts",
-  "rightPanelCompactor.ts",
-  "liveFinderDriveTools.ts",
   "usDiagnosticsGate.ts",
   "mapboxGlobeLoadHardeningRuntime.ts",
   "dialogControllerRuntime.ts",

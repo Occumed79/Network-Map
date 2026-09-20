@@ -24,11 +24,10 @@ These features now sit behind one consolidated `Map Tools` command panel instead
 - Alt-click route drawing from selected origin
 - Drive/service-zone isochrone polygons
 - Provider ETA Ranking: ranks visible pins by Mapbox drive-time and draws a selected route
-- Live Finder ETA card integration: applies ranked ETA badges and Route buttons directly inside result cards
-- Live Finder Drive-Time Tools strip: Rank by Drive Time, Apply ETA, Copy ETA, and Clear actions directly inside the results panel
+- Live Finder ETA integration is rendered directly by React with Mapbox-owned route geometry
+- Live Finder drive-time controls are native React controls; no DOM injection fallback remains
 - Copy ETA output for notes, emails, or internal case updates
 - Provider Density Field: draws native Mapbox density overlays over visible provider pins
-- Live Finder panel compactor: pushes result blocks higher and collapses secondary filter/source controls
 
 ## Deploy constraint
 
@@ -40,9 +39,6 @@ pnpm install --frozen-lockfile
 
 Do not add dependencies to `package.json` unless `pnpm-lock.yaml` is regenerated and committed. A previous attempt to add `@mapbox/mapbox-gl-style-spec` broke deploys because the lockfile was not updated.
 
-## Next phase
-
-The MapLibre migration has started on branch `maplibre-start` and draft PR #52. Keep renderer/package changes isolated there until the lockfile and Render build are verified.
 
 
 ## Provider point rendering authority

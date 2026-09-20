@@ -6,6 +6,7 @@ import path from "node:path";
 import { chromium } from "playwright";
 import {
   expandOrganizationBranches,
+  isSyntheticTestFacility,
   payloadsFromText,
   selectPayload,
   uniqueFacilityIds,
@@ -42,6 +43,18 @@ const VERIFIED_COORDINATE_CORRECTIONS = new Map([
       lat: 40.207535,
       lng: 44.477683,
       verificationUrl: "https://yandex.com/maps/10262/yerevan/house/margaryan_poghots_6_1/YE0YcgBnT00EQFpqfX5xdnlgYA%3D%3D/",
+    },
+  ],
+  [
+    "cmu2bwb7h00000agmure7dh9x",
+    {
+      expectedName: "Biomed LLC",
+      expectedAddress: "Shengavit, E․ Tadevosyan, bldg․ 5, 2",
+      expectedCommunity: "Shengavit",
+      expectedRegion: "Yerevan",
+      lat: 40.1466965,
+      lng: 44.4914363,
+      verificationUrl: "https://photon.komoot.io/api/?q=Biomed%20LLC%2C%20Shengavit%2C%20E.%20Tadevosyan%205%2C%20Yerevan%2C%20Armenia&limit=5",
     },
   ],
 ]);
@@ -527,10 +540,12 @@ try {
     }
   }
 
-  const facilities = [...facilityById.values()];
+  const syntheticTestFacilities = [...facilityById.values()].filter(isSyntheticTestFacility);
+  const facilities = [...facilityById.values()].filter((facility) => !isSyntheticTestFacility(facility));
   const usingRenderedFallback = Boolean(captured.renderedFallback);
-  const minimumAcceptable = usingRenderedFallback ? Math.max(MIN_FACILITIES, reportedTotal - 12) : reportedTotal;
-  if (facilities.length < minimumAcceptable || (!usingRenderedFallback && facilities.length !== reportedTotal)) {
+  const expectedPhysicalFacilities = reportedTotal - syntheticTestFacilities.length;
+  const minimumAcceptable = usingRenderedFallback ? Math.max(MIN_FACILITIES, expectedPhysicalFacilities - 12) : expectedPhysicalFacilities;
+  if (facilities.length < minimumAcceptable || (!usingRenderedFallback && facilities.length !== expectedPhysicalFacilities)) {
     throw new Error(`UHIF completeness guard failed: page reports ${reportedTotal}, selected ${facilities.length}; candidate sizes=${JSON.stringify(candidateArrays.map((candidate) => new Set(candidate.map((facility) => text(facility?.id)).filter(Boolean)).size))}`);
   }
 
@@ -626,6 +641,7 @@ try {
   console.log(JSON.stringify({
     source: "am_uhif_healthcare",
     officialFacilityTotal: reportedTotal,
+    skippedSyntheticTestFacilities: syntheticTestFacilities.length,
     mapPayloadFacilities: facilities.length,
     mapRows: sorted.length,
     correctedCoordinates,

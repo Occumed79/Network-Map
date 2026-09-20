@@ -1,5 +1,16 @@
 const text = (value) => value === null || value === undefined ? "" : String(value).trim();
 
+// These two IDs are publicly exposed UHIF test fixtures: each has a test
+// label and no source coordinates. Do not turn them into fabricated pins.
+const SYNTHETIC_TEST_FACILITY_IDS = new Set([
+  "cmt74sqv60009nyybl7uoz9mb",
+  "cmt6ay6sa00000aktfmsi0aox",
+]);
+
+export function isSyntheticTestFacility(facility) {
+  return SYNTHETIC_TEST_FACILITY_IDS.has(text(facility?.id));
+}
+
 function parseRscData(raw) {
   for (const line of raw.split(/\r?\n/u)) {
     if (!line.startsWith("1:")) continue;
@@ -132,6 +143,11 @@ export function expandOrganizationBranches(organizations) {
         organizationId,
         organizationName: text(organization.name),
         legalName: text(branch.legalName) || text(organization.legalName),
+        // UHIF's branch records use latitude/longitude while the normalizer
+        // consumes lat/lng. Preserve either spelling so physical branches
+        // remain map-renderable.
+        lat: branch.lat ?? branch.latitude ?? organization.lat ?? organization.latitude,
+        lng: branch.lng ?? branch.longitude ?? organization.lng ?? organization.longitude,
       });
     }
   }

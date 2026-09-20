@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   expandOrganizationBranches,
+  isSyntheticTestFacility,
   payloadsFromText,
   selectPayload,
   uniqueFacilityIds,
@@ -60,4 +61,28 @@ test("expands UHIF parent organizations into physical branch facilities", () => 
   assert.equal(expanded[1].name, "First Medical Group");
   assert.equal(expanded[2].legalName, "Second Clinic LLC");
   assert.equal(expanded[0].organizationId, "org-1");
+});
+
+test("preserves UHIF branch latitude and longitude as importer coordinates", () => {
+  const [facility] = expandOrganizationBranches([
+    {
+      id: "organization-1",
+      name: "Regional medical group",
+      branches: [{
+        id: "branch-1",
+        address: "1 Main Street",
+        latitude: 40.1773,
+        longitude: 44.5035,
+      }],
+    },
+  ]);
+
+  assert.equal(facility.lat, 40.1773);
+  assert.equal(facility.lng, 44.5035);
+});
+
+test("identifies only the two published UHIF test records as synthetic", () => {
+  assert.equal(isSyntheticTestFacility({ id: "cmt74sqv60009nyybl7uoz9mb" }), true);
+  assert.equal(isSyntheticTestFacility({ id: "cmt6ay6sa00000aktfmsi0aox" }), true);
+  assert.equal(isSyntheticTestFacility({ id: "real-clinic", name: "Test Medical Center" }), false);
 });

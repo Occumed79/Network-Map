@@ -1,6 +1,6 @@
 # Native Drive-Time Feature
 
-This folder contains the native replacement for the temporary DOM-based ETA ranking integration.
+This folder contains the native Mapbox/React replacement for the temporary DOM-based ETA ranking integration.
 
 ## Purpose
 
@@ -28,13 +28,13 @@ Without that flag, the runtime exits immediately and does not add controls or ma
 - `providerEtaEngine.ts` — ranking engine and distance prep
 - `providerEtaStore.ts` — lightweight app-level result store
 - `providerEtaExport.ts` — CSV/text export helpers
-- `leafletProviderAdapter.ts` — converts Leaflet markers and Live Finder results into ETA candidates
+- `mapSceneProviderAdapter.ts` — converts normalized provider results into ETA candidates
 - `useProviderEta.ts` — React hook for ranking/clearing/copying ETA results
 - `ProviderEtaBadge.tsx` — card-level ETA badge and actions
 - `DriveTimeControlStrip.tsx` — native result-panel control strip
 - `etaRouteEvents.ts` — route request event bridge
-- `leafletEtaRouteLayer.ts` — Leaflet route drawing helper
-- `nativeDriveTimeRuntime.ts` — feature-flagged Leaflet runtime for branch testing
+- `mapSceneEtaRouteLayer.ts` — native route drawing helper
+- `nativeDriveTimeRuntime.ts` — feature-flagged native drive-time runtime
 
 ## Replacement target
 

@@ -1137,17 +1137,8 @@ export default function App() {
   const [addrError, setAddrError] = useState('');
   const [addrSuggestions, setAddrSuggestions] = useState<Array<{display_name:string;lat:string;lon:string}>>([]);
   const addrSearchRef = useRef<HTMLDivElement>(null);
-  // Clinic groups
-  type ClinicEntry = { name:string; address:string; city:string; state:string; zip:string; phone:string; notes:string; lat:number|null; lng:number|null; color:string; };
-  type ClinicGroup = { id:number; groupName:string; color:string; visible:boolean; clinics:ClinicEntry[]; };
-  const [clinicGroups, setClinicGroups] = useState<ClinicGroup[]>([]);
-  const visibleClinicEntries = useMemo(
-    () => clinicGroups.flatMap(group => group.visible ? group.clinics : []),
-    [clinicGroups],
-  );
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
-  const [uploadColor, setUploadColor] = useState('#f472b6');
   const [uploadGroupName, setUploadGroupName] = useState('');
   const [masterProviderTypeFilter, setMasterProviderTypeFilter] = useState('');
     // Area prices
@@ -2123,29 +2114,6 @@ export default function App() {
     setNativeDiagnosticCollection('population',{type:'FeatureCollection',features:rendered} as any);
   },[showPopDensity, stateGeoRevision]);
 
-  // ── Uploaded clinic pins: native Mapbox source ─────────────────────────────
-  useEffect(()=>{
-    if(visibleClinicEntries.length===0) {
-      clearProviderDataset('uploaded');
-      return;
-    }
-    renderProviderDataset('uploaded', visibleClinicEntries, {
-      baseColor:'#f472b6',
-      glow:showGlowPoints,
-      getColor:(clinic)=>clinic.color || '#f472b6',
-      buildPopup:(c)=>{
-        const col=c.color||'#f472b6';
-        return `<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:170px;">
-          <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${escapeHtml(c.name)}</div>
-          ${c.address?`<div style="font-size:9.5px;color:#4a6888">${escapeHtml(c.address)}${c.city?', '+escapeHtml(c.city):''}${c.state?' '+escapeHtml(c.state):''}${c.zip?' '+escapeHtml(c.zip):''}</div>`:''}
-          ${c.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${escapeHtml(c.phone)}">${escapeHtml(c.phone)}</a></div>`:''}
-          ${c.notes?`<div style="font-size:9px;color:#3d5478;margin-top:3px">${escapeHtml(c.notes)}</div>`:''}
-          <div style="margin-top:6px;display:flex;gap:5px"><div style="width:8px;height:8px;border-radius:50%;background:${col};box-shadow:0 0 6px ${col};flex-shrink:0;margin-top:2px"></div><span style="font-size:8.5px;color:#3d5478;font-family:'IBM Plex Mono',monospace">UPLOADED CLINIC</span></div>
-        </div>`;
-      },
-    });
-    return ()=>clearProviderDataset('uploaded');
-  },[visibleClinicEntries, showGlowPoints]);
 
   // ── Service Presence native heatmap + provider points ────────────────────
   useEffect(()=>{
@@ -2217,7 +2185,6 @@ export default function App() {
         summary.needsGeocodeRows += Number(result.needsGeocodeRows || 0);
       }
       setUploadGroupName('');
-      setClinicGroups([]);
       window.dispatchEvent(new Event('network-map:provider-dataset-uploaded'));
       setUploadProgress(`Backend ingest complete: ${summary.rawRows} raw rows · ${summary.stagedRows} staged · ${summary.masteredRows} map-ready · ${summary.needsGeocodeRows} needs geocode · ${summary.errorRows} errors.`);
     } catch(err:any) {
@@ -3338,7 +3305,6 @@ export default function App() {
             <div className="command-section-title"><Layers3 size={15}/><span>Provider Layers</span><small>Off by default</small></div>
             <div className="workflow-layer-list">
               <div data-provider-layer-registry-host="true" />
-              <LayerToggle label="Upload Preview" checked={showUploadedClinics} onChange={setShowUploadedClinics} disabled={clinicGroups.length===0} status={clinicGroups.length ? `${uploadedClinics.length.toLocaleString()} uploaded rows` : 'Upload a clinic file to enable'}/>
               <LayerToggle label="Luminous Density" checked={showGlowPoints} onChange={setShowGlowPoints} status={showGlowPoints?'Density halos and point glow active':'Low-glow point styling'}/>
             </div>
 
@@ -4089,11 +4055,6 @@ export default function App() {
                     />
                   </div>
                   <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
-                    <div>
-                      <div style={{fontSize:8,color:'#3d5478',marginBottom:3}}>GROUP COLOR</div>
-                      <input type="color" value={uploadColor} onChange={e=>setUploadColor(e.target.value)}
-                        style={{width:40,height:32,border:'1px solid rgba(244,114,182,0.3)',borderRadius:4,background:'transparent',cursor:'pointer',padding:2}} />
-                    </div>
                     <button className="rp-assess-btn"
                       style={{padding:'8px 18px',background:'rgba(244,114,182,0.12)',borderColor:'rgba(244,114,182,0.3)',color:'#f472b6',opacity:uploadLoading?0.6:1}}
                       disabled={uploadLoading}

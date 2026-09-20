@@ -183,7 +183,7 @@ async function runSearch(page,code){
 }
 
 const browser=await chromium.launch({headless:true});
-const context=await browser.newContext({locale:"en-US",userAgent:USER_AGENT});
+const context=await browser.newContext({locale:"en-US",userAgent:USER_AGENT,ignoreHTTPSErrors:true});
 const page=await context.newPage();
 const detailUrls=new Map();
 try{

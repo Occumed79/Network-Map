@@ -6,9 +6,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const PDF_URL = "https://www.gov.sm/pub2/GovSM/dam/jcr%3A86ce8b7c-b7f5-40c0-8441-2c229f3746f8/SITO_WEB_ELENCO_strutture%20autoriz%2019_2_2026.pdf";
+const FALLBACK_PDF_URL = "https://www.gov.sm/pub2/GovSM/dam/jcr%3A86ce8b7c-b7f5-40c0-8441-2c229f3746f8/SITO_WEB_ELENCO_strutture%20autoriz%2015_9_26.pdf";
 const AUTHORITY_PAGE = "https://www.gov.sm/pub2/GovSM/Authority-Sanitaria/Autorizzazione-ed-Accreditamento-delle-Strutture-Sanitarie-Socio-Sanitarie-e-Socio-Educative.html";
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
+const PHOTON_URL = "https://photon.komoot.io/api/";
 const USER_AGENT = "Occu-Med-Network-Map/1.0 (+https://github.com/Occumed79/Network-Map)";
 const columns = [
   "source_record_id", "source_url", "name", "normalized_name", "address_line1",
@@ -106,13 +107,31 @@ function candidateFacilities(rawText) {
   }
   return [...deduped.values()];
 }
+async function currentPdfUrl() {
+  try {
+    const response = await fetch(AUTHORITY_PAGE, {
+      headers: { "user-agent": USER_AGENT, accept: "text/html,*/*" },
+      redirect: "follow",
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (response.ok) {
+      const html = await response.text();
+      const match = html.match(/href=["']([^"']*Elenco[^"']*strutture[^"']*autoriz[^"']*\.pdf[^"']*)["']/iu)
+        || html.match(/href=["']([^"']*SITO_WEB_ELENCO_strutture[^"']*\.pdf[^"']*)["']/iu);
+      if (match?.[1]) return new URL(match[1].replaceAll("&amp;", "&"), AUTHORITY_PAGE).href;
+    }
+  } catch (_) {}
+  return FALLBACK_PDF_URL;
+}
+
 async function downloadPdf(filePath) {
-  const response = await fetch(PDF_URL, {
+  const pdfUrl = await currentPdfUrl();
+  const response = await fetch(pdfUrl, {
     headers: { "user-agent": USER_AGENT, accept: "application/pdf,*/*", referer: AUTHORITY_PAGE },
     redirect: "follow",
     signal: AbortSignal.timeout(120_000),
   });
-  if (!response.ok) throw new Error(`San Marino Authority PDF HTTP ${response.status}`);
+  if (!response.ok) throw new Error(`San Marino Authority PDF HTTP ${response.status}: ${pdfUrl}`);
   const buffer = Buffer.from(await response.arrayBuffer());
   if (buffer.length < 5_000 || !buffer.subarray(0, 5).toString("ascii").startsWith("%PDF")) {
     throw new Error("San Marino authorized-structures download was not a valid PDF");
@@ -156,6 +175,35 @@ async function geocode(query) {
   };
 }
 
+async function photonGeocode(query) {
+  try {
+    const url = new URL(PHOTON_URL);
+    url.searchParams.set("q", query);
+    url.searchParams.set("limit", "3");
+    url.searchParams.set("lat", "43.9424");
+    url.searchParams.set("lon", "12.4578");
+    const response = await fetch(url, {
+      headers: { "user-agent": USER_AGENT, "accept-language": "it,en" },
+      signal: AbortSignal.timeout(45_000),
+    });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    for (const feature of payload?.features || []) {
+      const [lng, lat] = feature?.geometry?.coordinates || [];
+      if (!validCoordinates(Number(lat), Number(lng))) continue;
+      const props = feature?.properties || {};
+      return {
+        lat: Number(lat),
+        lng: Number(lng),
+        address1: text(props.street) || text(props.name),
+        city: text(props.city) || text(props.locality) || text(props.district),
+        postal: text(props.postcode),
+      };
+    }
+  } catch (_) {}
+  return null;
+}
+
 function postgresArray(values) {
   return `{${[...new Set(values.filter(Boolean))].map((value) => `"${String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`).join(",")}}`;
 }
@@ -188,6 +236,7 @@ for (const facility of facilities) {
     geo = shortened && shortened !== name ? await geocode(`${shortened}, San Marino`) : null;
     lastGeocodeAt = Date.now();
   }
+  if (!geo) geo = await photonGeocode(`${name}, San Marino`);
   if (!geo) { skippedUnplaced += 1; continue; }
 
   const classification = facility.section === "occupational_health"

@@ -260,15 +260,21 @@ for (const source of SOURCES) {
     let coordinates = existing.get(sourceId) || null;
     if (coordinates) reused += 1;
     if (!coordinates) {
-      if (!address && !city) { skippedUnplaced += 1; continue; }
+      const locationHint = [address, city, parent].filter(Boolean).join(", ");
       const wait = 1100 - (Date.now() - lastGeocodeAt);
       if (wait > 0) await sleep(wait);
-      coordinates = await geocode([name, address, city, "Azerbaijan"].filter(Boolean).join(", "));
+      coordinates = await geocode([name, locationHint, "Azerbaijan"].filter(Boolean).join(", "));
       lastGeocodeAt = Date.now();
-      if (!coordinates && address && city) {
+      if (!coordinates && locationHint) {
         const waitRetry = 1100 - (Date.now() - lastGeocodeAt);
         if (waitRetry > 0) await sleep(waitRetry);
-        coordinates = await geocode(`${address}, ${city}, Azerbaijan`);
+        coordinates = await geocode(`${locationHint}, Azerbaijan`);
+        lastGeocodeAt = Date.now();
+      }
+      if (!coordinates && parent) {
+        const waitParent = 1100 - (Date.now() - lastGeocodeAt);
+        if (waitParent > 0) await sleep(waitParent);
+        coordinates = await geocode(`${parent}, Azerbaijan`);
         lastGeocodeAt = Date.now();
       }
       if (!coordinates) { skippedUnplaced += 1; continue; }
@@ -276,7 +282,7 @@ for (const source of SOURCES) {
     }
 
     const normalized = normalizedKey(name);
-    const formatted = [address, city, "Azerbaijan"].filter(Boolean).join(", ");
+    const formatted = [address, city || parent, "Azerbaijan"].filter(Boolean).join(", ");
     const classification = classify(name, type, parent);
     const masterKey = `loc:${hash(JSON.stringify({
       name: normalized,
@@ -288,8 +294,12 @@ for (const source of SOURCES) {
     const rowOut = [
       sourceId, source.page, name, normalized, address, formatted, city, city, "", "AZ",
       coordinates.lat, coordinates.lng, phone, "", email, classification.primary,
-      postgresArray([...classification.tags, source.key === "subordinate" ? "tabib_subordinate_facility" : "tabib_direct_facility"]),
-      0.96, masterKey,
+      postgresArray([
+        ...classification.tags,
+        source.key === "subordinate" ? "tabib_subordinate_facility" : "tabib_direct_facility",
+        (!address && !city && parent) ? "coordinate_source:parent_institution" : "coordinate_source:geocoded",
+      ]),
+      (!address && !city && parent) ? 0.82 : 0.96, masterKey,
     ];
 
     const dedupeKey = `${normalized}|${normalizedKey(address)}|${normalizedKey(city)}`;

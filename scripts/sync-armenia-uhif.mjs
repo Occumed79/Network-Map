@@ -330,6 +330,17 @@ try {
     if (htmlHospitals) captured = { hospitals: htmlHospitals, url: DIRECTORY_URL, bytes: 0 };
   }
 
+  if (!captured) {
+    const scriptBodies = await page.locator("script").allTextContents();
+    const scriptCandidates = [];
+    for (const body of scriptBodies) {
+      const hospitals = payloadFromText(body);
+      if (hospitals) scriptCandidates.push({ hospitals, url: DIRECTORY_URL, bytes: body.length });
+    }
+    scriptCandidates.sort((a, b) => b.hospitals.length - a.hospitals.length);
+    captured = scriptCandidates[0] || null;
+  }
+
   if (!captured) captured = await discoverCompletePayload();
   if (!captured) {
     const mapButton = page.getByRole("button", { name: /^\s*Map\s*$/i });
@@ -343,7 +354,8 @@ try {
     }
   }
   if (!captured) {
-    throw new Error(`UHIF exposed no complete hospital payload; captured ${responsePayloads.length} response payloads and ${languageActions.size} language actions`);
+    const scriptSizes = (await page.locator("script").allTextContents()).map((body) => body.length).sort((a,b)=>b-a).slice(0,12);
+    throw new Error(`UHIF exposed no complete hospital payload; captured ${responsePayloads.length} response payloads and ${languageActions.size} language actions; largest script sizes=${JSON.stringify(scriptSizes)}`);
   }
 
   const candidateArrays = [...responsePayloads.map((entry) => entry.hospitals), captured.hospitals]

@@ -24,6 +24,8 @@ on:
       - "scripts/sync-ukraine-nhsu.mjs"
       - "scripts/extract-iceland-operator-registry.mjs"
       - "scripts/geocode-iceland-operator-registry.py"
+      - "scripts/sync-georgia-geostat.mjs"
+      - "scripts/sync-greenland-peqqik.py"
       - "scripts/import-official-registry.sh"
       - "scripts/official-registry-schema.sql"
   schedule:
@@ -62,6 +64,8 @@ jobs:
           - { source: san-marino-authorized, country: SM, country_name: San-Marino, source_key: sm_authorized_healthcare, cadence: monthly, minimum: 12 }
           - { source: turkey-moh-health-tourism, country: TR, country_name: Türkiye, source_key: tr_moh_health_tourism, cadence: monthly, minimum: 100 }
           - { source: north-macedonia-moh, country: MK, country_name: North-Macedonia, source_key: mk_moh_health_centers, cadence: monthly, minimum: 20 }
+          - { source: georgia-hmis, country: GE, country_name: Georgia, source_key: ge_geostat_healthcare, cadence: weekly, minimum: 200 }
+          - { source: greenland-healthcare, country: GL, country_name: Greenland, source_key: gl_healthcare, cadence: weekly, minimum: 35 }
     steps:
       - name: Decide whether this source is due
         shell: bash
@@ -102,7 +106,7 @@ jobs:
           set -euo pipefail
           python -m pip install --disable-pip-version-check beautifulsoup4 ijson openpyxl pandas pyproj requests xlrd
           npm install --no-save playwright@1.55.0
-          if [[ "${{ matrix.source }}" == "armenia-uhif" || "${{ matrix.source }}" == "iceland-doh" ]]; then
+          if [[ "${{ matrix.source }}" == "armenia-uhif" || "${{ matrix.source }}" == "iceland-doh" || "${{ matrix.source }}" == "georgia-hmis" ]]; then
             npx playwright install --with-deps chromium >/dev/null
           fi
           sudo apt-get update
@@ -132,6 +136,8 @@ jobs:
             san-marino-authorized) node scripts/sync-san-marino-authorized.mjs --output "$output" ;;
             turkey-moh-health-tourism) node --max-old-space-size=4096 scripts/sync-turkey-health-tourism.mjs --output "$output" ;;
             north-macedonia-moh) node scripts/sync-north-macedonia-health-centers.mjs --output "$output" ;;
+            georgia-hmis) node --max-old-space-size=4096 scripts/sync-georgia-geostat.mjs --output "$output" ;;
+            greenland-healthcare) python scripts/sync-greenland-peqqik.py --output "$output" ;;
             iceland-doh)
               node scripts/extract-iceland-operator-registry.mjs --output /tmp/europe-registry/iceland.tsv --summary /tmp/europe-registry/iceland-summary.json
               python scripts/geocode-iceland-operator-registry.py --input /tmp/europe-registry/iceland.tsv --output "$output" --skipped /tmp/europe-registry/iceland-skipped.json --workers 10

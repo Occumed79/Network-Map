@@ -314,7 +314,7 @@ export function clearProviderExplorerNative(channels: Channel[] = ["pins", "aggr
 
 function markHandled(originalEvent: unknown): void {
   if (originalEvent && typeof originalEvent === "object") {
-    (originalEvent as Record<string, unknown>).__networkMapCompatHandled = true;
+    (originalEvent as Record<string, unknown>).__networkMapOverlayHandled = true;
   }
 }
 

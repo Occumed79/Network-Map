@@ -9,10 +9,10 @@ const API_URL = "https://data.gov.cy/api/action/datastore/search.json";
 
 type Bounds = { north: number; south: number; east: number; west: number };
 type CyprusHospitalRow = {
-  Hospital?: unknown;
-  Address?: unknown;
-  Tel?: unknown;
-  Info_URL?: unknown;
+  Hospital?: unknown; hospital?: unknown;
+  Address?: unknown; address?: unknown;
+  Tel?: unknown; tel?: unknown;
+  Info_URL?: unknown; info_url?: unknown;
   latitude?: unknown;
   longitude?: unknown;
 };
@@ -55,7 +55,7 @@ function inBounds(lat: number, lng: number, bounds: Bounds | null): boolean {
 
 function stableId(row: CyprusHospitalRow, lat: number, lng: number): string {
   const digest = createHash("sha1")
-    .update([row.Hospital, row.Address, lat, lng].map((value) => String(value ?? "")).join("|"))
+    .update([row.Hospital ?? row.hospital, row.Address ?? row.address, lat, lng].map((value) => String(value ?? "")).join("|"))
     .digest("hex")
     .slice(0, 20);
   return `cy-moh-hospital:${digest}`;
@@ -65,10 +65,10 @@ function normalize(row: CyprusHospitalRow): Record<string, unknown> | null {
   const lat = numberValue(row.latitude);
   const lng = numberValue(row.longitude);
   if (lat === null || lng === null || lat < 34 || lat > 36 || lng < 31 || lng > 35) return null;
-  const name = text(row.Hospital);
+  const name = text(row.Hospital ?? row.hospital);
   if (!name) return null;
   const id = stableId(row, lat, lng);
-  const address = text(row.Address);
+  const address = text(row.Address ?? row.address);
   return {
     id,
     source_id: id,
@@ -84,8 +84,8 @@ function normalize(row: CyprusHospitalRow): Record<string, unknown> | null {
     country_code: "CY",
     lat,
     lng,
-    phone: text(row.Tel) || null,
-    website: text(row.Info_URL) || null,
+    phone: text(row.Tel ?? row.tel) || null,
+    website: text(row.Info_URL ?? row.info_url) || null,
     clinic_type: "hospital",
     providerType: "hospital",
     category: "state hospital",

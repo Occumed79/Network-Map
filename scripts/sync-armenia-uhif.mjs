@@ -312,9 +312,16 @@ try {
     throw new Error(`UHIF exposed no complete hospital payload; captured ${responsePayloads.length} response payloads and ${languageActions.size} language actions`);
   }
 
-  const facilities = captured.hospitals;
+  const facilityById = new Map();
+  for (const candidate of [...responsePayloads.map((entry) => entry.hospitals), captured.hospitals]) {
+    for (const facility of candidate || []) {
+      const id = text(facility?.id);
+      if (id) facilityById.set(id, facility);
+    }
+  }
+  const facilities = [...facilityById.values()];
   if (facilities.length !== reportedTotal) {
-    throw new Error(`UHIF completeness guard failed: page reports ${reportedTotal}, map payload contains ${facilities.length}`);
+    throw new Error(`UHIF completeness guard failed: page reports ${reportedTotal}, combined payload contains ${facilities.length}`);
   }
 
   const rows = new Map();

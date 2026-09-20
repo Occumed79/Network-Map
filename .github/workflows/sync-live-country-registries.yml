@@ -8,6 +8,7 @@ on:
       - ".github/actions/resolve-registry-database/action.yml"
       - ".github/workflows/sync-live-country-registries.yml"
       - "scripts/sync-live-registry-to-tsv.mjs"
+      - "scripts/sync-colombia-reps.py"
       - "scripts/import-official-registry.sh"
       - "scripts/official-registry-schema.sql"
       - "api-server/src/routes/**"
@@ -96,7 +97,11 @@ jobs:
           [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "Dedicated registry database connection is missing" >&2; exit 1; }
           echo "::add-mask::${TARGET_DATABASE_URL}"
           mkdir -p /tmp/registry
+          if [[ "${{ matrix.source }}" == "colombia-reps" ]]; then
+          count="$(python scripts/sync-colombia-reps.py --output /tmp/registry/provider.tsv)"
+        else
           count="$(node scripts/sync-live-registry-to-tsv.mjs --source "${{ matrix.source }}" --country "${{ matrix.country }}" --output /tmp/registry/provider.tsv)"
+        fi
           (( count > 0 )) || { echo "Registry returned no providers" >&2; exit 1; }
           echo "REGISTRY_EXPECTED=${count}" >> "$GITHUB_ENV"
       - name: Import compact dedicated registry

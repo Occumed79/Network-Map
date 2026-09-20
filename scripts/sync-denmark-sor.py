@@ -212,12 +212,14 @@ def main():
     scanned = 0
     health_institutions = 0
     no_coordinates = 0
+    sor_type_counts = {}
     for row in reader:
         scanned += 1
         if not active_now(row):
             continue
 
         sor_type = text(row.get("SorType")).upper()
+        sor_type_counts[sor_type] = sor_type_counts.get(sor_type, 0) + 1
         if sor_type in {"SI", "HI"}:
             sor_id = text(row.get("SorId"))
             name = text(row.get("EntityName")) or text(row.get("HealthInstitutionEntityName"))
@@ -265,7 +267,11 @@ def main():
 
     output = sorted(rows.values(), key=lambda row: (str(row[2]).lower(), str(row[0])))
     if len(output) < 1000:
-        raise RuntimeError(f"Only {len(output)} map-renderable Denmark SOR health institutions; refusing output")
+        coordinate_fields = [name for name in fieldnames if "Coord" in name or "Address" in name or "HealthInstitution" in name]
+        raise RuntimeError(
+            f"Only {len(output)} map-renderable Denmark SOR health institutions; "
+            f"SorType counts={sor_type_counts}; candidate fields={coordinate_fields[:120]}"
+        )
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     with open(args.output, "w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle, delimiter="\t", quoting=csv.QUOTE_ALL, lineterminator="\n")

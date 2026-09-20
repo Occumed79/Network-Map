@@ -60,8 +60,8 @@ jobs:
         run: pnpm --filter @workspace/occu-med-map test:mapbox-lifecycle-hardening
       - name: Mapbox source pipeline
         run: pnpm --filter @workspace/occu-med-map test:mapbox-source-pipeline-hardening
-      - name: Zero-Leaflet architecture
-        run: pnpm --filter @workspace/occu-med-map test:zero-leaflet
+      - name: Native map architecture authority
+        run: pnpm --filter @workspace/occu-med-map test:map-architecture-authority
       - name: Provider rendering authority
         run: pnpm --filter @workspace/occu-med-map test:provider-rendering-authority
       - name: Large-map rendering/memory

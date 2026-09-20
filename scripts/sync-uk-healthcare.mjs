@@ -136,30 +136,54 @@ function csvField(value) {
   return `"${encoded}"`;
 }
 
+const RETRYABLE_HTTP_STATUS = new Set([408, 425, 429]);
+
+async function fetchWithRetries(url, init) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    let response = null;
+    try {
+      response = await fetch(url, {
+        ...init,
+        signal: AbortSignal.timeout(180_000),
+      });
+    } catch (error) {
+      lastError = error;
+      if (attempt === 5) throw error;
+    }
+    if (response?.ok) return response;
+    if (response) {
+      const retryable = RETRYABLE_HTTP_STATUS.has(response.status) || response.status >= 500;
+      lastError = new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
+      if (!retryable || attempt === 5) throw lastError;
+    }
+    const delayMs = 1_000 * 2 ** (attempt - 1);
+    console.warn(`Retrying ${url} after attempt ${attempt}: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  throw lastError || new Error(`Request failed for ${url}`);
+}
+
 async function fetchText(url, headers = {}) {
-  const response = await fetch(url, {
+  const response = await fetchWithRetries(url, {
     headers: {
       "user-agent": "Mozilla/5.0 (compatible; Occu-Med-Network-Map/1.0; +https://github.com/Occumed79/Network-Map)",
       ...headers,
     },
     redirect: "follow",
-    signal: AbortSignal.timeout(180_000),
   });
-  if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
   return await response.text();
 }
 
 async function fetchJson(url, init = {}) {
-  const response = await fetch(url, {
+  const response = await fetchWithRetries(url, {
     ...init,
     headers: {
       accept: "application/json",
       "user-agent": "Occu-Med-Network-Map/1.0",
       ...(init.headers || {}),
     },
-    signal: AbortSignal.timeout(180_000),
   });
-  if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
   return await response.json();
 }
 

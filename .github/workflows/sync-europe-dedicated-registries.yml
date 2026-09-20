@@ -13,6 +13,7 @@ on:
       - "scripts/sync-bosnia-domestic-healthcare.py"
       - "scripts/sync-denmark-sor.py"
       - "scripts/sync-france-finess.mjs"
+      - "scripts/sync-france-finess.py"
       - "scripts/sync-kosovo-healthcare.py"
       - "scripts/sync-liechtenstein-lkv.mjs"
       - "scripts/sync-north-macedonia-health-centers.mjs"
@@ -49,9 +50,9 @@ jobs:
           - { source: denmark-sor-healthcare, country: DK, country_name: Denmark, source_key: dk_sor_healthcare, cadence: daily, minimum: 1000 }
           - { source: france-finess, country: FR, country_name: France, source_key: fr_finess, cadence: daily, minimum: 10000 }
           - { source: england-cqc, country: GB, country_name: England, source_key: gb_cqc_healthcare, cadence: weekly, minimum: 5000 }
-          - { source: northern-ireland-gp, country: GB, country_name: Northern-Ireland, source_key: gb_ni_gp, cadence: weekly, minimum: 400 }
+          - { source: northern-ireland-gp, country: GB, country_name: Northern-Ireland, source_key: gb_ni_gp, cadence: weekly, minimum: 200 }
           - { source: ukraine-nhsu, country: UA, country_name: Ukraine, source_key: ua_nhsu_pmg, cadence: weekly, minimum: 2000 }
-          - { source: andorra-cass, country: AD, country_name: Andorra, source_key: ad_cass_healthcare, cadence: weekly, minimum: 120 }
+          - { source: andorra-cass, country: AD, country_name: Andorra, source_key: ad_cass_healthcare, cadence: weekly, minimum: 15 }
           - { source: armenia-uhif, country: AM, country_name: Armenia, source_key: am_uhif_healthcare, cadence: weekly, minimum: 500 }
           - { source: bosnia-domestic, country: BA, country_name: Bosnia-and-Herzegovina, source_key: ba_domestic_healthcare, cadence: weekly, minimum: 55 }
           - { source: iceland-doh, country: IS, country_name: Iceland, source_key: is_doh_healthcare_operators, cadence: weekly, minimum: 200 }
@@ -99,7 +100,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install --disable-pip-version-check beautifulsoup4 openpyxl pandas pyproj requests xlrd
+          python -m pip install --disable-pip-version-check beautifulsoup4 ijson openpyxl pandas pyproj requests xlrd
           npm install --no-save playwright@1.55.0
           if [[ "${{ matrix.source }}" == "armenia-uhif" || "${{ matrix.source }}" == "iceland-doh" ]]; then
             npx playwright install --with-deps chromium >/dev/null
@@ -118,7 +119,7 @@ jobs:
           output=/tmp/europe-registry/provider.tsv
           case "${{ matrix.source }}" in
             denmark-sor-healthcare) python scripts/sync-denmark-sor.py --output "$output" ;;
-            france-finess) node --max-old-space-size=6144 scripts/sync-france-finess.mjs --output "$output" ;;
+            france-finess) python scripts/sync-france-finess.py --output "$output" ;;
             england-cqc) node --max-old-space-size=4096 scripts/sync-uk-healthcare.mjs --source england-cqc --output "$output" ;;
             northern-ireland-gp) node scripts/sync-northern-ireland-primary-care.mjs --output "$output" ;;
             ukraine-nhsu) node --max-old-space-size=4096 scripts/sync-ukraine-nhsu.mjs --output "$output" ;;

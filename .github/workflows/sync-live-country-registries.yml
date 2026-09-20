@@ -10,6 +10,7 @@ on:
       - "scripts/sync-live-registry-to-tsv.mjs"
       - "scripts/import-official-registry.sh"
       - "scripts/official-registry-schema.sql"
+      - "api-server/src/routes/**"
   schedule:
     - cron: "45 12 * * *"
 

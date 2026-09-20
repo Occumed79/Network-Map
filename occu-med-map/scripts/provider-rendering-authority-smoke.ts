@@ -30,10 +30,16 @@ for (const { file, text } of source) {
     `${file}: provider points must use GeoJSON sources/layers, not DOM-backed Mapbox Marker objects`);
 }
 
+const nativeOwner = readFileSync(path.join(srcRoot, "providerPointNativeRuntime.ts"), "utf8");
 const dataset = readFileSync(path.join(srcRoot, "providerDatasetNativeMapRuntime.ts"), "utf8");
 const live = readFileSync(path.join(srcRoot, "liveFinderNativeMapRuntime.ts"), "utf8");
 const explorer = readFileSync(path.join(srcRoot, "providerExplorerNativeMapRuntime.ts"), "utf8");
 const location = readFileSync(path.join(srcRoot, "providerLocationFinderRuntime.ts"), "utf8");
+
+assert.match(nativeOwner, /map\.addSource\(/, "authoritative provider point owner must create Mapbox GeoJSON sources");
+assert.match(nativeOwner, /map\.addLayer\(/, "authoritative provider point owner must create Mapbox circle layers");
+assert.match(nativeOwner, /type:\s*["']geojson["']/, "authoritative provider point owner must use GeoJSON sources");
+assert.match(nativeOwner, /type:\s*["']circle["']/, "authoritative provider point owner must use Mapbox-native circle layers");
 
 for (const [name, text] of [
   ["providerDatasetNativeMapRuntime", dataset],
@@ -41,13 +47,12 @@ for (const [name, text] of [
   ["providerExplorerNativeMapRuntime", explorer],
   ["providerLocationFinderRuntime", location],
 ] as const) {
-  assert.match(text, /map\.addSource\(|addSource\(/, `${name} must create Mapbox GeoJSON sources`);
-  assert.match(text, /map\.addLayer\(|addLayer\(/, `${name} must render through Mapbox style layers`);
+  assert.match(text, /ensureProviderPointLayer/, `${name} must delegate provider point rendering to providerPointNativeRuntime`);
 }
 
-assert.match(dataset, /type:\s*["']geojson["']/, "stored/uploaded provider channels must use GeoJSON sources");
-assert.match(live, /type:\s*["']geojson["']/, "live finder provider results must use GeoJSON sources");
-assert.match(explorer, /type:\s*["']geojson["']/, "Provider Explorer provider results must use GeoJSON sources");
-assert.match(location, /type:\s*["']geojson["']/, "Provider Location Finder results must use GeoJSON sources");
+assert.match(dataset, /buildProviderPointFeature/, "stored/uploaded provider records must use the canonical provider point feature builder");
+assert.match(live, /buildProviderPointFeature/, "live finder provider results must use the canonical provider point feature builder");
+assert.match(explorer, /buildProviderPointFeature/, "Provider Explorer provider results must use the canonical provider point feature builder");
+assert.match(location, /buildProviderPointFeature/, "Provider Location Finder results must use the canonical provider point feature builder");
 
-console.log("Provider rendering authority gate passed: provider points are Mapbox-native GeoJSON layers.");
+console.log("Provider rendering authority gate passed: one Mapbox-native provider point owner is authoritative.");

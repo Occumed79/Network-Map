@@ -38,6 +38,8 @@ jobs:
         run: pnpm --filter @workspace/api-server test:external-source-resilience
       - name: International registry contracts
         run: pnpm --filter @workspace/api-server test:international-registries
+      - name: Armenia UHIF payload selection
+        run: node --test scripts/test/armenia-uhif-payload.test.mjs
       - name: Observability/request correlation
         run: pnpm --filter @workspace/api-server test:observability
       - name: Provider Explorer API

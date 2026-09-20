@@ -18,6 +18,9 @@ jobs:
   chromium-ui:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      VITE_MAPBOX_TOKEN: pk.ci-network-map-placeholder
+      VITE_MAPBOX_TOKEN_2: pk.ci-network-map-placeholder
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

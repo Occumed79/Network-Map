@@ -51,7 +51,7 @@ All provider points render through Mapbox GL GeoJSON sources and native style la
 
 Logical datasets remain separate so users can toggle them independently. A provider being rendered by Mapbox does **not** mean Mapbox supplied that provider record. Examples include stored Neon providers, Overture, Healthsites, U.S. Embassy data, BlueHive, uploaded datasets, Provider Explorer, and live discovery results.
 
-Production code must not introduce Leaflet provider markers, DOM-backed `mapboxgl.Marker` provider pins, or a second provider-point rendering engine. CI enforces this with the zero-Leaflet and provider-rendering-authority gates.
+Production code must not introduce a second map engine, DOM-backed `mapboxgl.Marker` provider pins, or a second provider-point rendering path. CI enforces this with the native-map architecture and provider-rendering-authority gates.
 
 ## Mapbox token resilience
 

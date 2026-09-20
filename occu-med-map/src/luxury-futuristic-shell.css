@@ -75,7 +75,7 @@
 
 .mapbox-2d-host,
 .mapbox-globe-host,
-#map,
+#map {
   border-radius: 21px !important;
 }
 
@@ -456,7 +456,7 @@
 
   .mapbox-2d-host,
   .mapbox-globe-host,
-  #map,
+  #map {
     border-radius: 16px !important;
   }
 }

@@ -3271,7 +3271,7 @@ export default function App() {
         <div className="command-header-actions">
           <div className="provider-source-health" title={`${loadedProviderCount.toLocaleString()} provider records loaded in this viewport`}>
             <span className="source-health-dot"/>
-            <strong>{activeProviderSourceCount}/4</strong>
+            <strong>{activeProviderSourceCount}</strong>
             <span>layers active</span>
           </div>
 
@@ -3310,7 +3310,7 @@ export default function App() {
             <div className="hero-eyebrow">Global provider workspace</div>
             <div className="hero-title">Provider intelligence at map speed</div>
             <div className="hero-sub">Search, inspect density, find live facilities, and build coverage without leaving the map.</div>
-            <div className="hero-source-summary"><span>{activeProviderSourceCount} sources on</span><strong>{loadedProviderCount.toLocaleString()} visible records</strong></div>
+            <div className="hero-source-summary"><span>{activeProviderSourceCount} layers on</span><strong>{loadedProviderCount.toLocaleString()} visible records</strong></div>
           </div>
 
           <section className="sb-section command-section">

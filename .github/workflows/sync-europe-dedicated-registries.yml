@@ -9,6 +9,8 @@ on:
       - ".github/workflows/sync-europe-dedicated-registries.yml"
       - "scripts/sync-andorra-cass.py"
       - "scripts/sync-armenia-uhif.mjs"
+      - "scripts/lib/armenia-uhif-payload.mjs"
+      - "scripts/test/armenia-uhif-payload.test.mjs"
       - "scripts/sync-azerbaijan-tabib.mjs"
       - "scripts/sync-bosnia-domestic-healthcare.py"
       - "scripts/sync-denmark-sor.py"

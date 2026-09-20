@@ -245,7 +245,7 @@ registerMapboxMapInitializer({
       const html = String(feature?.properties?.popupHtml || "");
       if (!feature || !html) return;
       if (event.originalEvent && typeof event.originalEvent === "object") {
-        (event.originalEvent as unknown as Record<string, unknown>).__networkMapCompatHandled = true;
+        (event.originalEvent as unknown as Record<string, unknown>).__networkMapOverlayHandled = true;
       }
       new mapboxgl.Popup({ closeButton: true, maxWidth: "340px" }).setLngLat(event.lngLat).setHTML(html).addTo(map);
     };

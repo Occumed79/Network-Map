@@ -331,6 +331,9 @@ try {
     stagnantLoads = afterLength <= beforeLength ? stagnantLoads + 1 : 0;
   }
   await page.waitForTimeout(1_000);
+  // Capture the fully expanded list before switching to Map view, which
+  // removes the list cards from the DOM.
+  const renderedCards = await renderedHospitalCards(page);
 
   const payloadCandidates = [...responsePayloads];
   const html = await page.content();
@@ -373,7 +376,7 @@ try {
   }
   let renderedFallback = null;
   if (!captured || uniqueFacilityIds(captured.hospitals) !== reportedTotal) {
-    const cards = await renderedHospitalCards(page);
+    const cards = renderedCards;
     console.log(JSON.stringify({
       uhifRenderedCards: cards.length,
       officialFacilityTotal: reportedTotal,

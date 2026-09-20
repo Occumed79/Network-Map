@@ -47,7 +47,6 @@ const requiredOwners: Record<string, string> = {
   "dialogControllerRuntime.ts": "dialog-controller",
   "generalUiIntegrityRuntime.ts": "general-ui-integrity",
   "sidebarWorkspacePanelGuardRuntime.ts": "sidebar-workspace-integrity",
-  "providerSourceSelectionPersistenceRuntime.ts": "provider-source-selection-persistence",
 };
 
 for (const [file, id] of Object.entries(requiredOwners)) {

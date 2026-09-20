@@ -147,6 +147,18 @@ jobs:
             fi
           done
 
+      - name: Activate canonical shard reads
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          UPDATE public.provider_schema_state
+          SET canonical_read_enabled = true,
+              verification_notes = 'Source provider shard initialized from canonical schema',
+              updated_at = now()
+          WHERE id = 1;
+          SQL
+
       - name: Verify identical provider pipeline
         shell: bash
         run: |
@@ -214,6 +226,25 @@ jobs:
             IF canonical_type_count <> 32 THEN
               RAISE EXCEPTION 'Canonical provider type catalog is incomplete: expected 32 active types, found %', canonical_type_count;
             END IF;
-          END $$;
+
+            IF NOT EXISTS (
+              SELECT 1
+              FROM information_schema.columns
+              WHERE table_schema='public'
+                AND table_name='provider_type_catalog'
+                AND column_name='updated_at'
+                AND data_type='timestamp with time zone'
+            ) THEN
+              RAISE EXCEPTION 'provider_type_catalog.updated_at is missing';
+            END IF;
+
+            IF NOT EXISTS (
+              SELECT 1
+              FROM public.provider_schema_state
+              WHERE id=1 AND canonical_read_enabled=true
+            ) THEN
+              RAISE EXCEPTION 'Provider shard canonical reads are not enabled';
+            END IF;
+          END $;
           SQL
-          echo "${{ inputs.source_family }} Neon project ${{ inputs.project_slot }} now has the same provider schema and canonical type catalog as the primary project."
+          echo "${{ inputs.source_family }} Neon project ${{ inputs.project_slot }} now has the canonical provider schema, active canonical reads, and current provider type catalog."

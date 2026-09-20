@@ -1265,7 +1265,6 @@ export default function App() {
     mapView: true,
     usDiagnostics: true,
   });
-  const [indexedLayerData, setIndexedLayerData] = useState<any[]>([]);
   const [outreachNotes, setOutreachNotes] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_notes')||'{}'); } catch { return {}; } });
   const [outreachStatus, setOutreachStatus] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_status')||'{}'); } catch { return {}; } });
   const [savedToMyClinics, setSavedToMyClinics] = useState<Record<string,MyClinicSaveStatus>>({});

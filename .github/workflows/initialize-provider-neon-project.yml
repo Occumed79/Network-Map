@@ -7,7 +7,7 @@ on:
         description: Provider source stored in this Neon project
         required: true
         type: choice
-        options: ["healthsites", "usa_embassy"]
+        options: ["overpass", "healthsites", "usa_embassy"]
       project_slot:
         description: Provider database project to initialize
         required: true
@@ -32,6 +32,8 @@ jobs:
     timeout-minutes: 45
     env:
       SOURCE_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      OVERPASS_DATABASE_URL: ${{ secrets.OVERPASS_DATABASE_URL }}
+      OVERPASS_DATABASE_URL_2: ${{ secrets.OVERPASS_DATABASE_URL_2 }}
       HEALTHSITES_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
       HEALTHSITES_DATABASE_URL_2: ${{ secrets.HEALTHSITES_DATABASE_URL_2 }}
       HEALTHSITES_DATABASE_URL_3: ${{ secrets.HEALTHSITES_DATABASE_URL_3 }}
@@ -77,6 +79,10 @@ jobs:
         run: |
           set -euo pipefail
           case "${{ inputs.source_family }}" in
+            overpass)
+              target_prefix=OVERPASS_DATABASE_URL
+              maximum_slot=2
+              ;;
             healthsites)
               target_prefix=HEALTHSITES_DATABASE_URL
               maximum_slot=8

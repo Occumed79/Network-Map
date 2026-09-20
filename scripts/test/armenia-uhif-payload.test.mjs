@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  expandOrganizationBranches,
   payloadsFromText,
   selectPayload,
   uniqueFacilityIds,
@@ -32,4 +33,31 @@ test("selects the exact UHIF facility payload instead of a larger unrelated arra
   assert.equal(selected.hospitals.length, 579);
   assert.equal(uniqueFacilityIds(selected.hospitals), 579);
   assert.equal(selected.hospitals[0].id, "facility-0");
+});
+
+test("expands UHIF parent organizations into physical branch facilities", () => {
+  const expanded = expandOrganizationBranches([
+    {
+      id: "org-1",
+      name: "First Medical Group",
+      legalName: "First Medical Group LLC",
+      branches: [
+        { id: "branch-1", name: "First Clinic", address: "1 Main Street", lat: 40.1, lng: 44.5 },
+        { id: "branch-2", address: "2 Main Street", lat: 40.2, lng: 44.6 },
+      ],
+    },
+    {
+      id: "org-2",
+      name: "Second Clinic",
+      legalName: "Second Clinic LLC",
+      branches: [{ id: "branch-3", address: "3 Main Street", lat: 40.3, lng: 44.7 }],
+    },
+  ]);
+
+  assert.equal(expanded.length, 3);
+  assert.equal(uniqueFacilityIds(expanded), 3);
+  assert.deepEqual(expanded.map((facility) => facility.id), ["branch-1", "branch-2", "branch-3"]);
+  assert.equal(expanded[1].name, "First Medical Group");
+  assert.equal(expanded[2].legalName, "Second Clinic LLC");
+  assert.equal(expanded[0].organizationId, "org-1");
 });

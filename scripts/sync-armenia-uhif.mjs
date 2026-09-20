@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { chromium } from "playwright";
 import {
+  expandOrganizationBranches,
   payloadsFromText,
   selectPayload,
   uniqueFacilityIds,
@@ -264,6 +265,8 @@ function diagnosticValue(value) {
 
 function candidateProfile(candidate) {
   const sample = candidate.hospitals.slice(0, 3);
+  const branches = candidate.hospitals.flatMap((item) => Array.isArray(item?.branches) ? item.branches : []);
+  const expanded = expandOrganizationBranches(candidate.hospitals);
   const keys = [...new Set(sample.flatMap((item) => item && typeof item === "object" ? Object.keys(item) : []))].sort();
   return {
     rows: candidate.hospitals.length,
@@ -272,6 +275,13 @@ function candidateProfile(candidate) {
     samples: sample.map((item) => item && typeof item === "object"
       ? Object.fromEntries(Object.entries(item).map(([key, value]) => [key, diagnosticValue(value)]))
       : diagnosticValue(item)),
+    branchRows: branches.length,
+    expandedRows: expanded.length,
+    expandedUniqueIds: uniqueFacilityIds(expanded),
+    branchKeys: [...new Set(branches.slice(0, 10).flatMap((branch) => branch && typeof branch === "object" ? Object.keys(branch) : []))].sort(),
+    branchSamples: branches.slice(0, 3).map((branch) => branch && typeof branch === "object"
+      ? Object.fromEntries(Object.entries(branch).map(([key, value]) => [key, diagnosticValue(value)]))
+      : diagnosticValue(branch)),
     bytes: candidate.bytes,
     action: candidate.action || "",
   };
@@ -290,7 +300,7 @@ page.on("response", async (response) => {
 });
 
 page.on("request", (request) => {
-  if (request.url() !== DIRECTORY_URL || request.method() !== "POST") return;
+  if (!request.url().includes("/hospitals") || request.method() !== "POST") return;
   const headers = request.headers();
   const action = headers["next-action"] || "";
   if (!action) return;
@@ -393,6 +403,17 @@ try {
   const html = await page.content();
   for (const hospitals of payloadsFromText(html)) {
     payloadCandidates.push({ hospitals, url: DIRECTORY_URL, bytes: html.length });
+  }
+
+  // UHIF's public payload groups physical healthcare locations beneath parent
+  // organizations. The page result total counts those branches, so promote the
+  // branch rows as an additional candidate while retaining the parent payload
+  // for diagnostics and schema-change detection.
+  for (const candidate of [...payloadCandidates]) {
+    const hospitals = expandOrganizationBranches(candidate.hospitals);
+    if (hospitals.length !== candidate.hospitals.length) {
+      payloadCandidates.push({ ...candidate, hospitals, expandedBranches: true });
+    }
   }
 
   let captured = selectPayload(payloadCandidates, reportedTotal);

@@ -109,6 +109,35 @@ export function uniqueFacilityIds(hospitals) {
   return new Set(hospitals.map((facility) => text(facility?.id)).filter(Boolean)).size;
 }
 
+export function expandOrganizationBranches(organizations) {
+  if (!Array.isArray(organizations)) return [];
+  const expanded = [];
+  for (const organization of organizations) {
+    if (!organization || typeof organization !== "object") continue;
+    const organizationId = text(organization.id);
+    const branches = Array.isArray(organization.branches) && organization.branches.length
+      ? organization.branches
+      : [null];
+    for (let index = 0; index < branches.length; index += 1) {
+      const branch = branches[index];
+      if (!branch || typeof branch !== "object") {
+        expanded.push(organization);
+        continue;
+      }
+      expanded.push({
+        ...organization,
+        ...branch,
+        id: text(branch.id) || `${organizationId}:branch:${index + 1}`,
+        name: text(branch.name) || text(organization.name),
+        organizationId,
+        organizationName: text(organization.name),
+        legalName: text(branch.legalName) || text(organization.legalName),
+      });
+    }
+  }
+  return expanded;
+}
+
 export function selectPayload(candidates, reportedTotal) {
   const sorted = candidates
     .filter((candidate) => Array.isArray(candidate?.hospitals) && candidate.hospitals.length > 0)

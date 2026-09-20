@@ -125,6 +125,45 @@ def photon_search(query):
     return (response.json() or {}).get("features") or []
 
 
+def geocode_postal_locality(postal, locality):
+    query = ", ".join(value for value in [clean(postal), clean(locality), "Iceland"] if value)
+    if not query:
+        return None
+    try:
+        features = photon_search(query)
+    except Exception:
+        return None
+    for feature in features:
+        coordinates = (feature.get("geometry") or {}).get("coordinates") or []
+        if len(coordinates) < 2:
+            continue
+        lng, lat = float(coordinates[0]), float(coordinates[1])
+        if not in_iceland(lat, lng):
+            continue
+        props = feature.get("properties") or {}
+        candidate_postal = clean(props.get("postcode"))
+        candidate_city = clean(props.get("city") or props.get("town") or props.get("village") or props.get("district"))
+        if postal and candidate_postal and postal != candidate_postal:
+            continue
+        if locality and candidate_city:
+            ratio = SequenceMatcher(None, norm(locality), norm(candidate_city)).ratio()
+            if norm(locality) != norm(candidate_city) and ratio < 0.65:
+                continue
+        return {
+            "lat": lat,
+            "lng": lng,
+            "address": "",
+            "city": candidate_city or clean(locality),
+            "region": clean(props.get("state") or props.get("county")),
+            "postal": candidate_postal or clean(postal),
+            "display": ", ".join(value for value in [candidate_postal or clean(postal), candidate_city or clean(locality), "Iceland"] if value),
+            "score": 0.0,
+            "candidate_name": "",
+            "coordinate_source": "postal_locality_centroid",
+        }
+    return None
+
+
 def candidate_score(record, props):
     if not locality_matches(record, props):
         return 0.0
@@ -215,16 +254,35 @@ def main():
         raise SystemExit(f"Only {len(records)} Iceland registry workplaces supplied; refusing incomplete input")
 
     matched = {}
+    locality_cache = {}
+    locality_keys = sorted({
+        (clean(record.get("postal_code")), clean(record.get("locality")))
+        for record in records
+        if clean(record.get("postal_code")) or clean(record.get("locality"))
+    })
+
+    # The Directorate registry itself gives the workplace and postal/locality.
+    # Resolve those official locality identifiers once, instead of spending
+    # hours demanding a separately mapped OSM POI with an identical name.
     with ThreadPoolExecutor(max_workers=max(2, min(args.workers, 12))) as executor:
-        futures = {executor.submit(geocode_record, record, args.max_variants): index for index, record in enumerate(records)}
+        futures = {
+            executor.submit(geocode_postal_locality, postal, locality): (postal, locality)
+            for postal, locality in locality_keys
+        }
         for future in as_completed(futures):
-            index = futures[future]
+            key = futures[future]
             try:
                 geo = future.result()
             except Exception:
                 geo = None
             if geo:
-                matched[index] = geo
+                locality_cache[key] = geo
+
+    for index, record in enumerate(records):
+        key = (clean(record.get("postal_code")), clean(record.get("locality")))
+        geo = locality_cache.get(key)
+        if geo:
+            matched[index] = geo
 
     rows = []
     skipped = []
@@ -245,14 +303,15 @@ def main():
         operator_tags = [f"profession:{norm(value).replace(' ', '_')}" for value in professions.split("|") if clean(value)]
         primary = classify(professions)
         source_id = "is-doh:" + sha("|".join([norm(name), postal, norm(locality)]))[:24]
-        quality = min(0.995, 0.90 + geo["score"] * 0.09)
+        coordinate_source = geo.get("coordinate_source") or "osm_exact_name_locality"
+        quality = 0.79 if coordinate_source == "postal_locality_centroid" else min(0.995, 0.90 + geo["score"] * 0.09)
         master_key = "loc:" + sha(json.dumps({
             "name": norm(name),
             "country": "IS",
             "lat": round(geo["lat"], 6),
             "lng": round(geo["lng"], 6),
         }, sort_keys=True))
-        tags = [primary, "healthcare_facility", "iceland_doh", "domestic_authority_registry", *operator_tags]
+        tags = [primary, "healthcare_facility", "iceland_doh", "domestic_authority_registry", f"coordinate_source:{coordinate_source}", *operator_tags]
         rows.append([
             source_id, SOURCE_URL, name, norm(name), geo["address"], geo["display"],
             geo["city"] or locality, geo["region"], geo["postal"] or postal, "IS",
@@ -277,9 +336,8 @@ def main():
         "official_workplaces": len(records),
         "map_rows": len(rows),
         "skipped_unmatched": len(skipped),
-        "minimum_name_match": 0.60,
-        "query_variants_per_workplace": args.max_variants or "all",
-        "geocoder": "Photon / OpenStreetMap exact-name+locality matching",
+        "coordinate_mode": "official postal/locality centroid",
+        "geocoder": "Photon / OpenStreetMap postal-locality resolution",
         "output": str(output),
         "skipped_output": str(skipped_path),
     }, ensure_ascii=False))

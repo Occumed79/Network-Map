@@ -198,6 +198,16 @@ def group_localities(soup):
         if re.match(r"^(?:B-\d+|Postbox|Telefonnummer|Telefon:|Oqarasuaat)", next_line, re.I):
             if not any(word in key for word in ("telefon", "abning", "postbox", "region", "sygehus")):
                 output.append(line)
+    if len(output) < 2:
+        for anchor in soup.find_all("a", href=True):
+            label = text(anchor.get_text(" ", strip=True))
+            key = norm(label)
+            if not label or len(label) > 60 or key in bad:
+                continue
+            if any(token in key for token in ("kontakt", "sundhedscentre", "sygeplejestation", "region", "menu", "søg")):
+                continue
+            if internal_contact_url(urljoin("https://peqqik.gl", anchor["href"])):
+                output.append(label)
     return list(dict.fromkeys(output))
 
 def geocode(query):

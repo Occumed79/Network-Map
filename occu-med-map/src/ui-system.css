@@ -229,7 +229,6 @@ textarea:disabled,
 .mapbox-2d-host,
 .mapbox-3d-host,
 #map,
-.leaflet-container,
 .mapboxgl-map,
 .mapboxgl-canvas-container,
 .mapboxgl-canvas {
@@ -327,7 +326,7 @@ textarea:disabled,
 
 .modal-close,
 .modal-box .rp-close,
-.provider-drawer-header > button,
+.provider-drawer-header > button {
   flex: 0 0 auto !important;
   min-width: 34px !important;
   min-height: 34px !important;

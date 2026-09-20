@@ -3486,26 +3486,6 @@ export default function App() {
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER
   // ─────────────────────────────────────────────────────────────────────────
-  function toggleProviderLayer(key:DatasetKey, checked:boolean) {
-    if(key==='indexed') setShowIndexedProviders(checked);
-    else if(key==='bluehive') setShowBlueHive(checked);
-    else if(key==='dentists') setShowDentists(checked);
-    else setShowMyClinicsLayer(checked);
-    // The per-toggle effects below are the single owner of initial loading.
-    // Keeping network ownership out of the UI event handler prevents duplicate
-    // requests racing the state transition that makes the layer visible.
-  }
-
-  function providerLayerStatus(key:DatasetKey, count:number, emptyMessage:string, visible:boolean) {
-    const state=datasetStatus[key];
-    if(state.loading && !state.loaded) return 'Loading provider data…';
-    if(state.error) return state.error;
-    if(!state.loaded) return visible ? 'Loading starts when enabled' : 'Toggle on to load';
-    if(count===0 && !state.loading) return emptyMessage;
-    if(state.loading) return `${count.toLocaleString()} loaded · refreshing viewport…`;
-    return `${count.toLocaleString()} loaded · ${visible ? 'visible' : 'toggle off'}`;
-  }
-
   const selectedService = SERVICE_PRESENCE_OPTIONS.find(service=>service.key===metric) || SERVICE_PRESENCE_OPTIONS[0];
   const hasRadiusCenter = !!dropCenter || (lastRadiusLatRef.current!==null && lastRadiusLngRef.current!==null);
   const usLayerStatus = showUsDiagnostics ? (rawStateFeaturesRef.current.length ? 'Available' : 'Loading U.S. map data…') : 'Enable U.S. Diagnostics first';
@@ -3628,17 +3608,7 @@ export default function App() {
           <section className="sb-section command-section">
             <div className="command-section-title"><Layers3 size={15}/><span>Provider Layers</span><small>Off by default</small></div>
             <div className="workflow-layer-list">
-              <LayerToggle label="Indexed Providers" checked={showIndexedProviders} onChange={checked=>toggleProviderLayer('indexed',checked)} disabled={datasetStatus.indexed.loading} status={providerLayerStatus('indexed',indexedLayerData.length,'No indexed providers in view',showIndexedProviders)}/>
-              <LayerToggle label="BlueHive Providers" checked={showBlueHive} onChange={checked=>toggleProviderLayer('bluehive',checked)} disabled={datasetStatus.bluehive.loading} status={providerLayerStatus('bluehive',blueHiveData.length,'No BlueHive providers in view',showBlueHive)}/>
-              <LayerToggle label="Dental Examiner Presence" checked={showDentists} onChange={checked=>toggleProviderLayer('dentists',checked)} disabled={datasetStatus.dentists.loading} status={providerLayerStatus('dentists',dentistData.length,'No NPI-derived dental presence in view',showDentists)}/>
-              <LayerToggle label="My Clinics" checked={showMyClinicsLayer} onChange={checked=>toggleProviderLayer('myClinics',checked)} disabled={datasetStatus.myClinics.loading} status={providerLayerStatus('myClinics',myClinicsData.length,'No saved clinics in view',showMyClinicsLayer)}/>
-              <LayerToggle
-                label="NACCHO Local Health Depts"
-                checked={showNacchoLayer}
-                onChange={setShowNacchoLayer}
-                disabled={nacchoLoading}
-                status={nacchoLoading ? 'Loading LHD data…' : nacchoError ? nacchoError : showNacchoLayer ? `${nacchoData.length.toLocaleString()} LHDs in view · directory records` : 'Toggle on to load'}
-              />
+              <div data-provider-layer-registry-host="true" />
               <LayerToggle label="Upload Preview" checked={showUploadedClinics} onChange={setShowUploadedClinics} disabled={clinicGroups.length===0} status={clinicGroups.length ? `${uploadedClinics.length.toLocaleString()} uploaded rows` : 'Upload a clinic file to enable'}/>
               <LayerToggle label="Luminous Density" checked={showGlowPoints} onChange={setShowGlowPoints} status={showGlowPoints?'Density halos and point glow active':'Low-glow point styling'}/>
             </div>

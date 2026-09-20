@@ -22,7 +22,7 @@ const stream = createWriteStream(output, { encoding: "utf8" });
 const write = async (line) => { if (!stream.write(line)) await once(stream, "drain"); };
 const field = (value) => {
   if (value === null || value === undefined || value === "") return "\\N";
-  return `"${String(value).replaceAll('"', '""').replaceAll("\r", " ").replaceAll("\n", " ")}"`;
+  return `"${String(value).replaceAll('"', '""').replaceAll("\r", " ").replaceAll("\n", " ").replaceAll("\t", " ")}"`;
 };
 const pgArray = (values) => `{${values.map((value) => `"${String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`).join(",")}}`;
 const normalize = (value) => String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();

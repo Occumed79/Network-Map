@@ -8,9 +8,9 @@ import re
 import requests
 from pathlib import Path
 
-INSTITUTIONS_URL = "https://get.data.gov.lt/datasets/gov/vaspvt/licencijos/Istaiga/:format/csv"
-ACTIVITY_ADDRESSES_URL = "https://get.data.gov.lt/datasets/gov/vaspvt/licencijos/IstaigosVeiklosAdresas/:format/csv"
-ADDRESS_POINTS_URL = "https://get.data.gov.lt/datasets/gov/rc/ar/adresotaskas/AdresoTaskas/:format/csv"
+INSTITUTIONS_URL = "https://get.data.gov.lt/datasets/gov/vaspvt/licencijos/Istaiga/%3Aformat/csv"
+ACTIVITY_ADDRESSES_URL = "https://get.data.gov.lt/datasets/gov/vaspvt/licencijos/IstaigosVeiklosAdresas/%3Aformat/csv"
+ADDRESS_POINTS_URL = "https://get.data.gov.lt/datasets/gov/rc/ar/adresotaskas/AdresoTaskas/%3Aformat/csv"
 SOURCE_PAGE = "https://data.gov.lt/datasets/1623/"
 UA = "Occu-Med-Network-Map/1.0"
 COLUMNS = [

@@ -257,6 +257,7 @@ for (const { source, objects } of loadedSources) {
     const parent = pick(row, ["tabeliyinde oldugu tibb muessisesi", "esas muessise"], ["tabeliyinde", "esas muessise", "parent"]);
     let address = pick(row, ["unvan", "adres"], ["unvan", "adres"]);
     let city = pick(row, ["seher", "rayon", "inzibati erazi"], ["seher", "rayon", "inzibati", "region"]);
+    const hasNativeLocation = Boolean(address || city);
     const type = pick(row, ["muessisenin novu", "tip"], ["nov", "tip", "profil"]);
     const code = pick(row, ["kod", "id", "muessise kodu"], ["kod", "identifik"]);
     const phone = pick(row, ["telefon"], ["telefon", "phone"]);
@@ -271,7 +272,7 @@ for (const { source, objects } of loadedSources) {
     const parentLocation = parent ? parentLocations.get(normalizedKey(parent)) : null;
     if (!city && parentLocation?.city) city = parentLocation.city;
 
-    if (!coordinates && (address || city)) {
+    if (!coordinates && hasNativeLocation) {
       const wait = 1100 - (Date.now() - lastGeocodeAt);
       if (wait > 0) await sleep(wait);
       coordinates = await geocode([name, address, city, parent, "Azerbaijan"].filter(Boolean).join(", "));

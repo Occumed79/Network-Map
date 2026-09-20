@@ -18,7 +18,8 @@ ROOTS = [
     "https://peqqik.gl/da-DK/Kontakt/Sundhedscentre",
 ]
 ORG_PLAN = "https://peqqik.gl/-/media/Files/Fagpersoner/Organisationsplan_shv_2020.pdf?la=da-DK"
-NOMINATIM = "https://nominatim.openstreetmap.org/search"\nPHOTON = "https://photon.komoot.io/api/"
+NOMINATIM = "https://nominatim.openstreetmap.org/search"
+PHOTON = "https://photon.komoot.io/api/"
 USER_AGENT = "Occu-Med-Network-Map/1.0 (+https://github.com/Occumed79/Network-Map)"
 COLUMNS = [
     "source_record_id","source_url","name","normalized_name","address_line1",

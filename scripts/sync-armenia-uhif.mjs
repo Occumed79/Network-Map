@@ -251,6 +251,31 @@ const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ locale: "en-US" });
 const languageActions = new Map();
 const responsePayloads = [];
+const serverActions = new Map();
+
+function diagnosticValue(value) {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "string") return value.slice(0, 180);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) return `[array:${value.length}]`;
+  if (typeof value === "object") return `[object:${Object.keys(value).slice(0, 12).join(",")}]`;
+  return String(value).slice(0, 180);
+}
+
+function candidateProfile(candidate) {
+  const sample = candidate.hospitals.slice(0, 3);
+  const keys = [...new Set(sample.flatMap((item) => item && typeof item === "object" ? Object.keys(item) : []))].sort();
+  return {
+    rows: candidate.hospitals.length,
+    uniqueIds: uniqueFacilityIds(candidate.hospitals),
+    keys,
+    samples: sample.map((item) => item && typeof item === "object"
+      ? Object.fromEntries(Object.entries(item).map(([key, value]) => [key, diagnosticValue(value)]))
+      : diagnosticValue(item)),
+    bytes: candidate.bytes,
+    action: candidate.action || "",
+  };
+}
 
 page.on("response", async (response) => {
   const contentType = String(response.headers()["content-type"] || "").toLowerCase();
@@ -266,10 +291,16 @@ page.on("response", async (response) => {
 
 page.on("request", (request) => {
   if (request.url() !== DIRECTORY_URL || request.method() !== "POST") return;
-  if ((request.postData() || "") !== '["en"]') return;
   const headers = request.headers();
   const action = headers["next-action"] || "";
   if (!action) return;
+  const postData = request.postData() || "";
+  serverActions.set(`${action}\n${postData}`, {
+    action,
+    postData,
+    routerState: headers["next-router-state-tree"] || "",
+  });
+  if (postData !== '["en"]') return;
   languageActions.set(action, {
     action,
     routerState: headers["next-router-state-tree"] || "",
@@ -378,11 +409,11 @@ try {
         uhifPayloadCandidateSizes: payloadCandidates
           .slice()
           .sort((a, b) => b.hospitals.length - a.hospitals.length)
-          .map((candidate) => ({
-          rows: candidate.hospitals.length,
-          uniqueIds: uniqueFacilityIds(candidate.hospitals),
-          bytes: candidate.bytes,
-        })).slice(0, 20),
+          .map(candidateProfile).slice(0, 20),
+        uhifServerActions: [...serverActions.values()].map((descriptor) => ({
+          action: descriptor.action,
+          postData: descriptor.postData.slice(0, 1_000),
+        })),
       }));
     }
   }

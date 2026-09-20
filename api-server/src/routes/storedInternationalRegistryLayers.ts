@@ -77,7 +77,7 @@ const REGISTRIES: Record<RegistryDatabaseId, StoredRegistryDefinition> = {
   "gisco-hospitals-switzerland": { sourceKey: "eu_gisco_hospitals_ch", countryCode: "CH", countryName: "Switzerland" },
   "iceland-doh": { sourceKey: "is_doh_healthcare_operators", countryCode: "IS", countryName: "Iceland" },
   "greenland-healthcare": { sourceKey: "gl_healthcare", countryCode: "GL", countryName: "Greenland" },
-  "georgia-hmis": { sourceKey: "ge_hmis", countryCode: "GE", countryName: "Georgia" },
+  "georgia-hmis": { sourceKey: "ge_geostat_healthcare", countryCode: "GE", countryName: "Georgia" },
 };
 
 function addParam(params: unknown[], value: unknown): string {

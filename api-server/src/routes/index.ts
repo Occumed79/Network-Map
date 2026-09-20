@@ -25,6 +25,7 @@ import moreInternationalRegistryLayersRouter from "./moreInternationalRegistryLa
 import newZealandHealthFacilitiesRouter from "./newZealandHealthFacilities";
 import croatiaHzzoRegistryLayerRouter from "./croatiaHzzoRegistryLayer";
 import storedInternationalRegistryLayersRouter from "./storedInternationalRegistryLayers";
+import registrySyncBrokerRouter from "./registrySyncBroker";
 import europeLiveRegistryLayersRouter from "./europeLiveRegistryLayers";
 import walesGpSitesLayerRouter from "./walesGpSitesLayer";
 import cyprusHospitalRegistryLayerRouter from "./cyprusHospitalRegistryLayer";
@@ -76,6 +77,7 @@ router.use(moreInternationalRegistryLayersRouter);
 router.use(newZealandHealthFacilitiesRouter);
 router.use(internationalRegistryLayersRouter);
 router.use(storedInternationalRegistryLayersRouter);
+router.use(registrySyncBrokerRouter);
 router.use(stabilizeProviderLayerRequests);
 
 // Provider upload surfaces: transactional preview/commit/rollback lifecycle plus

@@ -33,8 +33,6 @@ for (const retired of [
 }
 
 const transitionalBroadStyleFiles = new Set([
-  "map-engine-final-fixes.css",
-  "sidebar-workspace-final-fixes.css",
   "startup-hardening.css",
 ]);
 const broadNamePattern = /(override|fix|hardening|polish|stabilization)/i;

@@ -350,7 +350,12 @@ async function captureResponse(
   currentFilterKey: string,
 ): Promise<CaptureResult> {
   if (!response.ok) {
-    return { entry: null, warning: `Provider layer request failed with HTTP ${response.status}` };
+    // Keep the source's explanation instead of replacing every failure with
+    // an HTTP number. Non-JSON proxy errors still get the safe generic message.
+    const payload = await response.clone().json().catch(() => null);
+    const reason = typeof payload?.warning === "string" ? payload.warning
+      : typeof payload?.error === "string" ? payload.error : "";
+    return { entry: null, warning: reason || `Provider layer request failed with HTTP ${response.status}` };
   }
   const body = await response.clone().text();
   let payload: Record<string, unknown>;

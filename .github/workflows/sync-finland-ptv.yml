@@ -28,7 +28,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
-      TARGET_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
+      # Existing canonical provider shard with verified spare capacity.
+      # The map already queries this project; source keys remain country-specific.
+      TARGET_DATABASE_URL: ${{ secrets.USA_EMBASSY_DATABASE_URL_3 }}
 
     steps:
       - name: Check out importer
@@ -50,7 +52,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "HEALTHSITES_DATABASE_URL is missing" >&2; exit 1; }
+          [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "USA_EMBASSY_DATABASE_URL_3 is missing" >&2; exit 1; }
           echo "::add-mask::${TARGET_DATABASE_URL}"
           test "$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT to_regclass('public.provider_master_map_view') IS NOT NULL")" = "t"
 
@@ -89,7 +91,7 @@ jobs:
           set -euo pipefail
           columns="source_record_id,source_url,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,primary_provider_type,capability_tags,quality_score,master_key"
           psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "
-            CREATE TABLE IF NOT EXISTS public.source5_import_staging (
+            CREATE TABLE IF NOT EXISTS public.official_registry_import_staging (
               source_record_id text PRIMARY KEY,
               source_url text,
               name text NOT NULL,
@@ -110,13 +112,15 @@ jobs:
               quality_score numeric,
               master_key text NOT NULL
             );
-            TRUNCATE public.source5_import_staging;
+            TRUNCATE public.official_registry_import_staging;
           "
           psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 \
-            -c "\\copy public.source5_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" \
+            -c "\\copy public.official_registry_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" \
             < /tmp/finland-ptv/provider.tsv
-          actual="$(psql "$TARGET_DATABASE_URL" -Atqc 'SELECT count(*) FROM public.source5_import_staging')"
+          actual="$(psql "$TARGET_DATABASE_URL" -Atqc 'SELECT count(*) FROM public.official_registry_import_staging')"
           [[ "$actual" == "$REGISTRY_EXPECTED" ]] || { echo "Staging mismatch ${actual} vs ${REGISTRY_EXPECTED}" >&2; exit 1; }
+          actual_master="$(psql "$TARGET_DATABASE_URL" -Atqc 'SELECT count(DISTINCT master_key) FROM public.official_registry_import_staging')"
+          echo "REGISTRY_EXPECTED_MASTER=${actual_master}" >> "$GITHUB_ENV"
 
       - name: Promote Finland into canonical registry
         shell: bash

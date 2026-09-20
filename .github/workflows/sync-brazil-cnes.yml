@@ -59,7 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/cnes/raw /tmp/cnes/extracted
-          curl --fail --location --retry 4 --retry-all-errors \
+          curl --fail --location --connect-timeout 20 --max-time 180 --retry 4 --retry-all-errors \
             "$CNES_JSON_ZIP_URL" \
             --output /tmp/cnes/raw/cnes_estabelecimentos_json.zip
           test -s /tmp/cnes/raw/cnes_estabelecimentos_json.zip
@@ -105,7 +105,7 @@ jobs:
           columns="source_record_id,source_url,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,primary_provider_type,capability_tags,quality_score,master_key"
 
           psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "
-            CREATE TABLE IF NOT EXISTS public.source5_import_staging (
+            CREATE TABLE IF NOT EXISTS public.official_registry_import_staging (
               source_record_id text PRIMARY KEY,
               source_url text,
               name text NOT NULL,
@@ -126,15 +126,17 @@ jobs:
               quality_score numeric,
               master_key text NOT NULL
             );
-            TRUNCATE public.source5_import_staging;
+            TRUNCATE public.official_registry_import_staging;
           "
 
           psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 \
-            -c "\\copy public.source5_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" \
+            -c "\\copy public.official_registry_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" \
             < /tmp/cnes/cnes-provider.tsv
 
-          actual="$(psql "$TARGET_DATABASE_URL" -Atqc 'SELECT count(*) FROM public.source5_import_staging')"
+          actual="$(psql "$TARGET_DATABASE_URL" -Atqc 'SELECT count(*) FROM public.official_registry_import_staging')"
           [[ "$actual" == "$CNES_EXPECTED" ]] || { echo "Staging mismatch ${actual} vs ${CNES_EXPECTED}" >&2; exit 1; }
+          actual_master="$(psql "$TARGET_DATABASE_URL" -Atqc 'SELECT count(DISTINCT master_key) FROM public.official_registry_import_staging')"
+          echo "CNES_EXPECTED_MASTER=${actual_master}" >> "$GITHUB_ENV"
 
       - name: Promote CNES into canonical registry
         shell: bash

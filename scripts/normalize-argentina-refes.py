@@ -5,7 +5,7 @@ from pathlib import Path
 COLUMNS = ["source_record_id","source_url","name","normalized_name","address_line1","formatted_address","city","state_region","postal_code","country_code","lat","lng","phone","website","email","primary_provider_type","capability_tags","quality_score","master_key"]
 DATASET_URL = "https://datos.salud.gob.ar/dataset/listado-establecimientos-de-salud-asentados-en-el-registro-federal-refes"
 
-def text(v): return "" if v is None else str(v).strip()
+def text(v): return "" if v is None else re.sub(r"\s+", " ", str(v)).strip()
 def canon(v):
     s=unicodedata.normalize("NFKD",text(v)); s="".join(c for c in s if not unicodedata.combining(c)).lower()
     return re.sub(r"[^a-z0-9]+"," ",s).strip()
@@ -27,8 +27,8 @@ def field(row, *candidates):
     wanted=[canon(v) for v in candidates]
     for key in wanted:
         if key in index and text(index[key]): return index[key]
-    for key,value in index.items():
-        if any(w and (key.startswith(w) or w in key) for w in wanted) and text(value): return value
+    # Never use substring matching: establecimiento_id/localidad_id occur
+    # before their *_nombre fields in the official export.
     return None
 def coordinates(row):
     lat=num(field(row,"latitud","latitude","lat")); lng=num(field(row,"longitud","longitude","lon","lng"))
@@ -41,7 +41,7 @@ def coordinates(row):
         if -56.5<=a<=-21 and -74.5<=b<=-52: return a,b
     return None
 def classify(row,name):
-    type_text=" ".join(text(field(row,k)) for k in ["tipologia","tipo establecimiento","categoria","especialidad","dependencia","nivel atencion","nombre tipologia"])
+    type_text=" ".join(text(field(row,k)) for k in ["tipologia","tipo establecimiento","categoria","especialidad","dependencia","nivel atencion","nombre tipologia","tipologia nombre","tipologia sigla"])
     blob=canon(name+" "+type_text); caps=[]
     def add(x):
         if x not in caps: caps.append(x)
@@ -63,13 +63,13 @@ def normalize(row):
     c=coordinates(row)
     if not c: return None
     lat,lng=c
-    name=text(field(row,"nombre establecimiento","establecimiento","nombre efector","nombre","razon social"))
+    name=text(field(row,"establecimiento nombre","nombre establecimiento","establecimiento","nombre efector","nombre","razon social"))
     if not name: return None
-    code=text(field(row,"codigo federal","codigo establecimiento","codigo refes","id refes","refes","codigo","id establecimiento","id"))
+    code=text(field(row,"establecimiento id","codigo federal","codigo establecimiento","codigo refes","id refes","refes","codigo","id establecimiento","id"))
     if not code: code=hashlib.sha1(f"{name}|{lat:.6f}|{lng:.6f}".encode()).hexdigest()[:20]
     address=text(field(row,"domicilio","direccion","calle","direccion establecimiento")); number=text(field(row,"numero","altura","numero puerta"))
     if address and number and number not in address: address=f"{address} {number}".strip()
-    city=text(field(row,"localidad","ciudad","municipio")); department=text(field(row,"departamento","partido")); province=text(field(row,"provincia")); postal=text(field(row,"codigo postal","cp"))
+    city=text(field(row,"localidad nombre","localidad","ciudad","municipio")); department=text(field(row,"departamento nombre","departamento","partido")); province=text(field(row,"provincia nombre","provincia")); postal=text(field(row,"codigo postal","cp"))
     full=", ".join(v for v in [address,postal,city,department,province,"Argentina"] if v)
     primary,caps=classify(row,name)
     return [f"refes:{code}",DATASET_URL,name,norm(name),address,full,city,province,postal,"AR",f"{lat:.8f}",f"{lng:.8f}",text(field(row,"telefono","telefonos","tel")),text(field(row,"sitio web","website","web","url")),text(field(row,"email","correo electronico","correo")).lower(),primary,pg_array(caps),"0.99" if address else "0.96",location_key(name,full,lat,lng)]

@@ -275,7 +275,6 @@ async function queryStoredAcrossProviderProjects(
     try {
       const result = await queryStored(
         probe.project.pool,
-        probe.schema,
         ctx,
         mode,
         probe.spatialEngine,

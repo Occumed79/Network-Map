@@ -2,6 +2,7 @@ import mapboxgl from "mapbox-gl";
 import { mapboxGeocode, type MapboxBounds, type MapboxPlace } from "./mapboxServices";
 import { registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
 import { registerMapToolsSection } from "./mapToolsPanelRegistry";
+import { buildProviderPointFeature, ensureProviderPointLayer } from "./providerPointNativeRuntime";
 import { normalizedProviderClickListener } from "./providerTypeNormalizationRuntime";
 import { registerRuntimeOwner } from "./runtimeControllerRegistry";
 
@@ -150,35 +151,26 @@ function bindInteractions(map: mapboxgl.Map): void {
 
 function ensureLayer(map: mapboxgl.Map): void {
   if (!map.isStyleLoaded()) return;
-  if (!map.getSource(SOURCE_ID)) {
-    map.addSource(SOURCE_ID, {
-      type: "geojson",
-      data: latestCollection,
-      cluster: false,
-      generateId: true,
-    });
-  }
-  if (!map.getLayer(LAYER_ID)) {
-    map.addLayer({
-      id: LAYER_ID,
-      type: "circle",
-      source: SOURCE_ID,
-      paint: {
-        "circle-radius": ["interpolate", ["linear"], ["zoom"], 2, 2.2, 7, 3.8, 13, 5.8],
-        "circle-color": [
-          "match",
-          ["get", "sourceGroup"],
-          "saved", "#f7d980",
-          "healthsites", "#91e2ef",
-          "#ffffff",
-        ],
-        "circle-opacity": 0.94,
-        "circle-stroke-color": "#07111f",
-        "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 2, 0.35, 10, 1.2],
-        "circle-stroke-opacity": 0.9,
-      },
-    });
-  }
+  ensureProviderPointLayer(map, {
+    sourceId: SOURCE_ID,
+    layerId: LAYER_ID,
+    defaultColor: "#ffffff",
+    defaultRadius: 4,
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 2, 2.2, 7, 3.8, 13, 5.8],
+      "circle-color": [
+        "match",
+        ["get", "sourceGroup"],
+        "saved", "#f7d980",
+        "healthsites", "#91e2ef",
+        "#ffffff",
+      ],
+      "circle-opacity": 0.94,
+      "circle-stroke-color": "#07111f",
+      "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 2, 0.35, 10, 1.2],
+      "circle-stroke-opacity": 0.9,
+    },
+  }, latestCollection);
   bindInteractions(map);
 }
 
@@ -364,24 +356,30 @@ function networkFeature(provider: ExplorerProvider, bounds: Bounds): ResultFeatu
   if (lat === null || lng === null || !withinBounds(lng, lat, bounds)) return null;
   const saved = provider.source_kind === "saved" || provider.status === "saved" || normalize(provider.source).includes("my clinics");
   const healthsites = normalize(provider.source).includes("healthsites");
-  return {
-    type: "Feature",
-    geometry: { type: "Point", coordinates: [lng, lat] },
-    properties: {
-      name: String(provider.name || "Unnamed provider"),
-      address: String(provider.address || ""),
-      city: String(provider.city || ""),
-      adminArea: String(provider.admin_area || ""),
-      country: String(provider.country || ""),
-      phone: String(provider.phone || ""),
-      website: String(provider.website || ""),
-      services: textList(provider.services || provider.categories),
-      source: String(provider.source || (saved ? "My Clinics" : "Provider network")),
-      sourceGroup: saved ? "saved" : healthsites ? "healthsites" : "network",
-    },
+  const properties: ResultProperties = {
+    name: String(provider.name || "Unnamed provider"),
+    address: String(provider.address || ""),
+    city: String(provider.city || ""),
+    adminArea: String(provider.admin_area || ""),
+    country: String(provider.country || ""),
+    phone: String(provider.phone || ""),
+    website: String(provider.website || ""),
+    services: textList(provider.services || provider.categories),
+    source: String(provider.source || (saved ? "My Clinics" : "Provider network")),
+    sourceGroup: saved ? "saved" : healthsites ? "healthsites" : "network",
   };
+  const feature = buildProviderPointFeature({
+    id: String(provider.id ?? `${properties.name}|${lat}|${lng}|${properties.source}`),
+    lat,
+    lng,
+    channel: "provider-location-search",
+    popupHtml: popupHtml(properties),
+    sourceKey: properties.source,
+    sourceKind: String(provider.source_kind || (saved ? "saved" : "stored")),
+    properties,
+  });
+  return feature as ResultFeature | null;
 }
-
 function dedupeFeatures(features: ResultFeature[]): ResultFeature[] {
   const output: ResultFeature[] = [];
   const sameName = new Map<string, ResultFeature[]>();

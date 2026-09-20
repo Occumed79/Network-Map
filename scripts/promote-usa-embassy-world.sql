@@ -70,8 +70,6 @@ WHERE source_key='embassy_clinic_docs';
 DELETE FROM public.provider_master_types
 WHERE source_key='embassy_clinic_docs';
 
-DELETE FROM public.medical_providers
-WHERE data_source='U.S. Embassy Medical Provider Lists';
 
 DELETE FROM public.provider_stage_records
 WHERE source_key='embassy_clinic_docs';
@@ -234,38 +232,6 @@ ON CONFLICT (master_provider_id, type_key) DO UPDATE SET
     COALESCE(EXCLUDED.confidence_score,0)
   );
 
-INSERT INTO public.medical_providers (
-  place_id, name, formatted_address, lat, lng, types, category,
-  phone, website, country_code, locality, administrative_area_level_1,
-  postal_code, data_source, source_id, source_type, confidence_score,
-  raw_data, scraped_at, updated_at
-)
-SELECT
-  'embassy_clinic_docs:' || source_record_id, name, NULLIF(formatted_address,''),
-  lat, lng, capability_tags, primary_provider_type, NULLIF(phone,''), NULLIF(website,''),
-  country_code, NULLIF(city,''), NULLIF(state_region,''), NULLIF(postal_code,''),
-  'U.S. Embassy Medical Provider Lists', 'embassy_clinic_docs:' || source_record_id,
-  'document_extraction', quality_score::double precision,
-  NULL,
-  now(), now()
-FROM public.source5_import_staging t
-ON CONFLICT (source_id) DO UPDATE SET
-  name=EXCLUDED.name,
-  formatted_address=EXCLUDED.formatted_address,
-  lat=EXCLUDED.lat,
-  lng=EXCLUDED.lng,
-  types=EXCLUDED.types,
-  category=EXCLUDED.category,
-  phone=COALESCE(EXCLUDED.phone, medical_providers.phone),
-  website=COALESCE(EXCLUDED.website, medical_providers.website),
-  country_code=EXCLUDED.country_code,
-  locality=EXCLUDED.locality,
-  administrative_area_level_1=EXCLUDED.administrative_area_level_1,
-  postal_code=EXCLUDED.postal_code,
-  confidence_score=GREATEST(COALESCE(medical_providers.confidence_score,0), COALESCE(EXCLUDED.confidence_score,0)),
-  raw_data=EXCLUDED.raw_data,
-  updated_at=now();
-
 SELECT (
   (SELECT COUNT(DISTINCT r.source_record_id)
    FROM public.provider_raw_records r
@@ -277,8 +243,6 @@ SELECT (
        WHERE source_key='embassy_clinic_docs') = :expected_master::bigint
   AND (SELECT COUNT(*) FROM public.provider_master_sources
        WHERE source_key='embassy_clinic_docs') = :expected::bigint
-  AND (SELECT COUNT(*) FROM public.medical_providers
-       WHERE data_source='U.S. Embassy Medical Provider Lists') = :expected::bigint
   AND (SELECT COUNT(*) FROM public.provider_master_sources pms
        JOIN public.provider_master pm ON pm.id=pms.master_provider_id
        WHERE pms.source_key='embassy_clinic_docs'

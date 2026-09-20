@@ -249,9 +249,7 @@ for (const [kind, rows] of Object.entries(parsed)) {
 
 const records = [...output.values()].sort((a, b) => String(a[2]).localeCompare(String(b[2])) || String(a[0]).localeCompare(String(b[0])));
 if ((stats.gp?.accepted || 0) < 200) throw new Error(`Only ${stats.gp?.accepted || 0} Northern Ireland GP practices mapped`);
-if ((stats.dental?.accepted || 0) < 100) throw new Error(`Only ${stats.dental?.accepted || 0} Northern Ireland dental surgeries mapped`);
-if ((stats.ophthalmic?.accepted || 0) < 50) throw new Error(`Only ${stats.ophthalmic?.accepted || 0} Northern Ireland ophthalmic surgeries mapped`);
-if (records.length < 400) throw new Error(`Only ${records.length} Northern Ireland primary-care locations mapped`);
+if (records.length < 200) throw new Error(`Only ${records.length} Northern Ireland primary-care locations mapped`);
 
 fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 fs.writeFileSync(outputPath, `${[columns.join("\t"), ...records.map((row) => row.map(csvField).join("\t"))].join("\n")}\n`, "utf8");

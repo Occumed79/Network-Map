@@ -214,7 +214,9 @@ def main():
     no_coordinates = 0
     for row in reader:
         scanned += 1
-        if text(row.get("SorType")) != "SI":
+        # SOR2 documentation and live exports use both legacy SI and current HI
+        # labels for Health Institutions. Treat either as the same entity class.
+        if text(row.get("SorType")).upper() not in {"SI", "HI"}:
             continue
         if not active_now(row):
             continue

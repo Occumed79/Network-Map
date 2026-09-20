@@ -13,7 +13,7 @@ function source(relativePath: string): string {
 const main = source("src/main.tsx");
 const appSource = source("src/App.tsx");
 const panelGuard = source("src/sidebarWorkspacePanelGuardRuntime.ts");
-const finalFixes = source("src/sidebar-workspace-final-fixes.css");
+const finalFixes = source("src/sidebar-workspace.css");
 const mapControls = source("src/mapControlsBridgeRuntime.ts");
 const productionUi = source("scripts/production-ui-smoke.mjs");
 const uiAcceptance = source("scripts/ci-ui-acceptance.mjs");

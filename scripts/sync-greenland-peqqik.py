@@ -12,6 +12,7 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
+from lib.official_source_fallback import wayback_snapshot_url
 
 ROOTS = [
     "https://peqqik.gl/Kontakt/Sundhedscentre",
@@ -21,6 +22,7 @@ ORG_PLAN = "https://peqqik.gl/-/media/Files/Fagpersoner/Organisationsplan_shv_20
 NOMINATIM = "https://nominatim.openstreetmap.org/search"
 PHOTON = "https://photon.komoot.io/api/"
 USER_AGENT = "Occu-Med-Network-Map/1.0 (+https://github.com/Occumed79/Network-Map)"
+WAYBACK_CDX = "https://web.archive.org/cdx/search/cdx"
 COLUMNS = [
     "source_record_id","source_url","name","normalized_name","address_line1",
     "formatted_address","city","state_region","postal_code","country_code",
@@ -79,7 +81,35 @@ def region_for(value):
             return region
     return ""
 
-def safe_get(url, timeout=60):
+def archived_official_snapshot(url):
+    parsed = urlparse(url)
+    if not parsed.netloc.lower().endswith("peqqik.gl"):
+        return ""
+    try:
+        response = requests.get(
+            WAYBACK_CDX,
+            params=[
+                ("url", url),
+                ("output", "json"),
+                ("filter", "statuscode:200"),
+                ("filter", "mimetype:text/html"),
+                ("fl", "timestamp,original,statuscode"),
+                ("from", "2024"),
+                ("sort", "reverse"),
+                ("limit", "1"),
+            ],
+            timeout=30,
+            headers={"User-Agent": USER_AGENT},
+        )
+        response.raise_for_status()
+        rows = response.json()
+        if len(rows) < 2 or not rows[1]:
+            return ""
+        return wayback_snapshot_url(url, rows[1][0])
+    except Exception:
+        return ""
+
+def safe_get(url, timeout=60, allow_archive=True):
     last = None
     for attempt in range(5):
         try:
@@ -92,7 +122,15 @@ def safe_get(url, timeout=60):
         except Exception as exc:
             last = exc
             time.sleep(min(10, 2 + attempt * 2))
+    if allow_archive:
+        snapshot_url = archived_official_snapshot(url)
+        if snapshot_url:
+            return safe_get(snapshot_url, timeout=timeout, allow_archive=False)
     raise last
+
+def canonical_source_url(url):
+    match = re.match(r"^https?://web\.archive\.org/web/\d+(?:id_)?/(https?://.+)$", str(url or ""), re.I)
+    return match.group(1) if match else url
 
 def internal_contact_url(url):
     try:
@@ -101,7 +139,7 @@ def internal_contact_url(url):
         return False
     return (
         parsed.netloc.lower().endswith("peqqik.gl")
-        and "/kontakt/sundhedscentre/" in parsed.path.lower()
+        and parsed.path.lower().startswith("/kontakt/sundhedscentre")
     )
 
 def phone_from(raw):
@@ -210,7 +248,7 @@ def main():
             continue
         soup = BeautifulSoup(response.text, "html.parser")
         for anchor in soup.find_all("a", href=True):
-            href = urljoin(response.url, anchor["href"]).split("#",1)[0]
+            href = canonical_source_url(urljoin(response.url, anchor["href"]).split("#",1)[0])
             if internal_contact_url(href) and href not in seen_urls:
                 queue.append((href, depth + 1))
 
@@ -227,7 +265,7 @@ def main():
                 facilities.setdefault(key, {
                     "name": f"{locality} Bygdekonsultation",
                     "locality": locality,
-                    "url": response.url,
+                    "url": canonical_source_url(response.url),
                     "phone": "",
                     "email": "",
                     "address": "",
@@ -250,7 +288,7 @@ def main():
         facilities[key] = {
             "name": title,
             "locality": city,
-            "url": response.url,
+            "url": canonical_source_url(response.url),
             "phone": phone_from(body),
             "email": email_from(body),
             "address": address_from(body, city),

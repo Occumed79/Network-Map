@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: finland-ptv-registry-sync
@@ -27,13 +28,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
-      TARGET_DATABASE_URL: ${{ secrets.FINLAND_REGISTRY_DATABASE_URL }}
 
     steps:
       - name: Check out importer
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Resolve dedicated registry database
+        uses: ./.github/actions/resolve-registry-database
+        with:
+          source: finland-ptv-healthcare
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -49,7 +53,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "Dedicated registry database secret is missing" >&2; exit 1; }
+          [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "Dedicated registry database connection is missing" >&2; exit 1; }
           echo "::add-mask::${TARGET_DATABASE_URL}"
           psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -Atqc "SELECT 1" >/dev/null
 

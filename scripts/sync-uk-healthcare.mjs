@@ -197,16 +197,16 @@ async function latestCqcCsv() {
 async function normalizeEngland() {
   const csvUrl = await latestCqcCsv();
   const raw = await fetchText(csvUrl, { accept: "text/csv,*/*", referer: CQC_PAGE });
-  const objects = rowsToObjects(parseCsv(raw), ["Location ID", "Location Name"]);
+  const objects = rowsToObjects(parseCsv(raw), ["Name", "Postcode"]);
+  const geocodes = await geocodePostcodes(objects.map((row) => pick(row, ["Postcode", "Location Postal Code", "Postal Code"])));
   const normalized = [];
   let rejectedNonClinical = 0;
   let rejectedCoordinates = 0;
 
   for (const row of objects) {
-    const locationId = pick(row, ["Location ID", "CQC Location ID"]);
     const name = pick(row, ["Location Name", "Name"]);
-    if (!locationId || !name) continue;
-    if (/^(y|yes|true|1)$/iu.test(pick(row, ["Dormant (Y/N)", "Dormant"]))) continue;
+    const postal = pick(row, ["Location Postal Code", "Postcode", "Postal Code"]).toUpperCase().replace(/\s+/gu, " ");
+    if (!name || !postal) continue;
 
     const classification = classifyEngland(row);
     if (!classification.keep) {
@@ -214,20 +214,29 @@ async function normalizeEngland() {
       continue;
     }
 
-    const lat = numberValue(pick(row, ["Location Latitude", "Latitude"]));
-    const lng = numberValue(pick(row, ["Location Longitude", "Longitude"]));
+    let lat = numberValue(pick(row, ["Location Latitude", "Latitude"]));
+    let lng = numberValue(pick(row, ["Location Longitude", "Longitude"]));
+    const geo = geocodes.get(postal);
+    if (!validCoordinates(lat, lng) && geo) {
+      lat = geo.lat;
+      lng = geo.lng;
+    }
     if (!validCoordinates(lat, lng)) {
       rejectedCoordinates += 1;
       continue;
     }
 
-    const address1 = pick(row, ["Location Street Address", "Location Address Line 1", "Address Line 1"]);
+    const address1 = pick(row, ["Location Street Address", "Location Address Line 1", "Address Line 1", "Address"]);
     const address2 = pick(row, ["Location Address Line 2", "Address Line 2"]);
-    const city = pick(row, ["Location City", "City"]);
-    const county = pick(row, ["Location County", "County"]);
-    const postal = pick(row, ["Location Postal Code", "Postcode", "Postal Code"]);
-    const region = pick(row, ["Location Region", "Location NHS Region", "Location Local Authority"]);
+    const city = pick(row, ["Location City", "City"]) || geo?.city || "";
+    const county = pick(row, ["Location County", "County", "Local authority"]);
+    const region = pick(row, ["Location Region", "Location NHS Region", "Location Local Authority", "Region"]) || geo?.region || "";
+    const providerName = pick(row, ["Provider name", "Provider Name"]);
+    const phoneValue = pick(row, ["Location Telephone Number", "Telephone Number", "Phone", "Phone number"]);
+    const websiteValue = pick(row, ["Location Web Address", "Web Address", "Website", "Service's website (if available)"]);
     const formatted = [address1, address2, city, county, postal, "England", "United Kingdom"].filter(Boolean).join(", ");
+    const identity = [name, address1, address2, postal, providerName].join("|").toLowerCase();
+    const locationId = pick(row, ["Location ID", "CQC Location ID"]) || hash(identity).slice(0, 24);
     const normalizedNameValue = normalizedName(name);
     const masterKey = `loc:${hash(JSON.stringify({
       name: normalizedNameValue,
@@ -239,7 +248,7 @@ async function normalizeEngland() {
 
     normalized.push([
       `cqc:${locationId}`,
-      `https://www.cqc.org.uk/location/${encodeURIComponent(locationId)}`,
+      csvUrl,
       name,
       normalizedNameValue,
       address1 || address2,
@@ -250,8 +259,8 @@ async function normalizeEngland() {
       "GB",
       lat,
       lng,
-      pick(row, ["Location Telephone Number", "Telephone Number", "Phone"]),
-      pick(row, ["Location Web Address", "Web Address", "Website"]),
+      phoneValue,
+      websiteValue,
       "",
       classification.primary,
       postgresArray([...classification.tags, "cqc_registered"]),
@@ -260,7 +269,14 @@ async function normalizeEngland() {
     ]);
   }
 
-  console.log(JSON.stringify({ source: "gb_cqc_healthcare", csvUrl, scanned: objects.length, rejectedNonClinical, rejectedCoordinates, geocodedFacilities: normalized.length }));
+  console.log(JSON.stringify({
+    source: "gb_cqc_healthcare",
+    csvUrl,
+    scanned: objects.length,
+    rejectedNonClinical,
+    rejectedCoordinates,
+    geocodedFacilities: normalized.length,
+  }));
   return normalized;
 }
 

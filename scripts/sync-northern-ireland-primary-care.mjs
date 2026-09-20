@@ -34,24 +34,32 @@ function normalizedHeader(value) {
   return normalizedName(value).replace(/\s+/gu, "_");
 }
 
+async function fetchWithRetry(url, init, accept) {
+  let lastError;
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        ...init,
+        headers: { accept, "user-agent": USER_AGENT, ...(init.headers || {}) },
+        redirect: "follow",
+        signal: AbortSignal.timeout(120_000),
+      });
+      if (response.ok) return response;
+      const error = new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
+      if (response.status < 500 && response.status !== 429) throw error;
+      lastError = error;
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < 5) await new Promise((resolve) => setTimeout(resolve, 1_500 * (2 ** (attempt - 1))));
+  }
+  throw lastError;
+}
 async function fetchJson(url, init = {}) {
-  const response = await fetch(url, {
-    ...init,
-    headers: { accept: "application/json", "user-agent": USER_AGENT, ...(init.headers || {}) },
-    redirect: "follow",
-    signal: AbortSignal.timeout(120_000),
-  });
-  if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
-  return await response.json();
+  return await (await fetchWithRetry(url, init, "application/json")).json();
 }
 async function fetchText(url) {
-  const response = await fetch(url, {
-    headers: { accept: "text/csv,*/*", "user-agent": USER_AGENT },
-    redirect: "follow",
-    signal: AbortSignal.timeout(120_000),
-  });
-  if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
-  return await response.text();
+  return await (await fetchWithRetry(url, {}, "text/csv,*/*")).text();
 }
 
 function parseCsv(raw) {

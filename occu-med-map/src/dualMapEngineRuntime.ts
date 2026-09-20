@@ -1,5 +1,4 @@
 import { registerMapboxMap, unregisterMapboxMap } from "./mapboxMapLifecycleRuntime";
-import { findCompatPopupHit, wasCompatibilityClickHandled } from "./mapboxCompatInteractionRuntime";
 import mapboxgl from "mapbox-gl";
 
 type MapMode = "2d" | "3d";
@@ -71,7 +70,6 @@ export async function initializeDualMapEngines(container: HTMLElement, initial: 
   if (mapWrap.classList.contains("dual-engine-map-shell")) return;
 
   mapWrap.classList.add("dual-engine-map-shell");
-  container.classList.add("map-scene-layer-host");
 
   mapbox2dHost = document.createElement("div");
   mapbox2dHost.className = "mapbox-2d-host";
@@ -389,33 +387,34 @@ function waitForMapReady(instance: mapboxgl.Map, label: string): Promise<void> {
   });
 }
 
+function wasOverlayClickHandled(originalEvent: unknown): boolean {
+  return Boolean(
+    originalEvent
+    && typeof originalEvent === "object"
+    && (originalEvent as Record<string, unknown>).__networkMapOverlayHandled,
+  );
+}
+
+function renderedOverlayOwnsClick(instance: mapboxgl.Map, point: mapboxgl.PointLike): boolean {
+  try {
+    return instance.queryRenderedFeatures(point).some((feature) => {
+      const properties = feature.properties || {};
+      const interactive = properties.interactive === true || properties.interactive === "true";
+      const popupHtml = String(properties.popupHtml || "").trim();
+      return interactive || popupHtml.length > 0;
+    });
+  } catch {
+    return false;
+  }
+}
+
 function installMapboxInteractions(instance: mapboxgl.Map, mode: MapMode): void {
   instance.on("click", (event) => {
     if (currentMode !== mode) return;
-    const layers = ["network-points", "network-lines", "network-fills"].filter((id) => Boolean(instance.getLayer(id)));
-    const features = layers.length ? instance.queryRenderedFeatures(event.point, { layers }) : [];
-    const html = String(features[0]?.properties?.popupHtml || "");
-    if (html) {
-      new mapboxgl.Popup({ closeButton: true }).setLngLat(event.lngLat).setHTML(html).addTo(instance);
-      return;
-    }
-
-    const compatibilityPopupHit = findCompatPopupHit(instance, event.point, event.lngLat);
-    if (compatibilityPopupHit || wasCompatibilityClickHandled(event.originalEvent)) return;
-
-    const overlayHit = instance.queryRenderedFeatures(event.point).some((feature) => {
-      const layerId = String(feature.layer?.id || "");
-      const properties = feature.properties || {};
-      const compatibilityFeature = properties.__compatLayerId !== undefined
-        && properties.__compatLayerId !== null
-        && properties.__interactive !== false;
-      return compatibilityFeature || layerId === "provider-location-search-dots";
-    });
-    if (overlayHit) return;
+    if (wasOverlayClickHandled(event.originalEvent) || renderedOverlayOwnsClick(instance, event.point)) return;
 
     const detail = { lat: event.lngLat.lat, lng: event.lngLat.lng, originalEvent: event.originalEvent, mode };
     window.dispatchEvent(new CustomEvent("network-map:native-click", { detail }));
-    window.dispatchEvent(new CustomEvent("network-map:scene-click", { detail }));
   });
 
   instance.on("dblclick", (event) => {
@@ -423,7 +422,6 @@ function installMapboxInteractions(instance: mapboxgl.Map, mode: MapMode): void 
     event.preventDefault();
     const detail = { lat: event.lngLat.lat, lng: event.lngLat.lng, originalEvent: event.originalEvent, mode };
     window.dispatchEvent(new CustomEvent("network-map:native-dblclick", { detail }));
-    window.dispatchEvent(new CustomEvent("network-map:scene-dblclick", { detail }));
   });
 }
 
@@ -512,7 +510,6 @@ export function cleanupDualMapEngines(): void {
   toggleControl?.remove();
   mapbox2dHost?.remove();
   mapboxGlobeHost?.remove();
-  mapContainer?.classList.remove("map-scene-layer-host");
   mapWrap?.classList.remove("dual-engine-map-shell", "visible-engine-ready", "mapbox-globe-active", "mapbox-globe-loading");
   mapContainer = null;
   mapWrap = null;

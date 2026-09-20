@@ -13,7 +13,8 @@ const PDF_SOURCES = [
   { key: "private_practice", url: "https://shgmturizmdb.saglik.gov.tr/TR-94836/yetkili-muayenehaneler.html" },
   { key: "other_health_facility", url: "https://shgmturizmdb.saglik.gov.tr/TR-94837/yetkili-diger-saglik-tesisleri.html" },
 ];
-const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";\nconst PHOTON_URL = "https://photon.komoot.io/api/";
+const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
+const PHOTON_URL = "https://photon.komoot.io/api/";
 const USER_AGENT = "Occu-Med-Network-Map/1.0 (+https://github.com/Occumed79/Network-Map)";
 const columns = [
   "source_record_id", "source_url", "name", "normalized_name", "address_line1",

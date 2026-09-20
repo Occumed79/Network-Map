@@ -27,8 +27,8 @@ assert.doesNotMatch(main, /general-ui-hardening\.css|general-ui-visual-consisten
 assert.match(main, /import "\.\/dialogControllerRuntime";/, "authoritative dialog controller must load");
 assert.match(main, /import "\.\/generalUiIntegrityRuntime";/, "general UI integrity runtime must load");
 assert.ok(
-  main.indexOf('import "./sidebar-workspace-final-fixes.css";') > main.indexOf('import "./ui-system.css";'),
-  "the focused sidebar ownership layer must load after the shared UI system",
+  main.indexOf('import "./sidebar-workspace.css";') > main.indexOf('import "./ui-system.css";'),
+  "the authoritative sidebar workspace stylesheet must load after the shared UI system",
 );
 assert.doesNotMatch(main, /diagnosticsReliabilityRuntime/, "diagnostics must not restore the retired runtime that clicks toggles off and on");
 assert.match(appSource, /stateGeoRevision/, "diagnostic overlays must rerun from explicit state-data readiness");

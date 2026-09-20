@@ -182,15 +182,6 @@ Add these styles to your `index.css`:
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
 }
-
-.leaflet-popup-content-wrapper {
-  background: transparent;
-}
-
-.leaflet-popup-content {
-  margin: 0;
-  background: transparent;
-}
 ```
 
 ## Features

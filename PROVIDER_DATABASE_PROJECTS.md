@@ -4,6 +4,8 @@ The Network Map keeps one provider architecture and can store provider groups in
 
 `provider_raw_records` → `provider_stage_records` → `provider_master` → `provider_master_sources` / `provider_master_types` → `medical_providers`
 
+Every provider project also carries the same provider reference/state layer: `provider_source_catalog`, `provider_type_catalog`, `provider_schema_state`, `schema_migration_versions`, and `provider_master_map_view`. The provider type catalog is shared logically across shards and must contain the full 32-key canonical/legacy-compatible set.
+
 The API reads the configured projects and returns ordinary provider records as one inventory.
 
 ## Connection ownership
@@ -21,7 +23,7 @@ The same source-specific names must be configured in GitHub Actions and in the R
 
 1. Create the required independent Neon projects.
 2. Add each direct PostgreSQL connection string as a GitHub Actions repository secret using the exact source-family variable name.
-3. Initialize the provider schema in each project before loading records.
+3. Initialize the provider schema in each project before loading records. The initializer must verify the core provider relations, both schema-state/version tables, the canonical map view, and all 32 active provider type keys.
 4. Add the same connection strings to the Render API service environment.
 5. Run the source-specific import workflow.
 

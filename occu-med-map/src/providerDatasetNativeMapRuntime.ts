@@ -1,5 +1,6 @@
 import mapboxgl from "mapbox-gl";
 import { getTrackedMapboxMaps, registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
+import { buildProviderPointFeature, ensureProviderPointLayer } from "./providerPointNativeRuntime";
 
 /** Provider dataset channels are registry-driven; new categories do not require a runtime union edit. */
 export type ProviderDatasetChannel = string;
@@ -78,22 +79,6 @@ function ids(channel: ProviderDatasetChannel) {
   };
 }
 
-function finite(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
-
-function coordinates(provider: any): [number, number] | null {
-  const lat = finite(provider?.lat ?? provider?.latitude);
-  const lng = finite(provider?.lng ?? provider?.lon ?? provider?.longitude);
-  if (lat == null || lng == null || lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
-  return [lng, lat];
-}
-
 function parseHex(hex: string): [number, number, number] {
   const cleaned = String(hex || "").trim().replace(/^#/, "");
   const normalized = cleaned.length === 3
@@ -119,9 +104,22 @@ function heatmapColor(baseColor: string): mapboxgl.Expression {
 function ensureChannel(map: mapboxgl.Map, channel: ProviderDatasetChannel): void {
   const state = stateFor(channel);
   const channelIds = ids(channel);
-  const existing = map.getSource(channelIds.source) as mapboxgl.GeoJSONSource | undefined;
-  if (existing) existing.setData(state.collection);
-  else map.addSource(channelIds.source, { type: "geojson", data: state.collection, generateId: true });
+
+  ensureProviderPointLayer(map, {
+    sourceId: channelIds.source,
+    layerId: channelIds.points,
+    defaultColor: state.baseColor,
+    defaultRadius: 4,
+    paint: {
+      "circle-radius": ["case", ["boolean", ["get", "glow"], false], 4.5, 4],
+      "circle-color": ["coalesce", ["get", "color"], state.baseColor],
+      "circle-opacity": 0.92,
+      "circle-stroke-width": 1,
+      "circle-stroke-color": "rgba(255,255,255,0.94)",
+      "circle-stroke-opacity": 0.96,
+      "circle-blur": ["case", ["boolean", ["get", "glow"], false], 0.18, 0],
+    },
+  }, state.collection);
 
   if (!map.getLayer(channelIds.heatmap)) {
     map.addLayer({
@@ -140,25 +138,7 @@ function ensureChannel(map: mapboxgl.Map, channel: ProviderDatasetChannel): void
   } else {
     map.setPaintProperty(channelIds.heatmap, "heatmap-color", heatmapColor(state.baseColor));
   }
-
-  if (!map.getLayer(channelIds.points)) {
-    map.addLayer({
-      id: channelIds.points,
-      type: "circle",
-      source: channelIds.source,
-      paint: {
-        "circle-radius": ["case", ["boolean", ["get", "glow"], false], 4.5, 4],
-        "circle-color": ["coalesce", ["get", "color"], state.baseColor],
-        "circle-opacity": 0.92,
-        "circle-stroke-width": 1,
-        "circle-stroke-color": "rgba(255,255,255,0.94)",
-        "circle-stroke-opacity": 0.96,
-        "circle-blur": ["case", ["boolean", ["get", "glow"], false], 0.18, 0],
-      },
-    });
-  }
 }
-
 function updateChannel(channel: ProviderDatasetChannel): void {
   const state = stateFor(channel);
   const channelIds = ids(channel);
@@ -198,20 +178,22 @@ export function renderProviderDataset<T>(
   const features: GeoJSON.Feature<GeoJSON.Point>[] = [];
   for (let index = 0; index < providers.length; index += 1) {
     const provider = providers[index] as any;
-    const point = coordinates(provider);
-    if (!point) continue;
+    const lat = Number(provider?.lat ?? provider?.latitude);
+    const lng = Number(provider?.lng ?? provider?.lon ?? provider?.longitude);
     const color = options.getColor?.(providers[index]) || options.baseColor;
-    features.push({
-      type: "Feature",
-      geometry: { type: "Point", coordinates: point },
-      properties: {
-        providerId: String(provider?.id ?? provider?.source_id ?? provider?.npi ?? index),
-        channel,
-        color,
-        glow: Boolean(options.glow),
-        popupHtml: options.buildPopup(providers[index]),
-      },
+    const feature = buildProviderPointFeature({
+      id: String(provider?.id ?? provider?.source_id ?? provider?.npi ?? index),
+      lat,
+      lng,
+      channel,
+      color,
+      popupHtml: options.buildPopup(providers[index]),
+      sourceKey: String(provider?.source_key ?? provider?.source ?? provider?.data_source ?? ""),
+      sourceKind: String(provider?.source_kind ?? ""),
+      providerType: String(provider?.primary_provider_type ?? provider?.providerType ?? provider?.clinic_type ?? ""),
+      properties: { glow: Boolean(options.glow) },
     });
+    if (feature) features.push(feature);
   }
   channels.add(channel);
   states.set(channel, {
@@ -222,7 +204,6 @@ export function renderProviderDataset<T>(
   updateChannel(channel);
   return features.length;
 }
-
 export function clearProviderDataset(channel: ProviderDatasetChannel): void {
   const previous = stateFor(channel);
   states.set(channel, {
@@ -234,7 +215,7 @@ export function clearProviderDataset(channel: ProviderDatasetChannel): void {
 
 function markHandled(originalEvent: unknown): void {
   if (originalEvent && typeof originalEvent === "object") {
-    (originalEvent as unknown as Record<string, unknown>).__networkMapCompatHandled = true;
+    (originalEvent as unknown as Record<string, unknown>).__networkMapOverlayHandled = true;
   }
 }
 

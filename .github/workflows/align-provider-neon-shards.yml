@@ -1,0 +1,89 @@
+name: Align provider Neon shard schema
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type ALIGN_PROVIDER_SHARDS
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: align-provider-neon-shards
+  cancel-in-progress: false
+
+jobs:
+  align:
+    if: ${{ inputs.confirmation == 'ALIGN_PROVIDER_SHARDS' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      OVERPASS_DATABASE_URL: ${{ secrets.OVERPASS_DATABASE_URL }}
+      OVERPASS_DATABASE_URL_2: ${{ secrets.OVERPASS_DATABASE_URL_2 }}
+      HEALTHSITES_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
+      HEALTHSITES_DATABASE_URL_2: ${{ secrets.HEALTHSITES_DATABASE_URL_2 }}
+      HEALTHSITES_DATABASE_URL_3: ${{ secrets.HEALTHSITES_DATABASE_URL_3 }}
+      HEALTHSITES_DATABASE_URL_4: ${{ secrets.HEALTHSITES_DATABASE_URL_4 }}
+      HEALTHSITES_DATABASE_URL_5: ${{ secrets.HEALTHSITES_DATABASE_URL_5 }}
+      HEALTHSITES_DATABASE_URL_6: ${{ secrets.HEALTHSITES_DATABASE_URL_6 }}
+      HEALTHSITES_DATABASE_URL_7: ${{ secrets.HEALTHSITES_DATABASE_URL_7 }}
+      HEALTHSITES_DATABASE_URL_8: ${{ secrets.HEALTHSITES_DATABASE_URL_8 }}
+      USA_EMBASSY_DATABASE_URL: ${{ secrets.USA_EMBASSY_DATABASE_URL }}
+      USA_EMBASSY_DATABASE_URL_2: ${{ secrets.USA_EMBASSY_DATABASE_URL_2 }}
+      USA_EMBASSY_DATABASE_URL_3: ${{ secrets.USA_EMBASSY_DATABASE_URL_3 }}
+      USA_EMBASSY_DATABASE_URL_4: ${{ secrets.USA_EMBASSY_DATABASE_URL_4 }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Align all configured provider shards
+        shell: bash
+        run: |
+          set -euo pipefail
+          shard_vars=(
+            OVERPASS_DATABASE_URL
+            OVERPASS_DATABASE_URL_2
+            HEALTHSITES_DATABASE_URL
+            HEALTHSITES_DATABASE_URL_2
+            HEALTHSITES_DATABASE_URL_3
+            HEALTHSITES_DATABASE_URL_4
+            HEALTHSITES_DATABASE_URL_5
+            HEALTHSITES_DATABASE_URL_6
+            HEALTHSITES_DATABASE_URL_7
+            HEALTHSITES_DATABASE_URL_8
+            USA_EMBASSY_DATABASE_URL
+            USA_EMBASSY_DATABASE_URL_2
+            USA_EMBASSY_DATABASE_URL_3
+            USA_EMBASSY_DATABASE_URL_4
+          )
+
+          for variable in "${shard_vars[@]}"; do
+            url="${!variable:-}"
+            [[ "$url" == postgres* ]] || { echo "$variable is missing" >&2; exit 1; }
+            echo "::add-mask::$url"
+            echo "Aligning $variable"
+            psql "$url" -v ON_ERROR_STOP=1 -f scripts/provider-shard-contract.sql
+
+            psql "$url" -v ON_ERROR_STOP=1 -Atqc "
+              SELECT
+                CASE WHEN to_regclass('public.provider_master_map_view') IS NOT NULL THEN 'view-ok' ELSE 'view-missing' END,
+                CASE WHEN EXISTS (
+                  SELECT 1 FROM public.provider_schema_state
+                  WHERE id=1 AND canonical_read_enabled=true
+                ) THEN 'canonical-ok' ELSE 'canonical-off' END,
+                CASE WHEN EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema='public'
+                    AND table_name='provider_type_catalog'
+                    AND column_name='updated_at'
+                ) THEN 'catalog-ok' ELSE 'catalog-drift' END;
+            "
+          done

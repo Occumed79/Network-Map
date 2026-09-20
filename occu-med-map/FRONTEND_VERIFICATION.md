@@ -21,5 +21,5 @@ Run the app locally and verify each target viewport with Live Finder both closed
 - Live Finder results scroll independently from the filters and header.
 - Search, radius, source filters, region, sort, and result actions remain usable.
 - The initial Live Finder state clearly asks the user to choose a location.
-- The native drive-time strip renders once when `VITE_NATIVE_DRIVE_TIME=true`.
+- The native drive-time strip renders once and its ETA badges/routes remain React/Mapbox-owned.
 - There is no page-level horizontal overflow and no layout-related console error.

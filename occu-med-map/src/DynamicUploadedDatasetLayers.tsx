@@ -197,10 +197,21 @@ export default function DynamicUploadedDatasetLayers() {
   }
 
   useEffect(() => {
+    const summary = Object.values(layers).reduce(
+      (acc, state) => ({
+        active: acc.active + (state.enabled ? 1 : 0),
+        visible: acc.visible + (state.enabled ? state.count : 0),
+      }),
+      { active: 0, visible: 0 },
+    );
+    window.dispatchEvent(new CustomEvent('network-map:uploaded-provider-registry-summary', { detail: summary }));
+  }, [layers]);
+
+  useEffect(() => {
     const controller = new AbortController();
     const refresh = () => { void refreshCatalog(controller.signal); };
     refresh();
-    const interval = window.setInterval(refresh, 4000);
+    const interval = window.setInterval(refresh, 60_000);
     window.addEventListener('focus', refresh);
     window.addEventListener('network-map:provider-dataset-uploaded', refresh);
     return () => {
@@ -209,7 +220,7 @@ export default function DynamicUploadedDatasetLayers() {
       window.removeEventListener('focus', refresh);
       window.removeEventListener('network-map:provider-dataset-uploaded', refresh);
     };
-  // Catalog refresh is intentionally polling so a newly uploaded Dataset Label becomes a toggle without a page reload.
+  // Upload events refresh immediately; the slower poll is only a recovery path for changes made outside this browser session.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

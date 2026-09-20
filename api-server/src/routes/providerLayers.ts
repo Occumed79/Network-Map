@@ -491,9 +491,18 @@ async function loadNormalizedLayer(
   return { providers: paginate(combined, all, page, limit), total: combined.length };
 }
 
-async function detectLayerStorage(pool: ReturnType<typeof getPool>): Promise<ProviderLayerStorage> {
-  if (await canonicalReadsEnabled(pool)) return "provider_master";
-  const schema = await detectProviderSchema(pool);
+async function detectLayerStorage(project: ProviderDatabaseProject): Promise<ProviderLayerStorage> {
+  // Additional provider projects are canonical storage shards by contract.
+  // They must never fall back to medical_providers or the retired normalized
+  // provider tables just because a copied migration-state flag is stale.
+  if (!project.primary) {
+    return await relationExists(project.pool, "provider_master_map_view")
+      ? "provider_master"
+      : "none";
+  }
+
+  if (await canonicalReadsEnabled(project.pool)) return "provider_master";
+  const schema = await detectProviderSchema(project.pool);
   if (schema === "canonical") return "provider_master";
   if (schema === "legacy") return "medical_providers";
   if (schema === "normalized") return "providers";
@@ -545,7 +554,7 @@ async function loadIndexedAcrossProviderProjects(input: {
   const warnings: string[] = [];
   const probeResults = await Promise.all(input.projects.map(async (project) => {
     try {
-      const storage = await detectLayerStorage(project.pool);
+      const storage = await detectLayerStorage(project);
       if (storage === "none") throw new Error("provider schema is not initialized");
       const result = await loadLayerFromProject(
         project,

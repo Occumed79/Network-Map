@@ -45,11 +45,14 @@ for (const absolute of filesUnder(srcRoot)) {
 const byKind = new Map<string, number>();
 for (const finding of findings) byKind.set(finding.kind, (byKind.get(finding.kind) || 0) + 1);
 
-console.log("Zero-Leaflet / zero-compat architecture audit");
+console.log("Native map architecture authority audit");
 console.log(`Production source findings: ${findings.length}`);
 for (const [kind, count] of [...byKind.entries()].sort()) console.log(`  ${kind}: ${count}`);
 for (const finding of findings) console.log(`${finding.kind}\t${finding.file}:${finding.line}\t${finding.text}`);
 
-// Inventory-only while the migration is active. The final commit flips this to
-// hard failure if any production compatibility finding remains.
-process.exitCode = 0;
+if (findings.length > 0) {
+  console.error(`Native map architecture violation: ${findings.length} production finding(s) remain.`);
+  process.exitCode = 1;
+} else {
+  console.log("Native map architecture authority gate passed.");
+}

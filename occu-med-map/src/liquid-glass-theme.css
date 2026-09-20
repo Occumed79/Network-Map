@@ -47,20 +47,7 @@ html, body, #root {
   mix-blend-mode: normal !important;
 }
 
-.leaflet-tile {
-  filter: saturate(0.94) contrast(0.99) brightness(1.02) !important;
-}
-
 /* Default map must not read as a filled U.S. risk layer. */
-.leaflet-overlay-pane path.leaflet-interactive {
-  fill: transparent !important;
-  fill-opacity: 0 !important;
-  stroke: rgba(62, 78, 96, 0.20) !important;
-  stroke-opacity: 0.30 !important;
-  stroke-width: 0.7 !important;
-  filter: none !important;
-}
-
 /* ── Luminous glass panels (app chrome only) ── */
 .sidebar,
 .hero-card,
@@ -70,8 +57,6 @@ html, body, #root {
 .modal-card,
 .local-pop-card,
 .tz-legend,
-.leaflet-popup-content-wrapper,
-.leaflet-tooltip,
 .rp-suggestions,
 .lp-item,
 .rp-rec,
@@ -212,18 +197,6 @@ html, body, #root {
 }
 
 /* ── Map controls + markers ── */
-.leaflet-control-zoom a {
-  background: rgba(255, 255, 255, 0.78) !important;
-  color: #102129 !important;
-  border: 1px solid rgba(255, 255, 255, 0.82) !important;
-  backdrop-filter: blur(18px) saturate(160%) !important;
-  -webkit-backdrop-filter: blur(18px) saturate(160%) !important;
-}
-
-.leaflet-marker-icon {
-  filter: saturate(0.82) brightness(1.0) !important;
-}
-
 .live-panel.open,
 .right-panel.open {
   max-width: 335px !important;

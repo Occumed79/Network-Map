@@ -44,11 +44,11 @@ import { fetchMapInventory, type MapInventoryProvider } from './features/provide
 import { DriveTimeControlStrip } from './features/driveTime/DriveTimeControlStrip';
 import { ProviderEtaBadge } from './features/driveTime/ProviderEtaBadge';
 import { requestEtaRoute } from './features/driveTime/etaRouteEvents';
-import { liveResultsToEtaCandidates } from './features/driveTime/mapSceneProviderAdapter';
+import { liveResultsToEtaCandidates } from './features/driveTime/providerCandidateAdapter';
 import { useProviderEta } from './features/driveTime/useProviderEta';
 import './features/driveTime/driveTimeControls.css';
 import './features/driveTime/driveTimeBadge.css';
-import DatasetBrowser, { filterSummary, type DatasetKey, type DatasetLoadState, type ProviderFeature, type ProviderExplorerFilters } from './DatasetBrowser';
+import DatasetBrowser, { filterSummary, type ProviderFeature, type ProviderExplorerFilters } from './DatasetBrowser';
 import { fetchProviderLayer } from './providerLayerRequestRuntime';
 import {
   clearProviderExplorerNative,
@@ -80,7 +80,6 @@ import {
   setNativeDiagnosticCollection,
 } from './usDiagnosticsNativeMapRuntime';
 
-const NATIVE_DRIVE_TIME_ENABLED = import.meta.env.VITE_NATIVE_DRIVE_TIME === 'true';
 
 const SERVICE_PRESENCE_OPTIONS = [
   {key:'primaryCare', label:'Primary Care / FFD', serviceKeys:['physicalExam','primaryCare','clinic','doctor']},
@@ -104,12 +103,6 @@ type ProviderDensityCell = { lat:number; lng:number; count:number };
 
 const INITIAL_PROVIDER_EXPLORER_FILTERS: ProviderExplorerFilters = { source:'all', source_kind:'all', q:'', country:'', admin_area:'', city:'', postal_code:'', clinicType:'', service:'', lat:'', lng:'', radiusMiles:'', useMapBounds:false };
 
-const INITIAL_DATASET_STATUS: Record<DatasetKey, DatasetLoadState> = {
-  bluehive: {loading:false, error:'', loaded:false},
-  dentists: {loading:false, error:'', loaded:false},
-  indexed: {loading:false, error:'', loaded:false},
-  myClinics: {loading:false, error:'', loaded:false},
-};
 
 function LayerToggle({label,checked,onChange,status,disabled=false}: {
   label:string;
@@ -1144,17 +1137,8 @@ export default function App() {
   const [addrError, setAddrError] = useState('');
   const [addrSuggestions, setAddrSuggestions] = useState<Array<{display_name:string;lat:string;lon:string}>>([]);
   const addrSearchRef = useRef<HTMLDivElement>(null);
-  // Clinic groups
-  type ClinicEntry = { name:string; address:string; city:string; state:string; zip:string; phone:string; notes:string; lat:number|null; lng:number|null; color:string; };
-  type ClinicGroup = { id:number; groupName:string; color:string; visible:boolean; clinics:ClinicEntry[]; };
-  const [clinicGroups, setClinicGroups] = useState<ClinicGroup[]>([]);
-  // Legacy compat: keep uploadedClinics as flat for existing render code
-  const uploadedClinics = clinicGroups.flatMap(g => g.visible ? g.clinics : []);
-  const showUploadedClinics = clinicGroups.some(g=>g.visible);
-  const setShowUploadedClinics = (v:boolean) => setClinicGroups(prev=>prev.map(g=>({...g,visible:v})));
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
-  const [uploadColor, setUploadColor] = useState('#f472b6');
   const [uploadGroupName, setUploadGroupName] = useState('');
   const [masterProviderTypeFilter, setMasterProviderTypeFilter] = useState('');
     // Area prices
@@ -1234,42 +1218,31 @@ export default function App() {
   const [pendingMarkerColor, setPendingMarkerColor] = useState('#ef4444');
   const [multiDropMode, setMultiDropMode] = useState(false);
   const [showGlowPoints, setShowGlowPoints] = useState(false);
-  const [showBlueHive, setShowBlueHive] = useState(false);
-  const [blueHiveData, setBlueHiveData] = useState<any[]>([]);
   const [inventoryData, setInventoryData] = useState<MapInventoryProvider[]>([]);
   const [inventoryLoading, setInventoryLoading] = useState(false);
   const [inventoryError, setInventoryError] = useState('');
   const [serviceInventoryEnabled, setServiceInventoryEnabled] = useState(false);
   const inventoryFetchRef = useRef<AbortController|null>(null);
-  const [showIndexedProviders, setShowIndexedProviders] = useState(false);
-  const [showDentists, setShowDentists] = useState(false);
-  const [dentistData, setDentistData] = useState<any[]>([]);
-  const [showMyClinicsLayer, setShowMyClinicsLayer] = useState(false);
-  const [myClinicsData, setMyClinicsData] = useState<any[]>([]);
-  // NACCHO Local Health Department layer — Issue #37
-  const [showNacchoLayer, setShowNacchoLayer] = useState(false);
-  const [nacchoData, setNacchoData] = useState<any[]>([]);
-  const [nacchoLoading, setNacchoLoading] = useState(false);
-  const [nacchoError, setNacchoError] = useState('');
-  const nacchoFetchRef = useRef<AbortController|null>(null);
   const [showDatasetBrowser, setShowDatasetBrowser] = useState(false);
   const [showProviderExplorerDrawer, setShowProviderExplorerDrawer] = useState(false);
-  const [datasetStatus, setDatasetStatus] = useState<Record<DatasetKey, DatasetLoadState>>(INITIAL_DATASET_STATUS);
-  const datasetRequestsRef = useRef<Partial<Record<DatasetKey, Promise<void>>>>({});
-  const providerLayerVisibilityRef = useRef({
-    indexed: showIndexedProviders,
-    bluehive: showBlueHive,
-    dentists: showDentists,
-    myClinics: showMyClinicsLayer,
-  });
-  useLayoutEffect(() => {
-    providerLayerVisibilityRef.current = {
-      indexed: showIndexedProviders,
-      bluehive: showBlueHive,
-      dentists: showDentists,
-      myClinics: showMyClinicsLayer,
+  const [providerRegistrySummary, setProviderRegistrySummary] = useState({ active: 0, visible: 0 });
+  const [uploadedRegistrySummary, setUploadedRegistrySummary] = useState({ active: 0, visible: 0 });
+  useEffect(() => {
+    const updateProviderSummary = (event: Event) => {
+      const detail = (event as CustomEvent<{active?:number;visible?:number}>).detail || {};
+      setProviderRegistrySummary({ active: Number(detail.active || 0), visible: Number(detail.visible || 0) });
     };
-  }, [showIndexedProviders, showBlueHive, showDentists, showMyClinicsLayer]);
+    const updateUploadedSummary = (event: Event) => {
+      const detail = (event as CustomEvent<{active?:number;visible?:number}>).detail || {};
+      setUploadedRegistrySummary({ active: Number(detail.active || 0), visible: Number(detail.visible || 0) });
+    };
+    window.addEventListener('network-map:provider-registry-summary', updateProviderSummary);
+    window.addEventListener('network-map:uploaded-provider-registry-summary', updateUploadedSummary);
+    return () => {
+      window.removeEventListener('network-map:provider-registry-summary', updateProviderSummary);
+      window.removeEventListener('network-map:uploaded-provider-registry-summary', updateUploadedSummary);
+    };
+  }, []);
   const providerExplorerRenderGenerationRef = useRef(0);
   const providerExplorerModeRef = useRef<ProviderExplorerMode>('density');
   const [providerExplorerFilters, setProviderExplorerFilters] = useState<ProviderExplorerFilters>(INITIAL_PROVIDER_EXPLORER_FILTERS);
@@ -1282,7 +1255,6 @@ export default function App() {
     mapView: true,
     usDiagnostics: true,
   });
-  const [indexedLayerData, setIndexedLayerData] = useState<any[]>([]);
   const [outreachNotes, setOutreachNotes] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_notes')||'{}'); } catch { return {}; } });
   const [outreachStatus, setOutreachStatus] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_status')||'{}'); } catch { return {}; } });
   const [savedToMyClinics, setSavedToMyClinics] = useState<Record<string,MyClinicSaveStatus>>({});
@@ -1292,10 +1264,10 @@ export default function App() {
   const lastRadiusRef = useRef<{lat:number;lng:number}|null>(null);
   const providerEta = useProviderEta();
   const etaCandidates = useMemo(
-    ()=>NATIVE_DRIVE_TIME_ENABLED?liveResultsToEtaCandidates(liveResults):[],
+    () => liveResultsToEtaCandidates(liveResults),
     [liveResults],
   );
-  const etaOrigin = NATIVE_DRIVE_TIME_ENABLED && lastRadiusRef.current
+  const etaOrigin = lastRadiusRef.current
     ? {
         ...lastRadiusRef.current,
         label: liveLocation || `${lastRadiusRef.current.lat.toFixed(4)}, ${lastRadiusRef.current.lng.toFixed(4)}`,
@@ -1304,7 +1276,6 @@ export default function App() {
   const liveBackendCategoryRef = useRef(liveBackendCategory);
   useEffect(()=>{ liveBackendCategoryRef.current = liveBackendCategory; },[liveBackendCategory]);
   useEffect(()=>{
-    if(!NATIVE_DRIVE_TIME_ENABLED) return;
     providerEta.clear();
   },[liveResults,dropCenter?.lat,dropCenter?.lng,providerEta.clear]);
 
@@ -1692,7 +1663,7 @@ export default function App() {
         setProviderExplorerStatus(`${aggregateStatus} · filters: ${filterSummary(filters).join(', ') || 'none'}`);
       }
       if(mode === 'pins' || mode === 'density-pins') {
-        const resp = await fetch(`/api/provider-explorer/map?${providerExplorerParams({...filters,useMapBounds:true}, 'pins')}`);
+        const resp = await fetchProviderLayer(`/api/provider-explorer/map?${providerExplorerParams({...filters,useMapBounds:true}, 'pins')}`);
         const data = await resp.json();
         if(!isCurrent()) return;
         const providers = Array.isArray(data.providers) ? data.providers as ProviderFeature[] : [];
@@ -1767,7 +1738,6 @@ export default function App() {
       if (!resp.ok || data.error) throw new Error(data.error || data.message || `HTTP ${resp.status}`);
       setSavedToMyClinics(prev=>({...prev,[key]:'saved'}));
       setSavedToMyClinicsErrors(prev=>{ const next={...prev}; delete next[key]; return next; });
-      if (showMyClinicsLayer) void loadProviderDataset('myClinics');
     } catch(err) {
       const message = err instanceof Error ? err.message : 'Save to My Clinics failed';
       setSavedToMyClinics(prev=>({...prev,[key]:'error'}));
@@ -1829,107 +1799,6 @@ export default function App() {
     }
   },[providerExplorerFilters, providerExplorerParams]);
 
-  const loadProviderDataset = useCallback((key: DatasetKey) => {
-    if(datasetRequestsRef.current[key]) return datasetRequestsRef.current[key];
-    const sourceByKey: Record<DatasetKey,string> = {
-      bluehive:'bluehive',
-      dentists:'dentists',
-      indexed:'indexed',
-      myClinics:'my-clinics',
-    };
-    const request = (async ()=>{
-      setDatasetStatus(prev=>({...prev,[key]:{loading:true,error:'',loaded:prev[key].loaded}}));
-      try {
-        const params = new URLSearchParams({limit:'1000',page:'1'});
-        if(key==='myClinics' && masterProviderTypeFilter) params.set('clinic_type', masterProviderTypeFilter);
-        const map = getActiveMapboxMap();
-        if(map) {
-          const bounds = map.getBounds();
-          if(bounds) {
-            params.set('north',String(bounds.getNorth()));
-            params.set('south',String(bounds.getSouth()));
-            params.set('east',String(bounds.getEast()));
-            params.set('west',String(bounds.getWest()));
-          }
-        }
-        const response = await fetchProviderLayer(`/api/provider-layers/${sourceByKey[key]}?${params.toString()}`);
-        const data = await response.json().catch(()=>null);
-        const responseError = data && typeof data.error === 'string' ? data.error : '';
-        if(!response.ok || responseError) {
-          throw new Error(responseError || `HTTP ${response.status}`);
-        }
-        const providers = Array.isArray(data?.providers) ? data.providers : [];
-        if(key==='bluehive') setBlueHiveData(providers);
-        else if(key==='dentists') setDentistData(providers);
-        else if(key==='indexed') setIndexedLayerData(providers);
-        else setMyClinicsData(providers);
-        setDatasetStatus(prev=>({...prev,[key]:{loading:false,error:'',loaded:true}}));
-      } catch (error) {
-        if(key==='bluehive') setShowBlueHive(false);
-        else if(key==='dentists') setShowDentists(false);
-        else if(key==='indexed') setShowIndexedProviders(false);
-        else setShowMyClinicsLayer(false);
-        setDatasetStatus(prev=>({...prev,[key]:{
-          loading:false,
-          loaded:false,
-          error:error instanceof Error ? error.message : 'Provider layer request failed',
-        }}));
-      } finally {
-        delete datasetRequestsRef.current[key];
-      }
-    })();
-    datasetRequestsRef.current[key] = request;
-    return request;
-  },[masterProviderTypeFilter]);
-
-  useEffect(()=>{
-    if(!mapReady) return;
-    let moveTimer: ReturnType<typeof setTimeout>|null = null;
-    let startupTimers: ReturnType<typeof setTimeout>[] = [];
-
-    // On moveend, refresh all enabled layers (debounced, simultaneous is fine
-    // because providerLayerRequestRuntime limits concurrency to 2).
-    const refreshOnMove = () => {
-      if(moveTimer) clearTimeout(moveTimer);
-      moveTimer = setTimeout(()=>{
-        const visibility = providerLayerVisibilityRef.current;
-        if(visibility.indexed) void loadProviderDataset('indexed');
-        if(visibility.bluehive) void loadProviderDataset('bluehive');
-        if(visibility.dentists) void loadProviderDataset('dentists');
-        if(visibility.myClinics) void loadProviderDataset('myClinics');
-      }, 300);
-    };
-
-    // On initial mount stagger the four layers so the browser can render the
-    // map tile and respond to interactions before provider data arrives.
-    // Offsets: 0ms → indexed, 800ms → bluehive, 1600ms → dentists, 2400ms → my-clinics.
-    // This is not a visible-provider cap — all layers still load fully.
-    const STAGGER_MS = 800;
-    const enabledAtBoot: DatasetKey[] = [];
-    if(showIndexedProviders) enabledAtBoot.push('indexed');
-    if(showBlueHive) enabledAtBoot.push('bluehive');
-    if(showDentists) enabledAtBoot.push('dentists');
-    if(showMyClinicsLayer) enabledAtBoot.push('myClinics');
-    enabledAtBoot.forEach((key, index) => {
-      startupTimers.push(setTimeout(()=>{ void loadProviderDataset(key); }, index * STAGGER_MS));
-    });
-
-    window.addEventListener('network-map:native-camera', refreshOnMove);
-    return ()=>{
-      if(moveTimer) clearTimeout(moveTimer);
-      startupTimers.forEach(clearTimeout);
-      window.removeEventListener('network-map:native-camera', refreshOnMove);
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[mapReady]);
-
-  // When a layer toggle changes after the map is ready, load that single layer.
-  // We depend on loadProviderDataset which is stable (useCallback).
-  useEffect(()=>{ if(mapReady && showIndexedProviders) void loadProviderDataset('indexed'); },[showIndexedProviders, loadProviderDataset]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(()=>{ if(mapReady && showBlueHive) void loadProviderDataset('bluehive'); },[showBlueHive, loadProviderDataset]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(()=>{ if(mapReady && showDentists) void loadProviderDataset('dentists'); },[showDentists, loadProviderDataset]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(()=>{ if(mapReady && showMyClinicsLayer) void loadProviderDataset('myClinics'); },[showMyClinicsLayer, loadProviderDataset]); // eslint-disable-line react-hooks/exhaustive-deps
-
   // ── Map Inventory: load indexed providers from Neon on map load + pan/zoom ──
   useEffect(()=>{
     if (!mapReady || !serviceInventoryEnabled) return;
@@ -1983,74 +1852,6 @@ export default function App() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[mapReady, metric, serviceInventoryEnabled]);
-
-  // ── NACCHO LHD layer: native Mapbox source + heatmap ───────────────────────
-  useEffect(()=>{
-    if(!mapReady) return;
-    if(!showNacchoLayer) {
-      clearProviderDataset('naccho');
-      nacchoFetchRef.current?.abort();
-      nacchoFetchRef.current=null;
-      return;
-    }
-    let timer:ReturnType<typeof setTimeout>|null=null;
-    const reload=()=>{
-      if(timer) clearTimeout(timer);
-      timer=setTimeout(async()=>{
-        nacchoFetchRef.current?.abort();
-        const ac=new AbortController();
-        nacchoFetchRef.current=ac;
-        setNacchoLoading(true);
-        setNacchoError('');
-        try {
-          const activeMap=getActiveMapboxMap();
-          const bounds=activeMap?.getBounds();
-          if(!bounds) return;
-          const params=new URLSearchParams({
-            useBounds:'true',
-            north:String(bounds.getNorth()),south:String(bounds.getSouth()),
-            east:String(bounds.getEast()),west:String(bounds.getWest()),limit:'1000',
-          });
-          const resp=await fetch(`/api/naccho-lhd?${params}`,{signal:ac.signal});
-          if(ac.signal.aborted) return;
-          const data=await resp.json().catch(()=>({providers:[]}));
-          if(ac.signal.aborted) return;
-          const providers=Array.isArray(data.providers)?data.providers:[];
-          setNacchoData(providers);
-          renderProviderDataset('naccho',providers,{
-            baseColor:'#34d399',
-            glow:false,
-            buildPopup:(p:any)=>{
-              const services=Array.isArray(p.public_health_services)?p.public_health_services:(p.services||[]);
-              const svcHtml=services.length?`<div style="font-size:9px;color:#6ee7b7;margin-top:4px;">${services.slice(0,5).join(', ')}</div>`:'';
-              return `<div style="font-family:Inter,sans-serif;padding:10px 12px;max-width:270px;">
-                <div style="font-size:12px;font-weight:700;color:#e2f0ff;">${p.name||'Local Health Department'}</div>
-                <div style="font-size:9px;font-family:'IBM Plex Mono',monospace;color:#34d399;letter-spacing:1px;text-transform:uppercase;margin:2px 0 4px;">NACCHO LHD Directory</div>
-                <div style="font-size:9px;color:#4a6888;margin-bottom:4px;">${[p.address,p.city,p.admin_area,p.country].filter(Boolean).join(', ')||'Address unavailable'}</div>
-                ${p.phone?`<div style="font-size:9px;margin-bottom:3px;"><a href="tel:${p.phone}">${p.phone}</a></div>`:''}
-                ${p.website?`<div style="font-size:8.5px;margin-bottom:3px;"><a href="${p.website}" target="_blank" rel="noreferrer">${p.website}</a></div>`:''}
-                ${svcHtml}
-                <div style="font-size:8px;color:#94a3b8;margin-top:5px;border-top:1px solid rgba(255,255,255,0.08);padding-top:4px;">External directory record · not a confirmed service provider</div>
-              </div>`;
-            },
-          });
-        } catch(error:any) {
-          if(!ac.signal.aborted) setNacchoError(error?.message||'NACCHO layer failed');
-        } finally {
-          if(!ac.signal.aborted) setNacchoLoading(false);
-        }
-      },400);
-    };
-    reload();
-    window.addEventListener('network-map:native-camera',reload);
-    return()=>{
-      if(timer) clearTimeout(timer);
-      window.removeEventListener('network-map:native-camera',reload);
-      nacchoFetchRef.current?.abort();
-      nacchoFetchRef.current=null;
-      clearProviderDataset('naccho');
-    };
-  },[mapReady,showNacchoLayer]);
 
   const activeToolRef = React.useRef(activeTool);
   React.useLayoutEffect(() => {
@@ -2313,73 +2114,6 @@ export default function App() {
     setNativeDiagnosticCollection('population',{type:'FeatureCollection',features:rendered} as any);
   },[showPopDensity, stateGeoRevision]);
 
-  // ── Uploaded clinic pins: native Mapbox source ─────────────────────────────
-  useEffect(()=>{
-    if(!showUploadedClinics || uploadedClinics.length===0) {
-      clearProviderDataset('uploaded');
-      return;
-    }
-    renderProviderDataset('uploaded', uploadedClinics, {
-      baseColor:'#f472b6',
-      glow:showGlowPoints,
-      getColor:(clinic)=>clinic.color || '#f472b6',
-      buildPopup:(c)=>{
-        const col=c.color||'#f472b6';
-        return `<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:170px;">
-          <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${escapeHtml(c.name)}</div>
-          ${c.address?`<div style="font-size:9.5px;color:#4a6888">${escapeHtml(c.address)}${c.city?', '+escapeHtml(c.city):''}${c.state?' '+escapeHtml(c.state):''}${c.zip?' '+escapeHtml(c.zip):''}</div>`:''}
-          ${c.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${escapeHtml(c.phone)}">${escapeHtml(c.phone)}</a></div>`:''}
-          ${c.notes?`<div style="font-size:9px;color:#3d5478;margin-top:3px">${escapeHtml(c.notes)}</div>`:''}
-          <div style="margin-top:6px;display:flex;gap:5px"><div style="width:8px;height:8px;border-radius:50%;background:${col};box-shadow:0 0 6px ${col};flex-shrink:0;margin-top:2px"></div><span style="font-size:8.5px;color:#3d5478;font-family:'IBM Plex Mono',monospace">UPLOADED CLINIC</span></div>
-        </div>`;
-      },
-    });
-    return ()=>clearProviderDataset('uploaded');
-  },[uploadedClinics, showUploadedClinics, showGlowPoints]);
-
-  // ── BlueHive native heatmap + provider points ────────────────────────────
-  useEffect(()=>{
-    if(!showBlueHive || blueHiveData.length===0) {
-      clearProviderDataset('bluehive');
-      return;
-    }
-    renderProviderDataset('bluehive', blueHiveData, {
-      baseColor:'#3b82f6',
-      glow:showGlowPoints,
-      getColor:(provider:any)=>providerCategoryStyle(provider).color,
-      buildPopup:(p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
-        <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||p.name||'Unnamed'}</div>
-        ${p.address_1?`<div style="font-size:9.5px;color:#4a6888"> ${p.address_1}${p.city?', '+p.city:''}${p.state?' '+p.state:''}${p.zip?' '+p.zip:''}</div>`:''}
-        ${p.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${p.phone}">${p.phone}</a></div>`:''}
-        ${p.website?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px"><a href="${p.website}" target="_blank" rel="noreferrer" style="color:#93c5fd">${p.website}</a></div>`:''}
-        ${p.services?`<div style="font-size:8px;color:#3d5478;margin-top:3px">${p.services}</div>`:''}
-        <div style="margin-top:6px;font-size:8.5px;color:#3b82f6;font-family:'IBM Plex Mono',monospace">BLUEHIVE PROVIDER</div>
-      </div>`,
-    });
-    return ()=>clearProviderDataset('bluehive');
-  },[showBlueHive,blueHiveData,showGlowPoints]);
-
-  // ── Dentist native heatmap + provider points ─────────────────────────────
-  useEffect(()=>{
-    if(!showDentists || dentistData.length===0) {
-      clearProviderDataset('dentists');
-      return;
-    }
-    renderProviderDataset('dentists', dentistData, {
-      baseColor:'#06b6d4',
-      glow:showGlowPoints,
-      getColor:(provider:any)=>providerCategoryStyle(provider).color,
-      buildPopup:(p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
-        <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||p.name||'Unnamed'}</div>
-        ${p.address_1?`<div style="font-size:9.5px;color:#4a6888"> ${p.address_1}${p.city?', '+p.city:''}${p.state?' '+p.state:''}${p.zip?' '+p.zip:''}</div>`:''}
-        ${p.phone?`<div style="font-size:9.5px;margin-top:2px">Phone: <a href="tel:${p.phone}">${p.phone}</a></div>`:''}
-        ${p.npi?`<div style="font-size:8.5px;color:#3d5478;margin-top:2px">NPI: <a href="${p.source_url||'#'}" target="_blank" rel="noreferrer" style="color:#93c5fd">${p.npi}</a></div>`:''}
-        ${p.taxonomy_description?`<div style="font-size:8px;color:#3d5478;margin-top:3px">${p.taxonomy_description}</div>`:''}
-        <div style="margin-top:6px;font-size:8.5px;color:#06b6d4;font-family:'IBM Plex Mono',monospace">DENTIST</div>
-      </div>`,
-    });
-    return ()=>clearProviderDataset('dentists');
-  },[showDentists,dentistData,showGlowPoints]);
 
   // ── Service Presence native heatmap + provider points ────────────────────
   useEffect(()=>{
@@ -2407,46 +2141,6 @@ export default function App() {
     });
     return ()=>clearProviderDataset('inventory');
   },[inventoryData,showGlowPoints]);
-
-  // ── Full indexed providers: native heatmap + points ──────────────────────
-  useEffect(()=>{
-    if(!showIndexedProviders || indexedLayerData.length===0) {
-      clearProviderDataset('indexed');
-      return;
-    }
-    renderProviderDataset('indexed', indexedLayerData, {
-      baseColor:'#10b981',
-      glow:showGlowPoints,
-      getColor:(provider:any)=>providerCategoryStyle(provider).color,
-      buildPopup:(p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
-        <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||p.name||'Unnamed'}</div>
-        ${(p.address_1||p.address)?`<div style="font-size:9.5px;color:#4a6888">${p.address_1||p.address}${p.city?', '+p.city:''}${(p.state||p.admin_area)?' '+(p.state||p.admin_area):''}</div>`:''}
-        ${p.phone?`<div style="font-size:9.5px;color:#67e8f9;margin-top:2px">${p.phone}</div>`:''}
-        <div style="margin-top:6px;font-size:8.5px;color:#10b981;font-family:'IBM Plex Mono',monospace">INDEXED PROVIDER</div>
-      </div>`,
-    });
-    return ()=>clearProviderDataset('indexed');
-  },[showIndexedProviders,indexedLayerData,showGlowPoints]);
-
-  // ── Persisted My Clinics: native heatmap + points ────────────────────────
-  useEffect(()=>{
-    if(!showMyClinicsLayer || myClinicsData.length===0) {
-      clearProviderDataset('my-clinics');
-      return;
-    }
-    renderProviderDataset('my-clinics', myClinicsData, {
-      baseColor:'#8b5cf6',
-      glow:showGlowPoints,
-      getColor:(provider:any)=>providerCategoryStyle(provider).color,
-      buildPopup:(p:any)=>`<div style="font-family:Inter,sans-serif;padding:10px 12px;min-width:200px;">
-        <div style="font-size:12px;font-weight:700;color:#e2f0ff;margin-bottom:4px">${p.clinic_name||p.name||'Unnamed'}</div>
-        ${(p.address_1||p.address)?`<div style="font-size:9.5px;color:#4a6888">${p.address_1||p.address}${p.city?', '+p.city:''}${(p.state||p.admin_area)?' '+(p.state||p.admin_area):''}</div>`:''}
-        ${p.phone?`<div style="font-size:9.5px;color:#67e8f9;margin-top:2px">${p.phone}</div>`:''}
-        <div style="margin-top:6px;font-size:8.5px;color:#8b5cf6;font-family:'IBM Plex Mono',monospace">MY CLINIC</div>
-      </div>`,
-    });
-    return ()=>clearProviderDataset('my-clinics');
-  },[showMyClinicsLayer,myClinicsData,showGlowPoints]);
 
   async function uploadClinicChunk(groupName:string, filename:string, rows:any[], chunkIndex:number, totalChunks:number, uploadSessionId:string, rowOffset:number) {
     const response = await fetch('/api/my-clinics/upload', {
@@ -2491,10 +2185,7 @@ export default function App() {
         summary.needsGeocodeRows += Number(result.needsGeocodeRows || 0);
       }
       setUploadGroupName('');
-      setClinicGroups([]);
-      setShowMyClinicsLayer(true);
-      setDatasetStatus(prev=>({...prev,myClinics:{loading:false,error:'',loaded:false}}));
-      await loadProviderDataset('myClinics');
+      window.dispatchEvent(new Event('network-map:provider-dataset-uploaded'));
       setUploadProgress(`Backend ingest complete: ${summary.rawRows} raw rows · ${summary.stagedRows} staged · ${summary.masteredRows} map-ready · ${summary.needsGeocodeRows} needs geocode · ${summary.errorRows} errors.`);
     } catch(err:any) {
       setUploadProgress(`Error: ${err.message||'Could not upload file'}`);
@@ -2950,7 +2641,7 @@ export default function App() {
     const categoryForSearch = categoryOverride || liveBackendCategoryRef.current;
     const map=getActiveMapboxMap();
     if(!map) return;
-    if(NATIVE_DRIVE_TIME_ENABLED) providerEta.clear();
+    providerEta.clear();
     const validCoordinates = Number.isFinite(lat) && Number.isFinite(lng)
       && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
     if(!validCoordinates) {
@@ -3404,11 +3095,18 @@ export default function App() {
 
   const dockMapToolsPanel = useCallback((panel:Element|null): boolean => {
     const host = mapToolsHostRef.current;
-    if (!(panel instanceof HTMLElement) || !host) return false;
+    if (!(panel instanceof HTMLElement) || !host || !panel.isConnected) return false;
     mapToolsPanelRef.current = panel;
     if (panel.parentElement !== host) host.appendChild(panel);
     panel.dataset.sidebarDocked = 'true';
     return true;
+  }, []);
+
+  const currentMapToolsPanel = useCallback((): HTMLElement | null => {
+    const remembered = mapToolsPanelRef.current;
+    if (remembered?.isConnected) return remembered;
+    if (remembered && !remembered.isConnected) mapToolsPanelRef.current = null;
+    return document.querySelector<HTMLElement>('.occumed-map-tools-panel');
   }, []);
 
   const handleSidebarTabKeyDown = useCallback((event:React.KeyboardEvent<HTMLButtonElement>, workspace:SidebarWorkspace) => {
@@ -3462,9 +3160,7 @@ export default function App() {
 
   useLayoutEffect(() => {
     if (sidebarWorkspace !== 'mapTools') return;
-    const redock = () => dockMapToolsPanel(
-      mapToolsPanelRef.current || document.querySelector('.occumed-map-tools-panel'),
-    );
+    const redock = () => dockMapToolsPanel(currentMapToolsPanel());
     redock();
     const frame = window.requestAnimationFrame(redock);
     const timer = window.setTimeout(redock, 120);
@@ -3472,45 +3168,25 @@ export default function App() {
       window.cancelAnimationFrame(frame);
       window.clearTimeout(timer);
     };
-  }, [dockMapToolsPanel, sidebarWorkspace]);
+  }, [currentMapToolsPanel, dockMapToolsPanel, sidebarWorkspace]);
 
   useEffect(() => {
     window.__NETWORK_MAP_SIDEBAR_WORKSPACES__ = {
       getActiveTab: () => sidebarWorkspaceRef.current,
       setActiveTab: selectSidebarWorkspace,
-      sync: () => { dockMapToolsPanel(mapToolsPanelRef.current || document.querySelector('.occumed-map-tools-panel')); },
+      sync: () => { dockMapToolsPanel(currentMapToolsPanel()); },
     };
     return () => { delete window.__NETWORK_MAP_SIDEBAR_WORKSPACES__; };
-  }, [dockMapToolsPanel, selectSidebarWorkspace]);
+  }, [currentMapToolsPanel, dockMapToolsPanel, selectSidebarWorkspace]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER
   // ─────────────────────────────────────────────────────────────────────────
-  function toggleProviderLayer(key:DatasetKey, checked:boolean) {
-    if(key==='indexed') setShowIndexedProviders(checked);
-    else if(key==='bluehive') setShowBlueHive(checked);
-    else if(key==='dentists') setShowDentists(checked);
-    else setShowMyClinicsLayer(checked);
-    // The per-toggle effects below are the single owner of initial loading.
-    // Keeping network ownership out of the UI event handler prevents duplicate
-    // requests racing the state transition that makes the layer visible.
-  }
-
-  function providerLayerStatus(key:DatasetKey, count:number, emptyMessage:string, visible:boolean) {
-    const state=datasetStatus[key];
-    if(state.loading && !state.loaded) return 'Loading provider data…';
-    if(state.error) return state.error;
-    if(!state.loaded) return visible ? 'Loading starts when enabled' : 'Toggle on to load';
-    if(count===0 && !state.loading) return emptyMessage;
-    if(state.loading) return `${count.toLocaleString()} loaded · refreshing viewport…`;
-    return `${count.toLocaleString()} loaded · ${visible ? 'visible' : 'toggle off'}`;
-  }
-
   const selectedService = SERVICE_PRESENCE_OPTIONS.find(service=>service.key===metric) || SERVICE_PRESENCE_OPTIONS[0];
   const hasRadiusCenter = !!dropCenter || (lastRadiusLatRef.current!==null && lastRadiusLngRef.current!==null);
   const usLayerStatus = showUsDiagnostics ? (rawStateFeaturesRef.current.length ? 'Available' : 'Loading U.S. map data…') : 'Enable U.S. Diagnostics first';
-  const activeProviderSourceCount = [showIndexedProviders,showBlueHive,showDentists,showMyClinicsLayer].filter(Boolean).length;
-  const loadedProviderCount = indexedLayerData.length + blueHiveData.length + dentistData.length + myClinicsData.length;
+  const activeProviderSourceCount = providerRegistrySummary.active + uploadedRegistrySummary.active;
+  const loadedProviderCount = providerRegistrySummary.visible + uploadedRegistrySummary.visible;
   const toggleSection = (section:string) => setCollapsedSections(prev=>({...prev,[section]:!prev[section]}));
   const toggleCommandTool = (tool:Exclude<ActiveTool,null>) => {
     setActiveTool(current=>{
@@ -3565,8 +3241,8 @@ export default function App() {
         <div className="command-header-actions">
           <div className="provider-source-health" title={`${loadedProviderCount.toLocaleString()} provider records loaded in this viewport`}>
             <span className="source-health-dot"/>
-            <strong>{activeProviderSourceCount}/4</strong>
-            <span>sources active</span>
+            <strong>{activeProviderSourceCount}</strong>
+            <span>layers active</span>
           </div>
 
           <button className={`command-action${activeTool==='liveFinder'?' active':''}`} aria-expanded={activeTool==='liveFinder'} onClick={()=>selectSidebarWorkspace(activeTool==='liveFinder'?'providers':'liveFinder')}>
@@ -3604,7 +3280,7 @@ export default function App() {
             <div className="hero-eyebrow">Global provider workspace</div>
             <div className="hero-title">Provider intelligence at map speed</div>
             <div className="hero-sub">Search, inspect density, find live facilities, and build coverage without leaving the map.</div>
-            <div className="hero-source-summary"><span>{activeProviderSourceCount} sources on</span><strong>{loadedProviderCount.toLocaleString()} visible records</strong></div>
+            <div className="hero-source-summary"><span>{activeProviderSourceCount} layers on</span><strong>{loadedProviderCount.toLocaleString()} visible records</strong></div>
           </div>
 
           <section className="sb-section command-section">
@@ -3628,18 +3304,7 @@ export default function App() {
           <section className="sb-section command-section">
             <div className="command-section-title"><Layers3 size={15}/><span>Provider Layers</span><small>Off by default</small></div>
             <div className="workflow-layer-list">
-              <LayerToggle label="Indexed Providers" checked={showIndexedProviders} onChange={checked=>toggleProviderLayer('indexed',checked)} disabled={datasetStatus.indexed.loading} status={providerLayerStatus('indexed',indexedLayerData.length,'No indexed providers in view',showIndexedProviders)}/>
-              <LayerToggle label="BlueHive Providers" checked={showBlueHive} onChange={checked=>toggleProviderLayer('bluehive',checked)} disabled={datasetStatus.bluehive.loading} status={providerLayerStatus('bluehive',blueHiveData.length,'No BlueHive providers in view',showBlueHive)}/>
-              <LayerToggle label="Dental Examiner Presence" checked={showDentists} onChange={checked=>toggleProviderLayer('dentists',checked)} disabled={datasetStatus.dentists.loading} status={providerLayerStatus('dentists',dentistData.length,'No NPI-derived dental presence in view',showDentists)}/>
-              <LayerToggle label="My Clinics" checked={showMyClinicsLayer} onChange={checked=>toggleProviderLayer('myClinics',checked)} disabled={datasetStatus.myClinics.loading} status={providerLayerStatus('myClinics',myClinicsData.length,'No saved clinics in view',showMyClinicsLayer)}/>
-              <LayerToggle
-                label="NACCHO Local Health Depts"
-                checked={showNacchoLayer}
-                onChange={setShowNacchoLayer}
-                disabled={nacchoLoading}
-                status={nacchoLoading ? 'Loading LHD data…' : nacchoError ? nacchoError : showNacchoLayer ? `${nacchoData.length.toLocaleString()} LHDs in view · directory records` : 'Toggle on to load'}
-              />
-              <LayerToggle label="Upload Preview" checked={showUploadedClinics} onChange={setShowUploadedClinics} disabled={clinicGroups.length===0} status={clinicGroups.length ? `${uploadedClinics.length.toLocaleString()} uploaded rows` : 'Upload a clinic file to enable'}/>
+              <div data-provider-layer-registry-host="true" />
               <LayerToggle label="Luminous Density" checked={showGlowPoints} onChange={setShowGlowPoints} status={showGlowPoints?'Density halos and point glow active':'Low-glow point styling'}/>
             </div>
 
@@ -3760,12 +3425,6 @@ export default function App() {
         <DatasetBrowser
           open={showDatasetBrowser}
           onClose={()=>setShowDatasetBrowser(false)}
-          blueHiveData={blueHiveData}
-          dentistData={dentistData}
-          indexedData={indexedLayerData}
-          myClinicsData={myClinicsData}
-          status={datasetStatus}
-          onLoad={key=>void loadProviderDataset(key)}
           getMapBounds={getProviderExplorerBounds}
           onViewOnMap={showProviderExplorerRowsOnMap}
           onViewDensity={(filters)=>void renderProviderExplorerMap('density', filters)}
@@ -3812,7 +3471,7 @@ export default function App() {
 
             <section className="provider-drawer-section">
               <label className="provider-field-label" htmlFor="provider-type-filter">Provider type</label>
-              <select id="provider-type-filter" className="provider-type-filter" value={masterProviderTypeFilter} onChange={event=>{setMasterProviderTypeFilter(event.target.value);setDatasetStatus(prev=>({...prev,myClinics:{loading:false,error:'',loaded:false}}));}}>
+              <select id="provider-type-filter" className="provider-type-filter" value={masterProviderTypeFilter} onChange={event=>{const value=event.target.value;setMasterProviderTypeFilter(value);setProviderExplorerFilters(prev=>({...prev,clinicType:value}));}}>
                 {MASTER_PROVIDER_TYPE_OPTIONS.map(([value,label])=><option key={value} value={value}>{label}</option>)}
               </select>
               <label className="provider-live-toggle">
@@ -3999,7 +3658,7 @@ export default function App() {
                 {liveLocation?`Center · ${liveLocation}`:'Coordinate-first live search · double-click the map or search an address.'}
                 {liveMirror&&<div style={{fontSize:9,color:'#2d4060',marginTop:3}}>{liveMirror}</div>}
               </div>
-              {NATIVE_DRIVE_TIME_ENABLED&&!npiCategory&&liveResults.length>0&&(
+              {!npiCategory&&liveResults.length>0&&(
                 <DriveTimeControlStrip
                   origin={etaOrigin}
                   candidates={etaCandidates}
@@ -4302,7 +3961,7 @@ export default function App() {
                   : filterAndSortLiveResults(liveResults).map((r:any)=>{
                     const c=CATS[r.cat]||CATS.clinic;
                     const gm=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name+(r.addr?' '+r.addr:''))}`;
-                    const resultEta=NATIVE_DRIVE_TIME_ENABLED?providerEta.findEta(r.name):null;
+                    const resultEta=providerEta.findEta(r.name);
                     const saveKey=providerSaveKey(r);
                     const saveState=savedToMyClinics[saveKey];
                     const saveError=savedToMyClinicsErrors[saveKey];
@@ -4319,7 +3978,7 @@ export default function App() {
                           {r.hours&&<span className="lp-tag">{r.hours.substring(0,30)}</span>}
                           {r.phone&&<span className="lp-tag"><Phone size={11}/>Phone</span>}
                         </div>
-                        {NATIVE_DRIVE_TIME_ENABLED&&resultEta&&(
+                        {resultEta&&(
                           <ProviderEtaBadge
                             eta={resultEta}
                             onRoute={requestEtaRoute}
@@ -4396,11 +4055,6 @@ export default function App() {
                     />
                   </div>
                   <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
-                    <div>
-                      <div style={{fontSize:8,color:'#3d5478',marginBottom:3}}>GROUP COLOR</div>
-                      <input type="color" value={uploadColor} onChange={e=>setUploadColor(e.target.value)}
-                        style={{width:40,height:32,border:'1px solid rgba(244,114,182,0.3)',borderRadius:4,background:'transparent',cursor:'pointer',padding:2}} />
-                    </div>
                     <button className="rp-assess-btn"
                       style={{padding:'8px 18px',background:'rgba(244,114,182,0.12)',borderColor:'rgba(244,114,182,0.3)',color:'#f472b6',opacity:uploadLoading?0.6:1}}
                       disabled={uploadLoading}

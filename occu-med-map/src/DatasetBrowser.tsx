@@ -7,15 +7,13 @@ export type ProviderFeature = {
   phone:string|null; website:string|null; source_url:string|null; confidence_score:number|null; trust_tier:string; last_seen:string|null; imported_at:string|null; raw_source_data?:unknown;
   status?:string|null; match_reason?:string|null; distance_miles?:number|null;
 };
-export type DatasetKey = 'bluehive' | 'dentists' | 'indexed' | 'myClinics';
-export type DatasetLoadState = { loading:boolean; loaded:boolean; error:string };
 export type ProviderExplorerFilters = {
   source:string; source_kind:string; q:string; country:string; admin_area:string; city:string; postal_code:string; clinicType:string; service:string; lat:string; lng:string; radiusMiles:string; useMapBounds:boolean; includeLive?:boolean; includeStored?:boolean; includeSaved?:boolean; includeCandidates?:boolean;
 };
 
 type ProviderExplorerResponse = { providers?:ProviderFeature[]; records?:ProviderFeature[]; total:number; count:number; page:number; limit:number; hasMore:boolean; facets?:Array<Record<string,unknown>>; error?:string; warning?:string; status?:ProviderExplorerStatus };
 type ProviderExplorerStatus = { persistenceConfigured?:boolean; spatialEngine?:string; candidatePersistence?:boolean; savedPersistence?:boolean; liveAdapters?:string[]; schema?:string };
-type Props = { open:boolean; onClose:()=>void; getMapBounds?:()=>{north:number;south:number;east:number;west:number}|null; getCurrentRadius?:()=>{lat:number;lng:number;radiusMiles:number}|null; onViewOnMap?:(providers:ProviderFeature[], filters:ProviderExplorerFilters)=>void; onViewDensity?:(filters:ProviderExplorerFilters)=>void; onCompare?:(filters:ProviderExplorerFilters)=>void; onLoad?:(key:DatasetKey)=>void; sharedFilters?:ProviderExplorerFilters; onFiltersChange?:(filters:ProviderExplorerFilters)=>void; onOpenMatchingInDatabase?:(filters:ProviderExplorerFilters)=>void } & Record<string,unknown>;
+type Props = { open:boolean; onClose:()=>void; getMapBounds?:()=>{north:number;south:number;east:number;west:number}|null; getCurrentRadius?:()=>{lat:number;lng:number;radiusMiles:number}|null; onViewOnMap?:(providers:ProviderFeature[], filters:ProviderExplorerFilters)=>void; onViewDensity?:(filters:ProviderExplorerFilters)=>void; onCompare?:(filters:ProviderExplorerFilters)=>void; sharedFilters?:ProviderExplorerFilters; onFiltersChange?:(filters:ProviderExplorerFilters)=>void; onOpenMatchingInDatabase?:(filters:ProviderExplorerFilters)=>void } & Record<string,unknown>;
 
 const SOURCE_OPTIONS = PROVIDER_EXPLORER_SOURCE_OPTIONS;
 const CATEGORY_OPTIONS = [['all','All provider categories'], ...PROVIDER_LAYER_CATEGORIES.map((entry)=>[entry.id,entry.label] as [string,string])] as const;

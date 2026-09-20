@@ -2,14 +2,13 @@ import mapboxgl from "mapbox-gl";
 import { mapboxGeocode, type MapboxBounds, type MapboxPlace } from "./mapboxServices";
 import { registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
 import { registerMapToolsSection } from "./mapToolsPanelRegistry";
+import { buildProviderPointFeature, ensureProviderPointLayer } from "./providerPointNativeRuntime";
 import { normalizedProviderClickListener } from "./providerTypeNormalizationRuntime";
 import { registerRuntimeOwner } from "./runtimeControllerRegistry";
 
 const SOURCE_ID = "provider-location-search-results";
 const LAYER_ID = "provider-location-search-dots";
 const PAGE_SIZE = 5_000;
-const MAX_RESULTS = 75_000;
-const MAX_PAGES_PER_QUERY = 20;
 
 const COUNTRIES = `Afghanistan|Albania|Algeria|Andorra|Angola|Antigua and Barbuda|Argentina|Armenia|Australia|Austria|Azerbaijan|Bahamas|Bahrain|Bangladesh|Barbados|Belarus|Belgium|Belize|Benin|Bhutan|Bolivia|Bosnia and Herzegovina|Botswana|Brazil|Brunei|Bulgaria|Burkina Faso|Burundi|Cabo Verde|Cambodia|Cameroon|Canada|Central African Republic|Chad|Chile|China|Colombia|Comoros|Costa Rica|Croatia|Cuba|Cyprus|Czechia|Democratic Republic of the Congo|Denmark|Djibouti|Dominica|Dominican Republic|Ecuador|Egypt|El Salvador|Equatorial Guinea|Eritrea|Estonia|Eswatini|Ethiopia|Fiji|Finland|France|Gabon|Gambia|Georgia|Germany|Ghana|Greece|Grenada|Guatemala|Guinea|Guinea-Bissau|Guyana|Haiti|Honduras|Hungary|Iceland|India|Indonesia|Iran|Iraq|Ireland|Israel|Italy|Ivory Coast|Jamaica|Japan|Jordan|Kazakhstan|Kenya|Kiribati|Kosovo|Kuwait|Kyrgyzstan|Laos|Latvia|Lebanon|Lesotho|Liberia|Libya|Liechtenstein|Lithuania|Luxembourg|Madagascar|Malawi|Malaysia|Maldives|Mali|Malta|Marshall Islands|Mauritania|Mauritius|Mexico|Micronesia|Moldova|Monaco|Mongolia|Montenegro|Morocco|Mozambique|Myanmar|Namibia|Nauru|Nepal|Netherlands|New Zealand|Nicaragua|Niger|Nigeria|North Korea|North Macedonia|Norway|Oman|Pakistan|Palau|Palestine|Panama|Papua New Guinea|Paraguay|Peru|Philippines|Poland|Portugal|Qatar|Republic of the Congo|Romania|Russia|Rwanda|Saint Kitts and Nevis|Saint Lucia|Saint Vincent and the Grenadines|Samoa|San Marino|Sao Tome and Principe|Saudi Arabia|Senegal|Serbia|Seychelles|Sierra Leone|Singapore|Slovakia|Slovenia|Solomon Islands|Somalia|South Africa|South Korea|South Sudan|Spain|Sri Lanka|Sudan|Suriname|Sweden|Switzerland|Syria|Taiwan|Tajikistan|Tanzania|Thailand|Timor-Leste|Togo|Tonga|Trinidad and Tobago|Tunisia|Turkey|Turkmenistan|Tuvalu|Uganda|Ukraine|United Arab Emirates|United Kingdom|United States|Uruguay|Uzbekistan|Vanuatu|Vatican City|Venezuela|Vietnam|Yemen|Zambia|Zimbabwe`.split("|");
 
@@ -152,35 +151,26 @@ function bindInteractions(map: mapboxgl.Map): void {
 
 function ensureLayer(map: mapboxgl.Map): void {
   if (!map.isStyleLoaded()) return;
-  if (!map.getSource(SOURCE_ID)) {
-    map.addSource(SOURCE_ID, {
-      type: "geojson",
-      data: latestCollection,
-      cluster: false,
-      generateId: true,
-    });
-  }
-  if (!map.getLayer(LAYER_ID)) {
-    map.addLayer({
-      id: LAYER_ID,
-      type: "circle",
-      source: SOURCE_ID,
-      paint: {
-        "circle-radius": ["interpolate", ["linear"], ["zoom"], 2, 2.2, 7, 3.8, 13, 5.8],
-        "circle-color": [
-          "match",
-          ["get", "sourceGroup"],
-          "saved", "#f7d980",
-          "healthsites", "#91e2ef",
-          "#ffffff",
-        ],
-        "circle-opacity": 0.94,
-        "circle-stroke-color": "#07111f",
-        "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 2, 0.35, 10, 1.2],
-        "circle-stroke-opacity": 0.9,
-      },
-    });
-  }
+  ensureProviderPointLayer(map, {
+    sourceId: SOURCE_ID,
+    layerId: LAYER_ID,
+    defaultColor: "#ffffff",
+    defaultRadius: 4,
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 2, 2.2, 7, 3.8, 13, 5.8],
+      "circle-color": [
+        "match",
+        ["get", "sourceGroup"],
+        "saved", "#f7d980",
+        "healthsites", "#91e2ef",
+        "#ffffff",
+      ],
+      "circle-opacity": 0.94,
+      "circle-stroke-color": "#07111f",
+      "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 2, 0.35, 10, 1.2],
+      "circle-stroke-opacity": 0.9,
+    },
+  }, latestCollection);
   bindInteractions(map);
 }
 
@@ -277,23 +267,24 @@ function countryVariants(country: string, place: MapboxPlace): string[] {
 async function fetchExplorerAll(
   params: URLSearchParams,
   savedOnly: boolean,
-  remaining: number,
   signal: AbortSignal,
-): Promise<{ providers: ExplorerProvider[]; capped: boolean }> {
+): Promise<{ providers: ExplorerProvider[] }> {
   const providers: ExplorerProvider[] = [];
+  const seen = new Set<string>();
   let page = 1;
-  let capped = false;
-  while (page <= MAX_PAGES_PER_QUERY && providers.length < remaining) {
+
+  while (true) {
     const url = new URL("/api/provider-explorer", window.location.origin);
     const query = new URLSearchParams(params);
     query.set("mode", "pins");
     query.set("page", String(page));
-    query.set("limit", String(Math.min(PAGE_SIZE, remaining - providers.length)));
+    query.set("limit", String(PAGE_SIZE));
     query.set("includeLive", "false");
     query.set("includeStored", savedOnly ? "false" : "true");
     query.set("includeSaved", savedOnly ? "true" : "false");
     query.set("includeCandidates", "false");
     url.search = query.toString();
+
     const response = await fetch(url, { signal });
     if (!response.ok) throw new Error(`Provider Explorer HTTP ${response.status}`);
     const payload = await response.json() as { providers?: ExplorerProvider[]; hasMore?: boolean; total?: number };
@@ -301,13 +292,26 @@ async function fetchExplorerAll(
     const accepted = savedOnly
       ? rows.filter((provider) => provider.status === "saved" || provider.source_kind === "saved")
       : rows;
-    providers.push(...accepted);
+
+    let newRows = 0;
+    for (const provider of accepted) {
+      const key = String(
+        provider.id
+        ?? `${provider.name || ""}|${provider.lat || ""}|${provider.lng || ""}|${provider.source || ""}`,
+      );
+      if (seen.has(key)) continue;
+      seen.add(key);
+      providers.push(provider);
+      newRows += 1;
+    }
+
     const total = Number(payload.total || providers.length);
     if (!payload.hasMore || rows.length === 0 || providers.length >= total) break;
+    if (newRows === 0) throw new Error("Provider Explorer pagination stopped because the server returned no new provider IDs.");
     page += 1;
   }
-  if (page > MAX_PAGES_PER_QUERY || providers.length >= remaining) capped = true;
-  return { providers: providers.slice(0, remaining), capped };
+
+  return { providers };
 }
 
 async function fetchNetworkProviders(
@@ -317,22 +321,20 @@ async function fetchNetworkProviders(
   bounds: Bounds,
   generation: number,
   signal: AbortSignal,
-): Promise<{ providers: ExplorerProvider[]; capped: boolean; usedBoundsFallback: boolean }> {
+): Promise<{ providers: ExplorerProvider[]; usedBoundsFallback: boolean }> {
   const combined: ExplorerProvider[] = [];
-  let capped = false;
   for (const variant of countryVariants(country, place)) {
     for (const savedOnly of [false, true]) {
-      if (generation !== searchGeneration || combined.length >= MAX_RESULTS) break;
+      if (generation !== searchGeneration) break;
       const params = new URLSearchParams({ country: variant });
       if (city) params.set("city", city);
-      const result = await fetchExplorerAll(params, savedOnly, MAX_RESULTS - combined.length, signal);
+      const result = await fetchExplorerAll(params, savedOnly, signal);
       combined.push(...result.providers);
-      capped ||= result.capped;
     }
   }
 
   if (combined.length > 0 || generation !== searchGeneration) {
-    return { providers: combined, capped, usedBoundsFallback: false };
+    return { providers: combined, usedBoundsFallback: false };
   }
 
   const boundsParams = new URLSearchParams({
@@ -342,11 +344,10 @@ async function fetchNetworkProviders(
     west: String(bounds.west),
   });
   for (const savedOnly of [false, true]) {
-    const result = await fetchExplorerAll(boundsParams, savedOnly, MAX_RESULTS - combined.length, signal);
+    const result = await fetchExplorerAll(boundsParams, savedOnly, signal);
     combined.push(...result.providers);
-    capped ||= result.capped;
   }
-  return { providers: combined, capped, usedBoundsFallback: true };
+  return { providers: combined, usedBoundsFallback: true };
 }
 
 function networkFeature(provider: ExplorerProvider, bounds: Bounds): ResultFeature | null {
@@ -355,24 +356,30 @@ function networkFeature(provider: ExplorerProvider, bounds: Bounds): ResultFeatu
   if (lat === null || lng === null || !withinBounds(lng, lat, bounds)) return null;
   const saved = provider.source_kind === "saved" || provider.status === "saved" || normalize(provider.source).includes("my clinics");
   const healthsites = normalize(provider.source).includes("healthsites");
-  return {
-    type: "Feature",
-    geometry: { type: "Point", coordinates: [lng, lat] },
-    properties: {
-      name: String(provider.name || "Unnamed provider"),
-      address: String(provider.address || ""),
-      city: String(provider.city || ""),
-      adminArea: String(provider.admin_area || ""),
-      country: String(provider.country || ""),
-      phone: String(provider.phone || ""),
-      website: String(provider.website || ""),
-      services: textList(provider.services || provider.categories),
-      source: String(provider.source || (saved ? "My Clinics" : "Provider network")),
-      sourceGroup: saved ? "saved" : healthsites ? "healthsites" : "network",
-    },
+  const properties: ResultProperties = {
+    name: String(provider.name || "Unnamed provider"),
+    address: String(provider.address || ""),
+    city: String(provider.city || ""),
+    adminArea: String(provider.admin_area || ""),
+    country: String(provider.country || ""),
+    phone: String(provider.phone || ""),
+    website: String(provider.website || ""),
+    services: textList(provider.services || provider.categories),
+    source: String(provider.source || (saved ? "My Clinics" : "Provider network")),
+    sourceGroup: saved ? "saved" : healthsites ? "healthsites" : "network",
   };
+  const feature = buildProviderPointFeature({
+    id: String(provider.id ?? `${properties.name}|${lat}|${lng}|${properties.source}`),
+    lat,
+    lng,
+    channel: "provider-location-search",
+    popupHtml: popupHtml(properties),
+    sourceKey: properties.source,
+    sourceKind: String(provider.source_kind || (saved ? "saved" : "stored")),
+    properties,
+  });
+  return feature as ResultFeature | null;
 }
-
 function dedupeFeatures(features: ResultFeature[]): ResultFeature[] {
   const output: ResultFeature[] = [];
   const sameName = new Map<string, ResultFeature[]>();
@@ -394,7 +401,6 @@ function dedupeFeatures(features: ResultFeature[]): ResultFeature[] {
     }
     coordinateKeys.add(coordinateKey);
     output.push(feature);
-    if (output.length >= MAX_RESULTS) break;
   }
   return output;
 }
@@ -457,12 +463,9 @@ async function runSearch(country: string, city: string): Promise<void> {
     const features = dedupeFeatures(networkFeatures);
     pushCollection({ type: "FeatureCollection", features });
     const location = trimmedCity ? `${trimmedCity}, ${trimmedCountry}` : trimmedCountry;
-    const capped = network.capped || features.length >= MAX_RESULTS;
     const fallback = network.usedBoundsFallback ? " Location fields were incomplete, so stored records were matched by the mapped boundary." : "";
     if (features.length === 0) {
       setStatus(`No provider dots were found for ${location}.`, "neutral");
-    } else if (capped) {
-      setStatus(`${features.length.toLocaleString()} individual dots shown in ${location}. Refine by city to reveal additional providers. ${sourceSummary(features)}.${fallback}`, "warning");
     } else {
       setStatus(`${features.length.toLocaleString()} individual providers shown in ${location}. ${sourceSummary(features)}.${fallback}`, "success");
     }

@@ -13,6 +13,7 @@ function source(relativePath: string): string {
 const main = source("src/main.tsx");
 const app = source("src/App.tsx");
 const nativeMap = source("src/providerExplorerNativeMapRuntime.ts");
+const providerPointOwner = source("src/providerPointNativeRuntime.ts");
 const requestStability = source("src/providerExplorerRequestStabilityRuntime.ts");
 const providerFinder = source("src/providerLocationFinderRuntime.ts");
 
@@ -36,9 +37,10 @@ assert.match(app, /clearProviderExplorerNative/, "App must clear stable native s
 assert.doesNotMatch(app, /providerExplorer(?:Layer|DensityLayer|LiveLayer|GapLayer)Ref/, "Provider Explorer must not retain scene LayerGroup refs");
 
 assert.match(nativeMap, /registerMapboxMapInitializer\(/, "native Provider Explorer renderer must attach through the Mapbox lifecycle");
-assert.match(nativeMap, /map\.addSource\(/, "native Provider Explorer renderer must own Mapbox GeoJSON sources");
-assert.match(nativeMap, /map\.addLayer\(/, "native Provider Explorer renderer must own Mapbox layers");
-assert.match(nativeMap, /source\.setData\(collection\)/, "native Provider Explorer refreshes must update stable sources with setData");
+assert.match(nativeMap, /ensureProviderPointLayer/, "Provider Explorer point channels must delegate to the authoritative provider point owner");
+assert.match(providerPointOwner, /map\.addSource\(/, "authoritative provider point owner must own Mapbox GeoJSON source creation");
+assert.match(providerPointOwner, /map\.addLayer\(/, "authoritative provider point owner must own Mapbox point layer creation");
+assert.match(providerPointOwner, /existing\.setData\(collection\)/, "authoritative provider point owner must reuse stable GeoJSON sources with setData");
 assert.match(nativeMap, /provider-explorer-native-pins/, "pins must use a stable native source/layer id");
 assert.match(nativeMap, /provider-explorer-native-aggregate/, "density and hex must use a stable native aggregate source");
 assert.match(nativeMap, /provider-explorer-native-dot-density/, "dot density must use a stable native source");
@@ -56,7 +58,8 @@ assert.match(requestStability, /registerNetworkRequestMiddleware\("provider-expl
 assert.doesNotMatch(requestStability, /window\.fetch\s*=/, "Provider Explorer must never own window.fetch");
 assert.doesNotMatch(requestStability, /mapSceneRuntime|MapScene\.|LayerGroup|stagedLayers|commitGroup/, "request stability must not patch rendering primitives");
 
-assert.match(providerFinder, /map\.addSource\(SOURCE_ID/, "Provider Location Finder must continue using its native Mapbox source");
-assert.match(providerFinder, /map\.addLayer\(/, "Provider Location Finder must continue using its native Mapbox layer");
+assert.match(providerFinder, /ensureProviderPointLayer/, "Provider Location Finder must delegate pin rendering to the authoritative Mapbox provider point owner");
+assert.match(providerFinder, /SOURCE_ID = "provider-location-search-results"/, "Provider Location Finder must retain a stable logical source id");
+assert.match(providerFinder, /LAYER_ID = "provider-location-search-dots"/, "Provider Location Finder must retain a stable logical layer id");
 
 console.log("Provider Explorer native Mapbox hardening smoke test passed.");

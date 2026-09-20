@@ -7,7 +7,7 @@ on:
         description: Provider source stored in this Neon project
         required: true
         type: choice
-        options: ["healthsites", "usa_embassy"]
+        options: ["overpass", "healthsites", "usa_embassy"]
       project_slot:
         description: Provider database project to initialize
         required: true
@@ -32,6 +32,8 @@ jobs:
     timeout-minutes: 45
     env:
       SOURCE_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      OVERPASS_DATABASE_URL: ${{ secrets.OVERPASS_DATABASE_URL }}
+      OVERPASS_DATABASE_URL_2: ${{ secrets.OVERPASS_DATABASE_URL_2 }}
       HEALTHSITES_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
       HEALTHSITES_DATABASE_URL_2: ${{ secrets.HEALTHSITES_DATABASE_URL_2 }}
       HEALTHSITES_DATABASE_URL_3: ${{ secrets.HEALTHSITES_DATABASE_URL_3 }}
@@ -77,6 +79,10 @@ jobs:
         run: |
           set -euo pipefail
           case "${{ inputs.source_family }}" in
+            overpass)
+              target_prefix=OVERPASS_DATABASE_URL
+              maximum_slot=2
+              ;;
             healthsites)
               target_prefix=HEALTHSITES_DATABASE_URL
               maximum_slot=8
@@ -141,6 +147,18 @@ jobs:
             fi
           done
 
+      - name: Activate canonical shard reads
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          UPDATE public.provider_schema_state
+          SET canonical_read_enabled = true,
+              verification_notes = 'Source provider shard initialized from canonical schema',
+              updated_at = now()
+          WHERE id = 1;
+          SQL
+
       - name: Verify identical provider pipeline
         shell: bash
         run: |
@@ -158,6 +176,8 @@ jobs:
               'provider_master_types',
               'provider_type_catalog',
               'medical_providers',
+              'provider_schema_state',
+              'schema_migration_versions',
               'provider_master_map_view'
             ] LOOP
               IF to_regclass('public.' || relation_name) IS NULL THEN
@@ -169,23 +189,62 @@ jobs:
             FROM public.provider_type_catalog
             WHERE active
               AND type_key IN (
-                'urgent_care',
-                'dot_provider',
-                'faa_provider',
-                'lab',
-                'general_practitioner',
-                'occupational_health_clinic',
+                'audiology',
+                'cardiology',
+                'concierge_medicine',
                 'dental',
-                'imaging',
-                'pharmacy_vaccination',
+                'dentist',
+                'dot_examiner',
+                'dot_provider',
+                'ent',
+                'faa_examiner',
+                'faa_provider',
+                'family_practice',
+                'gastroenterology',
+                'general_practitioner',
+                'hearing_aid',
                 'hospital',
+                'imaging',
+                'internal_medicine',
+                'lab',
+                'neurotology',
+                'occupational_health',
+                'occupational_health_clinic',
+                'orthopedics',
+                'pharmacy',
+                'pharmacy_vaccination',
+                'psychiatry',
+                'public_health',
+                'pulmonology',
                 'specialist',
-                'unknown'
+                'sports_medicine',
+                'unknown',
+                'urgent_care',
+                'walk_in_clinic'
               );
 
-            IF canonical_type_count <> 12 THEN
-              RAISE EXCEPTION 'Canonical provider type catalog is incomplete: expected 12 active types, found %', canonical_type_count;
+            IF canonical_type_count <> 32 THEN
+              RAISE EXCEPTION 'Canonical provider type catalog is incomplete: expected 32 active types, found %', canonical_type_count;
             END IF;
-          END $$;
+
+            IF NOT EXISTS (
+              SELECT 1
+              FROM information_schema.columns
+              WHERE table_schema='public'
+                AND table_name='provider_type_catalog'
+                AND column_name='updated_at'
+                AND data_type='timestamp with time zone'
+            ) THEN
+              RAISE EXCEPTION 'provider_type_catalog.updated_at is missing';
+            END IF;
+
+            IF NOT EXISTS (
+              SELECT 1
+              FROM public.provider_schema_state
+              WHERE id=1 AND canonical_read_enabled=true
+            ) THEN
+              RAISE EXCEPTION 'Provider shard canonical reads are not enabled';
+            END IF;
+          END $;
           SQL
-          echo "${{ inputs.source_family }} Neon project ${{ inputs.project_slot }} now has the same provider schema and canonical type catalog as the primary project."
+          echo "${{ inputs.source_family }} Neon project ${{ inputs.project_slot }} now has the canonical provider schema, active canonical reads, and current provider type catalog."

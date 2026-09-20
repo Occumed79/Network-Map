@@ -190,6 +190,8 @@ jobs:
             expected_master="$(jq -r ".projects[] | select(.slot == ${slot}) | .distinct_master_keys" "$manifest")"
             test -s "$file"
 
+            psql "$target_url" -v ON_ERROR_STOP=1 -f scripts/provider-shard-contract.sql
+
             missing="$(psql "$target_url" -Atqc "
               WITH required(name) AS (VALUES
                 ('provider_raw_records'),
@@ -198,7 +200,8 @@ jobs:
                 ('provider_master_sources'),
                 ('provider_master_types'),
                 ('provider_type_catalog'),
-                ('medical_providers'),
+                ('provider_schema_state'),
+                ('schema_migration_versions'),
                 ('provider_master_map_view')
               )
               SELECT string_agg(name, ', ' ORDER BY name)
@@ -246,10 +249,14 @@ jobs:
               return 1
             fi
 
-            actual="$(psql "$target_url" -Atqc "SELECT count(*) FROM public.medical_providers WHERE data_source='Healthsites / OpenStreetMap'")"
-            [[ "$actual" == "$expected" ]] || { echo "Provider project ${slot} verification failed: ${actual} vs ${expected}" >&2; return 1; }
-            echo "Provider project ${slot}: promoted ${actual} Healthsites facilities"
-            printf '%s\n' "- Provider project ${slot}: ${actual} facilities" > "/tmp/healthsites/provider-project-${slot}.summary"
+            actual="$(psql "$target_url" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='healthsites_osm'")"
+            actual_master="$(psql "$target_url" -Atqc "SELECT count(DISTINCT master_provider_id) FROM public.provider_master_sources WHERE source_key='healthsites_osm'")"
+            canonical="$(psql "$target_url" -Atqc "SELECT canonical_read_enabled FROM public.provider_schema_state WHERE id=1")"
+            [[ "$actual" == "$expected" ]] || { echo "Provider project ${slot} source-lineage verification failed: ${actual} vs ${expected}" >&2; return 1; }
+            [[ "$actual_master" == "$expected_master" ]] || { echo "Provider project ${slot} master verification failed: ${actual_master} vs ${expected_master}" >&2; return 1; }
+            [[ "$canonical" == "t" ]] || { echo "Provider project ${slot} canonical reads are not enabled" >&2; return 1; }
+            echo "Provider project ${slot}: promoted ${actual} Healthsites source rows into ${actual_master} canonical providers"
+            printf '%s\n' "- Provider project ${slot}: ${actual} source rows / ${actual_master} canonical providers" > "/tmp/healthsites/provider-project-${slot}.summary"
           }
 
           declare -a pids=()

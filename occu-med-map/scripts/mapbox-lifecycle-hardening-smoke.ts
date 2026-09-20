@@ -54,7 +54,10 @@ assert.deepEqual(constructorOwners, ["src/dualMapEngineRuntime.ts"], "the dual e
 
 const dualEngine = source("src/dualMapEngineRuntime.ts");
 assert.match(dualEngine, /registerMapboxMap\(instance, \{ mode \}\)/, "new Mapbox maps must be explicitly registered");
-assert.equal((dualEngine.match(/unregisterMapboxMap\(instance\)/g) || []).length, 2, "both Mapbox engines must be explicitly unregistered");
+assert.ok((dualEngine.match(/unregisterMapboxMap\(instance\)/g) || []).length >= 3, "Mapbox maps must be unregistered on both normal teardown and failed-token retry cleanup");
+assert.match(dualEngine, /mapboxTokenCandidates/, "Mapbox engines must support configured token failover");
+assert.match(dualEngine, /\[MAPBOX_2D_TOKEN, MAPBOX_TOKEN\]/, "2D must prefer the secondary token and retain the primary as fallback");
+assert.match(dualEngine, /\[MAPBOX_TOKEN, MAPBOX_2D_TOKEN\]/, "3D must prefer the primary token and retain the secondary as fallback");
 
 const registeredInitializers = [
   ["src/mapControlsBridgeRuntime.ts", "map-controls-bridge", 10],

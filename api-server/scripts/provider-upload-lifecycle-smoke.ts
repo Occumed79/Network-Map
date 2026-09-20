@@ -8,7 +8,8 @@ const route = fs.readFileSync(path.join(apiRoot, "src/routes/providerUploadLifec
 const migration = fs.readFileSync(path.join(apiRoot, "src/db/migrations/20260806_provider_upload_lifecycle.sql"), "utf8");
 const overtureMigration = fs.readFileSync(path.join(apiRoot, "src/db/migrations/20260820_expanded_provider_type_catalog.sql"), "utf8");
 const routeIndex = fs.readFileSync(path.join(apiRoot, "src/routes/index.ts"), "utf8");
-const sync = fs.readFileSync(path.join(repoRoot, "occu-med-map/src/myClinicsBackendSync.ts"), "utf8");
+const datasetUpload = fs.readFileSync(path.join(apiRoot, "src/routes/providerDatasetUploads.ts"), "utf8");
+const clinicUploadUi = fs.readFileSync(path.join(repoRoot, "occu-med-map/src/App.tsx"), "utf8");
 const spreadsheetSafety = fs.readFileSync(path.join(repoRoot, "occu-med-map/src/lib/spreadsheetSafety.ts"), "utf8");
 const etaExport = fs.readFileSync(path.join(repoRoot, "occu-med-map/src/features/driveTime/providerEtaExport.ts"), "utf8");
 
@@ -51,12 +52,14 @@ for (const typeKey of [
 ]) assert.match(overtureMigration, new RegExp(`'${typeKey}'`), `${typeKey} must be present in the additive catalog migration`);
 
 assert.match(routeIndex, /providerUploadLifecycleRouter/, "upload lifecycle router must be mounted");
-assert.ok(routeIndex.indexOf("providerUploadLifecycleRouter") < routeIndex.indexOf("providerDatasetUploadsRouter"), "safe lifecycle must be mounted before the legacy upload route");
-assert.match(sync, /provider-uploads\/preview/, "browser sync must preview before commit");
-assert.match(sync, /provider-uploads\/\$\{encodeURIComponent\(uploadId\)\}\/commit/, "browser sync must commit the same logical upload ID");
-assert.match(sync, /contentHash/, "browser sync must preserve one logical content hash across chunks");
-assert.match(sync, /chunkCount/, "browser sync must preserve chunk identity");
-assert.doesNotMatch(sync, /fetch\("\/api\/my-clinics\/upload"/, "legacy direct-write browser sync must be retired");
+assert.ok(routeIndex.indexOf("providerUploadLifecycleRouter") < routeIndex.indexOf("providerDatasetUploadsRouter"), "transactional lifecycle must be mounted before the browser/bulk dataset uploader");
+assert.match(datasetUpload, /router\.post\("\/my-clinics\/upload"/, "browser/bulk upload route must have one canonical owner");
+assert.match(datasetUpload, /finalMatchedAddress|final_matched_address/, "server upload normalization must accept final geocoder address columns");
+assert.match(datasetUpload, /finalLatitude|final_latitude/, "server upload normalization must accept final geocoder latitude columns");
+assert.match(datasetUpload, /finalLongitude|final_longitude/, "server upload normalization must accept final geocoder longitude columns");
+assert.doesNotMatch(datasetUpload, /INSERT INTO public\.medical_providers/, "new uploads must not mirror into medical_providers");
+assert.doesNotMatch(datasetUpload, /mirrorLegacy/, "canonical uploader must not expose legacy mirroring");
+assert.match(clinicUploadUi, /idempotency-key/, "Upload Clinics modal must send stable idempotency keys");
 
 assert.match(spreadsheetSafety, /FORMULA_PREFIX/, "spreadsheet formula detection must be centralized");
 assert.match(spreadsheetSafety, /\[=\+\\-@\]/, "formula guard must cover spreadsheet formula prefixes");

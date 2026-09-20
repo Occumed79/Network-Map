@@ -3,7 +3,6 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import "./mapboxMapLifecycleRuntime";
 import "./mapboxSourcePipelineRuntime";
 import "./networkRequestPipelineRuntime";
-import "./uploadedDatasetLabelRuntime";
 import "./adminApiRuntime";
 import "./mapControlsBridgeRuntime";
 import "./mapToolsCommandPanel";
@@ -13,10 +12,7 @@ import "./providerTypeNormalizationRuntime";
 import { switchMapModeWithTransition } from "./dualMapTransitionRuntime";
 import "./providerExplorerRequestStabilityRuntime";
 import "./providerExplorerExplicitVisualizationRuntime";
-// Source selection is user-facing state, not optional telemetry. Install its
-// change listener before React mounts so a fast user toggle can never be
-// overwritten later by a lazily loaded default-selection restore.
-import "./providerSourceSelectionPersistenceRuntime";
+import "./features/driveTime/nativeDriveTimeRuntime";
 import App from "./App";
 import ProviderLayerRegistryPanel from "./ProviderLayerRegistryPanel";
 import AppErrorBoundary, { ApplicationFailureScreen } from "./AppErrorBoundary";
@@ -31,13 +27,11 @@ import {
 import "./dual-map-engines.css";
 import "./dual-map-transition-opaque.css";
 import "./black-hole-transition.css";
-import "./map-engine-final-fixes.css";
 import "./features/driveTime/nativeDriveTimeRuntime.css";
 import "./index.css";
 import "./liquid-glass-theme.css";
 import "./live-finder-ux.css";
 import "./mapbox-intelligence.css";
-import "./live-finder-eta-actions.css";
 import "./performance-safety.css";
 import "./app-shell-layout.css";
 import "./workflow-ui.css";
@@ -50,12 +44,9 @@ import "./provider-location-finder.css";
 import "./sidebarWorkspacePanelGuardRuntime";
 import "./ui-system.css";
 import "./startup-hardening.css";
-// The consolidated sidebar layer intentionally loads after every synchronous
-// shell/theme stylesheet. It remains the owner of sidebar geometry, workspace
-// visibility, hit testing, and scrolling. The following regression sheet only
-// normalizes text close controls and the explicit-off Explorer presentation.
-import "./sidebar-workspace-final-fixes.css";
-import "./sidebar-workspace-regression-fixes.css";
+// The sidebar workspace stylesheet loads after the shared UI system so it owns
+// workspace geometry, visibility, hit testing, scrolling, and control sizing.
+import "./sidebar-workspace.css";
 import "./dialogControllerRuntime";
 import "./generalUiIntegrityRuntime";
 
@@ -66,16 +57,12 @@ async function safeLoad(name: string, loader: () => Promise<unknown>): Promise<v
 async function loadOptionalRuntimes(): Promise<void> {
   setBootPhase("optional-runtimes");
   await safeLoad("Mapbox load hardening", () => import("./mapboxGlobeLoadHardeningRuntime"));
-  await safeLoad("map engine cleanup", () => import("./mapEngineFinalFixRuntime"));
 
   await Promise.allSettled([
     safeLoad("provider layer telemetry", () => import("./providerLayerTelemetryRuntime")),
     safeLoad("map performance telemetry", () => import("./mapPerformanceTelemetryRuntime")),
     safeLoad("technical diagnostics export", () => import("./technicalDiagnosticsExport")),
-    safeLoad("right panel", () => import("./rightPanelCompactor")),
-    safeLoad("live finder tools", () => import("./liveFinderDriveTools")),
     safeLoad("U.S. diagnostics", () => import("./usDiagnosticsGate")),
-    safeLoad("drive time", () => import("./features/driveTime/nativeDriveTimeRuntime")),
   ]);
   markOptionalRuntimesComplete();
 }

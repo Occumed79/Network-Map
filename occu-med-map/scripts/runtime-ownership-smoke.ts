@@ -23,7 +23,7 @@ function assert(condition: unknown, message: string): asserts condition {
 const registrySource = source(SHARED_OBSERVER_OWNER);
 assert(registrySource.includes("registerRuntimeOwner"), "runtime owner registry is missing registerRuntimeOwner");
 assert(registrySource.includes("subscribeToSharedDomObserver"), "runtime owner registry is missing the shared DOM observer");
-assert(registrySource.includes("runWithoutSharedDomObservation"), "runtime owner registry must support safe legacy reconciliation without observer feedback");
+assert(registrySource.includes("runWithoutSharedDomObservation"), "runtime owner registry must support observer-safe DOM reconciliation");
 assert(registrySource.includes("duplicateAttempts"), "runtime owner registry must record blocked duplicate registrations");
 assert((registrySource.match(/new MutationObserver/g) || []).length === 1, "runtime owner registry must own exactly one shared MutationObserver");
 
@@ -33,21 +33,14 @@ const requiredOwners: Record<string, string> = {
   "mapToolsPanelRegistry.ts": "map-tools-section-registry",
   "mapToolsCommandPanel.ts": "map-tools-command-panel",
   "mapControlsBridgeRuntime.ts": "map-controls-bridge",
-  "uploadedDatasetLabelRuntime.ts": "uploaded-dataset-labels",
   "providerLayerTelemetryRuntime.ts": "provider-layer-telemetry",
-  "rightPanelCompactor.ts": "right-panel-compactor",
-  "liveFinderDriveTools.ts": "live-finder-drive-tools",
   "usDiagnosticsGate.ts": "us-diagnostics-gate",
-  "modalLabelScrubber.ts": "modal-label-scrubber",
-  "mapEngineLoadingCleanupRuntime.ts": "map-engine-loading-cleanup",
   "routePlannerControlsRuntime.ts": "route-planner-controls",
   "providerLocationFinderRuntime.ts": "provider-location-finder",
-  "mapEngineFinalFixRuntime.ts": "map-engine-final-fixes",
   "mapboxGlobeLoadHardeningRuntime.ts": "mapbox-globe-load-hardening",
   "dialogControllerRuntime.ts": "dialog-controller",
   "generalUiIntegrityRuntime.ts": "general-ui-integrity",
   "sidebarWorkspacePanelGuardRuntime.ts": "sidebar-workspace-integrity",
-  "providerSourceSelectionPersistenceRuntime.ts": "provider-source-selection-persistence",
 };
 
 for (const [file, id] of Object.entries(requiredOwners)) {
@@ -58,13 +51,8 @@ for (const [file, id] of Object.entries(requiredOwners)) {
 
 const sharedObserverConsumers = [
   "mapControlsBridgeRuntime.ts",
-  "uploadedDatasetLabelRuntime.ts",
   "providerLayerTelemetryRuntime.ts",
-  "rightPanelCompactor.ts",
-  "liveFinderDriveTools.ts",
   "usDiagnosticsGate.ts",
-  "modalLabelScrubber.ts",
-  "mapEngineLoadingCleanupRuntime.ts",
   "mapboxGlobeLoadHardeningRuntime.ts",
   "dialogControllerRuntime.ts",
   "generalUiIntegrityRuntime.ts",
@@ -75,15 +63,6 @@ for (const file of sharedObserverConsumers) {
   assert(!text.includes("new MutationObserver"), `${file} still owns an independent MutationObserver`);
   assert(text.includes("subscribeToSharedDomObserver"), `${file} is not using the shared DOM observer`);
 }
-
-// mapEngineFinalFixRuntime deliberately does NOT observe the map subtree. Its
-// prior observer callback wrote classes/removals back into the same subtree and
-// created a renderer-locking feedback loop in Chromium/WebKit. It is now a
-// bounded event/checkpoint reconciler while retaining explicit runtime ownership.
-const mapEngineFinalFix = source("mapEngineFinalFixRuntime.ts");
-assert(!mapEngineFinalFix.includes("new MutationObserver"), "mapEngineFinalFixRuntime.ts must not own a DOM observer");
-assert(!mapEngineFinalFix.includes("subscribeToSharedDomObserver"), "mapEngineFinalFixRuntime.ts must remain off the shared DOM observer to prevent feedback loops");
-assert(mapEngineFinalFix.includes("scheduleReconcile"), "mapEngineFinalFixRuntime.ts must use bounded reconciliation checkpoints");
 
 for (const file of ["routePlannerControlsRuntime.ts", "providerLocationFinderRuntime.ts"]) {
   const text = source(file);

@@ -27,8 +27,8 @@ assert.doesNotMatch(main, /general-ui-hardening\.css|general-ui-visual-consisten
 assert.match(main, /import "\.\/dialogControllerRuntime";/, "authoritative dialog controller must load");
 assert.match(main, /import "\.\/generalUiIntegrityRuntime";/, "general UI integrity runtime must load");
 assert.ok(
-  main.indexOf('import "./sidebar-workspace-final-fixes.css";') > main.indexOf('import "./ui-system.css";'),
-  "the focused sidebar ownership layer must load after the shared UI system",
+  main.indexOf('import "./sidebar-workspace.css";') > main.indexOf('import "./ui-system.css";'),
+  "the authoritative sidebar workspace stylesheet must load after the shared UI system",
 );
 assert.doesNotMatch(main, /diagnosticsReliabilityRuntime/, "diagnostics must not restore the retired runtime that clicks toggles off and on");
 assert.match(appSource, /stateGeoRevision/, "diagnostic overlays must rerun from explicit state-data readiness");
@@ -46,14 +46,14 @@ assert.match(css, /\.command-search-results\s*\{[^}]*max-height:/s, "search sugg
 assert.match(css, /\.modal-backdrop,\s*\.modal-backdrop\.open\s*\{[^}]*position: fixed !important;/s, "modal backdrops must own the viewport");
 assert.match(css, /\.modal-box\s*\{[^}]*max-height: min\(88dvh, 900px\) !important;/s, "desktop modals must be height constrained");
 assert.match(css, /@media \(max-width: 768px\)[\s\S]*\.modal-box\s*\{[^}]*height: 100dvh !important;/, "mobile modals must use a full-height layout");
-assert.match(css, /\.leaflet-popup-content\s*\{[^}]*overflow-y: auto !important;/s, "Leaflet popup content must scroll instead of escaping the viewport");
+assert.match(css, /\.mapboxgl-popup-content\s*\{[^}]*overflow-y: auto !important;/s, "Mapbox popup content must scroll instead of escaping the viewport");
 assert.match(css, /@media \(prefers-reduced-motion: reduce\)/, "reduced-motion preferences must be respected");
 assert.match(css, /button:focus-visible[\s\S]*outline:/, "interactive controls must retain visible keyboard focus");
 
 assert.match(visualCss, /\.local-pop-card\s*\{[^}]*right:/s, "map information cards must stay on the map side");
 assert.match(visualCss, /\.modal-box,\s*\.modal-box \*/, "legacy pale modal text rules must be overridden");
 assert.match(visualCss, /background: linear-gradient\(180deg, #091827 0%, #050d16 100%\)/, "dialogs must use the shared navy shell");
-assert.match(visualCss, /\.leaflet-popup-content-wrapper,[\s\S]*\.mapboxgl-popup-content/, "both map engines must share popup styling");
+assert.match(visualCss, /\.mapboxgl-popup-content\s*\{[^}]*background:/s, "Mapbox popup styling must remain owned by the UI system");
 
 assert.match(pdfCss, /\.pdf-modal-wrap\s*\{[^}]*position: fixed !important;/s, "report preview must own the viewport");
 assert.match(pdfCss, /\.pdf-toolbar\s*\{[^}]*position: sticky !important;/s, "report actions must remain accessible while scrolling");

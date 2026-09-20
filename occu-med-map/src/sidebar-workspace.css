@@ -1,6 +1,4 @@
-/* Authoritative workspace UI layer.
-   Loaded last so the four sidebar workspaces share one geometry, palette,
-   scrolling model, and map footprint regardless of older theme rules. */
+/* Authoritative sidebar workspace layout and control styling. */
 
 :root {
   --command-sidebar-width: clamp(292px, 21vw, 320px);
@@ -90,7 +88,6 @@ html[data-occumed-workspace-ready="true"] body .app-wrap .app-body .map-wrap {
 
 html[data-occumed-workspace-ready="true"] body .app-wrap .app-body .map-wrap :is(
   #map,
-  .leaflet-container,
   .dual-engine-map-shell,
   .mapbox-2d-host,
   .mapbox-3d-host,
@@ -106,7 +103,7 @@ html[data-occumed-workspace-ready="true"] body .app-wrap .app-body .map-wrap :is
   min-height: 0 !important;
 }
 
-/* The legacy right drawer must never participate in application grid sizing. */
+/* Floating Finder/Explorer panels never participate in application grid sizing. */
 html[data-occumed-workspace-ready="true"] body .app-wrap .app-body > :is(
   .live-panel,
   .provider-explorer-drawer,
@@ -187,9 +184,7 @@ html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspac
   max-width: 100% !important;
 }
 
-/* Provider controls now live in one React-owned wrapper. Neutralize legacy
-   `.sidebar > div` rules on that structural wrapper, then restore the card
-   treatment that older styles only applied to direct sidebar children. */
+/* Provider controls live in one React-owned wrapper with explicit card styling. */
 html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
   > .occumed-sidebar-provider-content {
   width: 100% !important;
@@ -339,11 +334,6 @@ html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body
   border-radius: 0 !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
-}
-
-html[data-occumed-workspace-ready="true"] body .leaflet-control-container
-  .occumed-map-tools-panel[data-sidebar-docked="true"] {
-  display: none !important;
 }
 
 html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body
@@ -605,4 +595,68 @@ html[data-occumed-workspace-ready="true"] body :is(
     max-width: none !important;
     border-radius: 0 !important;
   }
+}
+
+html[data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer .provider-drawer-header .rp-close,
+html[data-occumed-workspace-ready="true"] body
+  .live-panel .rp-header .rp-close {
+  box-sizing: border-box !important;
+  display: inline-flex !important;
+  flex: 0 0 auto !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: auto !important;
+  min-width: 62px !important;
+  max-width: none !important;
+  height: 30px !important;
+  min-height: 30px !important;
+  max-height: 30px !important;
+  margin: 0 !important;
+  padding: 0 10px !important;
+  overflow: visible !important;
+  color: var(--workspace-text) !important;
+  background: var(--workspace-control-bg) !important;
+  border: 1px solid rgba(72, 139, 174, 0.5) !important;
+  border-radius: 8px !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04) !important;
+  font-size: 10px !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+  letter-spacing: .02em !important;
+  text-align: center !important;
+  text-transform: none !important;
+  white-space: nowrap !important;
+  writing-mode: horizontal-tb !important;
+  text-orientation: mixed !important;
+  cursor: pointer !important;
+  pointer-events: auto !important;
+}
+
+html[data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer .provider-drawer-header .rp-close:hover:not(:disabled),
+html[data-occumed-workspace-ready="true"] body
+  .live-panel .rp-header .rp-close:hover:not(:disabled) {
+  color: #fff !important;
+  background: var(--workspace-control-hover) !important;
+  border-color: var(--workspace-border-strong) !important;
+}
+
+/* React keeps its last visualization mode selected internally so filters can
+   refresh an explicitly chosen view. Until the user actually chooses a mode,
+   do not visually present Density as enabled. */
+html[data-provider-explorer-visualization-active="false"] body
+  .provider-explorer-drawer .provider-visualization-grid button.active {
+  color: var(--workspace-text) !important;
+  background: var(--workspace-control-bg) !important;
+  border-color: rgba(72, 139, 174, 0.46) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035) !important;
+}
+
+/* Keep action targets usable at the desktop widths shown in production.
+   Shared button rules may style them, but must not collapse them. */
+html[data-occumed-workspace-ready="true"] body
+  :is(.provider-explorer-drawer, .occumed-map-tools-panel, .live-panel)
+  button:not(.mapboxgl-ctrl button):not(:disabled) {
+  pointer-events: auto !important;
 }

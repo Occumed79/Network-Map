@@ -605,16 +605,6 @@ textarea:focus-visible {
 .workflow-directory-modal .dir-app-name { grid-column: 2 !important; }
 .workflow-directory-modal .dir-app-tag { grid-column: 3 !important; }
 
-.leaflet-popup-content-wrapper,
-.leaflet-popup-tip,
-.leaflet-tooltip { color: #29475a !important; background: rgba(250,253,254,.97) !important; }
-.leaflet-popup-content a { color: #087f9a !important; }
-.leaflet-popup-content [style*="color:#e2f0ff"],
-.leaflet-popup-content [style*="color: #e2f0ff"] { color: #173548 !important; }
-.leaflet-popup-content [style*="color:#3d5478"],
-.leaflet-popup-content [style*="color: #3d5478"],
-.leaflet-popup-content [style*="color:#4a6888"] { color: #667d8e !important; }
-
 .mobile-sidebar-backdrop { display: none; }
 
 @media (max-width: 1240px) {

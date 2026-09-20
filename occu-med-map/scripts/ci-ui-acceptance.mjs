@@ -27,6 +27,20 @@ function json(route, payload, status = 200) {
 }
 
 async function mockApi(page) {
+  const emptyMapboxStyle = {
+    version: 8,
+    name: "Standalone UI acceptance",
+    sources: {},
+    layers: [{ id: "ci-background", type: "background", paint: { "background-color": "#e7edf3" } }],
+  };
+
+  await page.route("https://api.mapbox.com/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname.includes("/styles/v1/")) return json(route, emptyMapboxStyle);
+    return route.fulfill({ status: 204, body: "" });
+  });
+  await page.route("https://events.mapbox.com/**", (route) => route.fulfill({ status: 204, body: "" }));
+
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -100,7 +114,7 @@ async function assertGeometry(page, viewportName) {
       return !element.hidden && style.display !== "none" && style.visibility !== "hidden" && rect.width > 2 && rect.height > 2;
     };
     const offscreen = Array.from(document.querySelectorAll(
-      ".command-search-results, .local-pop-card, .tz-legend, .modal-box, .pdf-modal-wrap, .leaflet-popup, .mapboxgl-popup",
+      ".command-search-results, .local-pop-card, .tz-legend, .modal-box, .pdf-modal-wrap, .mapboxgl-popup",
     )).filter(visible).map((element) => {
       const rect = element.getBoundingClientRect();
       return {

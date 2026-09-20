@@ -1,11 +1,3 @@
-html.occumed-us-diagnostics-off .leaflet-overlay-pane path.leaflet-interactive {
-  pointer-events: none !important;
-}
-
-html.occumed-us-diagnostics-off .leaflet-overlay-pane path.leaflet-interactive:hover {
-  cursor: default !important;
-}
-
 html.occumed-us-diagnostics-off .tz-legend,
 html.occumed-us-diagnostics-off .legend-row,
 html.occumed-us-diagnostics-off .br,
@@ -13,10 +5,3 @@ html.occumed-us-diagnostics-off .local-pop-card:not(.radius-extractor-card) {
   display: none !important;
 }
 
-html.occumed-us-diagnostics-on .leaflet-overlay-pane path.leaflet-interactive {
-  pointer-events: auto !important;
-}
-
-html.occumed-us-diagnostics-on .leaflet-overlay-pane path.leaflet-interactive {
-  cursor: pointer !important;
-}

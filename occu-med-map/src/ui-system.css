@@ -77,7 +77,7 @@ textarea {
   max-width: 100%;
 }
 
-button:not(.leaflet-control-zoom-in):not(.leaflet-control-zoom-out):not(.mapboxgl-ctrl-icon),
+button:not(.mapboxgl-ctrl-icon),
 [role="button"]:not(.mapboxgl-ctrl-icon) {
   overflow-wrap: anywhere;
 }
@@ -229,7 +229,6 @@ textarea:disabled,
 .mapbox-2d-host,
 .mapbox-3d-host,
 #map,
-.leaflet-container,
 .mapboxgl-map,
 .mapboxgl-canvas-container,
 .mapboxgl-canvas {
@@ -238,12 +237,10 @@ textarea:disabled,
   max-width: 100% !important;
 }
 
-.leaflet-control-container,
 .mapboxgl-control-container {
   pointer-events: none;
 }
 
-.leaflet-control-container > *,
 .mapboxgl-control-container > * {
   pointer-events: auto;
 }
@@ -329,8 +326,7 @@ textarea:disabled,
 
 .modal-close,
 .modal-box .rp-close,
-.provider-drawer-header > button,
-.leaflet-popup-close-button {
+.provider-drawer-header > button {
   flex: 0 0 auto !important;
   min-width: 34px !important;
   min-height: 34px !important;
@@ -350,30 +346,6 @@ html[data-occumed-modal-open="true"] body {
 }
 
 /* Popups ---------------------------------------------------------------- */
-.leaflet-popup {
-  max-width: min(380px, calc(100vw - 28px)) !important;
-}
-
-.leaflet-popup-content-wrapper {
-  max-width: 100% !important;
-  overflow: hidden !important;
-  border-radius: 13px !important;
-}
-
-.leaflet-popup-content {
-  width: auto !important;
-  max-width: 100% !important;
-  max-height: min(420px, calc(100dvh - 140px)) !important;
-  margin: 14px 16px !important;
-  overflow-x: hidden !important;
-  overflow-y: auto !important;
-  overflow-wrap: anywhere !important;
-}
-
-.leaflet-popup-content :is(a, button, input, select, textarea) {
-  max-width: 100% !important;
-}
-
 .mapboxgl-popup {
   max-width: min(380px, calc(100vw - 28px)) !important;
 }
@@ -623,8 +595,6 @@ html[data-occumed-modal-open="true"] body {
   border-color: rgba(82, 157, 190, 0.24) !important;
 }
 
-.leaflet-popup-content-wrapper,
-.leaflet-popup-tip,
 .mapboxgl-popup-content {
   color: var(--ui-text) !important;
   background: linear-gradient(180deg, #0a1c2c, #061421) !important;
@@ -632,24 +602,19 @@ html[data-occumed-modal-open="true"] body {
   box-shadow: 0 18px 52px rgba(0,0,0,.48), inset 0 1px 0 rgba(255,255,255,.04) !important;
 }
 
-.leaflet-popup-content,
-.leaflet-popup-content :is(div, span, strong, p),
 .mapboxgl-popup-content,
 .mapboxgl-popup-content :is(div, span, strong, p) {
   color: var(--ui-text) !important;
 }
 
-.leaflet-popup-content a,
 .mapboxgl-popup-content a {
   color: #8ed7f0 !important;
 }
 
-.leaflet-popup-close-button,
 .mapboxgl-popup-close-button {
   color: var(--ui-muted) !important;
 }
 
-.leaflet-popup-close-button:hover,
 .mapboxgl-popup-close-button:hover {
   color: #ffffff !important;
 }

@@ -29,7 +29,6 @@ import providerUploadCategoriesRouter from "./providerUploadCategories";
 import googlePlacesRouter from "./googlePlaces";
 import enhancedSearchRouter from "./enhancedSearch";
 import providerExplorerRouter from "./providerExplorer";
-import myClinicsUploadRouter from "./myClinicsUpload";
 import nacchoLhdRouter from "./nacchoLhd";
 import nacchoRecoveryStatusRouter from "./nacchoRecoveryStatus";
 import scoringDatabaseRouter from "./scoringDatabase";
@@ -67,19 +66,17 @@ router.use(internationalRegistryLayersRouter);
 router.use(storedInternationalRegistryLayersRouter);
 router.use(stabilizeProviderLayerRequests);
 
-// Safe provider uploads require explicit preview -> commit -> rollback lifecycle.
-// The legacy dataset route remains behind it temporarily for compatibility.
+// Provider upload surfaces: transactional preview/commit/rollback lifecycle plus
+// the canonical browser/bulk dataset uploader.
 router.use(providerUploadLifecycleRouter);
 router.use(providerDatasetUploadsRouter);
 router.use(providerLayersRouter);
 router.use(providerCategoryLayersRouter);
 router.use(providerUploadCategoriesRouter);
-router.use(myClinicsUploadRouter);
 router.use(googlePlacesRouter);
 router.use(enhancedSearchRouter);
 
-// Domain-specific compatibility surfaces remain, but provider discovery inside
-// them delegates to the authoritative provider-sources pipeline.
+// Domain-specific tools delegate provider discovery to the authoritative provider-sources pipeline.
 router.use(dentalProviderDiscoveryRouter);
 router.use(liveFinderRouter);
 router.use(priceFinderUnifiedRouter);

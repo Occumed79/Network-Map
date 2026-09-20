@@ -1,5 +1,4 @@
 import { registerMapboxMap, unregisterMapboxMap } from "./mapboxMapLifecycleRuntime";
-import { findCompatPopupHit, wasCompatibilityClickHandled } from "./mapboxCompatInteractionRuntime";
 import mapboxgl from "mapbox-gl";
 
 type MapMode = "2d" | "3d";
@@ -23,6 +22,13 @@ declare global {
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || import.meta.env.VITE_MAPBOX_ACCESS_TOKEN || "";
 const MAPBOX_2D_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN_2 || "";
 const MAP_LOAD_TIMEOUT_MS = 30_000;
+
+function mapboxTokenCandidates(mode: MapMode): string[] {
+  const preferred = mode === "2d"
+    ? [MAPBOX_2D_TOKEN, MAPBOX_TOKEN]
+    : [MAPBOX_TOKEN, MAPBOX_2D_TOKEN];
+  return [...new Set(preferred.map((value) => String(value || "").trim()).filter(Boolean))];
+}
 
 let currentMode: MapMode = "2d";
 let mapContainer: HTMLElement | null = null;
@@ -64,7 +70,6 @@ export async function initializeDualMapEngines(container: HTMLElement, initial: 
   if (mapWrap.classList.contains("dual-engine-map-shell")) return;
 
   mapWrap.classList.add("dual-engine-map-shell");
-  container.classList.add("map-scene-layer-host");
 
   mapbox2dHost = document.createElement("div");
   mapbox2dHost.className = "mapbox-2d-host";
@@ -251,11 +256,33 @@ async function ensureMapboxGlobe(): Promise<void> {
 
 async function createMapboxMap(mode: MapMode): Promise<void> {
   const is2d = mode === "2d";
-  const token = is2d ? MAPBOX_2D_TOKEN : MAPBOX_TOKEN;
   const host = is2d ? mapbox2dHost : mapboxGlobeHost;
-  if (!token) throw new Error(is2d ? "VITE_MAPBOX_TOKEN_2 is not configured" : "VITE_MAPBOX_TOKEN is not configured");
   if (!host) throw new Error("Mapbox map host did not initialize");
 
+  const tokens = mapboxTokenCandidates(mode);
+  if (!tokens.length) {
+    throw new Error(mode === "2d"
+      ? "Neither VITE_MAPBOX_TOKEN_2 nor VITE_MAPBOX_TOKEN is configured"
+      : "Neither VITE_MAPBOX_TOKEN nor VITE_MAPBOX_TOKEN_2 is configured");
+  }
+
+  let lastError: unknown = null;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    try {
+      await createMapboxMapWithToken(mode, host, token);
+      if (index > 0) console.warn(`Mapbox ${mode} recovered using fallback token ${index + 1} of ${tokens.length}`);
+      return;
+    } catch (error) {
+      lastError = error;
+      console.warn(`Mapbox ${mode} token ${index + 1} of ${tokens.length} failed`, error);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(`Mapbox ${mode} failed with all configured tokens`);
+}
+
+async function createMapboxMapWithToken(mode: MapMode, host: HTMLElement, token: string): Promise<void> {
+  const is2d = mode === "2d";
   const instance = new mapboxgl.Map({
     container: host,
     accessToken: token,
@@ -273,30 +300,38 @@ async function createMapboxMap(mode: MapMode): Promise<void> {
     dragRotate: !is2d,
     pitchWithRotate: !is2d,
   });
-  registerMapboxMap(instance, { mode });
-  instance.doubleClickZoom.disable();
 
+  registerMapboxMap(instance, { mode });
   if (is2d) mapbox2dMap = instance;
   else mapboxGlobeMap = instance;
 
-  instance.addControl(new mapboxgl.NavigationControl({ visualizePitch: !is2d }), "top-left");
-  instance.scrollZoom.setWheelZoomRate(1 / 600);
-  instance.scrollZoom.setZoomRate(1 / 180);
+  try {
+    instance.doubleClickZoom.disable();
+    instance.addControl(new mapboxgl.NavigationControl({ visualizePitch: !is2d }), "top-left");
+    instance.scrollZoom.setWheelZoomRate(1 / 600);
+    instance.scrollZoom.setZoomRate(1 / 180);
 
-  if (!is2d) instance.on("style.load", () => configureGlobe(instance));
+    if (!is2d) instance.on("style.load", () => configureGlobe(instance));
 
-  await waitForMapReady(instance, is2d ? "Mapbox 2D map" : "Mapbox 3D globe");
+    await waitForMapReady(instance, is2d ? "Mapbox 2D map" : "Mapbox 3D globe");
 
-  if (!is2d) configureGlobe(instance);
-  installMapboxInteractions(instance, mode);
-  host.classList.add("ready", "engine-render-ready");
-  host.querySelectorAll<HTMLElement>(":scope > .dual-engine-loading").forEach((node) => node.remove());
+    if (!is2d) configureGlobe(instance);
+    installMapboxInteractions(instance, mode);
+    host.classList.add("ready", "engine-render-ready");
+    host.querySelectorAll<HTMLElement>(":scope > .dual-engine-loading").forEach((node) => node.remove());
 
-  instance.on("moveend", () => {
-    if (currentMode !== mode) return;
-    captureCamera(instance, mode);
-    emitCameraState(instance, mode);
-  });
+    instance.on("moveend", () => {
+      if (currentMode !== mode) return;
+      captureCamera(instance, mode);
+      emitCameraState(instance, mode);
+    });
+  } catch (error) {
+    unregisterMapboxMap(instance);
+    try { instance.remove(); } catch {}
+    if (is2d && mapbox2dMap === instance) mapbox2dMap = null;
+    if (!is2d && mapboxGlobeMap === instance) mapboxGlobeMap = null;
+    throw error;
+  }
 }
 
 function configureGlobe(instance: mapboxgl.Map): void {
@@ -352,33 +387,34 @@ function waitForMapReady(instance: mapboxgl.Map, label: string): Promise<void> {
   });
 }
 
+function wasOverlayClickHandled(originalEvent: unknown): boolean {
+  return Boolean(
+    originalEvent
+    && typeof originalEvent === "object"
+    && (originalEvent as Record<string, unknown>).__networkMapOverlayHandled,
+  );
+}
+
+function renderedOverlayOwnsClick(instance: mapboxgl.Map, point: mapboxgl.PointLike): boolean {
+  try {
+    return instance.queryRenderedFeatures(point).some((feature) => {
+      const properties = feature.properties || {};
+      const interactive = properties.interactive === true || properties.interactive === "true";
+      const popupHtml = String(properties.popupHtml || "").trim();
+      return interactive || popupHtml.length > 0;
+    });
+  } catch {
+    return false;
+  }
+}
+
 function installMapboxInteractions(instance: mapboxgl.Map, mode: MapMode): void {
   instance.on("click", (event) => {
     if (currentMode !== mode) return;
-    const layers = ["network-points", "network-lines", "network-fills"].filter((id) => Boolean(instance.getLayer(id)));
-    const features = layers.length ? instance.queryRenderedFeatures(event.point, { layers }) : [];
-    const html = String(features[0]?.properties?.popupHtml || "");
-    if (html) {
-      new mapboxgl.Popup({ closeButton: true }).setLngLat(event.lngLat).setHTML(html).addTo(instance);
-      return;
-    }
-
-    const compatibilityPopupHit = findCompatPopupHit(instance, event.point, event.lngLat);
-    if (compatibilityPopupHit || wasCompatibilityClickHandled(event.originalEvent)) return;
-
-    const overlayHit = instance.queryRenderedFeatures(event.point).some((feature) => {
-      const layerId = String(feature.layer?.id || "");
-      const properties = feature.properties || {};
-      const compatibilityFeature = properties.__compatLayerId !== undefined
-        && properties.__compatLayerId !== null
-        && properties.__interactive !== false;
-      return compatibilityFeature || layerId === "provider-location-search-dots";
-    });
-    if (overlayHit) return;
+    if (wasOverlayClickHandled(event.originalEvent) || renderedOverlayOwnsClick(instance, event.point)) return;
 
     const detail = { lat: event.lngLat.lat, lng: event.lngLat.lng, originalEvent: event.originalEvent, mode };
     window.dispatchEvent(new CustomEvent("network-map:native-click", { detail }));
-    window.dispatchEvent(new CustomEvent("network-map:scene-click", { detail }));
   });
 
   instance.on("dblclick", (event) => {
@@ -386,7 +422,6 @@ function installMapboxInteractions(instance: mapboxgl.Map, mode: MapMode): void 
     event.preventDefault();
     const detail = { lat: event.lngLat.lat, lng: event.lngLat.lng, originalEvent: event.originalEvent, mode };
     window.dispatchEvent(new CustomEvent("network-map:native-dblclick", { detail }));
-    window.dispatchEvent(new CustomEvent("network-map:scene-dblclick", { detail }));
   });
 }
 
@@ -475,7 +510,6 @@ export function cleanupDualMapEngines(): void {
   toggleControl?.remove();
   mapbox2dHost?.remove();
   mapboxGlobeHost?.remove();
-  mapContainer?.classList.remove("map-scene-layer-host");
   mapWrap?.classList.remove("dual-engine-map-shell", "visible-engine-ready", "mapbox-globe-active", "mapbox-globe-loading");
   mapContainer = null;
   mapWrap = null;

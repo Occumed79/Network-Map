@@ -113,8 +113,6 @@ assert.match(bridge, /map\.on\(["']moveend["'],\s*emitChange\)/);
 assert.match(bridge, /map\.on\(["']zoomend["'],\s*emitChange\)/);
 assert.match(bridge, /map\.on\(["']resize["'],\s*emitChange\)/);
 assert.match(bridge, /map\.off\(["']moveend["'],\s*emitChange\)/);
-assert.doesNotMatch(bridge, /registerLeafletMapInitializer/);
-assert.doesNotMatch(bridge, /L\.map\s*=/);
 assert.doesNotMatch(bridge, /setTimeout\(\(\) => registerMap\(map\),\s*0\)/);
 
 const main = readFileSync(resolve(here, '../src/main.tsx'), 'utf8');

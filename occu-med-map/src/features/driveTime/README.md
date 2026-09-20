@@ -1,49 +1,25 @@
 # Native Drive-Time Feature
 
-This folder contains the native Mapbox/React replacement for the temporary DOM-based ETA ranking integration.
+Drive-time ranking is owned by React and Mapbox GL.
 
-## Purpose
-
-Move drive-time ranking into reusable app code:
+## Flow
 
 ```text
-provider results -> ETA candidates -> Mapbox Directions -> ranked ETA result -> React cards
+provider results -> ETA candidates -> Mapbox Directions -> ranked ETA result -> React cards -> Mapbox route
 ```
-
-## Feature flag
-
-The application imports a feature-flagged drive-time runtime through `main.tsx`.
-
-It activates only when:
-
-```text
-VITE_NATIVE_DRIVE_TIME=true
-```
-
-Without that flag, the runtime exits immediately and does not add controls or map listeners.
 
 ## Main modules
 
 - `providerEtaTypes.ts` — shared types
 - `providerEtaEngine.ts` — ranking engine and distance prep
-- `providerEtaStore.ts` — lightweight app-level result store
+- `providerEtaStore.ts` — app-level result store
 - `providerEtaExport.ts` — CSV/text export helpers
 - `providerCandidateAdapter.ts` — converts normalized provider results into ETA candidates
 - `useProviderEta.ts` — React hook for ranking/clearing/copying ETA results
 - `ProviderEtaBadge.tsx` — card-level ETA badge and actions
 - `DriveTimeControlStrip.tsx` — native result-panel control strip
 - `etaRouteEvents.ts` — route request event bridge
-- `mapboxEtaRouteLayer.ts` — native route drawing helper
-- `nativeDriveTimeRuntime.ts` — feature-flagged native drive-time runtime
+- `mapboxEtaRouteLayer.ts` — Mapbox route drawing
+- `nativeDriveTimeRuntime.ts` — Mapbox route-layer lifecycle owner
 
-## Replacement target
-
-Eventually replace or retire:
-
-- `rightPanelCompactor.ts` ETA card injection
-- `liveFinderDriveTools.ts` click-proxy behavior
-- DOM text matching for provider cards
-
-## Merge rule
-
-Do not merge to `main` until this is wired into `App.tsx`, built, and visually checked on a non-production branch.
+There is no DOM-injection fallback and no drive-time feature flag. The native implementation is the only Live Finder ETA path.

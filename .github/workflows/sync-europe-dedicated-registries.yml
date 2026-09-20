@@ -51,13 +51,15 @@ jobs:
       max-parallel: 6
       matrix:
         include:
+          - { source: armenia-uhif, country: AM, country_name: Armenia, source_key: am_uhif_healthcare, cadence: weekly, minimum: 500 }
+          - { source: georgia-hmis, country: GE, country_name: Georgia, source_key: ge_geostat_healthcare, cadence: weekly, minimum: 200 }
+          - { source: greenland-healthcare, country: GL, country_name: Greenland, source_key: gl_healthcare, cadence: weekly, minimum: 35 }
+          - { source: england-cqc, country: GB, country_name: England, source_key: gb_cqc_healthcare, cadence: weekly, minimum: 5000 }
           - { source: denmark-sor-healthcare, country: DK, country_name: Denmark, source_key: dk_sor_healthcare, cadence: daily, minimum: 1000 }
           - { source: france-finess, country: FR, country_name: France, source_key: fr_finess, cadence: daily, minimum: 10000 }
-          - { source: england-cqc, country: GB, country_name: England, source_key: gb_cqc_healthcare, cadence: weekly, minimum: 5000 }
           - { source: northern-ireland-gp, country: GB, country_name: Northern-Ireland, source_key: gb_ni_gp, cadence: weekly, minimum: 200 }
           - { source: ukraine-nhsu, country: UA, country_name: Ukraine, source_key: ua_nhsu_pmg, cadence: weekly, minimum: 2000 }
           - { source: andorra-cass, country: AD, country_name: Andorra, source_key: ad_cass_healthcare, cadence: weekly, minimum: 15 }
-          - { source: armenia-uhif, country: AM, country_name: Armenia, source_key: am_uhif_healthcare, cadence: weekly, minimum: 500 }
           - { source: bosnia-domestic, country: BA, country_name: Bosnia-and-Herzegovina, source_key: ba_domestic_healthcare, cadence: weekly, minimum: 55 }
           - { source: iceland-doh, country: IS, country_name: Iceland, source_key: is_doh_healthcare_operators, cadence: weekly, minimum: 200 }
           - { source: kosovo-moh-private, country: XK, country_name: Kosovo, source_key: xk_moh_private_licensed, cadence: monthly, minimum: 40 }
@@ -66,8 +68,6 @@ jobs:
           - { source: san-marino-authorized, country: SM, country_name: San-Marino, source_key: sm_authorized_healthcare, cadence: monthly, minimum: 12 }
           - { source: turkey-moh-health-tourism, country: TR, country_name: Türkiye, source_key: tr_moh_health_tourism, cadence: monthly, minimum: 100 }
           - { source: north-macedonia-moh, country: MK, country_name: North-Macedonia, source_key: mk_moh_health_centers, cadence: monthly, minimum: 20 }
-          - { source: georgia-hmis, country: GE, country_name: Georgia, source_key: ge_geostat_healthcare, cadence: weekly, minimum: 200 }
-          - { source: greenland-healthcare, country: GL, country_name: Greenland, source_key: gl_healthcare, cadence: weekly, minimum: 35 }
     steps:
       - name: Decide whether this source is due
         shell: bash

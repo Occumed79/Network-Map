@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { croatiaHzzoCoordinates, parseCroatiaHzzoCoordinate } from "../src/lib/croatiaHzzoCoordinates";
-import { unwrapPtvServiceLocationBatch } from "../../scripts/ptv-service-channel.mjs";
+import { normalizePtvCoordinates, unwrapPtvServiceLocationBatch } from "../../scripts/ptv-service-channel.mjs";
 
 assert.equal(parseCroatiaHzzoCoordinate("168.337.154.388", 12, 21), 16.8337154388);
 assert.equal(parseCroatiaHzzoCoordinate("458.930.847.567", 41, 48), 45.8930847567);
@@ -30,6 +30,11 @@ assert.deepEqual(
   unwrapPtvServiceLocationBatch([{ locationChannel: wrappedPtvLocation }]),
   [wrappedPtvLocation],
 );
+const kuopioCoordinates = normalizePtvCoordinates("6973940.837", "534902.699");
+assert.ok(kuopioCoordinates);
+assert.ok(kuopioCoordinates.lat > 62.8 && kuopioCoordinates.lat < 63.0);
+assert.ok(kuopioCoordinates.lng > 27.5 && kuopioCoordinates.lng < 27.9);
+assert.deepEqual(normalizePtvCoordinates("62.892", "27.678"), { lat: 62.892, lng: 27.678 });
 
 for (const relativePath of [
   "../../scripts/promote-staged-government-registry.sql",

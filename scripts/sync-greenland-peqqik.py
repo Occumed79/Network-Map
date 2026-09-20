@@ -23,6 +23,7 @@ NOMINATIM = "https://nominatim.openstreetmap.org/search"
 PHOTON = "https://photon.komoot.io/api/"
 USER_AGENT = "Occu-Med-Network-Map/1.0 (+https://github.com/Occumed79/Network-Map)"
 WAYBACK_CDX = "https://web.archive.org/cdx/search/cdx"
+PEQQIK_LIVE_UNAVAILABLE = False
 COLUMNS = [
     "source_record_id","source_url","name","normalized_name","address_line1",
     "formatted_address","city","state_region","postal_code","country_code",
@@ -110,6 +111,12 @@ def archived_official_snapshot(url):
         return ""
 
 def safe_get(url, timeout=60, allow_archive=True):
+    global PEQQIK_LIVE_UNAVAILABLE
+    is_live_peqqik = urlparse(url).netloc.lower().endswith("peqqik.gl")
+    if allow_archive and is_live_peqqik and PEQQIK_LIVE_UNAVAILABLE:
+        snapshot_url = archived_official_snapshot(url)
+        if snapshot_url:
+            return safe_get(snapshot_url, timeout=timeout, allow_archive=False)
     last = None
     for attempt in range(5):
         try:
@@ -117,6 +124,11 @@ def safe_get(url, timeout=60, allow_archive=True):
                 url, timeout=timeout, allow_redirects=True,
                 headers={"User-Agent": USER_AGENT, "Accept-Language": "da,kl,en"},
             )
+            if r.status_code >= 500:
+                last = requests.HTTPError(f"{r.status_code} from {url}")
+                if is_live_peqqik:
+                    PEQQIK_LIVE_UNAVAILABLE = True
+                break
             r.raise_for_status()
             return r
         except Exception as exc:
@@ -139,7 +151,7 @@ def internal_contact_url(url):
         return False
     return (
         parsed.netloc.lower().endswith("peqqik.gl")
-        and parsed.path.lower().startswith("/kontakt/sundhedscentre")
+        and bool(re.match(r"^/(?:[a-z]{2}-[a-z]{2}/)?kontakt/sundhedscentre", parsed.path, re.I))
     )
 
 def phone_from(raw):
@@ -164,6 +176,11 @@ def address_from(raw, city):
         if re.search(r"\b(?:vej|aqqut|gade|street|b-\d+|postbox)\b", line, re.I) and len(line) < 100:
             return line
     return ""
+
+def locality_from_name(name):
+    value = text(name).split(",")[-1]
+    value = re.sub(r"\b(?:Sundhedscenter|Sundhedcenter|Peqqissaavik|Regionssygehus|Hospital|Sygehus|Landshospitalet)\b", " ", value, flags=re.I)
+    return text(value.strip(" ,-"))
 
 def group_localities(soup):
     raw = soup.get_text("\n", strip=True)
@@ -247,10 +264,30 @@ def main():
         except Exception:
             continue
         soup = BeautifulSoup(response.text, "html.parser")
+        page_url = canonical_source_url(response.url)
         for anchor in soup.find_all("a", href=True):
-            href = canonical_source_url(urljoin(response.url, anchor["href"]).split("#",1)[0])
-            if internal_contact_url(href) and href not in seen_urls:
-                queue.append((href, depth + 1))
+            href = canonical_source_url(urljoin(page_url, anchor["href"]).split("#",1)[0])
+            label = text(anchor.get_text(" ", strip=True))
+            label_norm = norm(label)
+            if not internal_contact_url(href):
+                continue
+            if any(word in label_norm for word in GROUP_WORDS):
+                if href not in seen_urls:
+                    queue.append((href, depth + 1))
+                continue
+            if any(word in label_norm for word in FACILITY_WORDS):
+                locality = locality_from_name(label)
+                facilities.setdefault(norm(label), {
+                    "name": label,
+                    "locality": locality,
+                    "url": href,
+                    "phone": "",
+                    "email": "",
+                    "address": "",
+                    "postal": "",
+                    "region": region_for(label + " " + href),
+                    "type": classify(label),
+                })
 
         heading = soup.find("h1")
         title = text(heading.get_text(" ", strip=True) if heading else soup.title.get_text(" ", strip=True) if soup.title else "")

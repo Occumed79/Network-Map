@@ -3502,7 +3502,7 @@ export default function App() {
 
             <section className="provider-drawer-section">
               <label className="provider-field-label" htmlFor="provider-type-filter">Provider type</label>
-              <select id="provider-type-filter" className="provider-type-filter" value={masterProviderTypeFilter} onChange={event=>{setMasterProviderTypeFilter(event.target.value);setDatasetStatus(prev=>({...prev,myClinics:{loading:false,error:'',loaded:false}}));}}>
+              <select id="provider-type-filter" className="provider-type-filter" value={masterProviderTypeFilter} onChange={event=>{const value=event.target.value;setMasterProviderTypeFilter(value);setProviderExplorerFilters(prev=>({...prev,clinicType:value}));}}>
                 {MASTER_PROVIDER_TYPE_OPTIONS.map(([value,label])=><option key={value} value={value}>{label}</option>)}
               </select>
               <label className="provider-live-toggle">

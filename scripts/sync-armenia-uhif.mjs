@@ -294,29 +294,28 @@ try {
   // exposes records beyond the first map payload through repeated "Load More"
   // server actions, so exhaust that list before checking completeness.
   let stagnantLoads = 0;
-  for (let attempt = 0; attempt < 120 && stagnantLoads < 3; attempt += 1) {
-    const beforeLength = (await page.locator("body").innerText()).length;
+  let renderedCount = (await renderedHospitalCards(page)).length;
+  for (let attempt = 0; attempt < 160 && stagnantLoads < 8 && renderedCount < reportedTotal; attempt += 1) {
+    const beforeCount = renderedCount;
     let clicked = false;
 
     const roleButton = page.getByRole("button", { name: /load more/i }).first();
     if (await roleButton.count() && await roleButton.isVisible().catch(() => false)) {
       await roleButton.scrollIntoViewIfNeeded().catch(() => {});
-      await roleButton.click({ timeout: 10_000 }).catch(() => {});
-      clicked = true;
+      clicked = await roleButton.click({ timeout: 10_000 }).then(() => true, () => false);
     }
 
     if (!clicked) {
       const textTarget = page.getByText(/^\s*Load More\s*(?:\(.*\))?\s*$/i).last();
       if (await textTarget.count() && await textTarget.isVisible().catch(() => false)) {
         await textTarget.scrollIntoViewIfNeeded().catch(() => {});
-        await textTarget.click({ timeout: 10_000 }).catch(() => {});
-        clicked = true;
+        clicked = await textTarget.click({ timeout: 10_000 }).then(() => true, () => false);
       }
     }
 
     if (!clicked) {
       clicked = await page.evaluate(() => {
-        const nodes = [...document.querySelectorAll("button,a,div,span")];
+        const nodes = [...document.querySelectorAll("button,a,[role='button']")];
         const target = nodes.find((node) => /^\s*Load More\b/i.test((node.textContent || "").trim()));
         if (!target || typeof target.click !== "function") return false;
         target.scrollIntoView({ block: "center" });
@@ -326,9 +325,22 @@ try {
     }
 
     if (!clicked) break;
-    await page.waitForTimeout(700);
-    const afterLength = (await page.locator("body").innerText()).length;
-    stagnantLoads = afterLength <= beforeLength ? stagnantLoads + 1 : 0;
+    let afterCount = beforeCount;
+    for (let poll = 0; poll < 20; poll += 1) {
+      await page.waitForTimeout(500);
+      afterCount = (await renderedHospitalCards(page)).length;
+      if (afterCount > beforeCount) break;
+    }
+    const progressed = afterCount > beforeCount;
+    stagnantLoads = progressed ? 0 : stagnantLoads + 1;
+    renderedCount = Math.max(renderedCount, afterCount);
+    console.log(JSON.stringify({
+      uhifLoadMoreAttempt: attempt + 1,
+      renderedBefore: beforeCount,
+      renderedAfter: afterCount,
+      progressed,
+      stagnantLoads,
+    }));
   }
   await page.waitForTimeout(1_000);
   // Capture the fully expanded list before switching to Map view, which

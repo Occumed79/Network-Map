@@ -13,10 +13,6 @@ import "./providerTypeNormalizationRuntime";
 import { switchMapModeWithTransition } from "./dualMapTransitionRuntime";
 import "./providerExplorerRequestStabilityRuntime";
 import "./providerExplorerExplicitVisualizationRuntime";
-// Source selection is user-facing state, not optional telemetry. Install its
-// change listener before React mounts so a fast user toggle can never be
-// overwritten later by a lazily loaded default-selection restore.
-import "./providerSourceSelectionPersistenceRuntime";
 import App from "./App";
 import ProviderLayerRegistryPanel from "./ProviderLayerRegistryPanel";
 import AppErrorBoundary, { ApplicationFailureScreen } from "./AppErrorBoundary";

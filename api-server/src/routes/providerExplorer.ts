@@ -33,8 +33,8 @@ type CandidatePayload = Partial<ProviderFeature> & { provider?: Partial<Provider
 type OverpassElement = { id: number; lat?: number; lon?: number; center?: { lat?: number; lon?: number }; tags?: Record<string, string> };
 
 const SOURCE_LABELS: Record<string, string> = { bluehive: "BlueHive", dentists: "Dentist Dataset", indexed: "indexed", "my-clinics": "My Clinics", saved: "My Clinics" };
-const MAX_RECORD_LIMIT = 100;
-const MAX_PIN_LIMIT = 5000;
+const MAX_RECORD_PAGE_SIZE = 5000;
+const MAX_PIN_PAGE_SIZE = 5000;
 const MAX_LIVE_RADIUS_MILES = 50;
 const OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter";
 const OVERPASS_CACHE_MS = 5 * 60 * 1000;
@@ -427,11 +427,11 @@ async function handleRecords(req: Request, res: Response, forcedMode?: Mode) {
       if (existing) existing.count += Number(cell.count || 0);
       else merged.set(key, { lat, lng, count: Number(cell.count || 0) });
     }
-    const cells = [...merged.values()].sort((a, b) => b.count - a.count).slice(0, 2000);
+    const cells = [...merged.values()].sort((a, b) => b.count - a.count);
     const total = results.reduce((sum, result) => sum + result.total, 0);
     res.json({ mode, total, cells, count: cells.length, precision, warning: warnings.join(" ") || undefined, warnings, partial: warnings.length > 0, databaseProjects: providerProjects.map((project) => project.id), status: { persistenceConfigured: true, schema, ...setup } }); return;
   }
-  const page = Math.max(1, Number(req.query.page) || 1); const maxLimit = mode === "pins" ? MAX_PIN_LIMIT : MAX_RECORD_LIMIT; const limit = Math.min(Math.max(1, Number(req.query.limit) || (mode === "pins" ? 1000 : 25)), maxLimit);
+  const page = Math.max(1, Number(req.query.page) || 1); const maxPageSize = mode === "pins" ? MAX_PIN_PAGE_SIZE : MAX_RECORD_PAGE_SIZE; const limit = Math.min(Math.max(1, Number(req.query.limit) || (mode === "pins" ? 1000 : 25)), maxPageSize);
   const stored = providerProjects.length > 1
     ? await queryStoredAcrossProviderProjects(providerProjects, ctx, mode, page, limit)
     : { ...(await queryStored(pool, schema, ctx, mode, setup.spatialEngine, page, limit)), warnings: [] as string[], databaseProjects: ["provider-project-1"] };
@@ -441,7 +441,7 @@ async function handleRecords(req: Request, res: Response, forcedMode?: Mode) {
   const live = ctx.includeLive || ctx.source === "live" || ctx.sourceKind === "live" ? await fetchLiveProviders(ctx) : { providers: [] as ProviderFeature[], warning: undefined };
   const providers = [...stored.providers, ...cand.providers, ...live.providers].slice(0, limit); const total = stored.total + cand.total + live.providers.length;
   const warnings = [live.warning, ...stored.warnings].filter((warning): warning is string => Boolean(warning));
-  res.json({ mode, providers, records: providers, total, count: providers.length, page, limit, hasMore: page * limit < total, visibleCount: providers.length, warning: warnings.join(" ") || undefined, warnings, partial: stored.warnings.length > 0, databaseProjects: stored.databaseProjects, status: { persistenceConfigured: true, schema, ...setup } });
+  res.json({ mode, providers, records: providers, total, count: providers.length, page, limit, hasMore: page * limit < total, visibleCount: providers.length, visibleCapped: false, warning: warnings.join(" ") || undefined, warnings, partial: stored.warnings.length > 0, databaseProjects: stored.databaseProjects, status: { persistenceConfigured: true, schema, ...setup } });
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

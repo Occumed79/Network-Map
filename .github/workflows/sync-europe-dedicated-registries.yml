@@ -29,6 +29,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: europe-dedicated-registry-sync
@@ -44,24 +45,21 @@ jobs:
       max-parallel: 3
       matrix:
         include:
-          - { source: denmark-sor-healthcare, country: DK, country_name: Denmark, source_key: dk_sor_healthcare, secret: DENMARK_REGISTRY_DATABASE_URL, cadence: daily, minimum: 1000 }
-          - { source: france-finess, country: FR, country_name: France, source_key: fr_finess, secret: FRANCE_REGISTRY_DATABASE_URL, cadence: daily, minimum: 10000 }
-          - { source: england-cqc, country: GB, country_name: England, source_key: gb_cqc_healthcare, secret: ENGLAND_REGISTRY_DATABASE_URL, cadence: weekly, minimum: 5000 }
-          - { source: northern-ireland-gp, country: GB, country_name: Northern-Ireland, source_key: gb_ni_gp, secret: NORTHERN_IRELAND_REGISTRY_DATABASE_URL, cadence: weekly, minimum: 400 }
-          - { source: ukraine-nhsu, country: UA, country_name: Ukraine, source_key: ua_nhsu_pmg, secret: UKRAINE_REGISTRY_DATABASE_URL, cadence: weekly, minimum: 2000 }
-          - { source: andorra-cass, country: AD, country_name: Andorra, source_key: ad_cass_healthcare, secret: ANDORRA_REGISTRY_DATABASE_URL, cadence: weekly, minimum: 120 }
-          - { source: armenia-uhif, country: AM, country_name: Armenia, source_key: am_uhif_healthcare, secret: ARMENIA_REGISTRY_DATABASE_URL, cadence: weekly, minimum: 500 }
-          - { source: bosnia-domestic, country: BA, country_name: Bosnia-and-Herzegovina, source_key: ba_domestic_healthcare, secret: BOSNIA_HERZEGOVINA_REGISTRY_DATABASE_URL, cadence: weekly, minimum: 55 }
-          - { source: iceland-doh, country: IS, country_name: Iceland, source_key: is_doh_healthcare_operators, secret: ICELAND_REGISTRY_DATABASE_URL, cadence: weekly, minimum: 200 }
-          - { source: kosovo-moh-private, country: XK, country_name: Kosovo, source_key: xk_moh_private_licensed, secret: KOSOVO_REGISTRY_DATABASE_URL, cadence: monthly, minimum: 40 }
-          - { source: azerbaijan-tabib, country: AZ, country_name: Azerbaijan, source_key: az_tabib_healthcare, secret: AZERBAIJAN_REGISTRY_DATABASE_URL, cadence: monthly, minimum: 100 }
-          - { source: liechtenstein-lkv, country: LI, country_name: Liechtenstein, source_key: li_lkv_okp, secret: LIECHTENSTEIN_REGISTRY_DATABASE_URL, cadence: monthly, minimum: 25 }
-          - { source: san-marino-authorized, country: SM, country_name: San-Marino, source_key: sm_authorized_healthcare, secret: SAN_MARINO_REGISTRY_DATABASE_URL, cadence: monthly, minimum: 12 }
-          - { source: turkey-moh-health-tourism, country: TR, country_name: Türkiye, source_key: tr_moh_health_tourism, secret: TURKIYE_REGISTRY_DATABASE_URL, cadence: monthly, minimum: 100 }
-          - { source: north-macedonia-moh, country: MK, country_name: North-Macedonia, source_key: mk_moh_health_centers, secret: NORTH_MACEDONIA_REGISTRY_DATABASE_URL, cadence: monthly, minimum: 20 }
-    env:
-      TARGET_DATABASE_URL: ${{ secrets[matrix.secret] }}
-
+          - { source: denmark-sor-healthcare, country: DK, country_name: Denmark, source_key: dk_sor_healthcare, cadence: daily, minimum: 1000 }
+          - { source: france-finess, country: FR, country_name: France, source_key: fr_finess, cadence: daily, minimum: 10000 }
+          - { source: england-cqc, country: GB, country_name: England, source_key: gb_cqc_healthcare, cadence: weekly, minimum: 5000 }
+          - { source: northern-ireland-gp, country: GB, country_name: Northern-Ireland, source_key: gb_ni_gp, cadence: weekly, minimum: 400 }
+          - { source: ukraine-nhsu, country: UA, country_name: Ukraine, source_key: ua_nhsu_pmg, cadence: weekly, minimum: 2000 }
+          - { source: andorra-cass, country: AD, country_name: Andorra, source_key: ad_cass_healthcare, cadence: weekly, minimum: 120 }
+          - { source: armenia-uhif, country: AM, country_name: Armenia, source_key: am_uhif_healthcare, cadence: weekly, minimum: 500 }
+          - { source: bosnia-domestic, country: BA, country_name: Bosnia-and-Herzegovina, source_key: ba_domestic_healthcare, cadence: weekly, minimum: 55 }
+          - { source: iceland-doh, country: IS, country_name: Iceland, source_key: is_doh_healthcare_operators, cadence: weekly, minimum: 200 }
+          - { source: kosovo-moh-private, country: XK, country_name: Kosovo, source_key: xk_moh_private_licensed, cadence: monthly, minimum: 40 }
+          - { source: azerbaijan-tabib, country: AZ, country_name: Azerbaijan, source_key: az_tabib_healthcare, cadence: monthly, minimum: 100 }
+          - { source: liechtenstein-lkv, country: LI, country_name: Liechtenstein, source_key: li_lkv_okp, cadence: monthly, minimum: 25 }
+          - { source: san-marino-authorized, country: SM, country_name: San-Marino, source_key: sm_authorized_healthcare, cadence: monthly, minimum: 12 }
+          - { source: turkey-moh-health-tourism, country: TR, country_name: Türkiye, source_key: tr_moh_health_tourism, cadence: monthly, minimum: 100 }
+          - { source: north-macedonia-moh, country: MK, country_name: North-Macedonia, source_key: mk_moh_health_centers, cadence: monthly, minimum: 20 }
     steps:
       - name: Decide whether this source is due
         shell: bash
@@ -81,6 +79,11 @@ jobs:
         if: env.RUN_SYNC == 'true'
         with:
           persist-credentials: false
+      - name: Resolve dedicated registry database
+        if: env.RUN_SYNC == 'true'
+        uses: ./.github/actions/resolve-registry-database
+        with:
+          source: ${{ matrix.source }}
       - uses: actions/setup-node@v4
         if: env.RUN_SYNC == 'true'
         with:
@@ -108,7 +111,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "${{ matrix.secret }} is missing" >&2; exit 1; }
+          [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "Dedicated registry database connection is missing" >&2; exit 1; }
           echo "::add-mask::${TARGET_DATABASE_URL}"
           mkdir -p /tmp/europe-registry
           output=/tmp/europe-registry/provider.tsv

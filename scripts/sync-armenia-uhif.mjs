@@ -271,9 +271,11 @@ async function renderedHospitalCards(page) {
   return await page.evaluate(() => {
     const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
     const output = [];
-    for (const heading of [...document.querySelectorAll("h3")]) {
+
+    // Prefer semantic headings when present.
+    for (const heading of [...document.querySelectorAll("h1,h2,h3,h4,h5,h6")]) {
       const name = clean(heading.textContent);
-      if (!name || /services and hospitals|referral assistant|contact/i.test(name)) continue;
+      if (!name || /services and hospitals|referral assistant|contact|medical organizations/i.test(name)) continue;
       let node = heading.parentElement;
       let chosen = null;
       for (let depth = 0; node && depth < 7; depth += 1, node = node.parentElement) {
@@ -285,18 +287,28 @@ async function renderedHospitalCards(page) {
       }
       if (!chosen) continue;
       const lines = String(chosen.innerText || "").split(/\n+/).map(clean).filter(Boolean);
-      const phone = (lines.join(" ").match(/\+374\s*\d[\d\s()-]{5,}/) || [""])[0];
-      const address = lines.find((line) =>
-        line !== name
-        && line !== phone
-        && !/^See All/i.test(line)
-        && !/^Load More/i.test(line)
-        && !/^\+374/.test(line)
-        && line.length >= 3
-        && line.length <= 140
-      ) || "";
-      output.push({ name, address, phone });
+      const phoneIndex = lines.findIndex((line) => /^\+374\s*\d/.test(line));
+      if (phoneIndex < 1) continue;
+      const address = clean(lines[phoneIndex - 1]);
+      output.push({ name, address, phone: clean(lines[phoneIndex]) });
     }
+
+    // The current UHIF client can render cards without heading tags. Its
+    // visible list is still consistently Name -> Address -> +374 phone.
+    if (!output.length) {
+      const lines = String(document.body?.innerText || "")
+        .split(/\n+/).map(clean).filter(Boolean);
+      for (let i = 2; i < lines.length; i += 1) {
+        if (!/^\+374\s*\d/.test(lines[i])) continue;
+        const address = clean(lines[i - 1]);
+        const name = clean(lines[i - 2]);
+        if (!name || !address) continue;
+        if (/found \d+ results|load more|all regions|all services|medical centers|pharmacies/i.test(name)) continue;
+        if (name.length > 220 || address.length > 180) continue;
+        output.push({ name, address, phone: clean(lines[i]) });
+      }
+    }
+
     const seen = new Set();
     return output.filter((item) => {
       const key = (item.name + "|" + item.address).toLowerCase();
@@ -382,12 +394,42 @@ try {
   // The list view is paginated independently from the map payload. UHIF now
   // exposes records beyond the first map payload through repeated "Load More"
   // server actions, so exhaust that list before checking completeness.
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const loadMore = page.getByRole("button", { name: /load more/i }).first();
-    if (!(await loadMore.count()) || !(await loadMore.isVisible().catch(() => false))) break;
-    await loadMore.scrollIntoViewIfNeeded().catch(() => {});
-    await loadMore.click({ timeout: 10_000 });
-    await page.waitForTimeout(650);
+  let stagnantLoads = 0;
+  for (let attempt = 0; attempt < 120 && stagnantLoads < 3; attempt += 1) {
+    const beforeLength = (await page.locator("body").innerText()).length;
+    let clicked = false;
+
+    const roleButton = page.getByRole("button", { name: /load more/i }).first();
+    if (await roleButton.count() && await roleButton.isVisible().catch(() => false)) {
+      await roleButton.scrollIntoViewIfNeeded().catch(() => {});
+      await roleButton.click({ timeout: 10_000 }).catch(() => {});
+      clicked = true;
+    }
+
+    if (!clicked) {
+      const textTarget = page.getByText(/^\s*Load More\s*(?:\(.*\))?\s*$/i).last();
+      if (await textTarget.count() && await textTarget.isVisible().catch(() => false)) {
+        await textTarget.scrollIntoViewIfNeeded().catch(() => {});
+        await textTarget.click({ timeout: 10_000 }).catch(() => {});
+        clicked = true;
+      }
+    }
+
+    if (!clicked) {
+      clicked = await page.evaluate(() => {
+        const nodes = [...document.querySelectorAll("button,a,div,span")];
+        const target = nodes.find((node) => /^\s*Load More\b/i.test((node.textContent || "").trim()));
+        if (!target || typeof target.click !== "function") return false;
+        target.scrollIntoView({ block: "center" });
+        target.click();
+        return true;
+      });
+    }
+
+    if (!clicked) break;
+    await page.waitForTimeout(700);
+    const afterLength = (await page.locator("body").innerText()).length;
+    stagnantLoads = afterLength <= beforeLength ? stagnantLoads + 1 : 0;
   }
   await page.waitForTimeout(1_000);
 

@@ -197,6 +197,17 @@ export default function DynamicUploadedDatasetLayers() {
   }
 
   useEffect(() => {
+    const summary = Object.values(layers).reduce(
+      (acc, state) => ({
+        active: acc.active + (state.enabled ? 1 : 0),
+        visible: acc.visible + (state.enabled ? state.count : 0),
+      }),
+      { active: 0, visible: 0 },
+    );
+    window.dispatchEvent(new CustomEvent('network-map:uploaded-provider-registry-summary', { detail: summary }));
+  }, [layers]);
+
+  useEffect(() => {
     const controller = new AbortController();
     const refresh = () => { void refreshCatalog(controller.signal); };
     refresh();

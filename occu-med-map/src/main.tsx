@@ -13,6 +13,7 @@ import "./providerTypeNormalizationRuntime";
 import { switchMapModeWithTransition } from "./dualMapTransitionRuntime";
 import "./providerExplorerRequestStabilityRuntime";
 import "./providerExplorerExplicitVisualizationRuntime";
+import "./features/driveTime/nativeDriveTimeRuntime";
 import App from "./App";
 import ProviderLayerRegistryPanel from "./ProviderLayerRegistryPanel";
 import AppErrorBoundary, { ApplicationFailureScreen } from "./AppErrorBoundary";
@@ -32,7 +33,6 @@ import "./index.css";
 import "./liquid-glass-theme.css";
 import "./live-finder-ux.css";
 import "./mapbox-intelligence.css";
-import "./live-finder-eta-actions.css";
 import "./performance-safety.css";
 import "./app-shell-layout.css";
 import "./workflow-ui.css";
@@ -63,10 +63,7 @@ async function loadOptionalRuntimes(): Promise<void> {
     safeLoad("provider layer telemetry", () => import("./providerLayerTelemetryRuntime")),
     safeLoad("map performance telemetry", () => import("./mapPerformanceTelemetryRuntime")),
     safeLoad("technical diagnostics export", () => import("./technicalDiagnosticsExport")),
-    safeLoad("right panel", () => import("./rightPanelCompactor")),
-    safeLoad("live finder tools", () => import("./liveFinderDriveTools")),
     safeLoad("U.S. diagnostics", () => import("./usDiagnosticsGate")),
-    safeLoad("drive time", () => import("./features/driveTime/nativeDriveTimeRuntime")),
   ]);
   markOptionalRuntimesComplete();
 }

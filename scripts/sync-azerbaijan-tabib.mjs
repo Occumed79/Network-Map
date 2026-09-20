@@ -236,20 +236,28 @@ const output = new Map();
 let scanned = 0;
 let reused = 0;
 let newlyGeocoded = 0;
+let parentCoordinateFallbacks = 0;
 let skippedUnplaced = 0;
 let lastGeocodeAt = 0;
 
+const loadedSources = [];
 for (const source of SOURCES) {
   const raw = await fetchText(source, { referer: source.page });
   const objects = rowsToObjects(parseDelimited(raw));
   scanned += objects.length;
+  loadedSources.push({ source, objects });
+}
 
+const parentLocations = new Map();
+
+for (const { source, objects } of loadedSources) {
   for (const row of objects) {
     const name = likelyName(row);
     if (!name || normalizedKey(name).length < 3) continue;
     const parent = pick(row, ["tabeliyinde oldugu tibb muessisesi", "esas muessise"], ["tabeliyinde", "esas muessise", "parent"]);
-    const address = pick(row, ["unvan", "adres"], ["unvan", "adres"]);
-    const city = pick(row, ["seher", "rayon", "inzibati erazi"], ["seher", "rayon", "inzibati", "region"]);
+    let address = pick(row, ["unvan", "adres"], ["unvan", "adres"]);
+    let city = pick(row, ["seher", "rayon", "inzibati erazi"], ["seher", "rayon", "inzibati", "region"]);
+    const hasNativeLocation = Boolean(address || city);
     const type = pick(row, ["muessisenin novu", "tip"], ["nov", "tip", "profil"]);
     const code = pick(row, ["kod", "id", "muessise kodu"], ["kod", "identifik"]);
     const phone = pick(row, ["telefon"], ["telefon", "phone"]);
@@ -258,12 +266,16 @@ for (const source of SOURCES) {
     const identity = code || hash(`${normalizedKey(name)}|${normalizedKey(parent)}|${normalizedKey(address)}|${normalizedKey(city)}`).slice(0, 20);
     const sourceId = `az-tabib:${source.key}:${identity}`;
     let coordinates = existing.get(sourceId) || null;
+    let coordinateSource = coordinates ? "existing_exact" : "";
     if (coordinates) reused += 1;
-    if (!coordinates) {
-      if (!address && !city) { skippedUnplaced += 1; continue; }
+
+    const parentLocation = parent ? parentLocations.get(normalizedKey(parent)) : null;
+    if (!city && parentLocation?.city) city = parentLocation.city;
+
+    if (!coordinates && hasNativeLocation) {
       const wait = 1100 - (Date.now() - lastGeocodeAt);
       if (wait > 0) await sleep(wait);
-      coordinates = await geocode([name, address, city, "Azerbaijan"].filter(Boolean).join(", "));
+      coordinates = await geocode([name, address, city, parent, "Azerbaijan"].filter(Boolean).join(", "));
       lastGeocodeAt = Date.now();
       if (!coordinates && address && city) {
         const waitRetry = 1100 - (Date.now() - lastGeocodeAt);
@@ -271,13 +283,30 @@ for (const source of SOURCES) {
         coordinates = await geocode(`${address}, ${city}, Azerbaijan`);
         lastGeocodeAt = Date.now();
       }
-      if (!coordinates) { skippedUnplaced += 1; continue; }
-      newlyGeocoded += 1;
+      if (coordinates) {
+        newlyGeocoded += 1;
+        coordinateSource = "nominatim";
+      }
     }
+
+    if (!coordinates && source.key === "subordinate" && parentLocation?.coordinates) {
+      coordinates = parentLocation.coordinates;
+      coordinateSource = "parent_facility_fallback";
+      parentCoordinateFallbacks += 1;
+    }
+
+    if (!coordinates) { skippedUnplaced += 1; continue; }
 
     const normalized = normalizedKey(name);
     const formatted = [address, city, "Azerbaijan"].filter(Boolean).join(", ");
     const classification = classify(name, type, parent);
+    if (source.key === "direct") {
+      parentLocations.set(normalizedKey(name), {
+        city,
+        address,
+        coordinates: { lat: coordinates.lat, lng: coordinates.lng },
+      });
+    }
     const masterKey = `loc:${hash(JSON.stringify({
       name: normalized,
       address: formatted.toLowerCase(),
@@ -288,8 +317,12 @@ for (const source of SOURCES) {
     const rowOut = [
       sourceId, source.page, name, normalized, address, formatted, city, city, "", "AZ",
       coordinates.lat, coordinates.lng, phone, "", email, classification.primary,
-      postgresArray([...classification.tags, source.key === "subordinate" ? "tabib_subordinate_facility" : "tabib_direct_facility"]),
-      0.96, masterKey,
+      postgresArray([
+        ...classification.tags,
+        source.key === "subordinate" ? "tabib_subordinate_facility" : "tabib_direct_facility",
+        coordinateSource === "parent_facility_fallback" ? "coordinate_source:parent_facility_fallback" : "",
+      ]),
+      coordinateSource === "parent_facility_fallback" ? 0.78 : 0.96, masterKey,
     ];
 
     const dedupeKey = `${normalized}|${normalizedKey(address)}|${normalizedKey(city)}`;
@@ -301,4 +334,4 @@ const sorted = [...output.values()].sort((a, b) => String(a[2]).localeCompare(St
 if (!sorted.length) throw new Error("Azerbaijan TABIB normalization produced zero map-renderable facilities");
 fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 fs.writeFileSync(outputPath, `${[columns.join("\t"), ...sorted.map((row) => row.map(csvField).join("\t"))].join("\n")}\n`, "utf8");
-console.log(JSON.stringify({ source: "az_tabib_healthcare", scanned, mapRows: sorted.length, coordinatesReused: reused, newlyGeocoded, skippedUnplaced, outputPath }));
+console.log(JSON.stringify({ source: "az_tabib_healthcare", scanned, mapRows: sorted.length, coordinatesReused: reused, newlyGeocoded, parentCoordinateFallbacks, skippedUnplaced, outputPath }));

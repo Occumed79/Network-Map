@@ -146,8 +146,7 @@ body {
   isolation: isolate;
 }
 
-#map,
-.leaflet-container {
+#map {
   width: 100% !important;
   height: 100% !important;
   min-width: 0 !important;
@@ -159,7 +158,6 @@ body {
   max-width: calc(100% - 32px) !important;
 }
 
-.leaflet-control-zoom,
 .occumed-basemap-control,
 .occumed-map-tools-panel {
   margin-left: 12px !important;
@@ -380,8 +378,8 @@ body {
 }
 
 /* Desktop and laptop workspace ownership is persistent: the sidebar is a real
-   grid column, not an off-canvas drawer. Legacy mobile transform rules must not
-   be allowed to translate it outside the viewport at desktop widths. */
+   grid column, not an off-canvas drawer. Mobile transform rules must not
+   translate it outside the viewport at desktop widths. */
 @media (min-width: 769px) {
   .sidebar {
     transform: none !important;

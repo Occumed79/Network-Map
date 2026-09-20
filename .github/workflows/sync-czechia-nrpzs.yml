@@ -6,6 +6,7 @@ on:
     branches:
       - main
     paths:
+      - ".github/actions/resolve-registry-database/action.yml"
       - ".github/workflows/sync-czechia-nrpzs.yml"
       - "scripts/normalize-czechia-nrpzs.py"
       - "scripts/official-registry-schema.sql"

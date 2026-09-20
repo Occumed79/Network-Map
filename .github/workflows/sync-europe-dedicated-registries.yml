@@ -5,6 +5,7 @@ on:
   push:
     branches: [main]
     paths:
+      - ".github/actions/resolve-registry-database/action.yml"
       - ".github/workflows/sync-europe-dedicated-registries.yml"
       - "scripts/sync-andorra-cass.py"
       - "scripts/sync-armenia-uhif.mjs"

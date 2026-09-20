@@ -3130,11 +3130,18 @@ export default function App() {
 
   const dockMapToolsPanel = useCallback((panel:Element|null): boolean => {
     const host = mapToolsHostRef.current;
-    if (!(panel instanceof HTMLElement) || !host) return false;
+    if (!(panel instanceof HTMLElement) || !host || !panel.isConnected) return false;
     mapToolsPanelRef.current = panel;
     if (panel.parentElement !== host) host.appendChild(panel);
     panel.dataset.sidebarDocked = 'true';
     return true;
+  }, []);
+
+  const currentMapToolsPanel = useCallback((): HTMLElement | null => {
+    const remembered = mapToolsPanelRef.current;
+    if (remembered?.isConnected) return remembered;
+    if (remembered && !remembered.isConnected) mapToolsPanelRef.current = null;
+    return document.querySelector<HTMLElement>('.occumed-map-tools-panel');
   }, []);
 
   const handleSidebarTabKeyDown = useCallback((event:React.KeyboardEvent<HTMLButtonElement>, workspace:SidebarWorkspace) => {
@@ -3188,9 +3195,7 @@ export default function App() {
 
   useLayoutEffect(() => {
     if (sidebarWorkspace !== 'mapTools') return;
-    const redock = () => dockMapToolsPanel(
-      mapToolsPanelRef.current || document.querySelector('.occumed-map-tools-panel'),
-    );
+    const redock = () => dockMapToolsPanel(currentMapToolsPanel());
     redock();
     const frame = window.requestAnimationFrame(redock);
     const timer = window.setTimeout(redock, 120);
@@ -3198,16 +3203,16 @@ export default function App() {
       window.cancelAnimationFrame(frame);
       window.clearTimeout(timer);
     };
-  }, [dockMapToolsPanel, sidebarWorkspace]);
+  }, [currentMapToolsPanel, dockMapToolsPanel, sidebarWorkspace]);
 
   useEffect(() => {
     window.__NETWORK_MAP_SIDEBAR_WORKSPACES__ = {
       getActiveTab: () => sidebarWorkspaceRef.current,
       setActiveTab: selectSidebarWorkspace,
-      sync: () => { dockMapToolsPanel(mapToolsPanelRef.current || document.querySelector('.occumed-map-tools-panel')); },
+      sync: () => { dockMapToolsPanel(currentMapToolsPanel()); },
     };
     return () => { delete window.__NETWORK_MAP_SIDEBAR_WORKSPACES__; };
-  }, [dockMapToolsPanel, selectSidebarWorkspace]);
+  }, [currentMapToolsPanel, dockMapToolsPanel, selectSidebarWorkspace]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER

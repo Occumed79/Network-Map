@@ -4,8 +4,7 @@
 }
 
 .modal-backdrop.open .map-wrap,
-.modal-backdrop.open #map,
-.modal-backdrop.open .leaflet-container {
+.modal-backdrop.open #map {
   filter: none !important;
 }
 

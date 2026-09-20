@@ -292,7 +292,7 @@ registerMapboxMapInitializer({
       const point = resultPoints.get(id);
       if (!point) return;
       if (event.originalEvent && typeof event.originalEvent === "object") {
-        (event.originalEvent as unknown as Record<string, unknown>).__networkMapCompatHandled = true;
+        (event.originalEvent as unknown as Record<string, unknown>).__networkMapOverlayHandled = true;
       }
       openPoint(map, point);
       onResultSelect?.(id);

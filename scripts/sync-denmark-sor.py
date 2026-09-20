@@ -99,13 +99,17 @@ def dk_coordinates(row):
             return north, east
         if 54.3 <= east <= 58.0 and 7.4 <= north <= 15.6:
             return east, north
-        for scale in (1.0, 0.1, 0.01, 0.001, 0.0001):
-            try:
-                lng, lat = TRANSFORMER.transform(east * scale, north * scale)
-            except Exception:
-                continue
-            if 54.3 <= lat <= 58.0 and 7.4 <= lng <= 15.6:
-                return lat, lng
+        # The live SOR2 export currently labels the ~6.1M northing as
+        # EMeasure and the ~700k easting as NMeasure. Try both published and
+        # swapped order, while still bounding every result to Denmark.
+        for raw_east, raw_north in ((east, north), (north, east)):
+            for scale in (1.0, 0.1, 0.01, 0.001, 0.0001):
+                try:
+                    lng, lat = TRANSFORMER.transform(raw_east * scale, raw_north * scale)
+                except Exception:
+                    continue
+                if 54.3 <= lat <= 58.0 and 7.4 <= lng <= 15.6:
+                    return lat, lng
     return None
 
 
@@ -252,13 +256,13 @@ def main():
             entity_type = text(row.get("EntityTypeName"))
             institution_type = text(row.get("HealthInstitutionEntityTypeName")) or entity_type
         elif sor_type in {"OE", "IE"}:
-            # SOR2 frequently carries the usable inherited address/coordinates
-            # on organizational and production-unit rows, while the SI row is
-            # only the institution identity. Resolve those child rows back to
-            # their parent Health Institution and keep one map record per SI.
-            sor_id = text(row.get("HealthInstitutionSorId"))
-            name = text(row.get("HealthInstitutionEntityName"))
-            entity_type = text(row.get("HealthInstitutionEntityTypeName"))
+            # Child rows may point at a parent Health Institution, but the live
+            # SOR2 export also contains IE/OE healthcare entities with no parent
+            # reference. Use the parent when supplied; otherwise keep the
+            # coordinate-bearing entity itself instead of dropping it.
+            sor_id = text(row.get("HealthInstitutionSorId")) or text(row.get("SorId"))
+            name = text(row.get("HealthInstitutionEntityName")) or text(row.get("EntityName"))
+            entity_type = text(row.get("HealthInstitutionEntityTypeName")) or text(row.get("EntityTypeName"))
             institution_type = entity_type
         else:
             continue

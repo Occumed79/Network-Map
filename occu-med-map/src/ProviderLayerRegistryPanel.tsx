@@ -226,6 +226,17 @@ export default function ProviderLayerRegistryPanel() {
   }
 
   useEffect(() => {
+    const summary = Object.values(layers).reduce(
+      (acc, state) => ({
+        active: acc.active + (state.enabled ? 1 : 0),
+        visible: acc.visible + (state.enabled ? state.count : 0),
+      }),
+      { active: 0, visible: 0 },
+    );
+    window.dispatchEvent(new CustomEvent('network-map:provider-registry-summary', { detail: summary }));
+  }, [layers]);
+
+  useEffect(() => {
     const reloadVisible = () => {
       window.clearTimeout(reloadTimer.current);
       reloadTimer.current = window.setTimeout(() => {

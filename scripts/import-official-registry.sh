@@ -36,27 +36,27 @@ actual="$(psql "$TARGET_DATABASE_URL" -Atqc "
 }
 
 # PostgreSQL TRUNCATE is transactional. If promotion or metadata update fails,
-# the previous production snapshot is restored by rollback.
+# the previous production snapshot is restored by rollback. Feed the SQL through
+# stdin so psql performs :variable interpolation before sending it to PostgreSQL.
 psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 \
   -v source_key="$REGISTRY_SOURCE_KEY" \
   -v country_code="$REGISTRY_COUNTRY_CODE" \
-  -v record_count="$actual" \
-  -c "
-    BEGIN;
-    LOCK TABLE public.official_registry_providers IN ACCESS EXCLUSIVE MODE;
-    TRUNCATE public.official_registry_providers;
-    INSERT INTO public.official_registry_providers (${columns})
-      SELECT ${columns}
-      FROM public.official_registry_providers_stage;
-    INSERT INTO public.official_registry_metadata
-      (source_key, country_code, record_count, synchronized_at)
-    VALUES (:'source_key', :'country_code', :'record_count'::bigint, now())
-    ON CONFLICT (source_key) DO UPDATE SET
-      country_code = EXCLUDED.country_code,
-      record_count = EXCLUDED.record_count,
-      synchronized_at = EXCLUDED.synchronized_at;
-    COMMIT;
-    TRUNCATE public.official_registry_providers_stage;
-  "
+  -v record_count="$actual" <<SQL
+BEGIN;
+LOCK TABLE public.official_registry_providers IN ACCESS EXCLUSIVE MODE;
+TRUNCATE public.official_registry_providers;
+INSERT INTO public.official_registry_providers (${columns})
+  SELECT ${columns}
+  FROM public.official_registry_providers_stage;
+INSERT INTO public.official_registry_metadata
+  (source_key, country_code, record_count, synchronized_at)
+VALUES (:'source_key', :'country_code', :'record_count'::bigint, now())
+ON CONFLICT (source_key) DO UPDATE SET
+  country_code = EXCLUDED.country_code,
+  record_count = EXCLUDED.record_count,
+  synchronized_at = EXCLUDED.synchronized_at;
+COMMIT;
+TRUNCATE public.official_registry_providers_stage;
+SQL
 
 echo "Promoted ${actual} ${REGISTRY_SOURCE_KEY} providers"

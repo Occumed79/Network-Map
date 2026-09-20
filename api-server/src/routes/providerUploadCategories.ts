@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { getPool } from "@workspace/db";
+import { getProviderDatabaseProjects, type ProviderDatabaseProject } from "@workspace/db";
 import { isPersistenceConfigured } from "../lib/networkMapPersistence";
 import { parseOptionalNumber } from "../lib/providerCoordinates";
 import { queryWithStatementTimeout } from "../lib/queryWithStatementTimeout";
@@ -25,9 +25,9 @@ function asBounds(req: Request): Bounds | null {
   return { north, south, east, west };
 }
 
-async function uploadedSourceExists(sourceKey: string): Promise<boolean> {
+async function uploadedSourceExists(project: ProviderDatabaseProject, sourceKey: string): Promise<boolean> {
   const { rows } = await queryWithStatementTimeout(
-    getPool(),
+    project.pool,
     `SELECT EXISTS (
        SELECT 1
        FROM public.provider_source_catalog
@@ -111,39 +111,88 @@ router.get("/provider-upload-categories", async (_req: Request, res: Response) =
       return;
     }
 
-    const { rows } = await queryWithStatementTimeout(
-      getPool(),
-      `SELECT
-         catalog.source_key,
-         catalog.display_name,
-         catalog.source_kind,
-         count(DISTINCT pm.id)::int AS total
-       FROM public.provider_source_catalog catalog
-       LEFT JOIN public.provider_master_sources pms
-         ON pms.source_key = catalog.source_key
-       LEFT JOIN public.provider_master pm
-         ON pm.id = pms.master_provider_id
-        AND pm.active = true
-        AND pm.lat IS NOT NULL
-        AND pm.lng IS NOT NULL
-        AND pm.lat BETWEEN -90 AND 90
-        AND pm.lng BETWEEN -180 AND 180
-        AND (pm.lat <> 0 OR pm.lng <> 0)
-       WHERE catalog.active = true
-         AND catalog.source_kind = 'user_upload'
-         AND catalog.source_key <> $1
-       GROUP BY catalog.source_key, catalog.display_name, catalog.source_kind
-       ORDER BY lower(catalog.display_name), catalog.source_key`,
-      [DEFAULT_UPLOAD_SOURCE_KEY],
-    );
-
-    const categories = rows.map((row) => ({
-      id: `uploaded-source-${row.source_key}`,
-      label: text(row.display_name) || text(row.source_key) || "Uploaded dataset",
-      sourceKey: text(row.source_key),
-      total: Number(row.total || 0),
+    const warnings: string[] = [];
+    const projects = getProviderDatabaseProjects();
+    const projectResults = await Promise.all(projects.map(async (project) => {
+      try {
+        const { rows } = await queryWithStatementTimeout(
+          project.pool,
+          `SELECT
+             catalog.source_key,
+             catalog.display_name,
+             catalog.source_kind,
+             count(DISTINCT pm.id)::int AS total
+           FROM public.provider_source_catalog catalog
+           LEFT JOIN public.provider_master_sources pms
+             ON pms.source_key = catalog.source_key
+           LEFT JOIN public.provider_master pm
+             ON pm.id = pms.master_provider_id
+            AND pm.active = true
+            AND pm.lat IS NOT NULL
+            AND pm.lng IS NOT NULL
+            AND pm.lat BETWEEN -90 AND 90
+            AND pm.lng BETWEEN -180 AND 180
+            AND (pm.lat <> 0 OR pm.lng <> 0)
+           WHERE catalog.active = true
+             AND catalog.source_kind = 'user_upload'
+             AND catalog.source_key <> $1
+           GROUP BY catalog.source_key, catalog.display_name, catalog.source_kind`,
+          [DEFAULT_UPLOAD_SOURCE_KEY],
+        );
+        return { project, rows };
+      } catch (error) {
+        warnings.push(`${project.id}: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+      }
     }));
-    res.json({ categories, count: categories.length });
+
+    const merged = new Map<string, {
+      id: string;
+      label: string;
+      sourceKey: string;
+      total: number;
+      databaseProjects: string[];
+    }>();
+
+    for (const result of projectResults) {
+      if (!result) continue;
+      for (const row of result.rows) {
+        const sourceKey = text(row.source_key);
+        if (!sourceKey) continue;
+        const label = text(row.display_name) || sourceKey || "Uploaded dataset";
+        const current = merged.get(sourceKey);
+        if (current) {
+          current.total += Number(row.total || 0);
+          current.databaseProjects.push(result.project.id);
+          if (current.label === current.sourceKey && label !== sourceKey) current.label = label;
+        } else {
+          merged.set(sourceKey, {
+            id: `uploaded-source-${sourceKey}`,
+            label,
+            sourceKey,
+            total: Number(row.total || 0),
+            databaseProjects: [result.project.id],
+          });
+        }
+      }
+    }
+
+    const successfulProjects = projectResults.filter(Boolean).length;
+    if (!successfulProjects && warnings.length) {
+      throw new Error(warnings.join(" "));
+    }
+
+    const categories = [...merged.values()]
+      .sort((a, b) => a.label.localeCompare(b.label) || a.sourceKey.localeCompare(b.sourceKey));
+
+    warnings.sort();
+    res.json({
+      categories,
+      count: categories.length,
+      databaseProjects: projectResults.flatMap((result) => result ? [result.project.id] : []),
+      partial: warnings.length > 0,
+      ...(warnings.length ? { warnings, warning: warnings.join(" ") } : {}),
+    });
   } catch (error) {
     console.error("[ProviderUploadCategories] catalog query failed:", error);
     res.status(503).json({
@@ -168,56 +217,95 @@ router.get("/provider-upload-categories/:sourceKey", async (req: Request, res: R
       res.json({ providers: [], count: 0, loaded: 0, total: 0, page: 1, limit: 0, hasMore: false, sourceKey, visibleCapped: false });
       return;
     }
-    if (!(await uploadedSourceExists(sourceKey))) {
-      res.status(404).json({ error: "Uploaded dataset category was not found.", sourceKey });
-      return;
-    }
 
     const limit = Math.min(Math.max(Number(req.query.limit) || 2000, 1), MAX_PAGE_SIZE);
     const page = Math.max(Number(req.query.page) || 1, 1);
     const bounds = asBounds(req);
+    const warnings: string[] = [];
+    const projects = getProviderDatabaseProjects();
 
-    const countParams: unknown[] = [];
-    const countWhere = buildWhere(sourceKey, bounds, countParams);
-    const countResult = await queryWithStatementTimeout(
-      getPool(),
-      `SELECT count(*)::int AS total
-       FROM public.provider_master pm
-       WHERE ${countWhere}`,
-      countParams,
-    );
-    const total = Number(countResult.rows[0]?.total || 0);
+    const probes = (
+      await Promise.all(projects.map(async (project) => {
+        try {
+          if (!(await uploadedSourceExists(project, sourceKey))) return null;
+          const countParams: unknown[] = [];
+          const countWhere = buildWhere(sourceKey, bounds, countParams);
+          const countResult = await queryWithStatementTimeout(
+            project.pool,
+            `SELECT count(*)::int AS total
+             FROM public.provider_master pm
+             WHERE ${countWhere}`,
+            countParams,
+          );
+          return { project, total: Number(countResult.rows[0]?.total || 0) };
+        } catch (error) {
+          warnings.push(`${project.id}: ${error instanceof Error ? error.message : String(error)}`);
+          return null;
+        }
+      }))
+    ).filter((probe): probe is { project: ProviderDatabaseProject; total: number } => Boolean(probe));
 
-    const rowParams: unknown[] = [];
-    const rowWhere = buildWhere(sourceKey, bounds, rowParams);
-    rowParams.push(limit, (page - 1) * limit);
-    const limitParam = `$${rowParams.length - 1}`;
-    const offsetParam = `$${rowParams.length}`;
-    const { rows } = await queryWithStatementTimeout(
-      getPool(),
-      `SELECT
-         pm.id,
-         pm.master_key,
-         pm.name,
-         pm.formatted_address AS address,
-         pm.city,
-         pm.state_region AS admin_area,
-         pm.postal_code,
-         pm.lat,
-         pm.lng,
-         pm.phone,
-         pm.website,
-         pm.primary_provider_type,
-         pm.capability_tags,
-         pm.quality_score
-       FROM public.provider_master pm
-       WHERE ${rowWhere}
-       ORDER BY pm.name ASC, pm.id ASC
-       LIMIT ${limitParam} OFFSET ${offsetParam}`,
-      rowParams,
-    );
+    if (!probes.length) {
+      if (warnings.length === projects.length) {
+        throw new Error(warnings.join(" "));
+      }
+      res.status(404).json({ error: "Uploaded dataset category was not found.", sourceKey });
+      return;
+    }
+
+    const total = probes.reduce((sum, probe) => sum + probe.total, 0);
+    let offset = (page - 1) * limit;
+    let remaining = limit;
+    const rows: Record<string, unknown>[] = [];
+
+    for (const probe of probes) {
+      if (remaining <= 0) break;
+      if (offset >= probe.total) {
+        offset -= probe.total;
+        continue;
+      }
+
+      const requested = Math.min(remaining, probe.total - offset);
+      const rowParams: unknown[] = [];
+      const rowWhere = buildWhere(sourceKey, bounds, rowParams);
+      rowParams.push(requested, offset);
+      const limitParam = `$${rowParams.length - 1}`;
+      const offsetParam = `$${rowParams.length}`;
+
+      try {
+        const result = await queryWithStatementTimeout(
+          probe.project.pool,
+          `SELECT
+             pm.id,
+             pm.master_key,
+             pm.name,
+             pm.formatted_address AS address,
+             pm.city,
+             pm.state_region AS admin_area,
+             pm.postal_code,
+             pm.lat,
+             pm.lng,
+             pm.phone,
+             pm.website,
+             pm.primary_provider_type,
+             pm.capability_tags,
+             pm.quality_score
+           FROM public.provider_master pm
+           WHERE ${rowWhere}
+           ORDER BY pm.name ASC, pm.id ASC
+           LIMIT ${limitParam} OFFSET ${offsetParam}`,
+          rowParams,
+        );
+        rows.push(...result.rows);
+        remaining -= requested;
+      } catch (error) {
+        warnings.push(`${probe.project.id}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      offset = 0;
+    }
 
     const providers = rows.map((row) => toProvider(row, sourceKey));
+    warnings.sort();
     res.json({
       providers,
       count: providers.length,
@@ -227,6 +315,9 @@ router.get("/provider-upload-categories/:sourceKey", async (req: Request, res: R
       limit,
       hasMore: page * limit < total,
       sourceKey,
+      databaseProjects: probes.map((probe) => probe.project.id),
+      partial: warnings.length > 0,
+      ...(warnings.length ? { warnings, warning: warnings.join(" ") } : {}),
       visibleCapped: false,
     });
   } catch (error) {

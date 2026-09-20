@@ -4,6 +4,7 @@ import { chromium } from "playwright";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { navigateWithRetry } from "./lib/retry-navigation.mjs";
 
 const SOURCE_PAGE = "https://www.br.geostat.ge/register_geo/?lang=en";
 const NACE_CODES = ["86.10.0", "86.21.0", "86.22.0", "86.23.0", "86.90.0"];
@@ -112,7 +113,7 @@ async function controlForEconomicActivity(page){
 }
 
 async function runSearch(page,code){
-  await page.goto(SOURCE_PAGE,{waitUntil:"domcontentloaded",timeout:90000});
+  await navigateWithRetry(page, SOURCE_PAGE, { waitUntil:"domcontentloaded", timeout:90000 });
   await page.waitForTimeout(1500);
   const controls=await controlForEconomicActivity(page);
   if(!controls?.length) throw new Error("GeoStat Economic Activity controls were not discovered");

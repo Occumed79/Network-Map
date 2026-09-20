@@ -43,6 +43,32 @@ jobs:
           - { source: mexico-clues, country: MX, country_name: Mexico, source_key: mx_clues_2024, secret: MEXICO_REGISTRY_DATABASE_URL }
           - { source: taiwan-nlsc-medical, country: TW, country_name: Taiwan, source_key: tw_nlsc_medical, secret: TAIWAN_REGISTRY_DATABASE_URL }
           - { source: new-zealand-health-facilities, country: NZ, country_name: New-Zealand, source_key: nz_health_facilities, secret: NEW_ZEALAND_REGISTRY_DATABASE_URL }
+          - { source: wales-gp-main-sites, country: GB, country_name: Wales, source_key: gb_wales_gp_sites, secret: WALES_REGISTRY_DATABASE_URL }
+          - { source: scotland-nhs-hospitals, country: GB, country_name: Scotland, source_key: gb_scotland_nhs_hospitals, secret: SCOTLAND_REGISTRY_DATABASE_URL }
+          - { source: montenegro-health-facilities, country: ME, country_name: Montenegro, source_key: me_ministry_health_facilities, secret: MONTENEGRO_REGISTRY_DATABASE_URL }
+          - { source: cyprus-state-hospitals, country: CY, country_name: Cyprus, source_key: cy_moh_state_hospitals, secret: CYPRUS_REGISTRY_DATABASE_URL }
+          - { source: moldova-health-institutions, country: MD, country_name: Moldova, source_key: md_ministry_health_map, secret: MOLDOVA_REGISTRY_DATABASE_URL }
+          - { source: gisco-hospitals-albania, country: AL, country_name: Albania, source_key: eu_gisco_hospitals_al, secret: ALBANIA_REGISTRY_DATABASE_URL }
+          - { source: gisco-hospitals-austria, country: AT, country_name: Austria, source_key: eu_gisco_hospitals_at, secret: AUSTRIA_REGISTRY_DATABASE_URL }
+          - { source: gisco-hospitals-belgium, country: BE, country_name: Belgium, source_key: eu_gisco_hospitals_be, secret: BELGIUM_REGISTRY_DATABASE_URL }
+          - { source: gisco-hospitals-bulgaria, country: BG, country_name: Bulgaria, source_key: eu_gisco_hospitals_bg, secret: BULGARIA_REGISTRY_DATABASE_URL }
+          - { source: gisco-hospitals-estonia, country: EE, country_name: Estonia, source_key: eu_gisco_hospitals_ee, secret: ESTONIA_REGISTRY_DATABASE_URL }
+          - { source: gisco-hospitals-greece, country: GR, country_name: Greece, source_key: eu_gisco_hospitals_gr, secret: GREECE_REGISTRY_DATABASE_URL }
+          - { source: gisco-hospitals-hungary, country: HU, country_name: Hungary, source_key: eu_gisco_hospitals_hu, secret: HUNGARY_REGISTRY_DATABASE_URL }
+          - { source: gisco-hospitals-italy, country: IT, country_name: Italy, source_key: eu_gisco_hospitals_it, secret: ITALY_REGISTRY_DATABASE_URL }
+          - { source: gisco-hospitals-luxembourg, country: LU, country_name: Luxembourg, source_key: eu_gisco_hospitals_lu, secret: LUXEMBOURG_REGISTRY_DATABASE_URL }
+          - { source: gisco-hospitals-malta, country: MT, country_name: Malta, source_key: eu_gisco_hospitals_mt, secret: MALTA_REGISTRY_DATABASE_URL }
+          - { source: gisco-hospitals-netherlands, country: NL, country_name: Netherlands, source_key: eu_gisco_hospitals_nl, secret: NETHERLANDS_REGISTRY_DATABASE_URL }
+          - { source: gisco-hospitals-norway, country: NO, country_name: Norway, source_key: eu_gisco_hospitals_no, secret: NORWAY_REGISTRY_DATABASE_URL }
+          - { source: gisco-hospitals-poland, country: PL, country_name: Poland, source_key: eu_gisco_hospitals_pl, secret: POLAND_REGISTRY_DATABASE_URL }
+          - { source: gisco-hospitals-portugal, country: PT, country_name: Portugal, source_key: eu_gisco_hospitals_pt, secret: PORTUGAL_REGISTRY_DATABASE_URL }
+          - { source: gisco-hospitals-romania, country: RO, country_name: Romania, source_key: eu_gisco_hospitals_ro, secret: ROMANIA_REGISTRY_DATABASE_URL }
+          - { source: gisco-hospitals-serbia, country: RS, country_name: Serbia, source_key: eu_gisco_hospitals_rs, secret: SERBIA_REGISTRY_DATABASE_URL }
+          - { source: gisco-hospitals-slovakia, country: SK, country_name: Slovakia, source_key: eu_gisco_hospitals_sk, secret: SLOVAKIA_REGISTRY_DATABASE_URL }
+          - { source: gisco-hospitals-slovenia, country: SI, country_name: Slovenia, source_key: eu_gisco_hospitals_si, secret: SLOVENIA_REGISTRY_DATABASE_URL }
+          - { source: gisco-hospitals-spain, country: ES, country_name: Spain, source_key: eu_gisco_hospitals_es, secret: SPAIN_REGISTRY_DATABASE_URL }
+          - { source: gisco-hospitals-sweden, country: SE, country_name: Sweden, source_key: eu_gisco_hospitals_se, secret: SWEDEN_REGISTRY_DATABASE_URL }
+          - { source: gisco-hospitals-switzerland, country: CH, country_name: Switzerland, source_key: eu_gisco_hospitals_ch, secret: SWITZERLAND_REGISTRY_DATABASE_URL }
     env:
       TARGET_DATABASE_URL: ${{ secrets[matrix.secret] }}
       REGISTRY_API_BASE_URL: https://network-map-v846.onrender.com

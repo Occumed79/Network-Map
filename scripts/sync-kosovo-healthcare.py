@@ -15,7 +15,8 @@ from openpyxl import load_workbook
 
 SOURCE_URL = "https://msh.rks-gov.net/Department/GetDocument?fileName=40874433.7895.xlsx&original=Lista+e+Institucioneve+Private+Sh%C3%ABndet%C3%ABsore+t%C3%AB+licencuara+2021-2026.xlsx"
 DATASET_URL = "https://msh.rks-gov.net/Department/Index/1060?type=1"
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"\nPHOTON_URL = "https://photon.komoot.io/api/"
+NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+PHOTON_URL = "https://photon.komoot.io/api/"
 USER_AGENT = "Occu-Med-Network-Map/1.0 (+https://github.com/Occumed79/Network-Map)"
 
 COLUMNS = [

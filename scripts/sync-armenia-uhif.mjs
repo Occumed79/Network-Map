@@ -86,16 +86,35 @@ function parseRscData(raw) {
 }
 
 function findHospitals(value, seen = new Set()) {
-  if (!value || typeof value !== "object" || seen.has(value)) return null;
-  seen.add(value);
-  if (Array.isArray(value.hospitals) && value.hospitals.length > 0) {
-    return value.hospitals;
+  let best = null;
+
+  function looksLikeFacilityArray(candidate) {
+    if (!Array.isArray(candidate) || candidate.length === 0) return false;
+    const sample = candidate.slice(0, Math.min(candidate.length, 40));
+    const facilityLike = sample.filter((item) =>
+      item && typeof item === "object"
+      && text(item.name)
+      && (text(item.id) || text(item.address) || text(item.region) || text(item.community))
+    ).length;
+    return facilityLike >= Math.max(1, Math.floor(sample.length * 0.7));
   }
-  for (const child of Array.isArray(value) ? value : Object.values(value)) {
-    const found = findHospitals(child, seen);
-    if (found) return found;
+
+  function visit(node) {
+    if (!node || typeof node !== "object" || seen.has(node)) return;
+    seen.add(node);
+
+    if (Array.isArray(node) && looksLikeFacilityArray(node)) {
+      if (!best || node.length > best.length) best = node;
+    }
+    if (!Array.isArray(node) && Array.isArray(node.hospitals) && looksLikeFacilityArray(node.hospitals)) {
+      if (!best || node.hospitals.length > best.length) best = node.hospitals;
+    }
+
+    for (const child of Array.isArray(node) ? node : Object.values(node)) visit(child);
   }
-  return null;
+
+  visit(value);
+  return best;
 }
 
 function payloadFromText(raw) {

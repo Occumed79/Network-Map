@@ -139,8 +139,9 @@ const routeIndex = readFileSync(resolve(here, '../../api-server/src/routes/index
 assert.doesNotMatch(routeIndex, /providerExplorerP2Read/);
 
 const providerExplorer = readFileSync(resolve(here, '../../api-server/src/routes/providerExplorer.ts'), 'utf8');
-assert.match(providerExplorer, /COALESCE\(mp\.scraped_at, mp\.updated_at\) AS imported_at/);
-assert.doesNotMatch(providerExplorer, /mp\.created_at AS imported_at/);
+assert.match(providerExplorer, /provider_master_map_view/, 'Provider Explorer must use the canonical provider view');
+assert.doesNotMatch(providerExplorer, /medical_providers/, 'Provider Explorer must never restore the legacy medical_providers path');
+assert.doesNotMatch(providerExplorer, /detectProviderSchema/, 'Provider Explorer must not use the generic legacy-capable schema detector');
 
 const diagnosticsGate = readFileSync(resolve(here, '../src/usDiagnosticsGate.ts'), 'utf8');
 assert.match(diagnosticsGate, /scheduleDiagnosticsSync/);

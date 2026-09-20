@@ -84,7 +84,8 @@ jobs:
                 ('provider_master_sources'),
                 ('provider_master_types'),
                 ('provider_type_catalog'),
-                ('medical_providers'),
+                ('provider_schema_state'),
+                ('schema_migration_versions'),
                 ('provider_master_map_view')
               )
               SELECT string_agg(name, ', ' ORDER BY name)
@@ -190,6 +191,8 @@ jobs:
             expected_master="$(jq -r ".projects[] | select(.slot == ${slot}) | .distinct_master_keys" "$manifest")"
             test -s "$file"
 
+            psql "$target_url" -v ON_ERROR_STOP=1 -f scripts/provider-shard-contract.sql
+
             psql "$target_url" -v ON_ERROR_STOP=1 -c "
               CREATE TABLE IF NOT EXISTS public.source5_import_staging (
                 source_record_id text PRIMARY KEY,
@@ -229,11 +232,15 @@ jobs:
               return 1
             fi
 
-            actual="$(psql "$target_url" -Atqc "SELECT count(*) FROM public.medical_providers WHERE data_source='U.S. Embassy Medical Provider Lists'")"
-            [[ "$actual" == "$expected" ]] || { echo "Embassy project ${slot} verification failed: ${actual} vs ${expected}" >&2; return 1; }
+            actual="$(psql "$target_url" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='embassy_clinic_docs'")"
+            actual_master="$(psql "$target_url" -Atqc "SELECT count(DISTINCT master_provider_id) FROM public.provider_master_sources WHERE source_key='embassy_clinic_docs'")"
+            canonical="$(psql "$target_url" -Atqc "SELECT canonical_read_enabled FROM public.provider_schema_state WHERE id=1")"
+            [[ "$actual" == "$expected" ]] || { echo "Embassy project ${slot} source-lineage verification failed: ${actual} vs ${expected}" >&2; return 1; }
+            [[ "$actual_master" == "$expected_master" ]] || { echo "Embassy project ${slot} master verification failed: ${actual_master} vs ${expected_master}" >&2; return 1; }
+            [[ "$canonical" == "t" ]] || { echo "Embassy project ${slot} canonical reads are not enabled" >&2; return 1; }
             db_bytes="$(psql "$target_url" -Atqc "SELECT pg_database_size(current_database())")"
-            echo "Embassy project ${slot}: promoted ${actual} providers; db_bytes=${db_bytes}"
-            printf '%s\n' "- Embassy project ${slot}: ${actual} providers (${db_bytes} bytes)" > "/tmp/usa-embassy/provider-project-${slot}.summary"
+            echo "Embassy project ${slot}: promoted ${actual} source rows into ${actual_master} canonical providers; db_bytes=${db_bytes}"
+            printf '%s\n' "- Embassy project ${slot}: ${actual} source rows / ${actual_master} canonical providers (${db_bytes} bytes)" > "/tmp/usa-embassy/provider-project-${slot}.summary"
           }
 
           declare -a pids=()

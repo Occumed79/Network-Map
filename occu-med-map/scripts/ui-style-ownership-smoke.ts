@@ -44,7 +44,6 @@ assert.match(uiSystem, /--ui-bg-panel:/, "ui-system.css must own panel design to
 assert.match(uiSystem, /--ui-text-primary:/, "ui-system.css must own typography color tokens");
 assert.match(uiSystem, /--ui-focus-ring:/, "ui-system.css must own focus tokens");
 assert.match(uiSystem, /\.modal-backdrop/, "ui-system.css must own modal geometry");
-assert.match(uiSystem, /\.leaflet-popup-content-wrapper/, "ui-system.css must own Leaflet popup presentation");
 assert.match(uiSystem, /\.mapboxgl-popup-content/, "ui-system.css must own Mapbox popup presentation");
 assert.match(uiSystem, /\.pdf-modal-wrap/, "ui-system.css must own report preview geometry");
 

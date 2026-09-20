@@ -104,6 +104,8 @@ def main():
         writer=csv.writer(out,delimiter="\t",quoting=csv.QUOTE_ALL,lineterminator="\n"); writer.writerow(COLUMNS)
         seen=set(); n=ok=bad=0
         for r in read_rows(a.input):
+            if n == 0:
+                print(json.dumps({"source":"ar_refes", "inputColumns":list(r)}, ensure_ascii=False))
             n+=1; row=normalize(r)
             if not row or row[0] in seen: bad+=1; continue
             seen.add(row[0]); writer.writerow(row); ok+=1

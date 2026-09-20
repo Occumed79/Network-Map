@@ -1,0 +1,49 @@
+name: Verify official registry sources
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/verify-registry-sources.yml"
+      - ".github/workflows/sync-argentina-refes.yml"
+      - "scripts/normalize-argentina-refes.py"
+
+permissions:
+  contents: read
+
+jobs:
+  refes:
+    name: Verify REFES against the current ministry workbook
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install 'openpyxl>=3.1,<4' pyyaml
+      - name: Download and normalize public source without database access
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Exercise the same download and normalization as production without
+          # giving this PR workflow any database credentials or write access.
+          python - <<'PY'
+          import os, subprocess, yaml
+          from pathlib import Path
+          workflow = yaml.safe_load(Path('.github/workflows/sync-argentina-refes.yml').read_text())
+          job = workflow['jobs']['sync']
+          env = dict(os.environ, REFES_PACKAGE_API=job['env']['REFES_PACKAGE_API'])
+          env['GITHUB_ENV'] = '/tmp/refes-verify.env'
+          for step in job['steps']:
+              if step.get('name') == 'Resolve and download latest official REFES resource':
+                  subprocess.run(['bash', '-euo', 'pipefail', '-c', step['run']], env=env, check=True)
+          for line in Path(env['GITHUB_ENV']).read_text().splitlines():
+              key, value = line.split('=', 1)
+              env[key] = value
+          for step in job['steps']:
+              if step.get('name') == 'Normalize geocoded REFES establishments':
+                  subprocess.run(['bash', '-euo', 'pipefail', '-c', step['run']], env=env, check=True)
+          PY

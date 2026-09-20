@@ -17,6 +17,8 @@ permissions:
 
 concurrency:
   group: official-provider-registry-sync
+  # Keep all country imports pending; the default single slot cancels siblings.
+  queue: max
   cancel-in-progress: false
 
 jobs:
@@ -26,9 +28,8 @@ jobs:
     timeout-minutes: 120
     env:
       TARGET_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
-      # The ministry CKAN host currently serves an incomplete TLS chain. The
-      # federal catalog mirrors the same official metadata with valid TLS.
-      REFES_PACKAGE_API: https://www.datos.gob.ar/api/3/action/package_show?id=listado-establecimientos-de-salud-asentados-en-el-registro-federal-refes
+      # Query the publishing ministry: the federal mirror is missing 2025/2026.
+      REFES_PACKAGE_API: https://datos.salud.gob.ar/api/3/action/package_show?id=listado-establecimientos-de-salud-asentados-en-el-registro-federal-refes
 
     steps:
       - name: Check out importer
@@ -60,7 +61,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/refes
-          curl --fail --location --retry 4 --retry-all-errors "$REFES_PACKAGE_API" --output /tmp/refes/package.json
+          # Public ministry data only; its server currently omits an intermediate TLS certificate.
+          curl --fail --location --insecure --retry 4 --retry-all-errors "$REFES_PACKAGE_API" --output /tmp/refes/package.json
           jq -e '.success == true and (.result.resources | length > 0)' /tmp/refes/package.json >/dev/null
 
           resource="$(jq -r '
@@ -83,11 +85,9 @@ jobs:
             *) ext=xlsx ;;
           esac
           target="/tmp/refes/refes.${ext}"
-          # datos.salud.gob.ar currently omits an intermediate certificate from
-          # its TLS chain. Metadata is resolved over validated TLS from the
-          # federal catalog above; constrain the download host, then tolerate
-          # only that known certificate-chain defect. File size, parser schema,
-          # coordinates, and minimum record counts are validated before import.
+          # The download uses the same publishing ministry and known TLS-chain
+          # exception as the catalog. Validate schema, coordinates, and counts
+          # before allowing any production import.
           curl --fail --location --insecure --retry 4 --retry-all-errors "$url" --output "$target"
           test -s "$target"
           size="$(stat -c%s "$target")"

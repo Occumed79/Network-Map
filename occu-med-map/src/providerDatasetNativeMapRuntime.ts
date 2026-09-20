@@ -215,7 +215,7 @@ export function clearProviderDataset(channel: ProviderDatasetChannel): void {
 
 function markHandled(originalEvent: unknown): void {
   if (originalEvent && typeof originalEvent === "object") {
-    (originalEvent as unknown as Record<string, unknown>).__networkMapCompatHandled = true;
+    (originalEvent as unknown as Record<string, unknown>).__networkMapOverlayHandled = true;
   }
 }
 

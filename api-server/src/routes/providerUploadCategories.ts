@@ -246,8 +246,8 @@ router.get("/provider-upload-categories/:sourceKey", async (req: Request, res: R
     ).filter((probe): probe is { project: ProviderDatabaseProject; total: number } => Boolean(probe));
 
     if (!probes.length) {
-      if (warnings.length === projects.length) {
-        throw new Error(warnings.join(" "));
+      if (warnings.length > 0) {
+        throw new Error(`Uploaded dataset availability could not be determined because one or more provider shards were unavailable. ${warnings.join(" ")}`);
       }
       res.status(404).json({ error: "Uploaded dataset category was not found.", sourceKey });
       return;
@@ -297,10 +297,13 @@ router.get("/provider-upload-categories/:sourceKey", async (req: Request, res: R
           rowParams,
         );
         rows.push(...result.rows);
-        remaining -= requested;
       } catch (error) {
         warnings.push(`${probe.project.id}: ${error instanceof Error ? error.message : String(error)}`);
       }
+      // Preserve the global logical page boundary even if this shard's row read
+      // fails after its count probe succeeded. Later shards must not backfill
+      // the failed slice or subsequent pages can repeat them.
+      remaining -= requested;
       offset = 0;
     }
 

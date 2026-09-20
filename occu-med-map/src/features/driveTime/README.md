@@ -12,7 +12,7 @@ provider results -> ETA candidates -> Mapbox Directions -> ranked ETA result -> 
 
 ## Feature flag
 
-The no-deploy branch imports a dormant runtime through `main.tsx`.
+The application imports a feature-flagged drive-time runtime through `main.tsx`.
 
 It activates only when:
 
@@ -28,12 +28,12 @@ Without that flag, the runtime exits immediately and does not add controls or ma
 - `providerEtaEngine.ts` — ranking engine and distance prep
 - `providerEtaStore.ts` — lightweight app-level result store
 - `providerEtaExport.ts` — CSV/text export helpers
-- `mapSceneProviderAdapter.ts` — converts normalized provider results into ETA candidates
+- `providerCandidateAdapter.ts` — converts normalized provider results into ETA candidates
 - `useProviderEta.ts` — React hook for ranking/clearing/copying ETA results
 - `ProviderEtaBadge.tsx` — card-level ETA badge and actions
 - `DriveTimeControlStrip.tsx` — native result-panel control strip
 - `etaRouteEvents.ts` — route request event bridge
-- `mapSceneEtaRouteLayer.ts` — native route drawing helper
+- `mapboxEtaRouteLayer.ts` — native route drawing helper
 - `nativeDriveTimeRuntime.ts` — feature-flagged native drive-time runtime
 
 ## Replacement target

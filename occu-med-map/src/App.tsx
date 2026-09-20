@@ -1142,10 +1142,10 @@ export default function App() {
   type ClinicEntry = { name:string; address:string; city:string; state:string; zip:string; phone:string; notes:string; lat:number|null; lng:number|null; color:string; };
   type ClinicGroup = { id:number; groupName:string; color:string; visible:boolean; clinics:ClinicEntry[]; };
   const [clinicGroups, setClinicGroups] = useState<ClinicGroup[]>([]);
-  // Legacy compat: keep uploadedClinics as flat for existing render code
-  const uploadedClinics = clinicGroups.flatMap(g => g.visible ? g.clinics : []);
-  const showUploadedClinics = clinicGroups.some(g=>g.visible);
-  const setShowUploadedClinics = (v:boolean) => setClinicGroups(prev=>prev.map(g=>({...g,visible:v})));
+  const visibleClinicEntries = useMemo(
+    () => clinicGroups.flatMap(group => group.visible ? group.clinics : []),
+    [clinicGroups],
+  );
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
   const [uploadColor, setUploadColor] = useState('#f472b6');
@@ -2127,11 +2127,11 @@ export default function App() {
 
   // ── Uploaded clinic pins: native Mapbox source ─────────────────────────────
   useEffect(()=>{
-    if(!showUploadedClinics || uploadedClinics.length===0) {
+    if(visibleClinicEntries.length===0) {
       clearProviderDataset('uploaded');
       return;
     }
-    renderProviderDataset('uploaded', uploadedClinics, {
+    renderProviderDataset('uploaded', visibleClinicEntries, {
       baseColor:'#f472b6',
       glow:showGlowPoints,
       getColor:(clinic)=>clinic.color || '#f472b6',
@@ -2147,7 +2147,7 @@ export default function App() {
       },
     });
     return ()=>clearProviderDataset('uploaded');
-  },[uploadedClinics, showUploadedClinics, showGlowPoints]);
+  },[visibleClinicEntries, showGlowPoints]);
 
   // ── Service Presence native heatmap + provider points ────────────────────
   useEffect(()=>{

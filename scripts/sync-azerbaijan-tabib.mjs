@@ -7,11 +7,15 @@ import path from "node:path";
 const SOURCES = [
   {
     key: "direct",
+    datasetId: "516934d5-0b5d-4263-959c-84701f859825",
+    resourceId: "d23858f2-2158-47e6-9a31-9ac03e55c069",
     url: "https://admin.opendata.az/dataset/516934d5-0b5d-4263-959c-84701f859825/resource/d23858f2-2158-47e6-9a31-9ac03e55c069/download/tbib-tabeli-tibb-muessiselerinin-siyahs.csv",
     page: "https://opendata.az/en/@tibbi-erazi-bolmelerini-idareetme-birliyi/tebib-tabeli-tibb-muessiseleri",
   },
   {
     key: "subordinate",
+    datasetId: "6dfb0cb6-0c4c-4b49-84a2-13b2c53c8149",
+    resourceId: "6e19decb-75c4-41d2-818a-03425672b8a7",
     url: "https://admin.opendata.az/dataset/6dfb0cb6-0c4c-4b49-84a2-13b2c53c8149/resource/6e19decb-75c4-41d2-818a-03425672b8a7/download/tbib-tabeli-tibb-muessiselerinin-alt-tibb-muessiselerinin-siyahs.csv",
     page: "https://opendata.az/@tibbi-erazi-bolmelerini-idareetme-birliyi/tibb-muessiseleri-ve-alt-muessiseler",
   },
@@ -159,14 +163,43 @@ function loadExisting(filePath) {
   return result;
 }
 
-async function fetchText(url, headers = {}) {
-  const response = await fetch(url, {
-    headers: { "user-agent": USER_AGENT, accept: "text/csv,*/*", ...headers },
-    redirect: "follow",
-    signal: AbortSignal.timeout(180_000),
-  });
-  if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
-  return await response.text();
+async function currentResourceUrl(source) {
+  try {
+    const api = new URL("https://admin.opendata.az/api/3/action/package_show");
+    api.searchParams.set("id", source.datasetId);
+    const response = await fetch(api, {
+      headers: { "user-agent": USER_AGENT, accept: "application/json" },
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!response.ok) return source.url;
+    const payload = await response.json();
+    const resource = payload?.result?.resources?.find((item) => item?.id === source.resourceId);
+    return text(resource?.url) || source.url;
+  } catch (_) {
+    return source.url;
+  }
+}
+
+async function fetchText(source, headers = {}) {
+  let url = source.url;
+  let lastError = null;
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    if (attempt > 1) url = await currentResourceUrl(source);
+    try {
+      const response = await fetch(url, {
+        headers: { "user-agent": USER_AGENT, accept: "text/csv,*/*", ...headers },
+        redirect: "follow",
+        signal: AbortSignal.timeout(180_000),
+      });
+      if (response.ok) return await response.text();
+      lastError = new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
+      if (![429, 502, 503, 504].includes(response.status)) throw lastError;
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < 6) await sleep(Math.min(30_000, attempt * 5_000));
+  }
+  throw lastError || new Error(`Azerbaijan CKAN download failed for ${source.key}`);
 }
 
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
@@ -207,7 +240,7 @@ let skippedUnplaced = 0;
 let lastGeocodeAt = 0;
 
 for (const source of SOURCES) {
-  const raw = await fetchText(source.url, { referer: source.page });
+  const raw = await fetchText(source, { referer: source.page });
   const objects = rowsToObjects(parseDelimited(raw));
   scanned += objects.length;
 

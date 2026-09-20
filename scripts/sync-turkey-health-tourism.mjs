@@ -8,22 +8,10 @@ import path from "node:path";
 
 const SOURCE_PAGE = "https://shgmturizmdb.saglik.gov.tr/TR-76664/yetkili-saglik-tesisleri.html";
 const PDF_SOURCES = [
-  {
-    key: "hospital",
-    url: "https://dosyamerkez.saglik.gov.tr/Eklenti/55803/0/hastanelerpdf.pdf?_tag1=3E9E6C411BF4011A5AA704A00F9F9947AD3D3CCD",
-  },
-  {
-    key: "medical_center",
-    url: "https://dosyamerkez.saglik.gov.tr/Eklenti/55804/0/tip-merkezleripdf.pdf?_tag1=39386B8AD70A0F916417E9B8EE1EE96CC2AF8CC3",
-  },
-  {
-    key: "private_practice",
-    url: "https://dosyamerkez.saglik.gov.tr/Eklenti/55806/0/muayenehanelerpdf.pdf?_tag1=1D9D85F9377115FB7EAFC9137408A43E8625AC1D",
-  },
-  {
-    key: "other_health_facility",
-    url: "https://dosyamerkez.saglik.gov.tr/Eklenti/55807/0/diger-saglik-tesisleripdf.pdf?_tag1=033A20599DD25185767AC3E9B9DA8E5CB7E802FE",
-  },
+  { key: "hospital", url: "https://shgmturizmdb.saglik.gov.tr/TR-94834/yetkili-hastaneler.html" },
+  { key: "medical_center", url: "https://shgmturizmdb.saglik.gov.tr/TR-94835/yetkili-tip-merkezleri.html" },
+  { key: "private_practice", url: "https://shgmturizmdb.saglik.gov.tr/TR-94836/yetkili-muayenehaneler.html" },
+  { key: "other_health_facility", url: "https://shgmturizmdb.saglik.gov.tr/TR-94837/yetkili-diger-saglik-tesisleri.html" },
 ];
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
 const USER_AGENT = "Occu-Med-Network-Map/1.0 (+https://github.com/Occumed79/Network-Map)";

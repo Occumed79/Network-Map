@@ -7,6 +7,7 @@ import re
 import time
 import unicodedata
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
@@ -353,32 +354,35 @@ def main():
             "source":ORG_PLAN,
         }, ensure_ascii=False))
 
-    rows = []
-    for index, facility in enumerate(facilities.values()):
+    def resolve_facility(facility):
         query = ", ".join(x for x in [facility["name"], facility["locality"], "Greenland"] if x)
         geo = geocode(query)
         if not geo and facility["locality"]:
             geo = geocode(f'{facility["locality"]}, Greenland')
-        if not geo:
-            continue
-        lat,lng,geo_city,geo_postal = geo
-        city = facility["locality"] or geo_city
-        postal = facility["postal"] or geo_postal
-        formatted = ", ".join(x for x in [facility["address"], postal, city, "Greenland"] if x)
-        source_id = "gl-peqqik:" + sha(norm(facility["name"]) + "|" + norm(city))[:24]
-        tags = [facility["type"], "healthcare_facility", "greenland_peqqik", "public_health_service"]
-        master = "loc:" + sha(json.dumps({
-            "name":norm(facility["name"]),"country":"GL",
-            "lat":round(lat,6),"lng":round(lng,6),
-        }, sort_keys=True, ensure_ascii=False))
-        rows.append([
-            source_id, facility["url"], facility["name"], norm(facility["name"]),
-            facility["address"], formatted, city, facility["region"], postal, "GL",
-            lat, lng, facility["phone"], facility["url"], facility["email"],
-            facility["type"], pg_array(tags), 0.96, master,
-        ])
-        if index:
-            time.sleep(0.35)
+        return facility, geo
+
+    rows = []
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        resolved = pool.map(resolve_facility, facilities.values())
+        for facility, geo in resolved:
+            if not geo:
+                continue
+            lat,lng,geo_city,geo_postal = geo
+            city = facility["locality"] or geo_city
+            postal = facility["postal"] or geo_postal
+            formatted = ", ".join(x for x in [facility["address"], postal, city, "Greenland"] if x)
+            source_id = "gl-peqqik:" + sha(norm(facility["name"]) + "|" + norm(city))[:24]
+            tags = [facility["type"], "healthcare_facility", "greenland_peqqik", "public_health_service"]
+            master = "loc:" + sha(json.dumps({
+                "name":norm(facility["name"]),"country":"GL",
+                "lat":round(lat,6),"lng":round(lng,6),
+            }, sort_keys=True, ensure_ascii=False))
+            rows.append([
+                source_id, facility["url"], facility["name"], norm(facility["name"]),
+                facility["address"], formatted, city, facility["region"], postal, "GL",
+                lat, lng, facility["phone"], facility["url"], facility["email"],
+                facility["type"], pg_array(tags), 0.96, master,
+            ])
 
     if len(rows) < 35:
         raise SystemExit(f"Only {len(rows)} Peqqik healthcare sites geocoded from {len(facilities)} parsed sites")

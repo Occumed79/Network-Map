@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const SOURCE_URL = "https://zdravstvo.gov.mk/en-GB/ustanovi/adresi-na-zd";
-const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
+const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";\nconst PHOTON_URL = "https://photon.komoot.io/api/";
 const USER_AGENT = "Occu-Med-Network-Map/1.0 (+https://github.com/Occumed79/Network-Map)";
 const columns = [
   "source_record_id", "source_url", "name", "normalized_name", "address_line1",
@@ -81,6 +81,39 @@ function classify(name) {
 
 function validCoordinates(lat, lng) {
   return Number.isFinite(lat) && Number.isFinite(lng) && lat >= 40.8 && lat <= 42.4 && lng >= 20.3 && lng <= 23.1;
+}
+
+async function photonGeocode(name, address) {
+  const queries = [
+    [name, address, "North Macedonia"].filter(Boolean).join(", "),
+    [address, "North Macedonia"].filter(Boolean).join(", "),
+    [name, "North Macedonia"].filter(Boolean).join(", "),
+  ];
+  for (const query of queries) {
+    try {
+      const url = new URL(PHOTON_URL);
+      url.searchParams.set("q", query);
+      url.searchParams.set("limit", "5");
+      const response = await fetch(url, {
+        headers: { "user-agent": USER_AGENT, "accept-language": "mk,en" },
+        signal: AbortSignal.timeout(25_000),
+      });
+      if (!response.ok) continue;
+      const payload = await response.json();
+      for (const feature of payload?.features || []) {
+        const [lng, lat] = feature?.geometry?.coordinates || [];
+        if (!validCoordinates(Number(lat), Number(lng))) continue;
+        const props = feature?.properties || {};
+        return {
+          lat: Number(lat),
+          lng: Number(lng),
+          city: text(props.city) || text(props.locality) || text(props.district),
+          postal: text(props.postcode),
+        };
+      }
+    } catch (_) {}
+  }
+  return null;
 }
 
 async function geocode(name, address) {
@@ -162,10 +195,13 @@ const rows = [];
 let lastGeocodeAt = 0;
 let skipped = 0;
 for (const candidate of candidates.values()) {
-  const wait = 1100 - (Date.now() - lastGeocodeAt);
-  if (wait > 0) await sleep(wait);
-  const geo = await geocode(candidate.name, candidate.address);
-  lastGeocodeAt = Date.now();
+  let geo = await photonGeocode(candidate.name, candidate.address);
+  if (!geo) {
+    const wait = 1100 - (Date.now() - lastGeocodeAt);
+    if (wait > 0) await sleep(wait);
+    geo = await geocode(candidate.name, candidate.address);
+    lastGeocodeAt = Date.now();
+  }
   if (!geo) { skipped += 1; continue; }
   const classification = classify(candidate.name);
   const sourceId = `mk-moh:${hash(`${normalized(candidate.name)}|${normalized(candidate.address)}`).slice(0, 22)}`;

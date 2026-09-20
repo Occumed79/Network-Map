@@ -91,14 +91,11 @@ function findHospitals(value, seen = new Set()) {
   function looksLikeFacilityArray(candidate) {
     if (!Array.isArray(candidate) || candidate.length === 0) return false;
     const sample = candidate.slice(0, Math.min(candidate.length, 40));
-    const facilityLike = sample.filter((item) => {
-      if (!item || typeof item !== "object" || !text(item.id) || !text(item.name)) return false;
-      const lat = Number(item.lat);
-      const lng = Number(item.lng);
-      const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng);
-      const hasLocationIdentity = text(item.address) && (text(item.region) || text(item.community));
-      return hasCoordinates || hasLocationIdentity;
-    }).length;
+    const facilityLike = sample.filter((item) =>
+      item && typeof item === "object"
+      && text(item.id)
+      && text(item.name)
+    ).length;
     return facilityLike >= Math.max(1, Math.ceil(sample.length * 0.8));
   }
 
@@ -450,7 +447,19 @@ try {
       if (hospitals) scriptCandidates.push({ hospitals, url: DIRECTORY_URL, bytes: body.length });
     }
     scriptCandidates.sort((a, b) => b.hospitals.length - a.hospitals.length);
-    captured = scriptCandidates[0] || null;
+    if (scriptCandidates.length) {
+      console.log(JSON.stringify({
+        uhifScriptCandidateSizes: scriptCandidates.map((candidate) => ({
+          rows: candidate.hospitals.length,
+          uniqueIds: new Set(candidate.hospitals.map((facility) => text(facility?.id)).filter(Boolean)).size,
+          bytes: candidate.bytes,
+        })).slice(0, 20),
+      }));
+    }
+    captured = scriptCandidates.find((candidate) =>
+      new Set(candidate.hospitals.map((facility) => text(facility?.id)).filter(Boolean)).size === reportedTotal
+    ) || scriptCandidates.find((candidate) => candidate.hospitals.length <= reportedTotal)
+      || scriptCandidates[0] || null;
   }
 
   if (!captured) captured = await discoverCompletePayload();

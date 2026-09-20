@@ -27,7 +27,6 @@ import {
 import "./dual-map-engines.css";
 import "./dual-map-transition-opaque.css";
 import "./black-hole-transition.css";
-import "./map-engine-final-fixes.css";
 import "./features/driveTime/nativeDriveTimeRuntime.css";
 import "./index.css";
 import "./liquid-glass-theme.css";
@@ -62,7 +61,6 @@ async function safeLoad(name: string, loader: () => Promise<unknown>): Promise<v
 async function loadOptionalRuntimes(): Promise<void> {
   setBootPhase("optional-runtimes");
   await safeLoad("Mapbox load hardening", () => import("./mapboxGlobeLoadHardeningRuntime"));
-  await safeLoad("map engine cleanup", () => import("./mapEngineFinalFixRuntime"));
 
   await Promise.allSettled([
     safeLoad("provider layer telemetry", () => import("./providerLayerTelemetryRuntime")),

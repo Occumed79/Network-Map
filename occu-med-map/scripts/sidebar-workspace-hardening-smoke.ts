@@ -13,7 +13,7 @@ function source(relativePath: string): string {
 const main = source("src/main.tsx");
 const appSource = source("src/App.tsx");
 const panelGuard = source("src/sidebarWorkspacePanelGuardRuntime.ts");
-const finalFixes = source("src/sidebar-workspace.css");
+const workspaceCss = source("src/sidebar-workspace.css");
 const mapControls = source("src/mapControlsBridgeRuntime.ts");
 const productionUi = source("scripts/production-ui-smoke.mjs");
 const uiAcceptance = source("scripts/ci-ui-acceptance.mjs");
@@ -30,9 +30,19 @@ assert.equal(
   false,
   "the unused alternate sidebar component must not be restored",
 );
+assert.equal(
+  existsSync(path.join(projectRoot, "src/sidebar-workspace-final-fixes.css")),
+  false,
+  "retired sidebar final-fix stylesheet must stay deleted",
+);
+assert.equal(
+  existsSync(path.join(projectRoot, "src/sidebar-workspace-regression-fixes.css")),
+  false,
+  "retired sidebar regression stylesheet must stay deleted",
+);
 assert.doesNotMatch(main, /sidebarWorkspaceControllerRuntime/, "obsolete imperative sidebar controller must remain retired");
-assert.match(main, /import "\.\/sidebar-workspace-final-fixes\.css";/, "authoritative sidebar layout layer must load");
-assert.match(main, /import "\.\/ui-system\.css";[\s\S]*import "\.\/startup-hardening\.css";[\s\S]*import "\.\/sidebar-workspace-final-fixes\.css";/, "authoritative sidebar CSS must load after synchronous shell and UI layers");
+assert.match(main, /import "\.\/sidebar-workspace\.css";/, "authoritative sidebar layout layer must load");
+assert.match(main, /import "\.\/ui-system\.css";[\s\S]*import "\.\/startup-hardening\.css";[\s\S]*import "\.\/sidebar-workspace\.css";/, "authoritative sidebar CSS must load after synchronous shell and UI layers");
 assert.match(main, /import "\.\/sidebarWorkspacePanelGuardRuntime";/, "sidebar integrity diagnostics must load");
 assert.doesNotMatch(main, /sidebarWorkspaceTabsRuntime/, "legacy tab runtime must remain retired");
 assert.doesNotMatch(main, /sidebarWorkspaceConsistencyRuntime/, "legacy consistency runtime must remain retired");
@@ -77,29 +87,29 @@ assert.doesNotMatch(panelGuard, /new MutationObserver/, "sidebar integrity diagn
 assert.doesNotMatch(panelGuard, /setInterval\s*\(/, "sidebar integrity diagnostics must remain event-driven");
 assert.doesNotMatch(panelGuard, /RETRY_DELAYS_MS|launcher\.click\(|controller\(\)\?\.sync|dispatchEvent\(new Event\("resize"\)\)/, "sidebar integrity diagnostics must detect problems without repairing workspace ownership");
 assert.match(panelGuard, /network-map:sidebar-workspace/, "sidebar integrity diagnostics must follow explicit workspace events");
-assert.match(panelGuard, /recover: scheduleAudit/, "legacy recovery API must now be diagnostic-only");
+assert.match(panelGuard, /recover: scheduleAudit/, "recovery hook must remain diagnostic-only");
 assert.match(panelGuard, /phantom-right-column/, "runtime audit must detect the black right-side gutter");
 assert.match(panelGuard, /map-tools-horizontal-overflow/, "runtime audit must detect Map Tools overflow");
 assert.match(panelGuard, /workspace-empty/, "runtime audit must reject selected workspaces without usable controls");
 assert.match(panelGuard, /__NETWORK_MAP_UI_INTEGRITY__/, "runtime UI audit must be externally inspectable");
 assert.match(panelGuard, /removeEventListener/, "UI integrity listeners must be cleaned up");
 
-assert.match(finalFixes, /\.occumed-sidebar-workspace-host > \.occumed-map-tools-panel\s*\{[\s\S]*position: static !important;/, "docked Map Tools must never float over the map");
-assert.match(finalFixes, /\.occumed-sidebar-workspace-tab\s*\{[\s\S]*font-size: 11\.5px !important;/, "workspace tab labels must retain readable text");
-assert.match(finalFixes, /grid-template-columns: var\(--command-sidebar-width\) minmax\(0, 1fr\) !important;/, "desktop layout must have only sidebar and map columns");
-assert.doesNotMatch(finalFixes, /minmax\(0, 1fr\) 0 !important/, "a zero-width legacy third column must not remain");
-assert.match(finalFixes, /phantom|legacy right drawer/i, "final layout must document right-drawer ownership");
-assert.match(finalFixes, /position: fixed !important;[\s\S]*--workspace-panel-top/, "Finder and Explorer must align to measured sidebar geometry");
-assert.match(finalFixes, /data-occumedworkspace="mapTools"/, "Map Tools must have a workspace-scoped final theme");
-assert.match(finalFixes, /background: var\(--workspace-card-bg\) !important;/, "workspace cards must share the navy panel palette");
-assert.match(finalFixes, /occumed-sidebar-provider-content > :is\(\.hero-card, \.sb-section\)/, "React's provider wrapper must retain the direct-child card styling");
-assert.match(finalFixes, /occumed-sidebar-provider-content \{[\s\S]*background: transparent !important;/, "the structural provider wrapper must not become a legacy card surface");
-assert.match(finalFixes, /--command-sidebar-width: clamp\(292px, 21vw, 320px\)/, "desktop workspace width must remain consistent across tabs");
-assert.match(finalFixes, /overflow-x: hidden !important;/, "workspace panels must prevent horizontal overflow");
-assert.match(finalFixes, /occumed-sidebar-workspace-scope::before[\s\S]*pointer-events: none !important;/, "decorative sidebar pseudo-elements must never intercept pointers");
-assert.match(finalFixes, /--workspace-layer-panel: 3100;[\s\S]*--workspace-layer-tabs: 3110;/, "sidebar overlays must use the documented application layer band");
-assert.match(finalFixes, /data-occumedworkspace\]:not\(\[data-occumedworkspace="liveFinder"\]\)/, "inactive Finder must be forcibly hidden");
-assert.match(finalFixes, /data-occumedworkspace\]:not\(\[data-occumedworkspace="explorer"\]\)/, "inactive Explorer must be forcibly hidden");
+assert.match(workspaceCss, /\.occumed-sidebar-workspace-host > \.occumed-map-tools-panel\s*\{[\s\S]*position: static !important;/, "docked Map Tools must never float over the map");
+assert.match(workspaceCss, /\.occumed-sidebar-workspace-tab\s*\{[\s\S]*font-size: 11\.5px !important;/, "workspace tab labels must retain readable text");
+assert.match(workspaceCss, /grid-template-columns: var\(--command-sidebar-width\) minmax\(0, 1fr\) !important;/, "desktop layout must have only sidebar and map columns");
+assert.doesNotMatch(workspaceCss, /minmax\(0, 1fr\) 0 !important/, "a zero-width third column must not remain");
+assert.match(workspaceCss, /Floating Finder\/Explorer panels/i, "authoritative layout must document floating panel ownership");
+assert.match(workspaceCss, /position: fixed !important;[\s\S]*--workspace-panel-top/, "Finder and Explorer must align to measured sidebar geometry");
+assert.match(workspaceCss, /data-occumedworkspace="mapTools"/, "Map Tools must have a workspace-scoped final theme");
+assert.match(workspaceCss, /background: var\(--workspace-card-bg\) !important;/, "workspace cards must share the navy panel palette");
+assert.match(workspaceCss, /occumed-sidebar-provider-content > :is\(\.hero-card, \.sb-section\)/, "React's provider wrapper must retain the direct-child card styling");
+assert.match(workspaceCss, /occumed-sidebar-provider-content \{[\s\S]*background: transparent !important;/, "the structural provider wrapper must remain transparent");
+assert.match(workspaceCss, /--command-sidebar-width: clamp\(292px, 21vw, 320px\)/, "desktop workspace width must remain consistent across tabs");
+assert.match(workspaceCss, /overflow-x: hidden !important;/, "workspace panels must prevent horizontal overflow");
+assert.match(workspaceCss, /occumed-sidebar-workspace-scope::before[\s\S]*pointer-events: none !important;/, "decorative sidebar pseudo-elements must never intercept pointers");
+assert.match(workspaceCss, /--workspace-layer-panel: 3100;[\s\S]*--workspace-layer-tabs: 3110;/, "sidebar overlays must use the documented application layer band");
+assert.match(workspaceCss, /data-occumedworkspace\]:not\(\[data-occumedworkspace="liveFinder"\]\)/, "inactive Finder must be forcibly hidden");
+assert.match(workspaceCss, /data-occumedworkspace\]:not\(\[data-occumedworkspace="explorer"\]\)/, "inactive Explorer must be forcibly hidden");
 
 assert.match(productionUi, /assertWorkspace\("providers"\)/, "production UI smoke must exercise Providers");
 assert.match(productionUi, /assertWorkspace\("mapTools"/, "production UI smoke must exercise Map Tools");

@@ -81,11 +81,24 @@ function candidateFacilities(rawText) {
     facilities.push(name);
   };
 
+  let awaitingName = false;
   for (const line of lines) {
     const numbered = line.match(/^\s*(\d{1,3})[.)\-]?\s+(.+)$/u);
     if (numbered) {
       flush();
       current = numbered[2];
+      awaitingName = false;
+      continue;
+    }
+    if (/^\s*\d{1,3}[.)\-]?\s*$/u.test(line)) {
+      flush();
+      awaitingName = true;
+      continue;
+    }
+    if (awaitingName) {
+      if (/^(pagina|pag\.)\s*\d+/iu.test(line)) continue;
+      current = line;
+      awaitingName = false;
       continue;
     }
     if (current && !/^\d+\s*$/u.test(line) && !/^(pagina|pag\.)\s*\d+/iu.test(line)) {

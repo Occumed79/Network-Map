@@ -24,6 +24,13 @@ const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || import.meta.env.VITE_M
 const MAPBOX_2D_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN_2 || "";
 const MAP_LOAD_TIMEOUT_MS = 30_000;
 
+function mapboxTokenCandidates(mode: MapMode): string[] {
+  const preferred = mode === "2d"
+    ? [MAPBOX_2D_TOKEN, MAPBOX_TOKEN]
+    : [MAPBOX_TOKEN, MAPBOX_2D_TOKEN];
+  return [...new Set(preferred.map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
 let currentMode: MapMode = "2d";
 let mapContainer: HTMLElement | null = null;
 let mapWrap: HTMLElement | null = null;
@@ -251,11 +258,33 @@ async function ensureMapboxGlobe(): Promise<void> {
 
 async function createMapboxMap(mode: MapMode): Promise<void> {
   const is2d = mode === "2d";
-  const token = is2d ? MAPBOX_2D_TOKEN : MAPBOX_TOKEN;
   const host = is2d ? mapbox2dHost : mapboxGlobeHost;
-  if (!token) throw new Error(is2d ? "VITE_MAPBOX_TOKEN_2 is not configured" : "VITE_MAPBOX_TOKEN is not configured");
   if (!host) throw new Error("Mapbox map host did not initialize");
 
+  const tokens = mapboxTokenCandidates(mode);
+  if (!tokens.length) {
+    throw new Error(mode === "2d"
+      ? "Neither VITE_MAPBOX_TOKEN_2 nor VITE_MAPBOX_TOKEN is configured"
+      : "Neither VITE_MAPBOX_TOKEN nor VITE_MAPBOX_TOKEN_2 is configured");
+  }
+
+  let lastError: unknown = null;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    try {
+      await createMapboxMapWithToken(mode, host, token);
+      if (index > 0) console.warn(`Mapbox ${mode} recovered using fallback token ${index + 1} of ${tokens.length}`);
+      return;
+    } catch (error) {
+      lastError = error;
+      console.warn(`Mapbox ${mode} token ${index + 1} of ${tokens.length} failed`, error);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(`Mapbox ${mode} failed with all configured tokens`);
+}
+
+async function createMapboxMapWithToken(mode: MapMode, host: HTMLElement, token: string): Promise<void> {
+  const is2d = mode === "2d";
   const instance = new mapboxgl.Map({
     container: host,
     accessToken: token,
@@ -273,30 +302,38 @@ async function createMapboxMap(mode: MapMode): Promise<void> {
     dragRotate: !is2d,
     pitchWithRotate: !is2d,
   });
-  registerMapboxMap(instance, { mode });
-  instance.doubleClickZoom.disable();
 
+  registerMapboxMap(instance, { mode });
   if (is2d) mapbox2dMap = instance;
   else mapboxGlobeMap = instance;
 
-  instance.addControl(new mapboxgl.NavigationControl({ visualizePitch: !is2d }), "top-left");
-  instance.scrollZoom.setWheelZoomRate(1 / 600);
-  instance.scrollZoom.setZoomRate(1 / 180);
+  try {
+    instance.doubleClickZoom.disable();
+    instance.addControl(new mapboxgl.NavigationControl({ visualizePitch: !is2d }), "top-left");
+    instance.scrollZoom.setWheelZoomRate(1 / 600);
+    instance.scrollZoom.setZoomRate(1 / 180);
 
-  if (!is2d) instance.on("style.load", () => configureGlobe(instance));
+    if (!is2d) instance.on("style.load", () => configureGlobe(instance));
 
-  await waitForMapReady(instance, is2d ? "Mapbox 2D map" : "Mapbox 3D globe");
+    await waitForMapReady(instance, is2d ? "Mapbox 2D map" : "Mapbox 3D globe");
 
-  if (!is2d) configureGlobe(instance);
-  installMapboxInteractions(instance, mode);
-  host.classList.add("ready", "engine-render-ready");
-  host.querySelectorAll<HTMLElement>(":scope > .dual-engine-loading").forEach((node) => node.remove());
+    if (!is2d) configureGlobe(instance);
+    installMapboxInteractions(instance, mode);
+    host.classList.add("ready", "engine-render-ready");
+    host.querySelectorAll<HTMLElement>(":scope > .dual-engine-loading").forEach((node) => node.remove());
 
-  instance.on("moveend", () => {
-    if (currentMode !== mode) return;
-    captureCamera(instance, mode);
-    emitCameraState(instance, mode);
-  });
+    instance.on("moveend", () => {
+      if (currentMode !== mode) return;
+      captureCamera(instance, mode);
+      emitCameraState(instance, mode);
+    });
+  } catch (error) {
+    unregisterMapboxMap(instance);
+    try { instance.remove(); } catch {}
+    if (is2d && mapbox2dMap === instance) mapbox2dMap = null;
+    if (!is2d && mapboxGlobeMap === instance) mapboxGlobeMap = null;
+    throw error;
+  }
 }
 
 function configureGlobe(instance: mapboxgl.Map): void {

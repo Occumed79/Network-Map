@@ -33,8 +33,20 @@ let page = 1;
 let total = 0;
 while (true) {
   const url = `${baseUrl}/api/international-registry-layers/${encodeURIComponent(source)}?limit=5000&page=${page}`;
-  const response = await fetch(url, { headers: { accept: "application/json", "user-agent": "Network-Map-registry-sync/1.0" } });
-  if (!response.ok) throw new Error(`${source} page ${page} returned HTTP ${response.status}: ${(await response.text()).slice(0, 500)}`);
+  let response;
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    response = await fetch(url, {
+      headers: { accept: "application/json", "user-agent": "Network-Map-registry-sync/1.0" },
+      signal: AbortSignal.timeout(180_000),
+    });
+    if (response.ok) break;
+    const retryable = response.status === 429 || response.status === 502 || response.status === 503 || response.status === 504;
+    const body = await response.text();
+    if (!retryable || attempt === 6) {
+      throw new Error(`${source} page ${page} returned HTTP ${response.status}: ${body.slice(0, 500)}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.min(30_000, attempt * 5_000)));
+  }
   const payload = await response.json();
   const providers = Array.isArray(payload.providers) ? payload.providers : [];
   for (const provider of providers) {

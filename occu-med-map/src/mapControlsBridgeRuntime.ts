@@ -56,78 +56,9 @@ function configureProjection(instance: mapboxgl.Map, globe: boolean): void {
   }
 }
 
-function ensureNetworkOverlayLayers(instance: mapboxgl.Map): void {
-  if (!instance.isStyleLoaded()) return;
-
-  try {
-    if (!instance.getSource("network-overlays")) {
-      instance.addSource("network-overlays", {
-        type: "geojson",
-        data: { type: "FeatureCollection", features: [] },
-      });
-    }
-
-    if (!instance.getLayer("network-fills")) {
-      instance.addLayer({
-        id: "network-fills",
-        type: "fill",
-        source: "network-overlays",
-        filter: ["==", ["geometry-type"], "Polygon"],
-        paint: {
-          "fill-color": ["coalesce", ["get", "fillColor"], "#0e7490"],
-          "fill-opacity": ["coalesce", ["get", "fillOpacity"], 0.2],
-          "fill-outline-color": ["coalesce", ["get", "lineColor"], "#ffffff"],
-        },
-      } as any);
-    }
-
-    if (!instance.getLayer("network-lines")) {
-      instance.addLayer({
-        id: "network-lines",
-        type: "line",
-        source: "network-overlays",
-        filter: ["==", ["geometry-type"], "LineString"],
-        paint: {
-          "line-color": ["coalesce", ["get", "lineColor"], "#67e8f9"],
-          "line-opacity": ["coalesce", ["get", "lineOpacity"], 0.9],
-          "line-width": ["coalesce", ["get", "lineWidth"], 2],
-        },
-      } as any);
-    }
-
-    if (!instance.getLayer("network-points")) {
-      instance.addLayer({
-        id: "network-points",
-        type: "circle",
-        source: "network-overlays",
-        filter: ["==", ["geometry-type"], "Point"],
-        paint: {
-          "circle-radius": ["coalesce", ["get", "pointRadius"], 5],
-          "circle-color": ["coalesce", ["get", "fillColor"], "#0e7490"],
-          "circle-opacity": ["coalesce", ["get", "fillOpacity"], 0.9],
-          "circle-stroke-color": ["coalesce", ["get", "lineColor"], "#ffffff"],
-          "circle-stroke-width": ["coalesce", ["get", "lineWidth"], 1],
-        },
-      } as any);
-    }
-  } catch (error) {
-    console.warn("Network Map overlays could not be restored after the basemap change", error);
-  }
-}
-
-function syncVisibleOverlays(): void {
-  const sync = (window as any).__NETWORK_MAP_GLOBE__?.sync;
-  if (typeof sync === "function") sync();
-}
-
 function finishStyleChange(instance: mapboxgl.Map, globe: boolean): void {
   configureProjection(instance, globe);
-  ensureNetworkOverlayLayers(instance);
-  syncVisibleOverlays();
-  window.setTimeout(syncVisibleOverlays, 120);
-  window.setTimeout(syncVisibleOverlays, 420);
 }
-
 function setPanelStatus(text: string): void {
   document.querySelectorAll<HTMLElement>(".occumed-mapbox-status").forEach((status) => {
     status.textContent = text;

@@ -85,6 +85,8 @@ def dk_coordinates(row):
         ("VisitingAddressCoordETRS89z32EMeasure", "VisitingAddressCoordETRS89z32NMeasure"),
         ("ActivityAddressCoordETRS89z32EMeasure", "ActivityAddressCoordETRS89z32NMeasure"),
         ("PostalAddressCoordETRS89z32EMeasure", "PostalAddressCoordETRS89z32NMeasure"),
+        ("SorVisitingAddressCoordETRS89z32EMeasure", "SorVisitingAddressCoordETRS89z32NMeasure"),
+        ("AddressCoordETRS89z32EMeasure", "AddressCoordETRS89z32NMeasure"),
     ]
     for east_key, north_key in pairs:
         east = finite(row.get(east_key))
@@ -101,10 +103,10 @@ def dk_coordinates(row):
 
 
 def address_parts(row):
-    prefixes = ["VisitingAddress", "ActivityAddress", "PostalAddress"]
+    prefixes = ["VisitingAddress", "ActivityAddress", "PostalAddress", "SorVisitingAddress", "Address"]
     for prefix in prefixes:
         street = text(row.get(prefix + "StreetName"))
-        number = text(row.get(prefix + "StreetBuildingId"))
+        number = text(row.get(prefix + "StreetBuildingId") or row.get(prefix + "StreetbuildingId"))
         floor = text(row.get(prefix + "FloorId"))
         suite = text(row.get(prefix + "SuiteId"))
         extra = text(row.get(prefix + "AdditionalAddressInfo"))
@@ -124,7 +126,10 @@ def address_parts(row):
 def specialties(row):
     values = []
     for index in range(1, 9):
-        value = text(row.get(f"PrioritizedEntitySpeciality{index}Name"))
+        value = text(
+            row.get(f"PrioritizedEntitySpeciality{index}Name")
+            or row.get(f"SorPrioritizedEntitySpeciality{index}Name")
+        )
         if value and value not in values:
             values.append(value)
     return values

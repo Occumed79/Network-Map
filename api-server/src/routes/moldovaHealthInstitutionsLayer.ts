@@ -5,7 +5,10 @@ const router = Router();
 const MAX_PAGE_SIZE = 5000;
 const SOURCE_PAGE = "https://ms.gov.md/contacte-2/harta-institutiilor-medicale/";
 const MY_MAPS_MID = "1kDYisrnz9cAVoGh2DoIIBksgVQY";
-const KML_URLS = [\n  `https://www.google.com/maps/d/u/0/kml?mid=${encodeURIComponent(MY_MAPS_MID)}&forcekml=1`,\n  `https://www.google.com/maps/d/kml?mid=${encodeURIComponent(MY_MAPS_MID)}&forcekml=1`,\n];
+const KML_URLS = [
+  `https://www.google.com/maps/d/u/0/kml?mid=${encodeURIComponent(MY_MAPS_MID)}&forcekml=1`,
+  `https://www.google.com/maps/d/kml?mid=${encodeURIComponent(MY_MAPS_MID)}&forcekml=1`,
+];
 const CACHE_TTL_MS = 6 * 60 * 60_000;
 
 type Bounds = { north: number; south: number; east: number; west: number };

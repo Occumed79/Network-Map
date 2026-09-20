@@ -102,7 +102,7 @@ function normalize(row: CyprusHospitalRow): Record<string, unknown> | null {
 }
 
 async function fetchRows(): Promise<CyprusHospitalRow[]> {
-  const params = new URLSearchParams({ resource_id: RESOURCE_ID, limit: "0" });
+  const params = new URLSearchParams({ resource_id: RESOURCE_ID, limit: "1000" });
   const payload = await fetchExternalJson<DkanPayload>(
     "cy-moh-state-hospitals",
     `${API_URL}?${params.toString()}`,

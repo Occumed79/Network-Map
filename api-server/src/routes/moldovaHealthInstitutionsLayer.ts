@@ -5,7 +5,7 @@ const router = Router();
 const MAX_PAGE_SIZE = 5000;
 const SOURCE_PAGE = "https://ms.gov.md/contacte-2/harta-institutiilor-medicale/";
 const MY_MAPS_MID = "1kDYisrnz9cAVoGh2DoIIBksgVQY";
-const KML_URL = `https://www.google.com/maps/d/kml?mid=${encodeURIComponent(MY_MAPS_MID)}&forcekml=1`;
+const KML_URLS = [\n  `https://www.google.com/maps/d/u/0/kml?mid=${encodeURIComponent(MY_MAPS_MID)}&forcekml=1`,\n  `https://www.google.com/maps/d/kml?mid=${encodeURIComponent(MY_MAPS_MID)}&forcekml=1`,\n];
 const CACHE_TTL_MS = 6 * 60 * 60_000;
 
 type Bounds = { north: number; south: number; east: number; west: number };
@@ -176,13 +176,24 @@ function parseKml(kml: string): Record<string, unknown>[] {
 
 async function loadProviders(): Promise<Record<string, unknown>[]> {
   if (cache && cache.expiresAt > Date.now()) return cache.providers;
-  const response = await fetch(KML_URL, {
-    headers: { accept: "application/vnd.google-earth.kml+xml, application/xml, text/xml, */*", "user-agent": "Occu-Med-Network-Map/1.0" },
-    redirect: "follow",
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) throw new Error(`Moldova Ministry health map KML failed: HTTP ${response.status}`);
-  const providers = parseKml(await response.text());
+  let kml = "";
+  let lastStatus = 0;
+  for (const url of KML_URLS) {
+    const response = await fetch(url, {
+      headers: { accept: "application/vnd.google-earth.kml+xml, application/xml, text/xml, */*", "user-agent": "Occu-Med-Network-Map/1.0" },
+      redirect: "follow",
+      signal: AbortSignal.timeout(30_000),
+    });
+    lastStatus = response.status;
+    if (!response.ok) continue;
+    const body = await response.text();
+    if (body.includes("<Placemark")) {
+      kml = body;
+      break;
+    }
+  }
+  if (!kml) throw new Error(`Moldova Ministry health map KML failed; last HTTP status ${lastStatus}`);
+  const providers = parseKml(kml);
   if (providers.length < 20) throw new Error(`Moldova Ministry health map produced only ${providers.length} mapped institutions`);
   cache = { expiresAt: Date.now() + CACHE_TTL_MS, providers };
   return providers;

@@ -65,15 +65,29 @@ assert.deepEqual(addSourceOwners, ["src/mapboxSourcePipelineRuntime.ts"], "only 
 assert.deepEqual(removeSourceOwners, ["src/mapboxSourcePipelineRuntime.ts"], "only the source pipeline may replace Map.prototype.removeSource");
 assert.deepEqual(setDataAssignmentOwners, ["src/mapboxSourcePipelineRuntime.ts"], "only the source pipeline may replace GeoJSONSource.setData");
 
+const providerPointOwner = source("src/providerPointNativeRuntime.ts");
+assert.match(providerPointOwner, /\.addSource\(/, "provider point owner must register native GeoJSON through public Mapbox addSource");
+assert.match(providerPointOwner, /\.setData\(/, "provider point owner must update native GeoJSON through public source.setData");
+assert.doesNotMatch(providerPointOwner, /\.setData\s*=/, "provider point owner must never replace GeoJSONSource.setData");
+assert.doesNotMatch(providerPointOwner, /prototype\.addSource\s*=/, "provider point owner must never replace Map.prototype.addSource");
+
 for (const file of [
   "src/providerDatasetNativeMapRuntime.ts",
   "src/providerExplorerNativeMapRuntime.ts",
+] as const) {
+  const content = source(file);
+  assert.match(content, /ensureProviderPointLayer/, `${file} must delegate provider point source/layer ownership`);
+  assert.doesNotMatch(content, /\.setData\s*=/, `${file} must never replace GeoJSONSource.setData`);
+  assert.doesNotMatch(content, /prototype\.addSource\s*=/, `${file} must never replace Map.prototype.addSource`);
+}
+
+for (const file of [
   "src/mapToolsNativeMapRuntime.ts",
   "src/phaseTwoNativeMapRuntime.ts",
 ] as const) {
   const content = source(file);
-  assert.match(content, /\.addSource\(/, `${file} must register native GeoJSON through public Mapbox addSource`);
-  assert.match(content, /\.setData\(/, `${file} must update native GeoJSON through public source.setData`);
+  assert.match(content, /\.addSource\(/, `${file} must register native overlay GeoJSON through public Mapbox addSource`);
+  assert.match(content, /\.setData\(/, `${file} must update native overlay GeoJSON through public source.setData`);
   assert.doesNotMatch(content, /\.setData\s*=/, `${file} must never replace GeoJSONSource.setData`);
   assert.doesNotMatch(content, /prototype\.addSource\s*=/, `${file} must never replace Map.prototype.addSource`);
 }

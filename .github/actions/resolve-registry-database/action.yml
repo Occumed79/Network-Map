@@ -22,8 +22,12 @@ runs:
         oidc_response="$(curl --fail --silent --show-error \
           -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
           "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=network-map-registry-sync")"
-        oidc_token="$(jq -r '.value // empty' <<<"$oidc_response")"
-        [[ -n "$oidc_token" ]] || { echo "GitHub OIDC token was empty" >&2; exit 1; }
+        if jq -e . >/dev/null 2>&1 <<<"$oidc_response"; then
+          oidc_token="$(jq -r '.value // empty' <<<"$oidc_response")"
+        else
+          oidc_token="$oidc_response"
+        fi
+        [[ "$oidc_token" == *.*.* ]] || { echo "GitHub OIDC token response was not a JWT" >&2; exit 1; }
         echo "::add-mask::${oidc_token}"
 
         response=""

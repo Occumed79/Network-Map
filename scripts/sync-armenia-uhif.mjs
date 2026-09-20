@@ -88,7 +88,7 @@ function parseRscData(raw) {
 function findHospitals(value, seen = new Set()) {
   if (!value || typeof value !== "object" || seen.has(value)) return null;
   seen.add(value);
-  if (Array.isArray(value.hospitals) && value.hospitals.length >= MIN_FACILITIES) {
+  if (Array.isArray(value.hospitals) && value.hospitals.length > 0) {
     return value.hospitals;
   }
   for (const child of Array.isArray(value) ? value : Object.values(value)) {
@@ -286,6 +286,18 @@ try {
   if (!Number.isInteger(reportedTotal) || reportedTotal < MIN_FACILITIES) {
     throw new Error(`UHIF page did not expose a plausible facility total; saw ${reportedTotal}`);
   }
+
+  // The list view is paginated independently from the map payload. UHIF now
+  // exposes records beyond the first map payload through repeated "Load More"
+  // server actions, so exhaust that list before checking completeness.
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const loadMore = page.getByRole("button", { name: /load more/i }).first();
+    if (!(await loadMore.count()) || !(await loadMore.isVisible().catch(() => false))) break;
+    await loadMore.scrollIntoViewIfNeeded().catch(() => {});
+    await loadMore.click({ timeout: 10_000 });
+    await page.waitForTimeout(650);
+  }
+  await page.waitForTimeout(1_000);
 
   let captured = responsePayloads
     .slice()

@@ -85,7 +85,16 @@ def sha(value):
 
 
 def session_get(url, timeout=90):
-    response = requests.get(url, timeout=timeout, headers={"User-Agent": USER_AGENT, "Accept-Language": "bs,hr,sr,en"})
+    headers = {"User-Agent": USER_AGENT, "Accept-Language": "bs,hr,sr,en"}
+    try:
+        response = requests.get(url, timeout=timeout, headers=headers)
+    except requests.exceptions.SSLError:
+        if "zzobpk.ba" not in url:
+            raise
+        # The official Bosnian-Podrinje Canton health-insurance authority
+        # currently presents a self-signed certificate. Scope the fallback
+        # strictly to that authority instead of weakening TLS globally.
+        response = requests.get(url, timeout=timeout, headers=headers, verify=False)
     response.raise_for_status()
     return response
 

@@ -200,6 +200,7 @@ async function normalizeEngland() {
   const objects = rowsToObjects(parseCsv(raw), ["Name", "Postcode"]);
   const geocodes = await geocodePostcodes(objects.map((row) => pick(row, ["Postcode", "Location Postal Code", "Postal Code"])));
   const normalized = [];
+  const seenSourceIds = new Set();
   let rejectedNonClinical = 0;
   let rejectedCoordinates = 0;
 
@@ -237,6 +238,9 @@ async function normalizeEngland() {
     const formatted = [address1, address2, city, county, postal, "England", "United Kingdom"].filter(Boolean).join(", ");
     const identity = [name, address1, address2, postal, providerName].join("|").toLowerCase();
     const locationId = pick(row, ["Location ID", "CQC Location ID"]) || hash(identity).slice(0, 24);
+    const sourceRecordId = `cqc:${locationId}`;
+    if (seenSourceIds.has(sourceRecordId)) continue;
+    seenSourceIds.add(sourceRecordId);
     const normalizedNameValue = normalizedName(name);
     const masterKey = `loc:${hash(JSON.stringify({
       name: normalizedNameValue,
@@ -247,7 +251,7 @@ async function normalizeEngland() {
     }))}`;
 
     normalized.push([
-      `cqc:${locationId}`,
+      sourceRecordId,
       csvUrl,
       name,
       normalizedNameValue,

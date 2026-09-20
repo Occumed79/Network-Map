@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | `DATABASE_URL_POOLED` | Preferred provider/map database connection through the Neon pooler | Used first when present. All provider inventory, upload, map/search, audit, and operational metadata use this database. |
 | `DATABASE_URL` | Provider/map database fallback/direct connection | Used only when `DATABASE_URL_POOLED` is absent. It is not a second logical provider database. |
+| `OVERPASS_DATABASE_URL`, `OVERPASS_DATABASE_URL_2` | Overture Maps provider database projects | Independent Neon provider shards using the same canonical provider schema. |
 | `HEALTHSITES_DATABASE_URL` … `_8` | Healthsites provider database projects | Independent Neon projects containing the identical provider schema and assigned Healthsites country groups. |
 | `USA_EMBASSY_DATABASE_URL` … `_4` | U.S. Embassy provider database projects | Independent Neon projects containing the identical provider schema and assigned embassy country groups. |
 | `DATABASE_URL_2` | Separate scoring / health-indicator database | Required by scoring routes/jobs only and checked separately for readiness. Never use it for provider inventory. |
@@ -22,7 +23,7 @@ Additional provider projects use a default pool ceiling of 2 connections each, c
 
 ## Migrations and drift
 
-SQL migrations live under `api-server/src/db/migrations`. New schema changes must have a repository migration and a matching schema/type change when applicable. `schema_migration_versions` records migration versions that are explicitly applied. CI's database lifecycle test verifies migration filename uniqueness, required integrity migrations, connection ownership, readiness behavior, and schema/index expectations.
+SQL migrations live under `api-server/src/db/migrations`. New schema changes must have a repository migration and a matching schema/type change when applicable. `schema_migration_versions` records migration versions that are explicitly applied. Every provider shard must also contain `provider_schema_state` and the same canonical `provider_type_catalog`; the current catalog contains 32 active canonical/compatibility keys. CI's database lifecycle test verifies migration filename uniqueness, required integrity migrations, connection ownership, readiness behavior, and schema/index expectations.
 
 Runtime request handlers must not create extensions, tables, or indexes. Schema ownership belongs to repository migrations applied through the deployment/migration procedure; liveness, readiness, search, and Provider Explorer GET requests stay schema-read-only.
 

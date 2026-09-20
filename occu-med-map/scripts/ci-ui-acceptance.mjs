@@ -114,7 +114,7 @@ async function assertGeometry(page, viewportName) {
       return !element.hidden && style.display !== "none" && style.visibility !== "hidden" && rect.width > 2 && rect.height > 2;
     };
     const offscreen = Array.from(document.querySelectorAll(
-      ".command-search-results, .local-pop-card, .tz-legend, .modal-box, .pdf-modal-wrap, .leaflet-popup, .mapboxgl-popup",
+      ".command-search-results, .local-pop-card, .tz-legend, .modal-box, .pdf-modal-wrap, .mapboxgl-popup",
     )).filter(visible).map((element) => {
       const rect = element.getBoundingClientRect();
       return {

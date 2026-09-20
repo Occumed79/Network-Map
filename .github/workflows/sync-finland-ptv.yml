@@ -21,7 +21,7 @@ permissions:
 
 concurrency:
   group: finland-ptv-registry-sync
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   sync:

@@ -109,13 +109,8 @@ function Toggle({ definition, state, onChange }: {
   </div>;
 }
 
-function findLegacyProviderLayerList(): HTMLElement | null {
-  for (const section of Array.from(document.querySelectorAll<HTMLElement>('section.command-section'))) {
-    const title = section.querySelector<HTMLElement>('.command-section-title span')?.textContent?.trim();
-    if (title !== 'Provider Layers') continue;
-    return section.querySelector<HTMLElement>('.workflow-layer-list');
-  }
-  return null;
+function findProviderLayerRegistryHost(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('[data-provider-layer-registry-host="true"]');
 }
 
 export default function ProviderLayerRegistryPanel() {
@@ -133,34 +128,16 @@ export default function ProviderLayerRegistryPanel() {
 
   useEffect(() => {
     let disposed = false;
-    const suppressLegacyControls = () => {
-      const list = findLegacyProviderLayerList();
-      if (!list) return;
-      for (const child of Array.from(list.children)) {
-        if (!(child instanceof HTMLElement)) continue;
-        if (child.dataset.providerRegistryOwned === 'true') continue;
-        const label = child.querySelector<HTMLElement>('.workflow-layer-name')?.textContent?.trim();
-        // Luminous Density is a visualization control, not a provider dataset.
-        // Keep it available while replacing only the old provider-source toggles.
-        if (label === 'Luminous Density') {
-          child.style.removeProperty('display');
-          delete child.dataset.providerRegistrySuppressed;
-          continue;
-        }
-        child.dataset.providerRegistrySuppressed = 'true';
-        child.style.display = 'none';
-      }
-      if (!disposed) setHost((current) => current === list ? current : list);
+    const attachRegistryHost = () => {
+      const nextHost = findProviderLayerRegistryHost();
+      if (!nextHost || disposed) return;
+      setHost((current) => current === nextHost ? current : nextHost);
     };
-    suppressLegacyControls();
-    const unsubscribe = subscribeToSharedDomObserver('provider-layer-registry-panel', suppressLegacyControls);
+    attachRegistryHost();
+    const unsubscribe = subscribeToSharedDomObserver('provider-layer-registry-panel', attachRegistryHost);
     return () => {
       disposed = true;
       unsubscribe();
-      document.querySelectorAll<HTMLElement>('[data-provider-registry-suppressed="true"]').forEach((element) => {
-        element.style.removeProperty('display');
-        delete element.dataset.providerRegistrySuppressed;
-      });
     };
   }, []);
 

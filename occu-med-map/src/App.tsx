@@ -80,7 +80,6 @@ import {
   setNativeDiagnosticCollection,
 } from './usDiagnosticsNativeMapRuntime';
 
-const NATIVE_DRIVE_TIME_ENABLED = import.meta.env.VITE_NATIVE_DRIVE_TIME === 'true';
 
 const SERVICE_PRESENCE_OPTIONS = [
   {key:'primaryCare', label:'Primary Care / FFD', serviceKeys:['physicalExam','primaryCare','clinic','doctor']},
@@ -1274,10 +1273,10 @@ export default function App() {
   const lastRadiusRef = useRef<{lat:number;lng:number}|null>(null);
   const providerEta = useProviderEta();
   const etaCandidates = useMemo(
-    ()=>NATIVE_DRIVE_TIME_ENABLED?liveResultsToEtaCandidates(liveResults):[],
+    () => liveResultsToEtaCandidates(liveResults),
     [liveResults],
   );
-  const etaOrigin = NATIVE_DRIVE_TIME_ENABLED && lastRadiusRef.current
+  const etaOrigin = lastRadiusRef.current
     ? {
         ...lastRadiusRef.current,
         label: liveLocation || `${lastRadiusRef.current.lat.toFixed(4)}, ${lastRadiusRef.current.lng.toFixed(4)}`,
@@ -1286,7 +1285,6 @@ export default function App() {
   const liveBackendCategoryRef = useRef(liveBackendCategory);
   useEffect(()=>{ liveBackendCategoryRef.current = liveBackendCategory; },[liveBackendCategory]);
   useEffect(()=>{
-    if(!NATIVE_DRIVE_TIME_ENABLED) return;
     providerEta.clear();
   },[liveResults,dropCenter?.lat,dropCenter?.lng,providerEta.clear]);
 

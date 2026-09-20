@@ -23,7 +23,6 @@ type RateLimitAvailability = "fail-open-read" | "fail-closed";
 let lastReadRateLimitFailure = "";
 
 export const ROUTE_POLICIES: RoutePolicy[] = [
-  { prefix: "/api/registry-sync", methods: ["POST"], capability: "write", authentication: "none", maxBytes: 64 * 1024, rateLimit: { windowSeconds: 600, max: 120 } },
   { prefix: "/api/provider-sources/search", methods: ["POST"], capability: "read", maxBytes: 512 * 1024, rateLimit: { windowSeconds: 600, max: 80 } },
   { prefix: "/api/provider-sources/npi-custom", methods: ["POST"], capability: "read", maxBytes: 512 * 1024, rateLimit: { windowSeconds: 600, max: 60 } },
   { prefix: "/api/diagnostics/export", methods: ["GET"], capability: "admin", rateLimit: { windowSeconds: 600, max: 60 } },

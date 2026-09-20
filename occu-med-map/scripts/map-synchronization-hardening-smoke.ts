@@ -15,6 +15,7 @@ const app = source("src/App.tsx");
 const dual = source("src/dualMapEngineRuntime.ts");
 const lifecycle = source("src/mapboxMapLifecycleRuntime.ts");
 const providerFinder = source("src/providerLocationFinderRuntime.ts");
+const providerPointOwner = source("src/providerPointNativeRuntime.ts");
 const sceneRuntimePath = path.join(projectRoot, "src/mapSceneRuntime.ts");
 
 assert.doesNotMatch(main, /mapOverlaySynchronizationControllerRuntime/, "retired overlay mirroring must not load");
@@ -48,7 +49,10 @@ assert.match(lifecycle, /orderedInitializers/, "Mapbox lifecycle must retain det
 assert.match(lifecycle, /executedByMap/, "Mapbox lifecycle must prevent duplicate initializer ownership");
 assert.match(lifecycle, /runCleanup\(map\)/, "Mapbox lifecycle must clean up registered owners when a map is removed");
 
-assert.match(providerFinder, /map\.addSource\(SOURCE_ID/, "provider finder must own a native Mapbox source");
-assert.match(providerFinder, /map\.addLayer\(/, "provider finder must own a native Mapbox layer");
+assert.match(providerFinder, /ensureProviderPointLayer/, "provider finder must delegate provider pins to the authoritative native point owner");
+assert.match(providerFinder, /SOURCE_ID = "provider-location-search-results"/, "provider finder must retain its stable logical Mapbox source id");
+assert.match(providerFinder, /LAYER_ID = "provider-location-search-dots"/, "provider finder must retain its stable logical Mapbox layer id");
+assert.match(providerPointOwner, /map\.addSource\(/, "authoritative provider point owner must create native Mapbox GeoJSON sources");
+assert.match(providerPointOwner, /map\.addLayer\(/, "authoritative provider point owner must create native Mapbox circle layers");
 
 console.log("Native Mapbox camera synchronization hardening smoke test passed.");

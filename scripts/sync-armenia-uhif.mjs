@@ -110,9 +110,34 @@ function payloadFromText(raw) {
   const rscHospitals = findHospitals(rsc);
   if (rscHospitals) candidates.push(rscHospitals);
 
-  for (const match of raw.matchAll(/self\.__next_f\.push\(\[1,("(?:\\.|[^"\\])*")\]\)/gu)) {
+  const marker = "self.__next_f.push([1,";
+  let cursor = 0;
+  while (cursor < raw.length) {
+    const markerIndex = raw.indexOf(marker, cursor);
+    if (markerIndex < 0) break;
+    let start = markerIndex + marker.length;
+    while (/\s/u.test(raw[start] || "")) start += 1;
+    if (raw[start] !== '"') {
+      cursor = start + 1;
+      continue;
+    }
+    let end = start + 1;
+    let escaped = false;
+    for (; end < raw.length; end += 1) {
+      const ch = raw[end];
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') break;
+    }
+    if (end >= raw.length) break;
     try {
-      const chunk = JSON.parse(match[1]);
+      const chunk = JSON.parse(raw.slice(start, end + 1));
       const parsedChunk = parseRscData(chunk);
       const hospitals = findHospitals(parsedChunk);
       if (hospitals) candidates.push(hospitals);
@@ -126,6 +151,7 @@ function payloadFromText(raw) {
         } catch (_) {}
       }
     } catch (_) {}
+    cursor = end + 1;
   }
   candidates.sort((a, b) => b.length - a.length);
   return candidates[0] || null;

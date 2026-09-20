@@ -82,10 +82,10 @@ def active_now(row):
 
 def dk_coordinates(row):
     pairs = [
+        ("SorVisitingAddressCoordETRS89z32EMeasure", "SorVisitingAddressCoordETRS89z32NMeasure"),
         ("VisitingAddressCoordETRS89z32EMeasure", "VisitingAddressCoordETRS89z32NMeasure"),
         ("ActivityAddressCoordETRS89z32EMeasure", "ActivityAddressCoordETRS89z32NMeasure"),
         ("PostalAddressCoordETRS89z32EMeasure", "PostalAddressCoordETRS89z32NMeasure"),
-        ("SorVisitingAddressCoordETRS89z32EMeasure", "SorVisitingAddressCoordETRS89z32NMeasure"),
         ("AddressCoordETRS89z32EMeasure", "AddressCoordETRS89z32NMeasure"),
     ]
     for east_key, north_key in pairs:
@@ -103,7 +103,7 @@ def dk_coordinates(row):
 
 
 def address_parts(row):
-    prefixes = ["VisitingAddress", "ActivityAddress", "PostalAddress", "SorVisitingAddress", "Address"]
+    prefixes = ["SorVisitingAddress", "VisitingAddress", "ActivityAddress", "PostalAddress", "Address"]
     for prefix in prefixes:
         street = text(row.get(prefix + "StreetName"))
         number = text(row.get(prefix + "StreetBuildingId") or row.get(prefix + "StreetbuildingId"))
@@ -214,11 +214,28 @@ def main():
     no_coordinates = 0
     for row in reader:
         scanned += 1
-        # SOR2 documentation and live exports use both legacy SI and current HI
-        # labels for Health Institutions. Treat either as the same entity class.
-        if text(row.get("SorType")).upper() not in {"SI", "HI"}:
-            continue
         if not active_now(row):
+            continue
+
+        sor_type = text(row.get("SorType")).upper()
+        if sor_type in {"SI", "HI"}:
+            sor_id = text(row.get("SorId"))
+            name = text(row.get("EntityName")) or text(row.get("HealthInstitutionEntityName"))
+            entity_type = text(row.get("EntityTypeName"))
+            institution_type = text(row.get("HealthInstitutionEntityTypeName")) or entity_type
+        elif sor_type == "OE":
+            # Current SOR exports carry the parent Health Institution and its
+            # inherited address on organizational-unit rows as well. This gives
+            # us a complete institution snapshot even when the SI row itself
+            # has no direct geolocation.
+            sor_id = text(row.get("HealthInstitutionSorId"))
+            name = text(row.get("HealthInstitutionEntityName"))
+            entity_type = text(row.get("HealthInstitutionEntityTypeName"))
+            institution_type = entity_type
+        else:
+            continue
+
+        if not sor_id or not name:
             continue
         health_institutions += 1
         coords = dk_coordinates(row)
@@ -226,13 +243,7 @@ def main():
             no_coordinates += 1
             continue
         lat, lng = coords
-        sor_id = text(row.get("SorId"))
-        name = text(row.get("EntityName")) or text(row.get("HealthInstitutionEntityName"))
-        if not sor_id or not name:
-            continue
         line1, city, postal, formatted = address_parts(row)
-        entity_type = text(row.get("EntityTypeName"))
-        institution_type = text(row.get("HealthInstitutionEntityTypeName")) or entity_type
         spec = specialties(row)
         primary, tags = classify(name, entity_type, institution_type, spec)
         phone = text(row.get("VirtualAddressTelephoneNumber"))

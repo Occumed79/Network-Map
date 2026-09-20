@@ -91,18 +91,36 @@ function parseCsv(raw) {
   return rows;
 }
 
+function headerKey(value) {
+  return text(value).toLowerCase().replace(/[^a-z0-9]+/gu, "");
+}
+
 function rowsToObjects(rows, requiredHeaders) {
-  const headerIndex = rows.findIndex((row) => requiredHeaders.every((header) => row.map(text).includes(header)));
-  if (headerIndex < 0) throw new Error(`CSV header not found: ${requiredHeaders.join(", ")}`);
+  const required = requiredHeaders.map(headerKey);
+  const headerIndex = rows.findIndex((row) => {
+    const keys = new Set(row.map(headerKey));
+    return required.every((header) => keys.has(header));
+  });
+  if (headerIndex < 0) {
+    const sample = rows.slice(0, 5).map((row) => row.slice(0, 12).map(text));
+    throw new Error(`CSV header not found: ${requiredHeaders.join(", ")}; sample=${JSON.stringify(sample)}`);
+  }
   const headers = rows[headerIndex].map((value) => text(value));
   return rows.slice(headerIndex + 1)
     .filter((row) => row.some((value) => text(value)))
-    .map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ""])));
+    .map((row) => {
+      const object = {};
+      headers.forEach((header, index) => {
+        object[header] = row[index] ?? "";
+        object[headerKey(header)] = row[index] ?? "";
+      });
+      return object;
+    });
 }
 
 function pick(row, names) {
   for (const name of names) {
-    const value = text(row[name]);
+    const value = text(row[name] ?? row[headerKey(name)]);
     if (value) return value;
   }
   return "";

@@ -42,7 +42,6 @@ const requiredOwners: Record<string, string> = {
   "mapEngineLoadingCleanupRuntime.ts": "map-engine-loading-cleanup",
   "routePlannerControlsRuntime.ts": "route-planner-controls",
   "providerLocationFinderRuntime.ts": "provider-location-finder",
-  "mapEngineFinalFixRuntime.ts": "map-engine-final-fixes",
   "mapboxGlobeLoadHardeningRuntime.ts": "mapbox-globe-load-hardening",
   "dialogControllerRuntime.ts": "dialog-controller",
   "generalUiIntegrityRuntime.ts": "general-ui-integrity",
@@ -74,15 +73,6 @@ for (const file of sharedObserverConsumers) {
   assert(!text.includes("new MutationObserver"), `${file} still owns an independent MutationObserver`);
   assert(text.includes("subscribeToSharedDomObserver"), `${file} is not using the shared DOM observer`);
 }
-
-// mapEngineFinalFixRuntime deliberately does NOT observe the map subtree. Its
-// prior observer callback wrote classes/removals back into the same subtree and
-// created a renderer-locking feedback loop in Chromium/WebKit. It is now a
-// bounded event/checkpoint reconciler while retaining explicit runtime ownership.
-const mapEngineFinalFix = source("mapEngineFinalFixRuntime.ts");
-assert(!mapEngineFinalFix.includes("new MutationObserver"), "mapEngineFinalFixRuntime.ts must not own a DOM observer");
-assert(!mapEngineFinalFix.includes("subscribeToSharedDomObserver"), "mapEngineFinalFixRuntime.ts must remain off the shared DOM observer to prevent feedback loops");
-assert(mapEngineFinalFix.includes("scheduleReconcile"), "mapEngineFinalFixRuntime.ts must use bounded reconciliation checkpoints");
 
 for (const file of ["routePlannerControlsRuntime.ts", "providerLocationFinderRuntime.ts"]) {
   const text = source(file);

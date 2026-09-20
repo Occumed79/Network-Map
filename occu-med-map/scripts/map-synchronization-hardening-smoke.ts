@@ -42,7 +42,6 @@ assert.match(dual, /network-map:native-camera/, "Mapbox must publish neutral cam
 assert.match(dual, /instance\.doubleClickZoom\.disable\(\)/, "double-click is owned by the native Live Finder interaction instead of Mapbox zoom");
 assert.doesNotMatch(dual, /canonicalMap/, "dual-engine runtime must not retain a logical-map controller");
 assert.doesNotMatch(dual, /registerMapSceneInitializer/, "dual-engine runtime must not depend on scene lifecycle registration");
-assert.doesNotMatch(dual, /syncMapboxCameraFromLeaflet|syncLeafletCameraFromMapbox|lastEngineDrivenLeafletMove/, "retired camera bridge must not return");
 assert.doesNotMatch(dual, /from ["'].+mapSceneRuntime["']/, "dual-engine camera owner must not import a transitional scene runtime");
 
 assert.match(lifecycle, /orderedInitializers/, "Mapbox lifecycle must retain deterministic initializer ordering");

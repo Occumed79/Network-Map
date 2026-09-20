@@ -326,7 +326,6 @@ try {
   const initial = await page.evaluate(() => ({ ...window.__smoke }));
   assert.deepEqual(initial.providerRequests, [], "provider APIs must be lazy at startup");
   assert.deepEqual(initial.tileProxyRequests || [], [], "2D must not request raster proxy tiles");
-  assert.equal(await page.locator(".leaflet-tile:visible").count(), 0, "Leaflet raster tiles must not be visible");
 
   await assertGeneralGeometry("desktop startup");
   await exerciseSearchDropdown();

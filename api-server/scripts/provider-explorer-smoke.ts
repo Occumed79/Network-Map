@@ -1,28 +1,46 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { classifyProvider } from '../src/lib/providerClassifier';
 import { hasValidCoordinates, parseOptionalNumber } from '../src/lib/providerCoordinates';
-import { buildLiveCacheKeyForTest, buildStoredWhereForTest, legacyProviderSelectForTest } from '../src/routes/providerExplorer';
+import { buildLiveCacheKeyForTest, buildStoredWhereForTest } from '../src/routes/providerExplorer';
 import { mergeMyClinicsLayerProviders } from '../src/routes/providerLayers';
 
 assert.equal(classifyProvider({ name: 'AFC Urgent Care' }), 'urgentCare');
 assert.equal(classifyProvider({ services: ['Audiogram testing'] }), 'audiogram');
 
-const blueHive = buildStoredWhereForTest({ source: 'bluehive', includeLive: false, includeStored: true, includeSaved: true, includeCandidates: true }, 'legacy', 'numeric-fallback');
-assert.match(blueHive.where, /LOWER\(COALESCE\(mp\.data_source/);
-assert.deepEqual(blueHive.params, ['BlueHive']);
+const blueHive = buildStoredWhereForTest(
+  { source: 'bluehive', includeLive: false, includeStored: true, includeSaved: true, includeCandidates: true },
+  'numeric-fallback',
+);
+assert.match(blueHive.where, /LOWER\(COALESCE\(pmv\.source_key/);
+assert.deepEqual(blueHive.params, ['bluehive']);
 
-const radius = buildStoredWhereForTest({ lat: 49.2827, lng: -123.1207, radiusMiles: 25, includeLive: false, includeStored: true, includeSaved: true, includeCandidates: true }, 'legacy', 'numeric-fallback');
+const radius = buildStoredWhereForTest(
+  { lat: 49.2827, lng: -123.1207, radiusMiles: 25, includeLive: false, includeStored: true, includeSaved: true, includeCandidates: true },
+  'numeric-fallback',
+);
 assert.match(radius.where, /3959 \* acos/);
 assert.ok(radius.params.includes(25));
 
-const bounds = buildStoredWhereForTest({ bounds: { north: 50, south: 49, east: -122, west: -124 }, includeLive: false, includeStored: true, includeSaved: true, includeCandidates: true }, 'legacy', 'numeric-fallback');
-assert.match(bounds.where, /mp\.lat BETWEEN/);
-assert.match(bounds.where, /mp\.lng BETWEEN/);
+const bounds = buildStoredWhereForTest(
+  { bounds: { north: 50, south: 49, east: -122, west: -124 }, includeLive: false, includeStored: true, includeSaved: true, includeCandidates: true },
+  'numeric-fallback',
+);
+assert.match(bounds.where, /pmv\.lat BETWEEN/);
+assert.match(bounds.where, /pmv\.lng BETWEEN/);
 
-const liveGuard = buildStoredWhereForTest({ source: 'live', includeLive: true, includeStored: true, includeSaved: true, includeCandidates: true }, 'legacy', 'numeric-fallback');
+const liveGuard = buildStoredWhereForTest(
+  { source: 'live', includeLive: true, includeStored: true, includeSaved: true, includeCandidates: true },
+  'numeric-fallback',
+);
 assert.match(liveGuard.where, /FALSE/);
 
-const canonicalIndexed = buildStoredWhereForTest({ source: 'indexed', includeLive: false, includeStored: true, includeSaved: false, includeCandidates: false }, 'canonical', 'numeric-fallback');
+const canonicalIndexed = buildStoredWhereForTest(
+  { source: 'indexed', includeLive: false, includeStored: true, includeSaved: false, includeCandidates: false },
+  'numeric-fallback',
+);
 assert.match(canonicalIndexed.where, /pmv\.source_kind = 'stored'/);
 assert.match(canonicalIndexed.where, /dentist_dataset/);
 assert.match(canonicalIndexed.where, /my_clinics_upload/);
@@ -39,10 +57,11 @@ assert.equal(parseOptionalNumber('   '), null);
 assert.equal(parseOptionalNumber('0'), 0);
 assert.equal(hasValidCoordinates(parseOptionalNumber(''), parseOptionalNumber('-118.25')), false);
 
-const legacyProjection = legacyProviderSelectForTest();
-assert.match(legacyProjection, /COALESCE\(mp\.scraped_at, mp\.updated_at\) AS imported_at/);
-assert.doesNotMatch(legacyProjection, /mp\.created_at/);
-assert.match(legacyProjection, /COALESCE\(NULLIF\(mp\.source_id, ''\), 'legacy:' \|\| mp\.id::text\) AS id/);
+const here = path.dirname(fileURLToPath(import.meta.url));
+const providerExplorerSource = fs.readFileSync(path.join(here, '../src/routes/providerExplorer.ts'), 'utf8');
+assert.doesNotMatch(providerExplorerSource, /medical_providers/, 'Provider Explorer must never query the legacy medical_providers table');
+assert.doesNotMatch(providerExplorerSource, /detectProviderSchema/, 'Provider Explorer must not use the generic legacy-capable schema detector');
+assert.match(providerExplorerSource, /provider_master_map_view/, 'Provider Explorer stored inventory must use the canonical provider view');
 
 const mergedMyClinics = mergeMyClinicsLayerProviders(
   [{ name: 'Uploaded Clinic', lat: 34.05, lng: -118.24, source_id: 'upload:1' }],

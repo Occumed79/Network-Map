@@ -177,20 +177,31 @@ async function renderedHospitalCards(page) {
       const name = clean(heading.textContent);
       if (!name || /services and hospitals|referral assistant|contact|medical organizations/i.test(name)) continue;
       let node = heading.parentElement;
-      let chosen = null;
+      let chosenLines = null;
       for (let depth = 0; node && depth < 7; depth += 1, node = node.parentElement) {
         const raw = String(node.innerText || "");
-        if (/\+374\s*\d/.test(raw) && raw.length < 6000) {
-          chosen = node;
+        if (raw.length >= 6000) continue;
+        const lines = raw.split(/\n+/).map(clean).filter(Boolean);
+        const nameIndex = lines.findIndex((line) => line === name);
+        if (nameIndex < 0) continue;
+        const details = lines.slice(nameIndex + 1).filter((line) =>
+          !/^\s*(?:load more|view more|details|directions|website)\s*$/i.test(line)
+        );
+        if (details.length) {
+          chosenLines = lines;
           break;
         }
       }
-      if (!chosen) continue;
-      const lines = String(chosen.innerText || "").split(/\n+/).map(clean).filter(Boolean);
-      const phoneIndex = lines.findIndex((line) => /^\+374\s*\d/.test(line));
-      if (phoneIndex < 1) continue;
-      const address = clean(lines[phoneIndex - 1]);
-      output.push({ name, address, phone: clean(lines[phoneIndex]) });
+      if (!chosenLines) continue;
+      const nameIndex = chosenLines.findIndex((line) => line === name);
+      const phoneIndex = chosenLines.findIndex((line, index) => index > nameIndex && /^\+374\s*\d/.test(line));
+      const details = chosenLines.slice(nameIndex + 1).filter((line) =>
+        !/^\+374\s*\d/.test(line)
+        && !/^\s*(?:load more|view more|details|directions|website)\s*$/i.test(line)
+      );
+      const address = clean(phoneIndex > nameIndex ? chosenLines[phoneIndex - 1] : details[0]);
+      if (!address) continue;
+      output.push({ name, address, phone: phoneIndex > nameIndex ? clean(chosenLines[phoneIndex]) : "" });
     }
 
     // The current UHIF client can render cards without heading tags. Its

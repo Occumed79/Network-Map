@@ -10,7 +10,7 @@ SELECT (
   AND BOOL_AND(name IS NOT NULL AND btrim(name) <> '')
   AND BOOL_AND(lat BETWEEN -90 AND 90 AND lng BETWEEN -180 AND 180)
 ) AS staging_ok
-FROM public.source5_import_staging
+FROM public.official_registry_import_staging
 \gset
 
 SELECT
@@ -21,7 +21,7 @@ SELECT
   COUNT(*) FILTER (WHERE country_code <> :'country_code') AS invalid_country_rows,
   COUNT(*) FILTER (WHERE name IS NULL OR btrim(name) = '') AS invalid_name_rows,
   COUNT(*) FILTER (WHERE lat NOT BETWEEN -90 AND 90 OR lng NOT BETWEEN -180 AND 180) AS invalid_coordinate_rows
-FROM public.source5_import_staging;
+FROM public.official_registry_import_staging;
 
 \if :staging_ok
 \else
@@ -91,7 +91,7 @@ SELECT
   '{}'::jsonb,
   NULL,
   'raw_loaded'
-FROM public.source5_import_staging t;
+FROM public.official_registry_import_staging t;
 
 INSERT INTO public.provider_stage_records (
   raw_record_id, source_key, source_record_id, name, normalized_name,
@@ -103,7 +103,7 @@ SELECT
   NULLIF(t.normalized_name, ''), t.country_code, t.lat, t.lng,
   t.primary_provider_type, t.capability_tags, t.quality_score, 'staged',
   jsonb_build_object('master_key', t.master_key)
-FROM public.source5_import_staging t
+FROM public.official_registry_import_staging t
 JOIN public.provider_raw_records r
   ON r.source_key = :'source_key'
  AND r.source_record_id = t.source_record_id;
@@ -121,7 +121,7 @@ SELECT
   capability_tags, :'source_key', quality_score, true, now(), now()
 FROM (
   SELECT DISTINCT ON (master_key) *
-  FROM public.source5_import_staging
+  FROM public.official_registry_import_staging
   ORDER BY master_key, quality_score DESC NULLS LAST, source_record_id
 ) dedup
 ON CONFLICT (master_key) DO UPDATE SET
@@ -164,7 +164,7 @@ INSERT INTO public.provider_master_sources (
 SELECT
   pm.id, s.id, r.id, :'source_key', t.source_record_id,
   t.source_url, t.quality_score, '{}'::jsonb
-FROM public.source5_import_staging t
+FROM public.official_registry_import_staging t
 JOIN public.provider_master pm ON pm.master_key = t.master_key
 JOIN public.provider_raw_records r
   ON r.source_key = :'source_key'
@@ -187,7 +187,7 @@ INSERT INTO public.provider_master_types
   (master_provider_id, type_key, source_key, confidence_score)
 SELECT DISTINCT
   pm.id, type_key, :'source_key', t.quality_score
-FROM public.source5_import_staging t
+FROM public.official_registry_import_staging t
 JOIN public.provider_master pm ON pm.master_key = t.master_key
 CROSS JOIN LATERAL unnest(ARRAY[t.primary_provider_type] || t.capability_tags) type_key
 WHERE type_key IS NOT NULL AND type_key <> ''
@@ -212,7 +212,7 @@ SELECT
   'government_registry', quality_score::double precision,
   NULL,
   now(), now()
-FROM public.source5_import_staging t
+FROM public.official_registry_import_staging t
 ON CONFLICT (source_id) DO UPDATE SET
   name = EXCLUDED.name,
   formatted_address = EXCLUDED.formatted_address,
@@ -261,5 +261,5 @@ SELECT (
   SELECT 1 / 0;
 \endif
 
-TRUNCATE public.source5_import_staging;
+TRUNCATE public.official_registry_import_staging;
 COMMIT;

@@ -1,6 +1,9 @@
 import { Router, type Request, type Response } from "express";
-import { getProviderDatabaseProjects, type ProviderDatabaseProject } from "@workspace/db";
-import { isPersistenceConfigured } from "../lib/networkMapPersistence";
+import {
+  getRegistryDatabaseProject,
+  type RegistryDatabaseId,
+  type RegistryDatabaseProject,
+} from "@workspace/db";
 import { parseOptionalNumber } from "../lib/providerCoordinates";
 import { queryWithStatementTimeout } from "../lib/queryWithStatementTimeout";
 
@@ -14,11 +17,67 @@ type StoredRegistryDefinition = {
   countryName: string;
 };
 
-const REGISTRIES: Record<string, StoredRegistryDefinition> = {
+const REGISTRIES: Record<RegistryDatabaseId, StoredRegistryDefinition> = {
+  "germany-klinik-atlas": { sourceKey: "de_klinikatlas", countryCode: "DE", countryName: "Germany" },
+  "canada-odhf": { sourceKey: "ca_odhf", countryCode: "CA", countryName: "Canada" },
+  "australia-healthdirect": { sourceKey: "au_healthdirect", countryCode: "AU", countryName: "Australia" },
+  "croatia-hzzo-primary-care": { sourceKey: "hr_hzzo_pzz_ckan", countryCode: "HR", countryName: "Croatia" },
+  "chile-minsal": { sourceKey: "cl_minsal_establishments", countryCode: "CL", countryName: "Chile" },
+  "colombia-reps": { sourceKey: "co_reps_sispro", countryCode: "CO", countryName: "Colombia" },
+  "ireland-hse-health-centres": { sourceKey: "ie_hse_health_centres", countryCode: "IE", countryName: "Ireland" },
+  "latvia-medical-facilities": { sourceKey: "lv_medical_facilities", countryCode: "LV", countryName: "Latvia" },
+  "lithuania-vaspvt": { sourceKey: "lt_vaspvt_licensed_facilities", countryCode: "LT", countryName: "Lithuania" },
+  "singapore-chas": { sourceKey: "sg_moh_chas", countryCode: "SG", countryName: "Singapore" },
+  "mexico-clues": { sourceKey: "mx_clues_2024", countryCode: "MX", countryName: "Mexico" },
+  "taiwan-nlsc-medical": { sourceKey: "tw_nlsc_medical", countryCode: "TW", countryName: "Taiwan" },
+  "new-zealand-health-facilities": { sourceKey: "nz_health_facilities", countryCode: "NZ", countryName: "New Zealand" },
   "brazil-cnes": { sourceKey: "br_cnes", countryCode: "BR", countryName: "Brazil" },
   "czechia-nrpzs": { sourceKey: "cz_nrpzs", countryCode: "CZ", countryName: "Czechia" },
   "argentina-refes": { sourceKey: "ar_refes", countryCode: "AR", countryName: "Argentina" },
   "finland-ptv-healthcare": { sourceKey: "fi_ptv_healthcare", countryCode: "FI", countryName: "Finland" },
+  "andorra-cass": { sourceKey: "ad_cass_healthcare", countryCode: "AD", countryName: "Andorra" },
+  "armenia-uhif": { sourceKey: "am_uhif_healthcare", countryCode: "AM", countryName: "Armenia" },
+  "azerbaijan-tabib": { sourceKey: "az_tabib_healthcare", countryCode: "AZ", countryName: "Azerbaijan" },
+  "bosnia-domestic": { sourceKey: "ba_domestic_healthcare", countryCode: "BA", countryName: "Bosnia and Herzegovina" },
+  "cyprus-state-hospitals": { sourceKey: "cy_moh_state_hospitals", countryCode: "CY", countryName: "Cyprus" },
+  "denmark-sor-healthcare": { sourceKey: "dk_sor_healthcare", countryCode: "DK", countryName: "Denmark" },
+  "england-cqc": { sourceKey: "gb_cqc_healthcare", countryCode: "GB", countryName: "England" },
+  "france-finess": { sourceKey: "fr_finess", countryCode: "FR", countryName: "France" },
+  "kosovo-moh-private": { sourceKey: "xk_moh_private_licensed", countryCode: "XK", countryName: "Kosovo" },
+  "liechtenstein-lkv": { sourceKey: "li_lkv_okp", countryCode: "LI", countryName: "Liechtenstein" },
+  "moldova-health-institutions": { sourceKey: "md_ministry_health_map", countryCode: "MD", countryName: "Moldova" },
+  "montenegro-health-facilities": { sourceKey: "me_ministry_health_facilities", countryCode: "ME", countryName: "Montenegro" },
+  "north-macedonia-moh": { sourceKey: "mk_moh_health_centers", countryCode: "MK", countryName: "North Macedonia" },
+  "northern-ireland-gp": { sourceKey: "gb_ni_gp", countryCode: "GB", countryName: "Northern Ireland" },
+  "san-marino-authorized": { sourceKey: "sm_authorized_healthcare", countryCode: "SM", countryName: "San Marino" },
+  "scotland-nhs-hospitals": { sourceKey: "gb_scotland_nhs_hospitals", countryCode: "GB", countryName: "Scotland" },
+  "turkey-moh-health-tourism": { sourceKey: "tr_moh_health_tourism", countryCode: "TR", countryName: "Türkiye" },
+  "ukraine-nhsu": { sourceKey: "ua_nhsu_pmg", countryCode: "UA", countryName: "Ukraine" },
+  "wales-gp-main-sites": { sourceKey: "gb_wales_gp_sites", countryCode: "GB", countryName: "Wales" },
+  "gisco-hospitals-albania": { sourceKey: "eu_gisco_hospitals_al", countryCode: "AL", countryName: "Albania" },
+  "gisco-hospitals-austria": { sourceKey: "eu_gisco_hospitals_at", countryCode: "AT", countryName: "Austria" },
+  "gisco-hospitals-belgium": { sourceKey: "eu_gisco_hospitals_be", countryCode: "BE", countryName: "Belgium" },
+  "gisco-hospitals-bulgaria": { sourceKey: "eu_gisco_hospitals_bg", countryCode: "BG", countryName: "Bulgaria" },
+  "gisco-hospitals-estonia": { sourceKey: "eu_gisco_hospitals_ee", countryCode: "EE", countryName: "Estonia" },
+  "gisco-hospitals-greece": { sourceKey: "eu_gisco_hospitals_gr", countryCode: "GR", countryName: "Greece" },
+  "gisco-hospitals-hungary": { sourceKey: "eu_gisco_hospitals_hu", countryCode: "HU", countryName: "Hungary" },
+  "gisco-hospitals-italy": { sourceKey: "eu_gisco_hospitals_it", countryCode: "IT", countryName: "Italy" },
+  "gisco-hospitals-luxembourg": { sourceKey: "eu_gisco_hospitals_lu", countryCode: "LU", countryName: "Luxembourg" },
+  "gisco-hospitals-malta": { sourceKey: "eu_gisco_hospitals_mt", countryCode: "MT", countryName: "Malta" },
+  "gisco-hospitals-netherlands": { sourceKey: "eu_gisco_hospitals_nl", countryCode: "NL", countryName: "Netherlands" },
+  "gisco-hospitals-norway": { sourceKey: "eu_gisco_hospitals_no", countryCode: "NO", countryName: "Norway" },
+  "gisco-hospitals-poland": { sourceKey: "eu_gisco_hospitals_pl", countryCode: "PL", countryName: "Poland" },
+  "gisco-hospitals-portugal": { sourceKey: "eu_gisco_hospitals_pt", countryCode: "PT", countryName: "Portugal" },
+  "gisco-hospitals-romania": { sourceKey: "eu_gisco_hospitals_ro", countryCode: "RO", countryName: "Romania" },
+  "gisco-hospitals-serbia": { sourceKey: "eu_gisco_hospitals_rs", countryCode: "RS", countryName: "Serbia" },
+  "gisco-hospitals-slovakia": { sourceKey: "eu_gisco_hospitals_sk", countryCode: "SK", countryName: "Slovakia" },
+  "gisco-hospitals-slovenia": { sourceKey: "eu_gisco_hospitals_si", countryCode: "SI", countryName: "Slovenia" },
+  "gisco-hospitals-spain": { sourceKey: "eu_gisco_hospitals_es", countryCode: "ES", countryName: "Spain" },
+  "gisco-hospitals-sweden": { sourceKey: "eu_gisco_hospitals_se", countryCode: "SE", countryName: "Sweden" },
+  "gisco-hospitals-switzerland": { sourceKey: "eu_gisco_hospitals_ch", countryCode: "CH", countryName: "Switzerland" },
+  "iceland-doh": { sourceKey: "is_doh_healthcare_operators", countryCode: "IS", countryName: "Iceland" },
+  "greenland-healthcare": { sourceKey: "gl_healthcare", countryCode: "GL", countryName: "Greenland" },
+  "georgia-hmis": { sourceKey: "ge_hmis", countryCode: "GE", countryName: "Georgia" },
 };
 
 function addParam(params: unknown[], value: unknown): string {
@@ -37,10 +96,10 @@ function asBounds(req: Request): Bounds | null {
   return { north, south, east, west };
 }
 
-async function canonicalViewAvailable(project: ProviderDatabaseProject): Promise<boolean> {
+async function registryTableAvailable(project: RegistryDatabaseProject): Promise<boolean> {
   const { rows } = await queryWithStatementTimeout(
     project.pool,
-    "SELECT to_regclass('public.provider_master_map_view') IS NOT NULL AS ok",
+    "SELECT to_regclass('public.official_registry_providers') IS NOT NULL AS ok",
     [],
   );
   return rows[0]?.ok === true;
@@ -48,114 +107,32 @@ async function canonicalViewAvailable(project: ProviderDatabaseProject): Promise
 
 function registryWhere(definition: StoredRegistryDefinition, bounds: Bounds | null, params: unknown[]): string {
   const conditions = [
-    "pmv.lat IS NOT NULL",
-    "pmv.lng IS NOT NULL",
-    "pmv.lat BETWEEN -90 AND 90",
-    "pmv.lng BETWEEN -180 AND 180",
-    "(pmv.lat <> 0 OR pmv.lng <> 0)",
-    `lower(COALESCE(pmv.source_key, '')) = ${addParam(params, definition.sourceKey.toLowerCase())}`,
-    `upper(COALESCE(pmv.country_code, '')) = ${addParam(params, definition.countryCode.toUpperCase())}`,
+    "p.lat BETWEEN -90 AND 90",
+    "p.lng BETWEEN -180 AND 180",
+    "(p.lat <> 0 OR p.lng <> 0)",
+    `upper(p.country_code) = ${addParam(params, definition.countryCode)}`,
   ];
-
   if (bounds) {
-    conditions.push(`pmv.lat BETWEEN ${addParam(params, bounds.south)} AND ${addParam(params, bounds.north)}`);
-    conditions.push(
-      bounds.west <= bounds.east
-        ? `pmv.lng BETWEEN ${addParam(params, bounds.west)} AND ${addParam(params, bounds.east)}`
-        : `(pmv.lng >= ${addParam(params, bounds.west)} OR pmv.lng <= ${addParam(params, bounds.east)})`,
-    );
+    conditions.push(`p.lat BETWEEN ${addParam(params, bounds.south)} AND ${addParam(params, bounds.north)}`);
+    conditions.push(bounds.west <= bounds.east
+      ? `p.lng BETWEEN ${addParam(params, bounds.west)} AND ${addParam(params, bounds.east)}`
+      : `(p.lng >= ${addParam(params, bounds.west)} OR p.lng <= ${addParam(params, bounds.east)})`);
   }
   return conditions.join(" AND ");
 }
 
-function registryBoundsWhere(bounds: Bounds | null, params: unknown[]): string {
-  if (!bounds) return "TRUE";
-  const conditions = [
-    `pmv.lat BETWEEN ${addParam(params, bounds.south)} AND ${addParam(params, bounds.north)}`,
-    bounds.west <= bounds.east
-      ? `pmv.lng BETWEEN ${addParam(params, bounds.west)} AND ${addParam(params, bounds.east)}`
-      : `(pmv.lng >= ${addParam(params, bounds.west)} OR pmv.lng <= ${addParam(params, bounds.east)})`,
-  ];
-  return conditions.join(" AND ");
-}
-
-async function countProject(
-  project: ProviderDatabaseProject,
-  definition: StoredRegistryDefinition,
-  bounds: Bounds | null,
-): Promise<{ total: number; nationalTotal: number }> {
-  const params: unknown[] = [];
-  const nationalWhere = registryWhere(definition, null, params);
-  const boundsWhere = registryBoundsWhere(bounds, params);
-  const { rows } = await queryWithStatementTimeout(
-    project.pool,
-    `SELECT
-       count(*)::int AS national_total,
-       count(*) FILTER (WHERE ${boundsWhere})::int AS total
-     FROM public.provider_master_map_view pmv
-     WHERE ${nationalWhere}`,
-    params,
-  );
-  return {
-    total: Number(rows[0]?.total || 0),
-    nationalTotal: Number(rows[0]?.national_total || 0),
-  };
-}
-
-async function loadProjectPage(
-  project: ProviderDatabaseProject,
-  definition: StoredRegistryDefinition,
-  bounds: Bounds | null,
-  limit: number,
-  offset: number,
-): Promise<Record<string, unknown>[]> {
-  const params: unknown[] = [];
-  const where = registryWhere(definition, bounds, params);
-  const limitParam = addParam(params, limit);
-  const offsetParam = addParam(params, offset);
-  const { rows } = await queryWithStatementTimeout(project.pool, `
-    SELECT
-      pmv.id,
-      pmv.master_key,
-      pmv.name,
-      pmv.address,
-      pmv.city,
-      pmv.admin_area,
-      pmv.postal_code,
-      pmv.country_code,
-      pmv.lat,
-      pmv.lng,
-      pmv.phone,
-      pmv.website,
-      pmv.primary_provider_type,
-      pmv.capability_tags,
-      pmv.source_key,
-      pmv.source_kind,
-      pmv.quality_score
-    FROM public.provider_master_map_view pmv
-    WHERE ${where}
-    ORDER BY pmv.name ASC, pmv.id ASC
-    LIMIT ${limitParam} OFFSET ${offsetParam}
-  `, params);
-  return rows;
-}
-
-function toProvider(
-  row: Record<string, unknown>,
-  source: string,
-  definition: StoredRegistryDefinition,
-): Record<string, unknown> {
+function toProvider(row: Record<string, unknown>, source: string, definition: StoredRegistryDefinition) {
   const type = String(row.primary_provider_type || "unknown");
   const tags = Array.isArray(row.capability_tags) ? row.capability_tags.map(String) : [type];
   return {
-    id: String(row.master_key || row.id || ""),
-    source_id: String(row.master_key || row.id || ""),
+    id: String(row.master_key || row.source_record_id || ""),
+    source_id: String(row.source_record_id || row.master_key || ""),
     name: String(row.name || "Unnamed provider"),
-    address: row.address ?? null,
-    address_1: row.address ?? null,
+    address: row.formatted_address ?? row.address_line1 ?? null,
+    address_1: row.address_line1 ?? row.formatted_address ?? null,
     city: row.city ?? null,
-    admin_area: row.admin_area ?? null,
-    state: row.admin_area ?? null,
+    admin_area: row.state_region ?? null,
+    state: row.state_region ?? null,
     postal_code: row.postal_code ?? null,
     zip: row.postal_code ?? null,
     country: definition.countryName,
@@ -170,9 +147,9 @@ function toProvider(
     services: tags,
     categories: tags,
     types: tags,
-    source: String(row.source_key || definition.sourceKey),
-    data_source: String(row.source_key || definition.sourceKey),
-    source_kind: String(row.source_kind || "government_registry"),
+    source: definition.sourceKey,
+    data_source: definition.sourceKey,
+    source_kind: "government_registry",
     trust_tier: "registry",
     confidence_score: row.quality_score == null ? null : Number(row.quality_score),
     provider_layer_category: source,
@@ -180,61 +157,70 @@ function toProvider(
 }
 
 router.get("/stored-international-registry-layers/:source", async (req: Request, res: Response) => {
-  const sourceParam = Array.isArray(req.params.source) ? req.params.source[0] : req.params.source;
-  const source = String(sourceParam || "");
+  const source = String(Array.isArray(req.params.source) ? req.params.source[0] : req.params.source || "") as RegistryDatabaseId;
   const definition = REGISTRIES[source];
   if (!definition) {
     res.status(400).json({ error: `Unknown stored international registry source: ${source}`, sources: Object.keys(REGISTRIES) });
     return;
   }
 
+  const project = getRegistryDatabaseProject(source);
+  if (!project) {
+    res.json({
+      providers: [], count: 0, loaded: 0, total: 0, nationalTotal: null,
+      page: 1, limit: 0, hasMore: false, source, visibleCapped: false,
+      registryState: "not_synchronized", synchronized: false,
+      warning: `${source} dedicated registry database is not configured.`,
+    });
+    return;
+  }
+
+  const limit = Math.min(Math.max(Number(req.query.limit) || 2000, 1), MAX_PAGE_SIZE);
+  const page = Math.max(Number(req.query.page) || 1, 1);
+  const bounds = asBounds(req);
+
   try {
-    if (!isPersistenceConfigured()) {
+    if (!(await registryTableAvailable(project))) {
       res.json({
         providers: [], count: 0, loaded: 0, total: 0, nationalTotal: null,
-        page: 1, limit: 0, hasMore: false, source, visibleCapped: false,
+        page, limit, hasMore: false, source, visibleCapped: false,
         registryState: "not_synchronized", synchronized: false,
-        warning: "Official registry data has not been synchronized into this deployment.",
+        warning: "Official registry data has not been synchronized into this country database.",
       });
       return;
     }
 
-    const limit = Math.min(Math.max(Number(req.query.limit) || 2000, 1), MAX_PAGE_SIZE);
-    const page = Math.max(Number(req.query.page) || 1, 1);
-    const bounds = asBounds(req);
-    const warnings: string[] = [];
+    const nationalParams: unknown[] = [definition.countryCode];
+    const nationalResult = await queryWithStatementTimeout(project.pool, `
+      SELECT count(*)::int AS total
+      FROM public.official_registry_providers p
+      WHERE upper(p.country_code) = $1
+        AND p.lat BETWEEN -90 AND 90 AND p.lng BETWEEN -180 AND 180
+        AND (p.lat <> 0 OR p.lng <> 0)
+    `, nationalParams);
+    const nationalTotal = Number(nationalResult.rows[0]?.total || 0);
 
-    const probes = (
-      await Promise.all(getProviderDatabaseProjects().map(async (project) => {
-        try {
-          if (!(await canonicalViewAvailable(project))) throw new Error("canonical provider view is unavailable");
-          return { project, ...await countProject(project, definition, bounds) };
-        } catch (error) {
-          warnings.push(`${project.id}: ${error instanceof Error ? error.message : String(error)}`);
-          return null;
-        }
-      }))
-    ).filter((probe): probe is { project: ProviderDatabaseProject; total: number; nationalTotal: number } => Boolean(probe));
+    const params: unknown[] = [];
+    const where = registryWhere(definition, bounds, params);
+    const countResult = await queryWithStatementTimeout(
+      project.pool,
+      `SELECT count(*)::int AS total FROM public.official_registry_providers p WHERE ${where}`,
+      params,
+    );
+    const total = Number(countResult.rows[0]?.total || 0);
+    const limitParam = addParam(params, limit);
+    const offsetParam = addParam(params, (page - 1) * limit);
+    const pageResult = await queryWithStatementTimeout(project.pool, `
+      SELECT source_record_id, source_url, name, address_line1, formatted_address,
+        city, state_region, postal_code, country_code, lat, lng, phone, website,
+        primary_provider_type, capability_tags, quality_score, master_key
+      FROM public.official_registry_providers p
+      WHERE ${where}
+      ORDER BY p.name ASC, p.source_record_id ASC
+      LIMIT ${limitParam} OFFSET ${offsetParam}
+    `, params);
 
-    const total = probes.reduce((sum, probe) => sum + probe.total, 0);
-    const nationalTotal = probes.reduce((sum, probe) => sum + probe.nationalTotal, 0);
-    let offset = (page - 1) * limit;
-    let remaining = limit;
-    const rows: Record<string, unknown>[] = [];
-
-    for (const probe of probes) {
-      if (remaining <= 0) break;
-      if (offset >= probe.total) {
-        offset -= probe.total;
-        continue;
-      }
-      const requested = Math.min(remaining, probe.total - offset);
-      rows.push(...await loadProjectPage(probe.project, definition, bounds, requested, offset));
-      remaining -= requested;
-      offset = 0;
-    }
-
-    const providers = rows.map((row) => toProvider(row, source, definition));
+    const providers = pageResult.rows.map((row) => toProvider(row, source, definition));
     res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
     res.json({
       providers,
@@ -246,18 +232,13 @@ router.get("/stored-international-registry-layers/:source", async (req: Request,
       limit,
       hasMore: page * limit < total,
       source,
-      databaseProjects: probes.map((probe) => probe.project.id),
+      databaseProject: project.id,
       officialRegistry: true,
       synchronized: nationalTotal > 0,
-      registryState: nationalTotal > 0
-        ? "ready"
-        : warnings.length > 0
-          ? "source_failed"
-          : "not_synchronized",
+      registryState: nationalTotal > 0 ? "ready" : "not_synchronized",
       resultScope: bounds ? "viewport" : "national",
       live: false,
-      partial: warnings.length > 0,
-      ...(warnings.length ? { warnings, warning: warnings.join(" ") } : {}),
+      partial: false,
       visibleCapped: false,
     });
   } catch (error) {

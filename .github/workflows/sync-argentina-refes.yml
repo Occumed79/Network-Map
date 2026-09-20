@@ -8,15 +8,17 @@ on:
     paths:
       - ".github/workflows/sync-argentina-refes.yml"
       - "scripts/normalize-argentina-refes.py"
-      - "scripts/promote-staged-government-registry.sql"
+      - "scripts/official-registry-schema.sql"
+      - "scripts/import-official-registry.sh"
   schedule:
     - cron: "5 11 6 * *"
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
-  group: official-provider-registry-sync
+  group: argentina-refes-registry-sync
   cancel-in-progress: false
 
 jobs:
@@ -25,16 +27,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
-      TARGET_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
-      # The ministry CKAN host currently serves an incomplete TLS chain. The
-      # federal catalog mirrors the same official metadata with valid TLS.
-      REFES_PACKAGE_API: https://www.datos.gob.ar/api/3/action/package_show?id=listado-establecimientos-de-salud-asentados-en-el-registro-federal-refes
+      # Query the publishing ministry: the federal mirror is missing 2025/2026.
+      REFES_PACKAGE_API: https://datos.salud.gob.ar/api/3/action/package_show?id=listado-establecimientos-de-salud-asentados-en-el-registro-federal-refes
 
     steps:
       - name: Check out importer
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Resolve dedicated registry database
+        uses: ./.github/actions/resolve-registry-database
+        with:
+          source: argentina-refes
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -51,16 +55,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "HEALTHSITES_DATABASE_URL is missing" >&2; exit 1; }
+          [[ "$TARGET_DATABASE_URL" == postgres* ]] || { echo "Dedicated registry database connection is missing" >&2; exit 1; }
           echo "::add-mask::${TARGET_DATABASE_URL}"
-          test "$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT to_regclass('public.provider_master_map_view') IS NOT NULL")" = "t"
+          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -Atqc "SELECT 1" >/dev/null
 
       - name: Resolve and download latest official REFES resource
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p /tmp/refes
-          curl --fail --location --retry 4 --retry-all-errors "$REFES_PACKAGE_API" --output /tmp/refes/package.json
+          # Public ministry data only; its server currently omits an intermediate TLS certificate.
+          curl --fail --location --insecure --connect-timeout 20 --max-time 180 --retry 4 --retry-all-errors "$REFES_PACKAGE_API" --output /tmp/refes/package.json
           jq -e '.success == true and (.result.resources | length > 0)' /tmp/refes/package.json >/dev/null
 
           resource="$(jq -r '
@@ -83,12 +88,10 @@ jobs:
             *) ext=xlsx ;;
           esac
           target="/tmp/refes/refes.${ext}"
-          # datos.salud.gob.ar currently omits an intermediate certificate from
-          # its TLS chain. Metadata is resolved over validated TLS from the
-          # federal catalog above; constrain the download host, then tolerate
-          # only that known certificate-chain defect. File size, parser schema,
-          # coordinates, and minimum record counts are validated before import.
-          curl --fail --location --insecure --retry 4 --retry-all-errors "$url" --output "$target"
+          # The download uses the same publishing ministry and known TLS-chain
+          # exception as the catalog. Validate schema, coordinates, and counts
+          # before allowing any production import.
+          curl --fail --location --insecure --connect-timeout 20 --max-time 180 --retry 4 --retry-all-errors "$url" --output "$target"
           test -s "$target"
           size="$(stat -c%s "$target")"
           (( size >= 500000 )) || { echo "REFES download is unexpectedly small: ${size} bytes" >&2; exit 1; }
@@ -110,64 +113,20 @@ jobs:
           echo "REGISTRY_EXPECTED_MASTER=${distinct_master}" >> "$GITHUB_ENV"
           echo "REFES geocoded records: ${expected}; canonical locations: ${distinct_master}"
 
-      - name: Stage normalized REFES rows
+      - name: Import compact dedicated registry
         shell: bash
-        run: |
-          set -euo pipefail
-          columns="source_record_id,source_url,name,normalized_name,address_line1,formatted_address,city,state_region,postal_code,country_code,lat,lng,phone,website,email,primary_provider_type,capability_tags,quality_score,master_key"
-          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "
-            CREATE TABLE IF NOT EXISTS public.source5_import_staging (
-              source_record_id text PRIMARY KEY,
-              source_url text,
-              name text NOT NULL,
-              normalized_name text,
-              address_line1 text,
-              formatted_address text,
-              city text,
-              state_region text,
-              postal_code text,
-              country_code text NOT NULL,
-              lat double precision NOT NULL,
-              lng double precision NOT NULL,
-              phone text,
-              website text,
-              email text,
-              primary_provider_type text,
-              capability_tags text[] NOT NULL DEFAULT ARRAY[]::text[],
-              quality_score numeric,
-              master_key text NOT NULL
-            );
-            TRUNCATE public.source5_import_staging;
-          "
-          psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 \
-            -c "\\copy public.source5_import_staging (${columns}) FROM STDIN WITH (FORMAT csv, HEADER true, DELIMITER E'\\t', NULL '\\N', QUOTE '\"', ESCAPE '\"')" \
-            < /tmp/refes/provider.tsv
-          actual="$(psql "$TARGET_DATABASE_URL" -Atqc 'SELECT count(*) FROM public.source5_import_staging')"
-          [[ "$actual" == "$REGISTRY_EXPECTED" ]] || { echo "Staging mismatch ${actual} vs ${REGISTRY_EXPECTED}" >&2; exit 1; }
+        env:
+          REGISTRY_TSV: /tmp/refes/provider.tsv
+          REGISTRY_EXPECTED: ${{ env.REGISTRY_EXPECTED }}
+          REGISTRY_SOURCE_KEY: ar_refes
+          REGISTRY_COUNTRY_CODE: AR
+        run: scripts/import-official-registry.sh
 
-      - name: Promote REFES into canonical registry
+      - name: Verify dedicated Argentina REFES registry
         shell: bash
         run: |
           set -euo pipefail
-          psql "$TARGET_DATABASE_URL" \
-            -v ON_ERROR_STOP=1 \
-            -v expected="$REGISTRY_EXPECTED" \
-            -v expected_master="$REGISTRY_EXPECTED_MASTER" \
-            -v source_key="ar_refes" \
-            -v country_code="AR" \
-            -v source_prefix_pattern="refes:%" \
-            -v source_display_name="Argentina REFES — Registro Federal de Establecimientos de Salud" \
-            -v data_source_name="Argentina REFES" \
-            -v source_notes="Official Argentina Ministry of Health national REFES registry; synchronized from the latest public bulk resource resolved through the government CKAN catalog" \
-            -f scripts/promote-staged-government-registry.sql
-
-      - name: Verify production Argentina source
-        shell: bash
-        run: |
-          set -euo pipefail
-          source_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_sources WHERE source_key='ar_refes'")"
-          mapped_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.provider_master_map_view WHERE source_key='ar_refes' AND country_code='AR' AND lat IS NOT NULL AND lng IS NOT NULL")"
-          [[ "$source_count" == "$REGISTRY_EXPECTED" ]] || { echo "REFES lineage mismatch ${source_count} vs ${REGISTRY_EXPECTED}" >&2; exit 1; }
-          (( mapped_count >= 4000 )) || { echo "Only ${mapped_count} REFES providers map-renderable" >&2; exit 1; }
-          echo "Argentina REFES source records: ${source_count}"
+          mapped_count="$(psql "$TARGET_DATABASE_URL" -Atqc "SELECT count(*) FROM public.official_registry_providers")"
+          [[ "$mapped_count" == "$REGISTRY_EXPECTED" ]] || { echo "Registry count mismatch ${mapped_count}" >&2; exit 1; }
+          (( mapped_count >= 4000 )) || { echo "Only ${mapped_count} providers map-renderable" >&2; exit 1; }
           echo "Argentina REFES map-renderable providers: ${mapped_count}"

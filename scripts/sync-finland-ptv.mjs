@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { unwrapPtvServiceLocationBatch } from "./ptv-service-channel.mjs";
+import { normalizePtvCoordinates, unwrapPtvServiceLocationBatch } from "./ptv-service-channel.mjs";
 
 const API_BASE = "https://api.palvelutietovaranto.suomi.fi/api/v11";
 const columns = [
@@ -33,11 +33,6 @@ function normalizedName(value) {
     .replace(/[^a-z0-9åäö]+/giu, " ")
     .trim()
     .replace(/\s+/gu, " ");
-}
-
-function numberValue(value) {
-  const parsed = Number(text(value).replace(",", "."));
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function localized(items, preferredLanguages = ["fi", "sv", "en"], preferredType = "") {
@@ -114,9 +109,11 @@ function addressFor(channel) {
   for (const address of ordered) {
     const street = address?.streetAddress || {};
     const other = address?.otherAddress || {};
-    const lat = numberValue(street.latitude ?? other.latitude);
-    const lng = numberValue(street.longitude ?? other.longitude);
-    if (lat === null || lng === null || lat < 59 || lat > 71.5 || lng < 18 || lng > 33.5) continue;
+    const coordinates = normalizePtvCoordinates(
+      street.latitude ?? other.latitude,
+      street.longitude ?? other.longitude,
+    );
+    if (!coordinates) continue;
 
     const streetName = localized(street.street);
     const streetNumber = text(street.streetNumber);
@@ -129,7 +126,7 @@ function addressFor(channel) {
       || localized(other.municipality?.name);
     const postal = text(street.postalCode || other.postalCode);
     const formatted = [line1, [postal, city].filter(Boolean).join(" "), "Finland"].filter(Boolean).join(", ");
-    return { line1, city, postal, formatted, lat, lng };
+    return { line1, city, postal, formatted, ...coordinates };
   }
   return null;
 }

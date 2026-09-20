@@ -25,6 +25,13 @@ import moreInternationalRegistryLayersRouter from "./moreInternationalRegistryLa
 import newZealandHealthFacilitiesRouter from "./newZealandHealthFacilities";
 import croatiaHzzoRegistryLayerRouter from "./croatiaHzzoRegistryLayer";
 import storedInternationalRegistryLayersRouter from "./storedInternationalRegistryLayers";
+import registrySyncBrokerRouter from "./registrySyncBroker";
+import europeLiveRegistryLayersRouter from "./europeLiveRegistryLayers";
+import walesGpSitesLayerRouter from "./walesGpSitesLayer";
+import cyprusHospitalRegistryLayerRouter from "./cyprusHospitalRegistryLayer";
+import europeGiscoHospitalLayersRouter from "./europeGiscoHospitalLayers";
+import scotlandNhsHospitalsLayerRouter from "./scotlandNhsHospitalsLayer";
+import moldovaHealthInstitutionsLayerRouter from "./moldovaHealthInstitutionsLayer";
 import providerUploadCategoriesRouter from "./providerUploadCategories";
 import googlePlacesRouter from "./googlePlaces";
 import enhancedSearchRouter from "./enhancedSearch";
@@ -58,12 +65,19 @@ router.use(nacchoLhdRouter);
 // provider-layer stabilizer so the browser never calls foreign APIs directly.
 // Source-specific routes must be mounted before the generic
 // /international-registry-layers/:source handler.
+router.use(walesGpSitesLayerRouter);
+router.use(europeLiveRegistryLayersRouter);
+router.use(cyprusHospitalRegistryLayerRouter);
+router.use(europeGiscoHospitalLayersRouter);
+router.use(scotlandNhsHospitalsLayerRouter);
+router.use(moldovaHealthInstitutionsLayerRouter);
 router.use(croatiaHzzoRegistryLayerRouter);
 router.use(additionalInternationalRegistryLayersRouter);
 router.use(moreInternationalRegistryLayersRouter);
 router.use(newZealandHealthFacilitiesRouter);
 router.use(internationalRegistryLayersRouter);
 router.use(storedInternationalRegistryLayersRouter);
+router.use(registrySyncBrokerRouter);
 router.use(stabilizeProviderLayerRequests);
 
 // Provider upload surfaces: transactional preview/commit/rollback lifecycle plus

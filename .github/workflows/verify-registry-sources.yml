@@ -1,0 +1,78 @@
+name: Verify official registry sources
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/verify-registry-sources.yml"
+      - ".github/workflows/sync-*.yml"
+      - "scripts/normalize-argentina-refes.py"
+      - "scripts/normalize-czechia-nrpzs.py"
+      - "scripts/sync-finland-ptv.mjs"
+      - "scripts/ptv-service-channel.mjs"
+      - "scripts/test-refes-normalizer.py"
+
+permissions:
+  contents: read
+
+jobs:
+  public-source:
+    name: Verify ${{ matrix.source }} against the official source
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        source: [argentina-refes, czechia-nrpzs, finland-ptv]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: python -m pip install 'openpyxl>=3.1,<4' pyyaml
+      - run: python scripts/test-refes-normalizer.py
+      - name: Download and normalize public source without database access
+        shell: bash
+        env:
+          REGISTRY_SOURCE: ${{ matrix.source }}
+        run: |
+          set -euo pipefail
+          # Use production steps, but no secrets, database steps, or write access.
+          python - <<'PY'
+          import csv, os, subprocess, yaml
+          from pathlib import Path
+          source = os.environ['REGISTRY_SOURCE']
+          workflow = yaml.safe_load(Path(f'.github/workflows/sync-{source}.yml').read_text())
+          job = workflow['jobs']['sync']
+          env = dict(os.environ)
+          env.update({k: v for k, v in job['env'].items() if k in ('REFES_PACKAGE_API', 'NRPZS_CSV_URL')})
+          env['GITHUB_ENV'] = '/tmp/registry-verify.env'
+          allowed = {
+              'Resolve and download latest official REFES resource',
+              'Normalize geocoded REFES establishments',
+              'Download official NRPZS CSV',
+              'Normalize geocoded healthcare locations',
+              'Fetch and normalize Finland healthcare service locations',
+          }
+          for step in job['steps']:
+              if step.get('name') not in allowed:
+                  continue
+              subprocess.run(['bash', '-euo', 'pipefail', '-c', step['run']], env=env, check=True)
+              if Path(env['GITHUB_ENV']).exists():
+                  for line in Path(env['GITHUB_ENV']).read_text().splitlines():
+                      key, value = line.split('=', 1)
+                      env[key] = value
+          output = {'argentina-refes': '/tmp/refes/provider.tsv', 'czechia-nrpzs': '/tmp/nrpzs/provider.tsv', 'finland-ptv': '/tmp/finland-ptv/provider.tsv'}[source]
+          with open(output, newline='') as f:
+              rows = list(csv.DictReader(f, delimiter='\t'))
+          assert rows, 'No normalized providers'
+          for row in rows:
+              assert row['name'].strip() and not row['name'].strip().isdecimal(), 'Numeric ID used as a provider name'
+          print(f'Validated {len(rows)} provider records from {source}')
+          print('Example names: ' + '; '.join(row['name'] for row in rows[:3]))
+          PY

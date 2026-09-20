@@ -7,6 +7,7 @@ const { Pool } = pg;
 let pool: pg.Pool | null = null;
 let scoringPool: pg.Pool | null = null;
 const providerProjectPools = new Map<string, pg.Pool>();
+const registryProjectPools = new Map<string, pg.Pool>();
 let db: ReturnType<typeof drizzle> | null = null;
 let closingPromise: Promise<void> | null = null;
 
@@ -22,6 +23,77 @@ export type ProviderDatabaseProject = {
   environmentVariable: string;
   family: "primary" | "overpass" | "healthsites" | "usa-embassy";
   primary: boolean;
+  pool: pg.Pool;
+};
+
+export const REGISTRY_DATABASE_CONFIG = {
+  "finland-ptv-healthcare": "FINLAND_REGISTRY_DATABASE_URL",
+  "argentina-refes": "ARGENTINA_REGISTRY_DATABASE_URL",
+  "czechia-nrpzs": "CZECHIA_REGISTRY_DATABASE_URL",
+  "brazil-cnes": "BRAZIL_REGISTRY_DATABASE_URL",
+  "new-zealand-health-facilities": "NEW_ZEALAND_REGISTRY_DATABASE_URL",
+  "taiwan-nlsc-medical": "TAIWAN_REGISTRY_DATABASE_URL",
+  "mexico-clues": "MEXICO_REGISTRY_DATABASE_URL",
+  "singapore-chas": "SINGAPORE_REGISTRY_DATABASE_URL",
+  "lithuania-vaspvt": "LITHUANIA_REGISTRY_DATABASE_URL",
+  "latvia-medical-facilities": "LATVIA_REGISTRY_DATABASE_URL",
+  "ireland-hse-health-centres": "IRELAND_REGISTRY_DATABASE_URL",
+  "colombia-reps": "COLOMBIA_REGISTRY_DATABASE_URL",
+  "chile-minsal": "CHILE_REGISTRY_DATABASE_URL",
+  "croatia-hzzo-primary-care": "CROATIA_REGISTRY_DATABASE_URL",
+  "australia-healthdirect": "AUSTRALIA_REGISTRY_DATABASE_URL",
+  "canada-odhf": "CANADA_REGISTRY_DATABASE_URL",
+  "germany-klinik-atlas": "GERMANY_REGISTRY_DATABASE_URL",
+  "andorra-cass": "ANDORRA_REGISTRY_DATABASE_URL",
+  "armenia-uhif": "ARMENIA_REGISTRY_DATABASE_URL",
+  "azerbaijan-tabib": "AZERBAIJAN_REGISTRY_DATABASE_URL",
+  "bosnia-domestic": "BOSNIA_HERZEGOVINA_REGISTRY_DATABASE_URL",
+  "cyprus-state-hospitals": "CYPRUS_REGISTRY_DATABASE_URL",
+  "denmark-sor-healthcare": "DENMARK_REGISTRY_DATABASE_URL",
+  "england-cqc": "ENGLAND_REGISTRY_DATABASE_URL",
+  "france-finess": "FRANCE_REGISTRY_DATABASE_URL",
+  "kosovo-moh-private": "KOSOVO_REGISTRY_DATABASE_URL",
+  "liechtenstein-lkv": "LIECHTENSTEIN_REGISTRY_DATABASE_URL",
+  "moldova-health-institutions": "MOLDOVA_REGISTRY_DATABASE_URL",
+  "montenegro-health-facilities": "MONTENEGRO_REGISTRY_DATABASE_URL",
+  "north-macedonia-moh": "NORTH_MACEDONIA_REGISTRY_DATABASE_URL",
+  "northern-ireland-gp": "NORTHERN_IRELAND_REGISTRY_DATABASE_URL",
+  "san-marino-authorized": "SAN_MARINO_REGISTRY_DATABASE_URL",
+  "scotland-nhs-hospitals": "SCOTLAND_REGISTRY_DATABASE_URL",
+  "turkey-moh-health-tourism": "TURKIYE_REGISTRY_DATABASE_URL",
+  "ukraine-nhsu": "UKRAINE_REGISTRY_DATABASE_URL",
+  "wales-gp-main-sites": "WALES_REGISTRY_DATABASE_URL",
+  "gisco-hospitals-albania": "ALBANIA_REGISTRY_DATABASE_URL",
+  "gisco-hospitals-austria": "AUSTRIA_REGISTRY_DATABASE_URL",
+  "gisco-hospitals-belgium": "BELGIUM_REGISTRY_DATABASE_URL",
+  "gisco-hospitals-bulgaria": "BULGARIA_REGISTRY_DATABASE_URL",
+  "gisco-hospitals-estonia": "ESTONIA_REGISTRY_DATABASE_URL",
+  "gisco-hospitals-greece": "GREECE_REGISTRY_DATABASE_URL",
+  "gisco-hospitals-hungary": "HUNGARY_REGISTRY_DATABASE_URL",
+  "gisco-hospitals-italy": "ITALY_REGISTRY_DATABASE_URL",
+  "gisco-hospitals-luxembourg": "LUXEMBOURG_REGISTRY_DATABASE_URL",
+  "gisco-hospitals-malta": "MALTA_REGISTRY_DATABASE_URL",
+  "gisco-hospitals-netherlands": "NETHERLANDS_REGISTRY_DATABASE_URL",
+  "gisco-hospitals-norway": "NORWAY_REGISTRY_DATABASE_URL",
+  "gisco-hospitals-poland": "POLAND_REGISTRY_DATABASE_URL",
+  "gisco-hospitals-portugal": "PORTUGAL_REGISTRY_DATABASE_URL",
+  "gisco-hospitals-romania": "ROMANIA_REGISTRY_DATABASE_URL",
+  "gisco-hospitals-serbia": "SERBIA_REGISTRY_DATABASE_URL",
+  "gisco-hospitals-slovakia": "SLOVAKIA_REGISTRY_DATABASE_URL",
+  "gisco-hospitals-slovenia": "SLOVENIA_REGISTRY_DATABASE_URL",
+  "gisco-hospitals-spain": "SPAIN_REGISTRY_DATABASE_URL",
+  "gisco-hospitals-sweden": "SWEDEN_REGISTRY_DATABASE_URL",
+  "gisco-hospitals-switzerland": "SWITZERLAND_REGISTRY_DATABASE_URL",
+  "iceland-doh": "ICELAND_REGISTRY_DATABASE_URL",
+  "greenland-healthcare": "GREENLAND_REGISTRY_DATABASE_URL",
+  "georgia-hmis": "GEORGIA_REGISTRY_DATABASE_URL",
+} as const;
+
+export type RegistryDatabaseId = keyof typeof REGISTRY_DATABASE_CONFIG;
+
+export type RegistryDatabaseProject = {
+  id: RegistryDatabaseId;
+  environmentVariable: (typeof REGISTRY_DATABASE_CONFIG)[RegistryDatabaseId];
   pool: pg.Pool;
 };
 
@@ -52,10 +124,29 @@ export function getDatabaseConfigurationSummary() {
       ...additionalProviderProjects,
     ],
     scoring: process.env.DATABASE_URL_2 ? "DATABASE_URL_2" : "missing",
+    registryProjects: Object.entries(REGISTRY_DATABASE_CONFIG)
+      .filter(([, environmentVariable]) => Boolean(process.env[environmentVariable]))
+      .map(([id]) => id),
     providerPoolMax: positiveInteger(process.env.PGPOOL_MAX, 4, 1, 20),
     additionalProviderPoolMax: positiveInteger(process.env.PGPOOL_PROVIDER_PROJECT_MAX, 2, 1, 10),
     scoringPoolMax: positiveInteger(process.env.PGPOOL_SCORING_MAX, 2, 1, 10),
   } as const;
+}
+
+export function getRegistryDatabaseProject(id: RegistryDatabaseId): RegistryDatabaseProject | null {
+  const environmentVariable = REGISTRY_DATABASE_CONFIG[id];
+  const connectionString = process.env[environmentVariable];
+  if (!connectionString) return null;
+  let registryPool = registryProjectPools.get(id);
+  if (!registryPool) {
+    registryPool = createPool(
+      connectionString,
+      `${process.env.PGAPPNAME || "network-map-api"}-registry-${id}`,
+      positiveInteger(process.env.PGPOOL_REGISTRY_MAX, 2, 1, 5),
+    );
+    registryProjectPools.set(id, registryPool);
+  }
+  return { id, environmentVariable, pool: registryPool };
 }
 
 function getDatabaseUrl(): string {
@@ -208,6 +299,10 @@ export function getPoolDiagnostics() {
       project,
       ...describe(target),
     })),
+    registryProjects: [...registryProjectPools.entries()].map(([project, target]) => ({
+      project,
+      ...describe(target),
+    })),
     scoring: describe(scoringPool),
   };
 }
@@ -215,10 +310,11 @@ export function getPoolDiagnostics() {
 export async function closeDatabasePools(): Promise<void> {
   if (closingPromise) return closingPromise;
   closingPromise = (async () => {
-    const targets = [pool, scoringPool, ...providerProjectPools.values()].filter((target): target is pg.Pool => Boolean(target));
+    const targets = [pool, scoringPool, ...providerProjectPools.values(), ...registryProjectPools.values()].filter((target): target is pg.Pool => Boolean(target));
     pool = null;
     scoringPool = null;
     providerProjectPools.clear();
+    registryProjectPools.clear();
     db = null;
     await Promise.allSettled(targets.map((target) => target.end()));
   })().finally(() => { closingPromise = null; });

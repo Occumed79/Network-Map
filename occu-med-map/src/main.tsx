@@ -45,12 +45,9 @@ import "./provider-location-finder.css";
 import "./sidebarWorkspacePanelGuardRuntime";
 import "./ui-system.css";
 import "./startup-hardening.css";
-// The consolidated sidebar layer intentionally loads after every synchronous
-// shell/theme stylesheet. It remains the owner of sidebar geometry, workspace
-// visibility, hit testing, and scrolling. The following regression sheet only
-// normalizes text close controls and the explicit-off Explorer presentation.
-import "./sidebar-workspace-final-fixes.css";
-import "./sidebar-workspace-regression-fixes.css";
+// The sidebar workspace stylesheet loads after the shared UI system so it owns
+// workspace geometry, visibility, hit testing, scrolling, and control sizing.
+import "./sidebar-workspace.css";
 import "./dialogControllerRuntime";
 import "./generalUiIntegrityRuntime";
 

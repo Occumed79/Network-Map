@@ -5,6 +5,7 @@ on:
   push:
     branches: [main]
     paths:
+      - ".github/actions/resolve-registry-database/action.yml"
       - ".github/workflows/sync-live-country-registries.yml"
       - "scripts/sync-live-registry-to-tsv.mjs"
       - "scripts/import-official-registry.sh"

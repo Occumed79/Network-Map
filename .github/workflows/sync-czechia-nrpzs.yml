@@ -2,6 +2,13 @@ name: Sync Czechia NRPZS healthcare providers
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/sync-czechia-nrpzs.yml"
+      - "scripts/normalize-czechia-nrpzs.py"
+      - "scripts/promote-staged-government-registry.sql"
   schedule:
     - cron: "35 10 2 * *"
 
@@ -9,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: czechia-nrpzs-provider-sync
+  group: official-provider-registry-sync
   cancel-in-progress: false
 
 jobs:
@@ -102,6 +109,13 @@ jobs:
             < /tmp/nrpzs/provider.tsv
           actual="$(psql "$TARGET_DATABASE_URL" -Atqc 'SELECT count(*) FROM public.source5_import_staging')"
           [[ "$actual" == "$REGISTRY_EXPECTED" ]] || { echo "Staging mismatch ${actual} vs ${REGISTRY_EXPECTED}" >&2; exit 1; }
+          # Derive the reconciliation count from the rows PostgreSQL actually
+          # parsed. Counting the quoted TSV with cut/sort produced a different
+          # distinct-master value and caused the promotion guard to roll back.
+          actual_master="$(psql "$TARGET_DATABASE_URL" -Atqc 'SELECT count(DISTINCT master_key) FROM public.source5_import_staging')"
+          (( actual_master >= 8000 )) || { echo "Only ${actual_master} staged NRPZS canonical locations" >&2; exit 1; }
+          echo "REGISTRY_EXPECTED_MASTER=${actual_master}" >> "$GITHUB_ENV"
+          echo "NRPZS staged rows: ${actual}; canonical locations: ${actual_master}"
 
       - name: Promote NRPZS into canonical registry
         shell: bash

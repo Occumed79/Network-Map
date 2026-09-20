@@ -62,8 +62,8 @@ function truthyFlag(value) {
 
 function classify(row) {
   const blob = [
-    first(row, "nome_fantasia", "nome_razao_social"),
-    first(row, "descricao_tipo_unidade", "tipo_unidade", "descricao_natureza_juridica"),
+    first(row, "nome_fantasia", "nome_razao_social", "NO_FANTASIA", "NO_RAZAO_SOCIAL"),
+    first(row, "descricao_tipo_unidade", "tipo_unidade", "descricao_natureza_juridica", "DS_TIPO_UNIDADE", "TP_UNIDADE"),
   ].join(" ").toLowerCase();
 
   const capabilities = new Set();
@@ -76,7 +76,8 @@ function classify(row) {
   if (/sa[uú]de do trabalhador|medicina do trabalho|ocupacional/.test(blob)) add("occupational_health_clinic");
   if (/hospital|pronto.?socorro|emerg[eê]ncia/.test(blob) || truthyFlag(row.estabelecimento_possui_atendimento_hospitalar)) add("hospital");
   if (/cl[ií]nica|centro de sa[uú]de|posto de sa[uú]de|unidade b[aá]sica|consult[oó]rio|policl[ií]nica|ambulat/.test(blob)
-      || truthyFlag(row.estabelecimento_faz_atendimento_ambulatorial_sus)) add("general_practitioner");
+      || truthyFlag(row.estabelecimento_faz_atendimento_ambulatorial_sus)
+      || truthyFlag(row.CO_AMBULATORIAL_SUS)) add("general_practitioner");
   if (/cardio|pneumo|orto|neuro|gastro|otorrino|psiquiatr|especializ/.test(blob)) add("specialist");
 
   if (!capabilities.size) add("unknown");
@@ -99,28 +100,29 @@ function csvField(value) {
 }
 
 function locationFor(row) {
-  const street = first(row, "endereco_estabelecimento", "logradouro", "endereco");
-  const number = first(row, "numero_estabelecimento", "numero");
-  const complement = first(row, "endereco_complemento_estabelecimento", "complemento_estabelecimento", "complemento");
-  const neighborhood = first(row, "bairro_estabelecimento", "bairro");
+  const street = first(row, "endereco_estabelecimento", "logradouro", "endereco", "NO_LOGRADOURO");
+  const number = first(row, "numero_estabelecimento", "numero", "NU_ENDERECO");
+  const complement = first(row, "endereco_complemento_estabelecimento", "complemento_estabelecimento", "complemento", "NO_COMPLEMENTO");
+  const neighborhood = first(row, "bairro_estabelecimento", "bairro", "NO_BAIRRO");
   const line1 = [street, number].filter(Boolean).join(" ").trim();
-  const city = first(row, "nome_municipio", "descricao_municipio", "municipio", "municipio_nome");
-  const rawUf = finiteNumber(row.codigo_uf);
-  const state = first(row, "sigla_uf", "uf") || (rawUf === null ? "" : ufCodes.get(rawUf) || String(rawUf));
-  const postal = first(row, "codigo_cep_estabelecimento", "cep");
+  const city = first(row, "nome_municipio", "descricao_municipio", "municipio", "municipio_nome", "NO_MUNICIPIO");
+  const rawUf = finiteNumber(row.codigo_uf ?? row.CO_UF);
+  const state = first(row, "sigla_uf", "uf", "SG_UF") || (rawUf === null ? "" : ufCodes.get(rawUf) || String(rawUf));
+  const postal = first(row, "codigo_cep_estabelecimento", "cep", "CO_CEP");
   const full = [line1, complement, neighborhood, city, state, postal, "Brazil"].filter(Boolean).join(", ");
   return { line1, city, state, postal, full };
 }
 
 function rowFromCnes(row) {
-  const cnes = first(row, "codigo_cnes", "cnes");
+  const cnes = first(row, "codigo_cnes", "cnes", "CO_CNES");
   if (!cnes) return null;
+  if (first(row, "CO_MOTIVO_DESAB", "codigo_motivo_desabilitacao")) return null;
 
-  const lat = finiteNumber(row.latitude_estabelecimento_decimo_grau ?? row.latitude);
-  const lng = finiteNumber(row.longitude_estabelecimento_decimo_grau ?? row.longitude);
+  const lat = finiteNumber(row.latitude_estabelecimento_decimo_grau ?? row.latitude ?? row.NU_LATITUDE);
+  const lng = finiteNumber(row.longitude_estabelecimento_decimo_grau ?? row.longitude ?? row.NU_LONGITUDE);
   if (lat === null || lng === null || lat < -90 || lat > 90 || lng < -180 || lng > 180 || (lat === 0 && lng === 0)) return null;
 
-  const name = first(row, "nome_fantasia", "nome_razao_social", "razao_social");
+  const name = first(row, "nome_fantasia", "nome_razao_social", "razao_social", "NO_FANTASIA", "NO_RAZAO_SOCIAL");
   if (!name || /^(null|undefined|n\/?a|sem nome)$/iu.test(name)) return null;
 
   const location = locationFor(row);
@@ -147,9 +149,9 @@ function rowFromCnes(row) {
     "BR",
     lat,
     lng,
-    first(row, "numero_telefone_estabelecimento", "telefone"),
+    first(row, "numero_telefone_estabelecimento", "telefone", "NU_TELEFONE"),
     first(row, "website", "url"),
-    first(row, "endereco_email_estabelecimento", "email").toLowerCase(),
+    first(row, "endereco_email_estabelecimento", "email", "NO_EMAIL").toLowerCase(),
     classification.primary,
     postgresArray(classification.capabilities),
     location.line1 ? 0.98 : 0.94,

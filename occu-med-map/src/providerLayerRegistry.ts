@@ -24,12 +24,12 @@ function source(id: string, label: string, sourceKey: string, color: string, sec
 }
 
 function liveRegistrySource(id: string, label: string, color: string): ProviderLayerCategory {
-  return { id, label, section: 'LIVE INTERNATIONAL REGISTRIES', kind: 'source', channel: `registry-${id}`, color,
+  return { id, label, section: 'OFFICIAL INTERNATIONAL REGISTRIES', kind: 'source', channel: `registry-${id}`, color,
     endpoint: `/api/international-registry-layers/${id}` };
 }
 
 function synchronizedRegistrySource(id: string, label: string, color: string): ProviderLayerCategory {
-  return { id, label, section: 'LIVE INTERNATIONAL REGISTRIES', kind: 'source', channel: `registry-${id}`, color,
+  return { id, label, section: 'OFFICIAL INTERNATIONAL REGISTRIES', kind: 'source', channel: `registry-${id}`, color,
     endpoint: `/api/stored-international-registry-layers/${id}` };
 }
 

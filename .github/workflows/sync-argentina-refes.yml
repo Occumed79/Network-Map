@@ -2,6 +2,13 @@ name: Sync Argentina REFES healthcare establishments
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/sync-argentina-refes.yml"
+      - "scripts/normalize-argentina-refes.py"
+      - "scripts/promote-staged-government-registry.sql"
   schedule:
     - cron: "5 11 6 * *"
 
@@ -9,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: argentina-refes-provider-sync
+  group: official-provider-registry-sync
   cancel-in-progress: false
 
 jobs:
@@ -19,7 +26,9 @@ jobs:
     timeout-minutes: 120
     env:
       TARGET_DATABASE_URL: ${{ secrets.HEALTHSITES_DATABASE_URL }}
-      REFES_PACKAGE_API: https://datos.salud.gob.ar/api/3/action/package_show?id=listado-establecimientos-de-salud-asentados-en-el-registro-federal-refes
+      # The ministry CKAN host currently serves an incomplete TLS chain. The
+      # federal catalog mirrors the same official metadata with valid TLS.
+      REFES_PACKAGE_API: https://www.datos.gob.ar/api/3/action/package_show?id=listado-establecimientos-de-salud-asentados-en-el-registro-federal-refes
 
     steps:
       - name: Check out importer
@@ -65,12 +74,21 @@ jobs:
           ' /tmp/refes/package.json)"
           IFS=$'\t' read -r url format name <<< "$resource"
           [[ "$url" == http* ]] || { echo "Could not resolve a downloadable REFES resource" >&2; exit 1; }
+          [[ "$url" == http://datos.salud.gob.ar/* || "$url" == https://datos.salud.gob.ar/* ]] || {
+            echo "REFES catalog returned an unexpected download host: ${url}" >&2
+            exit 1
+          }
           case "${format,,} ${url,,}" in
             *csv*) ext=csv ;;
             *) ext=xlsx ;;
           esac
           target="/tmp/refes/refes.${ext}"
-          curl --fail --location --retry 4 --retry-all-errors "$url" --output "$target"
+          # datos.salud.gob.ar currently omits an intermediate certificate from
+          # its TLS chain. Metadata is resolved over validated TLS from the
+          # federal catalog above; constrain the download host, then tolerate
+          # only that known certificate-chain defect. File size, parser schema,
+          # coordinates, and minimum record counts are validated before import.
+          curl --fail --location --insecure --retry 4 --retry-all-errors "$url" --output "$target"
           test -s "$target"
           size="$(stat -c%s "$target")"
           (( size >= 500000 )) || { echo "REFES download is unexpectedly small: ${size} bytes" >&2; exit 1; }

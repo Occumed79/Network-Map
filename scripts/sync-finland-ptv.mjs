@@ -3,6 +3,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { unwrapPtvServiceLocationBatch } from "./ptv-service-channel.mjs";
 
 const API_BASE = "https://api.palvelutietovaranto.suomi.fi/api/v11";
 const columns = [
@@ -213,8 +214,10 @@ async function allServiceLocationIds() {
 async function serviceLocationBatch(ids) {
   const params = new URLSearchParams({ guids: ids.join(","), showHeader: "false" });
   const payload = await fetchJson(`${API_BASE}/ServiceChannel/list?${params.toString()}`);
-  if (!Array.isArray(payload)) throw new Error("PTV ServiceChannel/list did not return an array");
-  return payload.filter((channel) => channel && typeof channel === "object");
+  // V11 returns a discriminated wrapper (locationChannel, phoneChannel, ...),
+  // not the channel object directly. Treating the wrapper as the channel was
+  // why 37,636 fetched locations collapsed to one normalized healthcare row.
+  return unwrapPtvServiceLocationBatch(payload);
 }
 
 function normalizedRow(channel) {

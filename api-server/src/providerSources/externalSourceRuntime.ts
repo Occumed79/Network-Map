@@ -65,6 +65,11 @@ const POLICIES: Record<string, Partial<SourcePolicy>> = {
   nominatim: { timeoutMs: 7_000, maxAttempts: 1, concurrency: 1, circuitFailureThreshold: 3, circuitCooldownMs: 90_000, cacheTtlMs: 24 * 60 * 60_000 },
   rapidapi: { timeoutMs: 8_000, maxAttempts: 2, concurrency: 3, circuitFailureThreshold: 3, circuitCooldownMs: 60_000, cacheTtlMs: 5 * 60_000 },
   webevidence: { timeoutMs: 12_000, maxAttempts: 2, concurrency: 2, circuitFailureThreshold: 3, circuitCooldownMs: 90_000, cacheTtlMs: 10 * 60_000 },
+  // SISPRO's national REPS layer is consistently slower than the default
+  // eight-second budget. One bounded attempt stays within the API request
+  // deadline and avoids spending another full timeout on an immediate retry.
+  "co-reps-sispro": { timeoutMs: 15_000, maxAttempts: 1, concurrency: 2, circuitFailureThreshold: 3, circuitCooldownMs: 60_000, cacheTtlMs: 5 * 60_000 },
+  "co-reps-sispro-count": { timeoutMs: 15_000, maxAttempts: 1, concurrency: 2, circuitFailureThreshold: 3, circuitCooldownMs: 60_000, cacheTtlMs: 5 * 60_000 },
 };
 
 const states = new Map<string, SourceState>();

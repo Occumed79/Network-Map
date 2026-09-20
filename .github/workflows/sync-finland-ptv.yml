@@ -8,6 +8,8 @@ on:
     paths:
       - ".github/workflows/sync-finland-ptv.yml"
       - "scripts/sync-finland-ptv.mjs"
+      - "scripts/ptv-service-channel.mjs"
+      - "scripts/promote-staged-government-registry.sql"
   schedule:
     - cron: "15 11 * * 1,4"
 
@@ -15,7 +17,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: finland-ptv-healthcare-provider-sync
+  group: official-provider-registry-sync
   cancel-in-progress: false
 
 jobs:

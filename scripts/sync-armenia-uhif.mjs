@@ -85,6 +85,52 @@ function parseRscData(raw) {
   return null;
 }
 
+function findHospitals(value, seen = new Set()) {
+  if (!value || typeof value !== "object" || seen.has(value)) return null;
+  seen.add(value);
+  if (Array.isArray(value.hospitals) && value.hospitals.length >= MIN_FACILITIES) {
+    return value.hospitals;
+  }
+  for (const child of Array.isArray(value) ? value : Object.values(value)) {
+    const found = findHospitals(child, seen);
+    if (found) return found;
+  }
+  return null;
+}
+
+function payloadFromText(raw) {
+  const candidates = [];
+  try {
+    const parsed = JSON.parse(raw);
+    const hospitals = findHospitals(parsed);
+    if (hospitals) candidates.push(hospitals);
+  } catch (_) {}
+
+  const rsc = parseRscData(raw);
+  const rscHospitals = findHospitals(rsc);
+  if (rscHospitals) candidates.push(rscHospitals);
+
+  for (const match of raw.matchAll(/self\.__next_f\.push\(\[1,("(?:\\.|[^"\\])*")\]\)/gu)) {
+    try {
+      const chunk = JSON.parse(match[1]);
+      const parsedChunk = parseRscData(chunk);
+      const hospitals = findHospitals(parsedChunk);
+      if (hospitals) candidates.push(hospitals);
+      for (const line of chunk.split(/\r?\n/u)) {
+        const colon = line.indexOf(":");
+        if (colon < 0) continue;
+        try {
+          const parsed = JSON.parse(line.slice(colon + 1));
+          const nested = findHospitals(parsed);
+          if (nested) candidates.push(nested);
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+  candidates.sort((a, b) => b.length - a.length);
+  return candidates[0] || null;
+}
+
 function classify(name) {
   const value = normalizedKey(name);
   let primary = "healthcare_facility";
@@ -163,6 +209,18 @@ async function replayLanguageAction(page, action, routerState) {
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ locale: "en-US" });
 const languageActions = new Map();
+const responsePayloads = [];
+
+page.on("response", async (response) => {
+  const contentType = String(response.headers()["content-type"] || "").toLowerCase();
+  if (!response.url().includes("/hospitals")) return;
+  if (!/(json|text\/x-component|text\/html)/u.test(contentType)) return;
+  try {
+    const body = await response.text();
+    const hospitals = payloadFromText(body);
+    if (hospitals) responsePayloads.push({ hospitals, url: response.url(), bytes: body.length });
+  } catch (_) {}
+});
 
 page.on("request", (request) => {
   if (request.url() !== DIRECTORY_URL || request.method() !== "POST") return;
@@ -203,16 +261,30 @@ try {
     throw new Error(`UHIF page did not expose a plausible facility total; saw ${reportedTotal}`);
   }
 
-  let captured = await discoverCompletePayload();
+  let captured = responsePayloads
+    .slice()
+    .sort((a, b) => b.hospitals.length - a.hospitals.length)[0] || null;
+
+  if (!captured) {
+    const htmlHospitals = payloadFromText(await page.content());
+    if (htmlHospitals) captured = { hospitals: htmlHospitals, url: DIRECTORY_URL, bytes: 0 };
+  }
+
+  if (!captured) captured = await discoverCompletePayload();
   if (!captured) {
     const mapButton = page.getByRole("button", { name: /^\s*Map\s*$/i });
     if (await mapButton.count()) {
       await mapButton.first().click();
       await page.waitForTimeout(2500);
-      captured = await discoverCompletePayload();
+      captured = responsePayloads
+        .slice()
+        .sort((a, b) => b.hospitals.length - a.hospitals.length)[0]
+        || await discoverCompletePayload();
     }
   }
-  if (!captured) throw new Error(`UHIF did not expose a replayable medical-center payload; discovered ${languageActions.size} language actions`);
+  if (!captured) {
+    throw new Error(`UHIF exposed no complete hospital payload; captured ${responsePayloads.length} response payloads and ${languageActions.size} language actions`);
+  }
 
   const facilities = captured.hospitals;
   if (facilities.length !== reportedTotal) {

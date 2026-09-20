@@ -31,6 +31,31 @@ PARISHES = {
     "arinsal", "pas de la casa", "santa coloma",
 }
 
+PARISH_CENTROIDS = {
+    "andorra la vella": (42.5063, 1.5218),
+    "escaldes engordany": (42.5089, 1.5408),
+    "encamp": (42.5363, 1.5831),
+    "canillo": (42.5677, 1.5976),
+    "la massana": (42.5449, 1.5148),
+    "ordino": (42.5562, 1.5332),
+    "sant julia de loria": (42.4637, 1.4913),
+    "arinsal": (42.5728, 1.4845),
+    "pas de la casa": (42.5428, 1.7336),
+    "santa coloma": (42.4940, 1.4977),
+}
+
+
+def parish_fallback(value):
+    key = norm(value)
+    if key.startswith("escaldes") and "engordany" in key:
+        key = "escaldes engordany"
+    if key.startswith("sant julia"):
+        key = "sant julia de loria"
+    coords = PARISH_CENTROIDS.get(key)
+    if not coords:
+        return None
+    return {"lat": coords[0], "lng": coords[1], "city": clean(value), "postal": "", "centroid": True}
+
 
 def clean(value):
     return re.sub(r"\s+", " ", str(value or "")).strip()
@@ -196,9 +221,13 @@ def main():
             last_request = time.time()
         geo = cache[address_key]
         if not geo:
+            geo = parish_fallback(provider["parish"])
+        if not geo:
             skipped += 1
             continue
         primary, tags = classify(provider["specialty"])
+        if geo.get("centroid"):
+            tags.append("coordinate_source:parish_centroid")
         source_id = "ad-cass:" + sha("|".join([provider["name"], provider["address"], provider["phone"]]))[:24]
         formatted = ", ".join(x for x in [provider["address"], provider["parish"], geo.get("postal"), "Andorra"] if x)
         master_key = "loc:" + sha(json.dumps({
@@ -208,7 +237,7 @@ def main():
         rows.append([
             source_id, BASE, provider["name"], norm(provider["name"]), provider["address"], formatted,
             provider["parish"] or geo.get("city"), "", geo.get("postal") or "", "AD", geo["lat"], geo["lng"],
-            provider["phone"], "", "", primary, pg_array(tags), 0.97, master_key,
+            provider["phone"], "", "", primary, pg_array(tags), 0.90 if geo.get("centroid") else 0.97, master_key,
         ])
 
     if len(rows) < 15:

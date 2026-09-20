@@ -76,7 +76,6 @@
 .mapbox-2d-host,
 .mapbox-globe-host,
 #map,
-.leaflet-container {
   border-radius: 21px !important;
 }
 
@@ -323,7 +322,6 @@
 }
 
 /* Provider popups: dark premium information cards */
-.leaflet-popup-content-wrapper,
 .mapboxgl-popup-content {
   color: var(--lux-text) !important;
   border: 1px solid rgba(211, 224, 236, 0.2) !important;
@@ -339,7 +337,6 @@
   -webkit-backdrop-filter: blur(24px) saturate(110%) !important;
 }
 
-.leaflet-popup-tip,
 .mapboxgl-popup-anchor-bottom .mapboxgl-popup-tip {
   background: rgba(9, 13, 20, 0.96) !important;
   border-top-color: rgba(9, 13, 20, 0.96) !important;
@@ -357,39 +354,30 @@
   border-left-color: rgba(9, 13, 20, 0.96) !important;
 }
 
-.leaflet-popup-content,
 .mapboxgl-popup-content {
   color: var(--lux-text) !important;
   font-size: 12px !important;
   line-height: 1.55 !important;
 }
 
-.leaflet-popup-content strong,
 .mapboxgl-popup-content strong,
-.leaflet-popup-content .pt,
 .mapboxgl-popup-content .pt {
   color: #f4f8fb !important;
   font-weight: 760 !important;
   letter-spacing: -0.01em !important;
 }
 
-.leaflet-popup-content .pi,
 .mapboxgl-popup-content .pi {
   color: var(--lux-text) !important;
   min-width: 230px !important;
 }
 
-.leaflet-popup-content .ps,
-.leaflet-popup-content .pcl,
-.leaflet-popup-content .pcn,
 .mapboxgl-popup-content .ps,
 .mapboxgl-popup-content .pcl,
 .mapboxgl-popup-content .pcn {
   color: var(--lux-muted) !important;
 }
 
-.leaflet-popup-content .pb,
-.leaflet-popup-content .pc,
 .mapboxgl-popup-content .pb,
 .mapboxgl-popup-content .pc {
   color: #dce6ed !important;
@@ -399,42 +387,35 @@
   box-shadow: none !important;
 }
 
-.leaflet-popup-content .pdiv,
 .mapboxgl-popup-content .pdiv {
   border-color: rgba(207, 220, 232, 0.1) !important;
   background: rgba(207, 220, 232, 0.1) !important;
 }
 
-.leaflet-popup-content .pct,
 .mapboxgl-popup-content .pct {
   background: rgba(255,255,255,0.075) !important;
 }
 
-.leaflet-popup-content .pcf,
 .mapboxgl-popup-content .pcf {
   background: linear-gradient(90deg, #71808c, #b5c4cf) !important;
   box-shadow: none !important;
 }
 
-.leaflet-popup-content .pcs,
 .mapboxgl-popup-content .pcs {
   color: #bdcad4 !important;
 }
 
-.leaflet-popup-content a,
 .mapboxgl-popup-content a {
   color: var(--lux-accent) !important;
   font-weight: 700 !important;
   text-decoration: none !important;
 }
 
-.leaflet-popup-content a:hover,
 .mapboxgl-popup-content a:hover {
   color: #d9f6fc !important;
   text-decoration: underline !important;
 }
 
-.leaflet-popup-content button,
 .mapboxgl-popup-content button,
 .provider-popup-save {
   color: #e6eef4 !important;
@@ -444,7 +425,6 @@
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.045) !important;
 }
 
-.leaflet-popup-close-button,
 .mapboxgl-popup-close-button {
   color: #9caab6 !important;
   background: transparent !important;
@@ -452,13 +432,11 @@
   font-size: 19px !important;
 }
 
-.leaflet-popup-close-button:hover,
 .mapboxgl-popup-close-button:hover {
   color: #ffffff !important;
 }
 
 /* Keep category identity in the pins, not in loud card backgrounds. */
-.leaflet-popup-content [style*="background:"],
 .mapboxgl-popup-content [style*="background:"] {
   background-color: transparent;
 }
@@ -479,7 +457,6 @@
   .mapbox-2d-host,
   .mapbox-globe-host,
   #map,
-  .leaflet-container {
     border-radius: 16px !important;
   }
 }

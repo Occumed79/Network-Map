@@ -93,12 +93,19 @@ def dk_coordinates(row):
         north = finite(row.get(north_key))
         if east is None or north is None:
             continue
-        try:
-            lng, lat = TRANSFORMER.transform(east, north)
-        except Exception:
-            continue
-        if 54.3 <= lat <= 58.0 and 7.4 <= lng <= 15.6:
-            return lat, lng
+        # Some SOR2 exports have carried the same named fields as WGS84
+        # decimal degrees, while others contain true ETRS89 / UTM zone 32.
+        if 7.4 <= east <= 15.6 and 54.3 <= north <= 58.0:
+            return north, east
+        if 54.3 <= east <= 58.0 and 7.4 <= north <= 15.6:
+            return east, north
+        for scale in (1.0, 0.1, 0.01, 0.001, 0.0001):
+            try:
+                lng, lat = TRANSFORMER.transform(east * scale, north * scale)
+            except Exception:
+                continue
+            if 54.3 <= lat <= 58.0 and 7.4 <= lng <= 15.6:
+                return lat, lng
     return None
 
 
@@ -213,6 +220,7 @@ def main():
     health_institutions = 0
     no_coordinates = 0
     sor_type_counts = {}
+    raw_coordinate_samples = []
     for row in reader:
         scanned += 1
         if not active_now(row):
@@ -220,6 +228,24 @@ def main():
 
         sor_type = text(row.get("SorType")).upper()
         sor_type_counts[sor_type] = sor_type_counts.get(sor_type, 0) + 1
+        if len(raw_coordinate_samples) < 12:
+            sample = {
+                key: text(row.get(key))
+                for key in (
+                    "VisitingAddressCoordETRS89z32EMeasure",
+                    "VisitingAddressCoordETRS89z32NMeasure",
+                    "ActivityAddressCoordETRS89z32EMeasure",
+                    "ActivityAddressCoordETRS89z32NMeasure",
+                    "PostalAddressCoordETRS89z32EMeasure",
+                    "PostalAddressCoordETRS89z32NMeasure",
+                )
+                if text(row.get(key))
+            }
+            if sample:
+                sample["SorType"] = sor_type
+                sample["SorId"] = text(row.get("SorId"))
+                sample["HealthInstitutionSorId"] = text(row.get("HealthInstitutionSorId"))
+                raw_coordinate_samples.append(sample)
         if sor_type in {"SI", "HI"}:
             sor_id = text(row.get("SorId"))
             name = text(row.get("EntityName")) or text(row.get("HealthInstitutionEntityName"))
@@ -270,7 +296,8 @@ def main():
         coordinate_fields = [name for name in fieldnames if "Coord" in name or "Address" in name or "HealthInstitution" in name]
         raise RuntimeError(
             f"Only {len(output)} map-renderable Denmark SOR health institutions; "
-            f"SorType counts={sor_type_counts}; candidate fields={coordinate_fields[:120]}"
+            f"SorType counts={sor_type_counts}; raw coordinate samples={raw_coordinate_samples}; "
+            f"candidate fields={coordinate_fields[:120]}"
         )
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     with open(args.output, "w", encoding="utf-8", newline="") as handle:

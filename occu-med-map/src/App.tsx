@@ -2641,7 +2641,7 @@ export default function App() {
     const categoryForSearch = categoryOverride || liveBackendCategoryRef.current;
     const map=getActiveMapboxMap();
     if(!map) return;
-    if(NATIVE_DRIVE_TIME_ENABLED) providerEta.clear();
+    providerEta.clear();
     const validCoordinates = Number.isFinite(lat) && Number.isFinite(lng)
       && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
     if(!validCoordinates) {
@@ -3658,7 +3658,7 @@ export default function App() {
                 {liveLocation?`Center · ${liveLocation}`:'Coordinate-first live search · double-click the map or search an address.'}
                 {liveMirror&&<div style={{fontSize:9,color:'#2d4060',marginTop:3}}>{liveMirror}</div>}
               </div>
-              {NATIVE_DRIVE_TIME_ENABLED&&!npiCategory&&liveResults.length>0&&(
+              {!npiCategory&&liveResults.length>0&&(
                 <DriveTimeControlStrip
                   origin={etaOrigin}
                   candidates={etaCandidates}
@@ -3961,7 +3961,7 @@ export default function App() {
                   : filterAndSortLiveResults(liveResults).map((r:any)=>{
                     const c=CATS[r.cat]||CATS.clinic;
                     const gm=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name+(r.addr?' '+r.addr:''))}`;
-                    const resultEta=NATIVE_DRIVE_TIME_ENABLED?providerEta.findEta(r.name):null;
+                    const resultEta=providerEta.findEta(r.name);
                     const saveKey=providerSaveKey(r);
                     const saveState=savedToMyClinics[saveKey];
                     const saveError=savedToMyClinicsErrors[saveKey];
@@ -3978,7 +3978,7 @@ export default function App() {
                           {r.hours&&<span className="lp-tag">{r.hours.substring(0,30)}</span>}
                           {r.phone&&<span className="lp-tag"><Phone size={11}/>Phone</span>}
                         </div>
-                        {NATIVE_DRIVE_TIME_ENABLED&&resultEta&&(
+                        {resultEta&&(
                           <ProviderEtaBadge
                             eta={resultEta}
                             onRoute={requestEtaRoute}

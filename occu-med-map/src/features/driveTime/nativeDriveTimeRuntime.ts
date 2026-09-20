@@ -3,12 +3,8 @@ import { installNativeEtaRouteLayer } from "./mapboxEtaRouteLayer";
 
 let installed = false;
 
-function nativeDriveTimeEnabled(): boolean {
-  return import.meta.env.VITE_NATIVE_DRIVE_TIME === "true";
-}
-
 export function installNativeDriveTimeRuntime(): void {
-  if (installed || !nativeDriveTimeEnabled()) return;
+  if (installed) return;
   installed = true;
   registerMapboxMapInitializer({
     id: "native-drive-time-route",

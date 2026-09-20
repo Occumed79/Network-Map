@@ -1,6 +1,7 @@
 import mapboxgl from "mapbox-gl";
 import type { ProviderFeature } from "./DatasetBrowser";
 import { getTrackedMapboxMaps, registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
+import { buildProviderPointFeature, ensureProviderPointLayer } from "./providerPointNativeRuntime";
 
 export type ProviderExplorerDensityCell = { lat: number; lng: number; count: number };
 
@@ -96,34 +97,25 @@ function sourceData(map: mapboxgl.Map, id: string, collection: GeoJSON.FeatureCo
   map.addSource(id, { type: "geojson", data: collection, generateId: true });
 }
 
-function addPointLayer(map: mapboxgl.Map, id: string, source: string, radius = 4): void {
-  if (map.getLayer(id)) return;
-  map.addLayer({
-    id,
-    type: "circle",
-    source,
+function ensureLayers(map: mapboxgl.Map): void {
+  sourceData(map, IDS.aggregate.source, collections.aggregate);
+
+  ensureProviderPointLayer(map, { sourceId: IDS.pins.source, layerId: IDS.pins.layer, defaultRadius: 4 }, collections.pins);
+  ensureProviderPointLayer(map, {
+    sourceId: IDS.dots.source,
+    layerId: IDS.dots.layer,
+    defaultRadius: 2.25,
     paint: {
-      "circle-radius": ["coalesce", ["get", "radius"], radius],
-      "circle-color": ["coalesce", ["get", "color"], "#0891b2"],
-      "circle-opacity": ["coalesce", ["get", "opacity"], 0.92],
-      "circle-stroke-width": ["coalesce", ["get", "strokeWidth"], 1],
+      "circle-radius": ["coalesce", ["get", "radius"], 2.25],
+      "circle-color": ["coalesce", ["get", "color"], "#087f9a"],
+      "circle-opacity": ["coalesce", ["get", "opacity"], 0.54],
+      "circle-stroke-width": ["coalesce", ["get", "strokeWidth"], 0],
       "circle-stroke-color": ["coalesce", ["get", "strokeColor"], "#ffffff"],
       "circle-stroke-opacity": ["coalesce", ["get", "strokeOpacity"], 0.95],
     },
-  });
-}
-
-function ensureLayers(map: mapboxgl.Map): void {
-  sourceData(map, IDS.pins.source, collections.pins);
-  sourceData(map, IDS.aggregate.source, collections.aggregate);
-  sourceData(map, IDS.dots.source, collections.dots);
-  sourceData(map, IDS.live.source, collections.live);
-  sourceData(map, IDS.gaps.source, collections.gaps);
-
-  addPointLayer(map, IDS.pins.layer, IDS.pins.source, 4);
-  addPointLayer(map, IDS.dots.layer, IDS.dots.source, 2.25);
-  addPointLayer(map, IDS.live.layer, IDS.live.source, 4);
-  addPointLayer(map, IDS.gaps.layer, IDS.gaps.source, 4);
+  }, collections.dots);
+  ensureProviderPointLayer(map, { sourceId: IDS.live.source, layerId: IDS.live.layer, defaultRadius: 4 }, collections.live);
+  ensureProviderPointLayer(map, { sourceId: IDS.gaps.source, layerId: IDS.gaps.layer, defaultRadius: 4 }, collections.gaps);
 
   if (!map.getLayer(IDS.aggregate.circle)) {
     map.addLayer({
@@ -190,26 +182,23 @@ function activeMap(): mapboxgl.Map | null {
 }
 
 function providerFeature(provider: ProviderFeature, options: ProviderRenderOptions, channel: Channel): GeoJSON.Feature<GeoJSON.Point> | null {
-  if (typeof provider.lat !== "number" || typeof provider.lng !== "number") return null;
-  if (!Number.isFinite(provider.lat) || !Number.isFinite(provider.lng)) return null;
-  return {
-    type: "Feature",
-    geometry: { type: "Point", coordinates: [provider.lng, provider.lat] },
-    properties: {
-      providerId: String(provider.id || ""),
-      channel,
-      color: options.color(provider),
-      radius: 4,
-      opacity: channel === "gaps" ? 0.9 : 0.92,
-      strokeWidth: 1,
-      strokeColor: "#ffffff",
-      strokeOpacity: 0.95,
-      popupHtml: options.popupHtml(provider),
-      interactive: true,
-    },
-  };
+  return buildProviderPointFeature({
+    id: String(provider.id || ""),
+    lat: Number(provider.lat),
+    lng: Number(provider.lng),
+    channel,
+    color: options.color(provider),
+    radius: 4,
+    opacity: channel === "gaps" ? 0.9 : 0.92,
+    strokeWidth: 1,
+    strokeColor: "#ffffff",
+    strokeOpacity: 0.95,
+    popupHtml: options.popupHtml(provider),
+    sourceKey: String(provider.source || ""),
+    sourceKind: String(provider.source_kind || ""),
+    providerType: String(provider.clinic_type || ""),
+  });
 }
-
 function fitProviders(providers: ProviderFeature[]): void {
   const map = activeMap();
   if (!map) return;

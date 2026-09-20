@@ -13,7 +13,7 @@ const PDF_SOURCES = [
   { key: "private_practice", url: "https://shgmturizmdb.saglik.gov.tr/TR-94836/yetkili-muayenehaneler.html" },
   { key: "other_health_facility", url: "https://shgmturizmdb.saglik.gov.tr/TR-94837/yetkili-diger-saglik-tesisleri.html" },
 ];
-const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
+const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";\nconst PHOTON_URL = "https://photon.komoot.io/api/";
 const USER_AGENT = "Occu-Med-Network-Map/1.0 (+https://github.com/Occumed79/Network-Map)";
 const columns = [
   "source_record_id", "source_url", "name", "normalized_name", "address_line1",
@@ -173,6 +173,33 @@ function classify(name, sourceKey) {
   return { primary, tags: [...tags, "turkey_moh_health_tourism_authorized", sourceKey] };
 }
 
+async function photonGeocode(name, province) {
+  const url = new URL(PHOTON_URL);
+  url.searchParams.set("q", `${name}, ${province}, Türkiye`);
+  url.searchParams.set("limit", "5");
+  try {
+    const response = await fetch(url, {
+      headers: { "user-agent": USER_AGENT, "accept-language": "tr,en" },
+      signal: AbortSignal.timeout(25_000),
+    });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    for (const feature of payload?.features || []) {
+      const [lng, lat] = feature?.geometry?.coordinates || [];
+      if (!validCoordinates(Number(lat), Number(lng))) continue;
+      const props = feature?.properties || {};
+      return {
+        lat: Number(lat),
+        lng: Number(lng),
+        address1: text(props.street) || text(props.name),
+        city: text(props.city) || text(props.locality) || text(props.district) || province,
+        postal: text(props.postcode),
+      };
+    }
+  } catch (_) {}
+  return null;
+}
+
 async function geocode(name, province) {
   const url = new URL(NOMINATIM_URL);
   url.searchParams.set("format", "jsonv2");
@@ -229,19 +256,25 @@ const rows = [];
 let lastGeocodeAt = 0;
 let skippedUnplaced = 0;
 for (const entry of candidates.values()) {
-  const wait = 1050 - (Date.now() - lastGeocodeAt);
-  if (wait > 0) await sleep(wait);
-  let geo = await geocode(entry.name, entry.province);
-  lastGeocodeAt = Date.now();
+  let geo = await photonGeocode(entry.name, entry.province);
+  if (!geo) {
+    const wait = 1050 - (Date.now() - lastGeocodeAt);
+    if (wait > 0) await sleep(wait);
+    geo = await geocode(entry.name, entry.province);
+    lastGeocodeAt = Date.now();
+  }
   if (!geo) {
     const shortened = entry.name
       .replace(/\b(ozel|özel|saglik|sağlık|hizmetleri|ticaret|limited|ltd|sti|şti|anonim|as|a s)\b/giu, " ")
       .replace(/\s+/gu, " ").trim();
     if (shortened && shortened !== entry.name) {
-      const waitRetry = 1050 - (Date.now() - lastGeocodeAt);
-      if (waitRetry > 0) await sleep(waitRetry);
-      geo = await geocode(shortened, entry.province);
-      lastGeocodeAt = Date.now();
+      geo = await photonGeocode(shortened, entry.province);
+      if (!geo) {
+        const waitRetry = 1050 - (Date.now() - lastGeocodeAt);
+        if (waitRetry > 0) await sleep(waitRetry);
+        geo = await geocode(shortened, entry.province);
+        lastGeocodeAt = Date.now();
+      }
     }
   }
   if (!geo) { skippedUnplaced += 1; continue; }

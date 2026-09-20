@@ -18,7 +18,7 @@ ROOTS = [
     "https://peqqik.gl/da-DK/Kontakt/Sundhedscentre",
 ]
 ORG_PLAN = "https://peqqik.gl/-/media/Files/Fagpersoner/Organisationsplan_shv_2020.pdf?la=da-DK"
-NOMINATIM = "https://nominatim.openstreetmap.org/search"
+NOMINATIM = "https://nominatim.openstreetmap.org/search"\nPHOTON = "https://photon.komoot.io/api/"
 USER_AGENT = "Occu-Med-Network-Map/1.0 (+https://github.com/Occumed79/Network-Map)"
 COLUMNS = [
     "source_record_id","source_url","name","normalized_name","address_line1",
@@ -145,6 +145,26 @@ def group_localities(soup):
     return list(dict.fromkeys(output))
 
 def geocode(query):
+    try:
+        r = requests.get(
+            PHOTON, params={"q": query, "limit": 5},
+            timeout=20,
+            headers={"User-Agent":USER_AGENT,"Accept-Language":"da,kl,en"},
+        )
+        r.raise_for_status()
+        for feature in (r.json() or {}).get("features") or []:
+            coords = ((feature.get("geometry") or {}).get("coordinates") or [])
+            if len(coords) < 2:
+                continue
+            lng, lat = float(coords[0]), float(coords[1])
+            if 58.0 <= lat <= 84.0 and -74.0 <= lng <= -10.0:
+                props = feature.get("properties") or {}
+                city = text(props.get("city") or props.get("locality") or props.get("district"))
+                postal = text(props.get("postcode"))
+                return lat, lng, city, postal
+    except Exception:
+        pass
+
     params = {"format":"jsonv2","limit":1,"countrycodes":"gl","q":query}
     for attempt in range(3):
         try:

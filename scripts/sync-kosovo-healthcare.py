@@ -15,7 +15,7 @@ from openpyxl import load_workbook
 
 SOURCE_URL = "https://msh.rks-gov.net/Department/GetDocument?fileName=40874433.7895.xlsx&original=Lista+e+Institucioneve+Private+Sh%C3%ABndet%C3%ABsore+t%C3%AB+licencuara+2021-2026.xlsx"
 DATASET_URL = "https://msh.rks-gov.net/Department/Index/1060?type=1"
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"\nPHOTON_URL = "https://photon.komoot.io/api/"
 USER_AGENT = "Occu-Med-Network-Map/1.0 (+https://github.com/Occumed79/Network-Map)"
 
 COLUMNS = [
@@ -152,6 +152,31 @@ def classify(name, kind, services):
     return primary, list(dict.fromkeys(tags))
 
 
+def photon_geocode(session, query):
+    try:
+        response = session.get(
+            PHOTON_URL,
+            params={"q": query, "limit": 5},
+            headers={"User-Agent": USER_AGENT, "Accept-Language": "sq,en"},
+            timeout=25,
+        )
+        response.raise_for_status()
+        features = (response.json() or {}).get("features") or []
+    except requests.RequestException:
+        return None
+    for feature in features:
+        coordinates = ((feature.get("geometry") or {}).get("coordinates") or [])
+        if len(coordinates) < 2:
+            continue
+        try:
+            lng, lat = float(coordinates[0]), float(coordinates[1])
+        except (TypeError, ValueError):
+            continue
+        if valid_coordinates(lat, lng):
+            return (lat, lng)
+    return None
+
+
 def geocode(session, query):
     response = session.get(
         NOMINATIM_URL,
@@ -218,23 +243,28 @@ def build_rows(records, existing):
             if not address and not municipality:
                 skipped += 1
                 continue
-            wait = 1.10 - (time.monotonic() - last_geocode)
-            if wait > 0:
-                time.sleep(wait)
-            try:
-                coords = geocode(session, query)
-            except requests.RequestException:
-                coords = None
-            last_geocode = time.monotonic()
-            if not coords and address and municipality:
+            coords = photon_geocode(session, query)
+            if not coords:
                 wait = 1.10 - (time.monotonic() - last_geocode)
                 if wait > 0:
                     time.sleep(wait)
                 try:
-                    coords = geocode(session, f"{address}, {municipality}, Kosovo")
+                    coords = geocode(session, query)
                 except requests.RequestException:
                     coords = None
                 last_geocode = time.monotonic()
+            if not coords and address and municipality:
+                fallback_query = f"{address}, {municipality}, Kosovo"
+                coords = photon_geocode(session, fallback_query)
+                if not coords:
+                    wait = 1.10 - (time.monotonic() - last_geocode)
+                    if wait > 0:
+                        time.sleep(wait)
+                    try:
+                        coords = geocode(session, fallback_query)
+                    except requests.RequestException:
+                        coords = None
+                    last_geocode = time.monotonic()
             if not coords:
                 skipped += 1
                 continue

@@ -76,7 +76,8 @@ function ensureChannel(map: mapboxgl.Map, channel: Channel): void {
       },
     });
   }
-  if (!map.getLayer(channelIds.label)) {
+  const styleSupportsGlyphs = Boolean(map.getStyle()?.glyphs);
+  if (styleSupportsGlyphs && !map.getLayer(channelIds.label)) {
     map.addLayer({
       id: channelIds.label,
       type: "symbol",

@@ -44,6 +44,7 @@ jobs:
               const hasSchemaState = schema.rows[0]?.has_schema_state === true;
               if (!hasMapView) throw new Error(`${label}: provider_master_map_view is missing`);
               if (!hasMasterSources) throw new Error(`${label}: provider_master_sources is missing`);
+              if (!hasSchemaState) throw new Error(`${label}: provider_schema_state is missing`);
 
               const counts = await client.query(`
                 SELECT
@@ -54,15 +55,12 @@ jobs:
               const canonicalTotal = Number(counts.rows[0]?.canonical_total || 0);
               const overtureTotal = Number(counts.rows[0]?.overture_total || 0);
               const sourceLinks = Number(counts.rows[0]?.source_links || 0);
-              let canonicalReadEnabled = null;
-              if (hasSchemaState) {
-                const state = await client.query(`SELECT canonical_read_enabled FROM public.provider_schema_state WHERE id=1`);
-                canonicalReadEnabled = state.rows[0]?.canonical_read_enabled === true;
-              }
+              const state = await client.query(`SELECT canonical_read_enabled FROM public.provider_schema_state WHERE id=1`);
+              const canonicalReadEnabled = state.rows[0]?.canonical_read_enabled === true;
               if (canonicalTotal !== expectedCount) throw new Error(`${label}: expected ${expectedCount} canonical rows, got ${canonicalTotal}`);
               if (overtureTotal !== canonicalTotal) throw new Error(`${label}: canonical view is not Overture-only (${overtureTotal}/${canonicalTotal})`);
               if (sourceLinks !== canonicalTotal) throw new Error(`${label}: source lineage mismatch (${sourceLinks}/${canonicalTotal})`);
-              if (hasSchemaState && !canonicalReadEnabled) throw new Error(`${label}: canonical reads are not enabled`);
+              if (!canonicalReadEnabled) throw new Error(`${label}: canonical reads are not enabled`);
 
               console.log(JSON.stringify({
                 shard: label,

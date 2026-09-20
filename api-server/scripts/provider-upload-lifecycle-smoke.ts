@@ -8,7 +8,8 @@ const route = fs.readFileSync(path.join(apiRoot, "src/routes/providerUploadLifec
 const migration = fs.readFileSync(path.join(apiRoot, "src/db/migrations/20260806_provider_upload_lifecycle.sql"), "utf8");
 const overtureMigration = fs.readFileSync(path.join(apiRoot, "src/db/migrations/20260820_expanded_provider_type_catalog.sql"), "utf8");
 const routeIndex = fs.readFileSync(path.join(apiRoot, "src/routes/index.ts"), "utf8");
-const sync = fs.readFileSync(path.join(repoRoot, "occu-med-map/src/myClinicsBackendSync.ts"), "utf8");
+const datasetUpload = fs.readFileSync(path.join(apiRoot, "src/routes/providerDatasetUploads.ts"), "utf8");
+const clinicUploadUi = fs.readFileSync(path.join(repoRoot, "occu-med-map/src/App.tsx"), "utf8");
 const spreadsheetSafety = fs.readFileSync(path.join(repoRoot, "occu-med-map/src/lib/spreadsheetSafety.ts"), "utf8");
 const etaExport = fs.readFileSync(path.join(repoRoot, "occu-med-map/src/features/driveTime/providerEtaExport.ts"), "utf8");
 
@@ -51,7 +52,7 @@ for (const typeKey of [
 ]) assert.match(overtureMigration, new RegExp(`'${typeKey}'`), `${typeKey} must be present in the additive catalog migration`);
 
 assert.match(routeIndex, /providerUploadLifecycleRouter/, "upload lifecycle router must be mounted");
-assert.ok(routeIndex.indexOf("providerUploadLifecycleRouter") < routeIndex.indexOf("providerDatasetUploadsRouter"), "safe lifecycle must be mounted before the legacy upload route");
+assert.ok(routeIndex.indexOf("providerUploadLifecycleRouter") < routeIndex.indexOf("providerDatasetUploadsRouter"), "transactional lifecycle must be mounted before the browser/bulk dataset uploader");
 assert.match(sync, /provider-uploads\/preview/, "browser sync must preview before commit");
 assert.match(sync, /provider-uploads\/\$\{encodeURIComponent\(uploadId\)\}\/commit/, "browser sync must commit the same logical upload ID");
 assert.match(sync, /contentHash/, "browser sync must preserve one logical content hash across chunks");

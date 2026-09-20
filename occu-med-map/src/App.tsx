@@ -44,7 +44,7 @@ import { fetchMapInventory, type MapInventoryProvider } from './features/provide
 import { DriveTimeControlStrip } from './features/driveTime/DriveTimeControlStrip';
 import { ProviderEtaBadge } from './features/driveTime/ProviderEtaBadge';
 import { requestEtaRoute } from './features/driveTime/etaRouteEvents';
-import { liveResultsToEtaCandidates } from './features/driveTime/mapSceneProviderAdapter';
+import { liveResultsToEtaCandidates } from './features/driveTime/providerCandidateAdapter';
 import { useProviderEta } from './features/driveTime/useProviderEta';
 import './features/driveTime/driveTimeControls.css';
 import './features/driveTime/driveTimeBadge.css';

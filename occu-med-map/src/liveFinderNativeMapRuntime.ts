@@ -1,5 +1,6 @@
 import mapboxgl from "mapbox-gl";
 import { getTrackedMapboxMaps, registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
+import { buildProviderPointFeature, ensureProviderPointLayer } from "./providerPointNativeRuntime";
 
 export type NativeLivePoint = {
   id: string;
@@ -146,21 +147,19 @@ function ensureLayers(map: mapboxgl.Map): void {
   ensureAreaLayers(map, IDS.drop, collections.drop);
   ensureAreaLayers(map, IDS.reference, collections.reference);
   ensureAreaLayers(map, IDS.search, collections.search);
-  sourceData(map, IDS.results.source, collections.results);
-  if (!map.getLayer(IDS.results.layer)) {
-    map.addLayer({
-      id: IDS.results.layer,
-      type: "circle",
-      source: IDS.results.source,
-      paint: {
-        "circle-radius": ["coalesce", ["get", "radius"], 4],
-        "circle-color": ["coalesce", ["get", "color"], "#22d3ee"],
-        "circle-opacity": 0.94,
-        "circle-stroke-width": 1,
-        "circle-stroke-color": "#ffffff",
-      },
-    });
-  }
+  ensureProviderPointLayer(map, {
+    sourceId: IDS.results.source,
+    layerId: IDS.results.layer,
+    defaultColor: "#22d3ee",
+    defaultRadius: 4,
+    paint: {
+      "circle-radius": ["coalesce", ["get", "radius"], 4],
+      "circle-color": ["coalesce", ["get", "color"], "#22d3ee"],
+      "circle-opacity": 0.94,
+      "circle-stroke-width": 1,
+      "circle-stroke-color": "#ffffff",
+    },
+  }, collections.results);
 }
 
 function update(channel: Channel): void {
@@ -220,25 +219,26 @@ export function renderNativeLivePoints(points: NativeLivePoint[], select?: (id: 
   resultPoints.clear();
   onResultSelect = select || null;
   const features: GeoJSON.Feature<GeoJSON.Point>[] = [];
-  for (const point of points.slice(0, 750)) {
-    if (!Number.isFinite(point.lat) || !Number.isFinite(point.lng)) continue;
-    resultPoints.set(point.id, point);
-    features.push({
-      type: "Feature",
-      geometry: { type: "Point", coordinates: [point.lng, point.lat] },
-      properties: {
-        id: point.id,
-        color: point.color,
-        radius: point.radius ?? 4,
-        popupHtml: point.popupHtml,
-      },
+  for (const point of points) {
+    const feature = buildProviderPointFeature({
+      id: point.id,
+      lat: point.lat,
+      lng: point.lng,
+      channel: "live-finder-results",
+      color: point.color,
+      radius: point.radius ?? 4,
+      popupHtml: point.popupHtml,
+      sourceKind: "live",
+      properties: { id: point.id },
     });
+    if (!feature) continue;
+    resultPoints.set(point.id, point);
+    features.push(feature);
   }
   collections.results = { type: "FeatureCollection", features };
   update("results");
   return features.length;
 }
-
 export function clearNativeLivePoints(): void {
   resultPoints.clear();
   collections.results = empty();

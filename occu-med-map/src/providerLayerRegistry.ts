@@ -123,6 +123,8 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   synchronizedRegistrySource('armenia-uhif', 'Armenia — UHIF Medical Organizations', '#d97706'),
   synchronizedRegistrySource('bosnia-domestic', 'Bosnia & Herzegovina — Domestic Healthcare Authorities', '#2563eb'),
   synchronizedRegistrySource('iceland-doh', 'Iceland — Directorate of Health Operators', '#0e7490'),
+  synchronizedRegistrySource('georgia-hmis', 'Georgia — GeoStat Healthcare Register', '#b45309'),
+  synchronizedRegistrySource('greenland-healthcare', 'Greenland — Peqqik Health Service', '#0891b2'),
 
   source('international-providers', 'International Providers', 'healthsites_osm', '#06b6d4', 'SOURCE / NETWORK OVERLAYS'),
   source('usa-embassy-recommended', 'U.S. Embassy Recommended', 'embassy_clinic_docs', '#facc15', 'SOURCE / NETWORK OVERLAYS'),

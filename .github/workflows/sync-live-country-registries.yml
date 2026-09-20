@@ -9,6 +9,7 @@ on:
       - ".github/workflows/sync-live-country-registries.yml"
       - "scripts/sync-live-registry-to-tsv.mjs"
       - "scripts/sync-colombia-reps.py"
+      - "scripts/sync-lithuania-vaspvt.py"
       - "scripts/import-official-registry.sh"
       - "scripts/official-registry-schema.sql"
       - "api-server/src/routes/**"
@@ -87,11 +88,11 @@ jobs:
         with:
           node-version: "22"
       - uses: actions/setup-python@v5
-        if: matrix.source == 'colombia-reps'
+        if: matrix.source == 'colombia-reps' || matrix.source == 'lithuania-vaspvt'
         with:
           python-version: "3.12"
       - name: Install Colombia sync dependency
-        if: matrix.source == 'colombia-reps'
+        if: matrix.source == 'colombia-reps' || matrix.source == 'lithuania-vaspvt'
         run: python -m pip install --disable-pip-version-check requests
       - name: Install PostgreSQL client
         run: |
@@ -106,6 +107,8 @@ jobs:
           mkdir -p /tmp/registry
           if [[ "${{ matrix.source }}" == "colombia-reps" ]]; then
             count="$(python scripts/sync-colombia-reps.py --output /tmp/registry/provider.tsv)"
+          elif [[ "${{ matrix.source }}" == "lithuania-vaspvt" ]]; then
+            count="$(python scripts/sync-lithuania-vaspvt.py --output /tmp/registry/provider.tsv)"
           else
             count="$(node scripts/sync-live-registry-to-tsv.mjs --source "${{ matrix.source }}" --country "${{ matrix.country }}" --output /tmp/registry/provider.tsv)"
           fi

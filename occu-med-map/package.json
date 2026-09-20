@@ -41,8 +41,8 @@
     "test:mapbox-lifecycle-hardening": "tsx scripts/mapbox-lifecycle-hardening-smoke.ts",
     "test:mapbox-source-pipeline-hardening": "tsx scripts/mapbox-source-pipeline-hardening-smoke.ts",
     "test:large-map-performance": "tsx scripts/large-map-performance-smoke.ts",
-    "test:zero-leaflet": "tsx scripts/zero-leaflet-architecture-audit.ts",
-    "test:provider-rendering-authority": "tsx scripts/provider-rendering-authority-smoke.ts"
+    "test:provider-rendering-authority": "tsx scripts/provider-rendering-authority-smoke.ts",
+    "test:map-architecture-authority": "tsx scripts/native-map-architecture-audit.ts"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",

@@ -18,9 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: official-provider-registry-sync
-  # Keep all country imports pending; the default single slot cancels siblings.
-  queue: max
+  group: finland-ptv-registry-sync
   cancel-in-progress: false
 
 jobs:

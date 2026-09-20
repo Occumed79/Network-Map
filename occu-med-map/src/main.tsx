@@ -3,7 +3,6 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import "./mapboxMapLifecycleRuntime";
 import "./mapboxSourcePipelineRuntime";
 import "./networkRequestPipelineRuntime";
-import "./uploadedDatasetLabelRuntime";
 import "./adminApiRuntime";
 import "./mapControlsBridgeRuntime";
 import "./mapToolsCommandPanel";

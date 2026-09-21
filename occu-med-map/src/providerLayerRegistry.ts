@@ -65,6 +65,7 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   providerType('dot-examiners', 'DOT Examiners', 'dot_examiner', '#fb923c', 'EXAMINER / SPECIAL NETWORKS', 'dot_provider'),
   source('blue-hive', 'Blue Hive', 'bluehive', '#60a5fa', 'EXAMINER / SPECIAL NETWORKS'),
 
+  synchronizedRegistrySource('uk-fcdo-recommended', 'UK Embassy Recommended — FCDO', '#f59e0b'),
   synchronizedRegistrySource('germany-klinik-atlas', 'Germany — Bundes-Klinik-Atlas', '#2563eb'),
   synchronizedRegistrySource('canada-odhf', 'Canada — ODHF', '#dc2626'),
   synchronizedRegistrySource('australia-healthdirect', 'Australia — HealthDirect', '#059669'),

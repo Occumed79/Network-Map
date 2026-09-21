@@ -27,6 +27,7 @@ export type ProviderDatabaseProject = {
 };
 
 export const REGISTRY_DATABASE_CONFIG = {
+  "uk-fcdo-recommended": "UK_EMBASSY_DATABASE_URL",
   "finland-ptv-healthcare": "FINLAND_REGISTRY_DATABASE_URL",
   "argentina-refes": "ARGENTINA_REGISTRY_DATABASE_URL",
   "czechia-nrpzs": "CZECHIA_REGISTRY_DATABASE_URL",

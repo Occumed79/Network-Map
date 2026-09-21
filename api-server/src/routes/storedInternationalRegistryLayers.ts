@@ -13,11 +13,12 @@ const MAX_PAGE_SIZE = 5000;
 type Bounds = { north: number; south: number; east: number; west: number };
 type StoredRegistryDefinition = {
   sourceKey: string;
-  countryCode: string;
-  countryName: string;
+  countryCode?: string;
+  countryName?: string;
 };
 
 const REGISTRIES: Record<RegistryDatabaseId, StoredRegistryDefinition> = {
+  "uk-fcdo-recommended": { sourceKey: "uk_fcdo_recommended" },
   "germany-klinik-atlas": { sourceKey: "de_klinikatlas", countryCode: "DE", countryName: "Germany" },
   "canada-odhf": { sourceKey: "ca_odhf", countryCode: "CA", countryName: "Canada" },
   "australia-healthdirect": { sourceKey: "au_healthdirect", countryCode: "AU", countryName: "Australia" },
@@ -110,8 +111,10 @@ function registryWhere(definition: StoredRegistryDefinition, bounds: Bounds | nu
     "p.lat BETWEEN -90 AND 90",
     "p.lng BETWEEN -180 AND 180",
     "(p.lat <> 0 OR p.lng <> 0)",
-    `upper(p.country_code) = ${addParam(params, definition.countryCode)}`,
   ];
+  if (definition.countryCode) {
+    conditions.push(`upper(p.country_code) = ${addParam(params, definition.countryCode)}`);
+  }
   if (bounds) {
     conditions.push(`p.lat BETWEEN ${addParam(params, bounds.south)} AND ${addParam(params, bounds.north)}`);
     conditions.push(bounds.west <= bounds.east
@@ -135,8 +138,8 @@ function toProvider(row: Record<string, unknown>, source: string, definition: St
     state: row.state_region ?? null,
     postal_code: row.postal_code ?? null,
     zip: row.postal_code ?? null,
-    country: definition.countryName,
-    country_code: row.country_code ?? definition.countryCode,
+    country: definition.countryName ?? row.country_code ?? null,
+    country_code: row.country_code ?? definition.countryCode ?? null,
     lat: Number(row.lat),
     lng: Number(row.lng),
     phone: row.phone ?? null,
@@ -190,12 +193,15 @@ router.get("/stored-international-registry-layers/:source", async (req: Request,
       return;
     }
 
-    const nationalParams: unknown[] = [definition.countryCode];
+    const nationalParams: unknown[] = [];
+    const registryScope = definition.countryCode
+      ? `upper(p.country_code) = ${addParam(nationalParams, definition.countryCode)} AND`
+      : "";
     const nationalResult = await queryWithStatementTimeout(project.pool, `
       SELECT count(*)::int AS total
       FROM public.official_registry_providers p
-      WHERE upper(p.country_code) = $1
-        AND p.lat BETWEEN -90 AND 90 AND p.lng BETWEEN -180 AND 180
+      WHERE ${registryScope}
+        p.lat BETWEEN -90 AND 90 AND p.lng BETWEEN -180 AND 180
         AND (p.lat <> 0 OR p.lng <> 0)
     `, nationalParams);
     const nationalTotal = Number(nationalResult.rows[0]?.total || 0);

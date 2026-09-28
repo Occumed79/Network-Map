@@ -6,7 +6,7 @@ import "./networkRequestPipelineRuntime";
 import "./adminApiRuntime";
 import "./mapControlsBridgeRuntime";
 import "./mapToolsCommandPanel";
-import "./routePlannerControlsRuntime";
+import "./routePlannerControlsRuntime";\nimport "./mapCoverageGeographicFocusRuntime";
 import "./providerLocationFinderRuntime";
 import "./providerTypeNormalizationRuntime";
 import { switchMapModeWithTransition } from "./dualMapTransitionRuntime";

@@ -21,6 +21,12 @@ const BOUNDARY_LAYERS = {
   ],
 } as const;
 
+const STATE_ABBREVIATIONS = Object.fromEntries(
+  "01:AL|02:AK|04:AZ|05:AR|06:CA|08:CO|09:CT|10:DE|11:DC|12:FL|13:GA|15:HI|16:ID|17:IL|18:IN|19:IA|20:KS|21:KY|22:LA|23:ME|24:MD|25:MA|26:MI|27:MN|28:MS|29:MO|30:MT|31:NE|32:NV|33:NH|34:NJ|35:NM|36:NY|37:NC|38:ND|39:OH|40:OK|41:OR|42:PA|44:RI|45:SC|46:SD|47:TN|48:TX|49:UT|50:VT|51:VA|53:WA|54:WV|55:WI|56:WY|60:AS|66:GU|69:MP|72:PR|78:VI"
+    .split("|")
+    .map((pair) => pair.split(":")),
+) as Record<string, string>;
+
 type BoundaryKind = keyof typeof BOUNDARY_LAYERS;
 type ProviderSelection = { key: string; name: string; lat: number; lng: number };
 type BoundarySelection = { key: string; label: string; feature: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> };
@@ -310,7 +316,8 @@ function mountCoverageRadius(panel: HTMLElement): () => void {
 function boundaryLabel(feature: GeoJSON.Feature, fallback: string): string {
   const properties = feature.properties || {};
   const name = String(properties.NAME || properties.BASENAME || "").trim();
-  const state = String(properties.STUSAB || "").trim();
+  const stateFips = String(properties.STATE || "").padStart(2, "0");
+  const state = String(properties.STUSAB || STATE_ABBREVIATIONS[stateFips] || "").trim();
   return [name || fallback, state].filter(Boolean).join(", ");
 }
 
@@ -436,7 +443,7 @@ function mountGeographicFocus(panel: HTMLElement): () => void {
   const input = document.createElement("input");
   input.type = "text";
   input.className = "occumed-mapbox-search";
-  input.placeholder = "Search state, county, or city";
+  input.placeholder = "Search U.S. state, county, or city";
   input.setAttribute("aria-label", "Boundary search");
 
   const actions = document.createElement("div");

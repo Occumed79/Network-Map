@@ -21,6 +21,8 @@ assert.match(runtime, /selectedProviders\s*=\s*new Map/, "coverage rings must su
 assert.match(runtime, /selectedBoundaries\s*=\s*new Map/, "geographic focus must support multiple selected boundaries");
 assert.match(runtime, /selectingProviders\s*=\s*miles\s*>\s*0/, "choosing a radius must immediately enable pin selection");
 assert.match(runtime, /event\.point\.x\s*-\s*12/, "provider pins must have a usable click target");
+assert.match(runtime, /map\.project\(/, "provider hit testing must project candidate pins for nearest-click selection");
+assert.match(runtime, /Math\.hypot/, "provider hit testing must choose the nearest candidate inside the hit box");
 assert.match(runtime, /tigerWMS_Current\/MapServer/, "geographic focus must use the current TIGERweb service");
 assert.match(runtime, /maxAllowableOffset/, "boundary geometry must be simplified for interactive selection");
 for (const layer of ["80", "82", "28", "30"]) {

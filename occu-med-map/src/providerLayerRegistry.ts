@@ -34,6 +34,10 @@ function synchronizedRegistrySource(id: string, label: string, color: string): P
  * Every entry owns its own native Mapbox channel so each toggle is independent.
  */
 export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
+  // Keep the embassy registry at the top of Providers instead of below every
+  // domestic category, where it was effectively hidden several screens down.
+  synchronizedRegistrySource('uk-fcdo-recommended', 'UK Embassy Recommended — FCDO', '#f59e0b'),
+
   providerType('urgent-cares', 'Urgent Cares', 'urgent_care', '#38bdf8', 'CORE OCCUPATIONAL / PRIMARY CARE'),
   providerType('walk-in-clinics', 'Walk-In Clinics', 'walk_in_clinic', '#0ea5e9', 'CORE OCCUPATIONAL / PRIMARY CARE'),
   providerType('occupational-health-clinics', 'Occupational Health Clinics', 'occupational_health', '#22d3ee', 'CORE OCCUPATIONAL / PRIMARY CARE', 'occupational_health_clinic'),
@@ -65,7 +69,6 @@ export const PROVIDER_LAYER_CATEGORIES: readonly ProviderLayerCategory[] = [
   providerType('dot-examiners', 'DOT Examiners', 'dot_examiner', '#fb923c', 'EXAMINER / SPECIAL NETWORKS', 'dot_provider'),
   source('blue-hive', 'Blue Hive', 'bluehive', '#60a5fa', 'EXAMINER / SPECIAL NETWORKS'),
 
-  synchronizedRegistrySource('uk-fcdo-recommended', 'UK Embassy Recommended — FCDO', '#f59e0b'),
   synchronizedRegistrySource('germany-klinik-atlas', 'Germany — Bundes-Klinik-Atlas', '#2563eb'),
   synchronizedRegistrySource('canada-odhf', 'Canada — ODHF', '#dc2626'),
   synchronizedRegistrySource('australia-healthdirect', 'Australia — HealthDirect', '#059669'),

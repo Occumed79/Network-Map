@@ -56,9 +56,8 @@ async function assertFourWorkspaceCycle(page, stage) {
         actionCount,
         providerTool: document.body.dataset.providerTool || "",
         mapToolsDocked: tabName !== "mapTools" || Boolean(panels[0]?.closest(".occumed-sidebar-workspace-host")),
-        // Phase-2: find tab drives liveFinder machinery (live-panel hidden by CSS for find/results)
-        inactiveFinderHidden: tabName === "liveFinder" || tabName === "find" || !liveVisible,
-        inactiveExplorerHidden: tabName === "explorer" || !explorerVisible,
+        inactiveFinderHidden: !liveVisible,
+        inactiveExplorerHidden: !explorerVisible,
         separated: Boolean(sidebarRect && mapRect && mapRect.left >= sidebarRect.right + 4),
         audit: window.__NETWORK_MAP_UI_INTEGRITY__?.audit?.() || null,
         duplicateOwners: window.__NETWORK_MAP_RUNTIME_OWNERSHIP__?.snapshot?.().duplicateAttempts || [],

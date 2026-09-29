@@ -13,12 +13,10 @@ import {
   Download,
   ExternalLink,
   GitCompareArrows,
-  Globe2,
   Layers3,
   LoaderCircle,
   MapIcon,
   Menu,
-  PanelRightOpen,
   Phone,
   Radar,
   RefreshCw,
@@ -3018,58 +3016,6 @@ export default function App() {
   return (
     <div className="app-wrap">
       <div className="cursor-light" />
-      <header className="command-header">
-        <button
-          className="mobile-menu-button"
-          aria-label={mobileSidebarOpen ? 'Close navigation' : 'Open navigation'}
-          onClick={()=>setMobileSidebarOpen(value=>!value)}
-        >
-          {mobileSidebarOpen ? <X size={20}/> : <Menu size={20}/>}
-        </button>
-        <div className="command-brand">
-          <span className="command-brand-mark"><Globe2 size={20}/></span>
-          <span>
-            <strong>Occu-Med</strong>
-            <small>Network Command Center</small>
-          </span>
-        </div>
-        <div className="command-search" ref={addrSearchRef}>
-          <Search size={18} aria-hidden="true"/>
-          <input
-            value={addrSearch}
-            onChange={event=>handleAddrInput(event.target.value)}
-            onKeyDown={event=>{ if(event.key==='Escape'){setAddrSearch('');setAddrSuggestions([]);} }}
-            placeholder="Search any address, city, or landmark"
-            aria-label="Search map"
-          />
-          {addrLoading && <LoaderCircle className="command-spin" size={17} aria-label="Searching"/>}
-          {addrSearch && !addrLoading && (
-            <button className="command-search-clear" aria-label="Clear map search" onClick={()=>{setAddrSearch('');setAddrSuggestions([]);}}><X size={16}/></button>
-          )}
-          {addrSuggestions.length>0 && (
-            <div className="command-search-results">
-              {addrSuggestions.map((suggestion,index)=>(
-                <button key={`${suggestion.lat}-${suggestion.lon}-${index}`} onClick={()=>jumpToAddr(suggestion.lat,suggestion.lon,suggestion.display_name)}>
-                  <strong>{suggestion.display_name.split(',')[0]}</strong>
-                  <span>{suggestion.display_name}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="command-header-actions">
-          <div className="provider-source-health" title={`${loadedProviderCount.toLocaleString()} provider records loaded in this viewport`}>
-            <span className="source-health-dot"/>
-            <strong>{activeProviderSourceCount}</strong>
-            <span>layers active</span>
-          </div>
-
-          <button className={`command-action${activeTool==='liveFinder'?' active':''}`} aria-expanded={activeTool==='liveFinder'} onClick={()=>selectSidebarWorkspace(activeTool==='liveFinder'?'providers':'liveFinder')}>
-            <PanelRightOpen size={16}/><span>Analysis</span>
-          </button>
-        </div>
-      </header>
-
       <div className="app-body">
         {mobileSidebarOpen && <button className="mobile-sidebar-backdrop" aria-label="Close navigation" onClick={()=>setMobileSidebarOpen(false)}/>}
         <aside ref={sidebarRef} className={`sidebar occumed-sidebar-workspace-scope${mobileSidebarOpen ? ' mobile-open' : ''}`} data-occumed-workspace-tab={sidebarWorkspace}>
@@ -3095,15 +3041,19 @@ export default function App() {
           </div>
           <MapToolsWorkspaceHost ref={mapToolsHostRef} />
           <div id="sidebar-providers-panel" className="occumed-sidebar-provider-content" role="tabpanel" aria-label="Providers workspace">
-          <div className="hero-card">
-            <div className="hero-eyebrow">Global provider workspace</div>
-            <div className="hero-title">Provider intelligence at map speed</div>
-            <div className="hero-sub">Search, inspect density, find live facilities, and build coverage without leaving the map.</div>
-            <div className="hero-source-summary"><span>{activeProviderSourceCount} layers on</span><strong>{loadedProviderCount.toLocaleString()} visible records</strong></div>
+          {/* Phase 1: compact Providers header — replaces marketing hero */}
+          <div className="providers-compact-header">
+            <span className="providers-compact-title">PROVIDERS</span>
+            <div className="providers-compact-meta">
+              <span className="providers-source-health-dot" title={`${loadedProviderCount.toLocaleString()} records in viewport`}/>
+              <span>{activeProviderSourceCount} sources active</span>
+              <span className="providers-compact-sep">·</span>
+              <span>{loadedProviderCount.toLocaleString()} visible</span>
+            </div>
           </div>
 
           <section className="sb-section command-section">
-            <div className="command-section-title"><Radar size={15}/><span>Workflows</span></div>
+            <div className="phase1-section-label"><Radar size={13}/><span>Workflows</span></div>
             <div className="command-tool-grid">
               <button className={String((activeTool==='liveFinder'?'active':'') || '').concat(' unified-live-tool').trim()} onClick={()=>{setProviderToolMode('live');document.body.dataset.providerTool='live';selectSidebarWorkspace('liveFinder');}}><Radar size={16}/><span>Live Finder</span></button>
                 <button type="button" className="unified-npi-tool" onClick={()=>{setProviderToolMode('npi');document.body.dataset.providerTool='npi';selectSidebarWorkspace('liveFinder');}} aria-pressed={providerToolMode==='npi'}>
@@ -3120,8 +3070,8 @@ export default function App() {
             </div>
           </section>
 
-          <section className="sb-section command-section">
-            <div className="command-section-title"><Layers3 size={15}/><span>Provider Layers</span><small>Off by default</small></div>
+          <section className="sb-section command-section provider-layers-section">
+            <div className="phase1-section-label"><Layers3 size={13}/><span>Provider Layers</span><small>Off by default</small></div>
             <div className="workflow-layer-list">
               <div data-provider-layer-registry-host="true" />
               <LayerToggle label="Luminous Density" checked={showGlowPoints} onChange={setShowGlowPoints} status={showGlowPoints?'Density halos and point glow active':'Low-glow point styling'}/>
@@ -3326,6 +3276,39 @@ export default function App() {
 
         {/* ── MAP ── */}
         <div className="map-wrap">
+          {/* Floating search bar — replaces full-width command-header */}
+          <div className="floating-search-bar" ref={addrSearchRef}>
+            <button
+              className="mobile-menu-button floating-menu-button"
+              aria-label={mobileSidebarOpen ? 'Close navigation' : 'Open navigation'}
+              onClick={()=>setMobileSidebarOpen(value=>!value)}
+            >
+              {mobileSidebarOpen ? <X size={18}/> : <Menu size={18}/>}
+            </button>
+            <Search size={16} className="floating-search-icon" aria-hidden="true"/>
+            <input
+              className="floating-search-input"
+              value={addrSearch}
+              onChange={event=>handleAddrInput(event.target.value)}
+              onKeyDown={event=>{ if(event.key==='Escape'){setAddrSearch('');setAddrSuggestions([]);} }}
+              placeholder="Search any address, city, or landmark…"
+              aria-label="Search map"
+            />
+            {addrLoading && <LoaderCircle className="command-spin floating-search-spinner" size={15} aria-label="Searching"/>}
+            {addrSearch && !addrLoading && (
+              <button className="command-search-clear floating-search-clear" aria-label="Clear map search" onClick={()=>{setAddrSearch('');setAddrSuggestions([]);}}><X size={14}/></button>
+            )}
+            {addrSuggestions.length>0 && (
+              <div className="floating-search-results">
+                {addrSuggestions.map((suggestion,index)=>(
+                  <button key={`${suggestion.lat}-${suggestion.lon}-${index}`} onClick={()=>jumpToAddr(suggestion.lat,suggestion.lon,suggestion.display_name)}>
+                    <strong>{suggestion.display_name.split(',')[0]}</strong>
+                    <span>{suggestion.display_name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <div id="map" ref={mapDivRef}/>
           {(activeTool === 'radius')&&(
             <div className="local-pop-card radius-extractor-card" style={{top: dropCenter ? 184 : 96, borderColor:'rgba(252,165,165,0.35)', boxShadow:'0 10px 30px rgba(239,68,68,0.16)'}}>

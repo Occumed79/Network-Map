@@ -660,3 +660,832 @@ html[data-occumed-workspace-ready="true"] body
   button:not(.mapboxgl-ctrl button):not(:disabled) {
   pointer-events: auto !important;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   PHASE 1 — Sidebar shell unification + floating search + neon borders
+   Palette: #F0F8FF · #D1DCE5 · #A3C5D9  (Phase 1 correction commit)
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* The full-width command-header has been removed.  Zero-out the height variable
+   so any legacy calc() references collapse cleanly instead of adding phantom space. */
+:root {
+  --command-header-height: 0px;
+  /* Phase 1 neon palette */
+  --neon-c1: #F0F8FF;
+  --neon-c2: #D1DCE5;
+  --neon-c3: #A3C5D9;
+  --neon-glow-hover:  rgba(209, 220, 229, 0.40);
+  --neon-glow-active: rgba(240, 248, 255, 0.62);
+  /* Phase 1 font stack (Apple / macOS Tahoe) */
+  --p1-font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif;
+}
+
+/* ── App body fills 100% height without the header row ── */
+html[data-occumed-workspace-ready="true"] body .app-wrap {
+  display: flex !important;
+  flex-direction: column !important;
+}
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: 100% !important;
+}
+
+
+/* Phase 1 typography authority: all sidebar workspace UI uses the Apple/SF stack.
+   Scope intentionally excludes map popups and generated report HTML. */
+html[data-occumed-workspace-ready="true"] body :is(
+  .sidebar.occumed-sidebar-workspace-scope,
+  .live-panel,
+  .provider-explorer-drawer
+) {
+  font-family: var(--p1-font) !important;
+}
+html[data-occumed-workspace-ready="true"] body :is(
+  .sidebar.occumed-sidebar-workspace-scope,
+  .live-panel,
+  .provider-explorer-drawer
+) :is(button, input, select, textarea, label) {
+  font-family: var(--p1-font) !important;
+}
+
+/* Provider registry section headings are currently emitted with inline
+   IBM Plex Mono styles. Override presentation only; do not change registry DOM/logic. */
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  [data-provider-registry-owned="true"] [style*="letter-spacing"] {
+  font-family: var(--p1-font) !important;
+  color: var(--neon-c2) !important;
+  text-shadow: 0 0 8px rgba(163, 197, 217, 0.28) !important;
+}
+
+/* ─── Floating glass search bar (inside map-wrap) ─────────────────────────── */
+.map-wrap .floating-search-bar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3200;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(540px, calc(100% - 160px));
+  min-width: 220px;
+  height: 44px;
+  padding: 0 12px 0 10px;
+  pointer-events: auto;
+  /* Glass */
+  background: rgba(5, 14, 26, 0.72);
+  border-radius: 999px;
+  border: 1px solid rgba(163, 197, 217, 0.34);
+  box-shadow:
+    0 8px 28px rgba(0, 0, 0, 0.38),
+    0 0 0 1px rgba(240, 248, 255, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(22px) saturate(130%);
+  -webkit-backdrop-filter: blur(22px) saturate(130%);
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+  font-family: var(--p1-font);
+}
+.map-wrap .floating-search-bar:focus-within {
+  border-color: rgba(209, 220, 229, 0.60);
+  box-shadow:
+    0 8px 28px rgba(0, 0, 0, 0.42),
+    0 0 18px rgba(163, 197, 217, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+.map-wrap .floating-search-bar .floating-search-icon {
+  flex: 0 0 auto;
+  color: rgba(163, 197, 217, 0.70);
+}
+.map-wrap .floating-search-bar .floating-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0 4px;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  outline: none !important;
+  color: #e8f3f9 !important;
+  font-size: 13px !important;
+  font-family: var(--p1-font) !important;
+  font-weight: 420 !important;
+  letter-spacing: -0.01em;
+  caret-color: var(--neon-c3);
+}
+.map-wrap .floating-search-bar .floating-search-input::placeholder {
+  color: rgba(163, 197, 217, 0.52) !important;
+}
+.map-wrap .floating-search-bar .floating-search-spinner {
+  flex: 0 0 auto;
+  color: var(--neon-c3);
+}
+.map-wrap .floating-search-bar .floating-search-clear {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: rgba(163, 197, 217, 0.12);
+  border: 1px solid rgba(163, 197, 217, 0.28);
+  border-radius: 50%;
+  color: rgba(209, 220, 229, 0.80);
+  cursor: pointer;
+  transition: background 140ms, color 140ms;
+}
+.map-wrap .floating-search-bar .floating-search-clear:hover {
+  background: rgba(209, 220, 229, 0.22);
+  color: #F0F8FF;
+}
+/* Dropdown results from floating bar */
+.map-wrap .floating-search-results {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 3201;
+  background: rgba(5, 12, 22, 0.92);
+  border: 1px solid rgba(163, 197, 217, 0.30);
+  border-radius: 16px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(22px) saturate(130%);
+  -webkit-backdrop-filter: blur(22px) saturate(130%);
+  overflow: hidden;
+}
+.map-wrap .floating-search-results button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 9px 16px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgba(163, 197, 217, 0.10);
+  cursor: pointer;
+  transition: background 120ms;
+}
+.map-wrap .floating-search-results button:last-child {
+  border-bottom: 0;
+}
+.map-wrap .floating-search-results button:hover {
+  background: rgba(163, 197, 217, 0.10);
+}
+.map-wrap .floating-search-results strong {
+  color: #e4f0f7;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--p1-font);
+}
+.map-wrap .floating-search-results span {
+  overflow: hidden;
+  color: rgba(163, 197, 217, 0.62);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--p1-font);
+}
+
+/* Mobile: show floating menu button only on mobile */
+.map-wrap .floating-search-bar .floating-menu-button {
+  display: none;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  color: rgba(209, 220, 229, 0.80);
+  cursor: pointer;
+}
+
+/* ─── Compact Providers header ─────────────────────────────────────────────── */
+.providers-compact-header {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 9px 11px;
+  background: rgba(6, 20, 33, 0.82);
+  border: 1px solid rgba(163, 197, 217, 0.32);
+  border-radius: 11px;
+  backdrop-filter: blur(12px);
+  font-family: var(--p1-font);
+}
+.providers-compact-title {
+  font-size: 10.5px;
+  font-weight: 860;
+  letter-spacing: 0.1em;
+  color: var(--neon-c1);
+  text-shadow: 0 0 12px rgba(163, 197, 217, 0.40);
+}
+.providers-compact-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9.5px;
+  color: rgba(163, 197, 217, 0.72);
+  font-family: var(--p1-font);
+}
+.providers-source-health-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #5cd9a0;
+  box-shadow: 0 0 0 3px rgba(92, 217, 160, 0.18);
+  flex-shrink: 0;
+}
+.providers-compact-sep {
+  opacity: 0.45;
+}
+
+/* ─── Phase 1 glowing subsection titles ───────────────────────────────────── */
+.phase1-section-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 0;
+  font-size: 9.5px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  font-family: var(--p1-font);
+  color: var(--neon-c2);
+  text-shadow: 0 0 8px rgba(163, 197, 217, 0.35);
+}
+.phase1-section-label svg {
+  color: var(--neon-c3);
+  opacity: 0.80;
+}
+.phase1-section-label small {
+  margin-left: auto;
+  color: rgba(163, 197, 217, 0.52);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   NEON BORDER — React/CSS adaptation of Inspira UI's actual NeonBorder.vue.
+   Source pattern: two opposing 135deg linear-gradient glow layers, each blurred
+   with drop-shadow and rotated together by a transform-based 6s animation.
+   The Vue wrapper/divs are mapped to ::before/::after so existing React controls
+   keep their current DOM, handlers, rounded geometry, and workspace ownership.
+   Palette: #F0F8FF · #D1DCE5 · #A3C5D9.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+@keyframes neon-border-rotate {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Workspace tabs — actual Inspira two-layer linear-gradient technique. */
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab {
+  position: relative;
+  overflow: visible;
+  isolation: isolate;
+  font-family: var(--p1-font) !important;
+}
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab::before,
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  z-index: -1;
+  opacity: 0;
+  pointer-events: none;
+  transform-origin: center;
+  animation: neon-border-rotate 6s linear infinite paused;
+  transition: opacity 220ms ease;
+}
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab::before {
+  background: linear-gradient(
+    135deg,
+    var(--neon-c3) 0%,
+    var(--neon-c3) 25%,
+    transparent 50%,
+    transparent 100%
+  );
+  filter: blur(1px) drop-shadow(0 0 12px var(--neon-c3));
+}
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab::after {
+  background: linear-gradient(
+    135deg,
+    transparent 0%,
+    transparent 50%,
+    var(--neon-c1) 75%,
+    var(--neon-c1) 100%
+  );
+  filter: blur(1px) drop-shadow(0 0 12px var(--neon-c1));
+}
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab:hover:not(:disabled)::before,
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab:hover:not(:disabled)::after {
+  opacity: 0.30;
+  animation-play-state: running;
+}
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab.active::before,
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab.active::after,
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab[aria-selected="true"]::before,
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab[aria-selected="true"]::after {
+  opacity: 0.55;
+  animation-play-state: running;
+}
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab.active,
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab[aria-selected="true"] {
+  border-color: rgba(209, 220, 229, 0.68) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.09),
+    0 0 18px rgba(163, 197, 217, 0.28) !important;
+}
+
+/* Primary sidebar tool buttons — same two rotating glow layers. */
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button {
+  position: relative;
+  isolation: isolate;
+  overflow: visible;
+  font-family: var(--p1-font) !important;
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button::before,
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  z-index: -1;
+  opacity: 0;
+  pointer-events: none;
+  transform-origin: center;
+  animation: neon-border-rotate 6s linear infinite paused;
+  transition: opacity 220ms ease;
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button::before {
+  background: linear-gradient(
+    135deg,
+    var(--neon-c3) 0%,
+    var(--neon-c3) 25%,
+    transparent 50%,
+    transparent 100%
+  );
+  filter: blur(1px) drop-shadow(0 0 12px var(--neon-c3));
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button::after {
+  background: linear-gradient(
+    135deg,
+    transparent 0%,
+    transparent 50%,
+    var(--neon-c1) 75%,
+    var(--neon-c1) 100%
+  );
+  filter: blur(1px) drop-shadow(0 0 12px var(--neon-c1));
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button:hover:not(:disabled)::before,
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button:hover:not(:disabled)::after {
+  opacity: 0.25;
+  animation-play-state: running;
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button.active::before,
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button.active::after,
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button[aria-pressed="true"]::before,
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button[aria-pressed="true"]::after {
+  opacity: 0.52;
+  animation-play-state: running;
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button.active,
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button[aria-pressed="true"] {
+  border-color: rgba(209, 220, 229, 0.58) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.06),
+    0 0 14px rgba(163, 197, 217, 0.24) !important;
+}
+
+/* ─── Provider layer cards: dark navy glass with neon borders ─────────────── */
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .provider-layers-section .workflow-layer {
+  position: relative;
+  box-sizing: border-box;
+  isolation: isolate;
+  background: rgba(7, 18, 30, 0.88) !important;
+  border: 1px solid rgba(163, 197, 217, 0.28) !important;
+  border-radius: 11px !important;
+  color: var(--workspace-text) !important;
+  box-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+  backdrop-filter: blur(14px) saturate(120%);
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .provider-layers-section .workflow-layer::before,
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .provider-layers-section .workflow-layer::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  z-index: -1;
+  opacity: 0;
+  pointer-events: none;
+  transform-origin: center;
+  animation: neon-border-rotate 6s linear infinite paused;
+  transition: opacity 260ms ease;
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .provider-layers-section .workflow-layer::before {
+  background: linear-gradient(
+    135deg,
+    var(--neon-c3) 0%,
+    var(--neon-c3) 25%,
+    transparent 50%,
+    transparent 100%
+  );
+  filter: blur(1px) drop-shadow(0 0 12px var(--neon-c3));
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .provider-layers-section .workflow-layer::after {
+  background: linear-gradient(
+    135deg,
+    transparent 0%,
+    transparent 50%,
+    var(--neon-c1) 75%,
+    var(--neon-c1) 100%
+  );
+  filter: blur(1px) drop-shadow(0 0 12px var(--neon-c1));
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .provider-layers-section .workflow-layer:hover::before,
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .provider-layers-section .workflow-layer:hover::after {
+  opacity: 0.28;
+  animation-play-state: running;
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .provider-layers-section .workflow-layer:hover {
+  border-color: rgba(209, 220, 229, 0.50) !important;
+  box-shadow:
+    0 4px 18px rgba(0, 0, 0, 0.36),
+    0 0 14px var(--neon-glow-hover),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .provider-layers-section .workflow-layer.active::before,
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .provider-layers-section .workflow-layer.active::after {
+  opacity: 0.55;
+  animation-play-state: running;
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .provider-layers-section .workflow-layer.active {
+  border-color: rgba(240, 248, 255, 0.52) !important;
+  background: rgba(8, 22, 38, 0.90) !important;
+  box-shadow:
+    0 4px 18px rgba(0, 0, 0, 0.36),
+    0 0 22px var(--neon-glow-active),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07) !important;
+}
+
+/* Layer name and status in dark glass cards */
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .provider-layers-section .workflow-layer-name {
+  color: var(--neon-c1) !important;
+  font-size: 10.5px !important;
+  font-family: var(--p1-font) !important;
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .provider-layers-section .workflow-layer-status {
+  color: rgba(163, 197, 217, 0.62) !important;
+  font-size: 8.5px !important;
+}
+
+/* ─── Finder (live-panel) — navy glass language matching sidebar ────────────── */
+
+/* Override the light-glass live-finder-ux.css with the Phase 1 dark navy palette */
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body .live-panel.open {
+  background: linear-gradient(180deg, #07111d 0%, #050d16 100%) !important;
+  border: 1px solid rgba(163, 197, 217, 0.28) !important;
+  border-top: 0 !important;
+  box-shadow:
+    10px 12px 30px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+  backdrop-filter: blur(22px) saturate(130%) !important;
+  color: var(--workspace-text) !important;
+}
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel.open .lp-inner {
+  color: var(--workspace-text) !important;
+  background: transparent !important;
+}
+
+/* Finder header / title — phase1-section-label treatment */
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .lp-title {
+  font-size: 10px !important;
+  font-weight: 860 !important;
+  letter-spacing: 0.09em !important;
+  color: var(--neon-c2) !important;
+  text-shadow: 0 0 8px rgba(163, 197, 217, 0.30) !important;
+  font-family: var(--p1-font) !important;
+}
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .analysis-panel-title small {
+  color: rgba(163, 197, 217, 0.58) !important;
+  font-family: var(--p1-font) !important;
+  font-size: 8.5px !important;
+}
+
+/* Finder panel header separator */
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .lp-panel-header {
+  border-bottom-color: rgba(163, 197, 217, 0.16) !important;
+}
+
+/* Finder inputs/selects */
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .rp-input,
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .rp-select,
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel textarea,
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel select {
+  color: #e7f5f9 !important;
+  background: #061522 !important;
+  border-color: rgba(72, 139, 174, 0.34) !important;
+  font-family: var(--p1-font) !important;
+}
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .rp-input::placeholder,
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel textarea::placeholder {
+  color: #829ead !important;
+}
+
+/* Finder result items */
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .lp-item {
+  color: var(--workspace-text) !important;
+  background: var(--workspace-card-bg) !important;
+  border-color: rgba(72, 139, 174, 0.24) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+/* Finder chips */
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .lp-chip {
+  color: var(--workspace-text) !important;
+  background: var(--workspace-control-bg) !important;
+  border-color: rgba(72, 139, 174, 0.46) !important;
+}
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .lp-chip.on {
+  color: #ffffff !important;
+  background: linear-gradient(180deg, #123f5d, #08283f) !important;
+  border-color: rgba(113, 192, 224, 0.68) !important;
+}
+
+/* Finder empty state */
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .lp-empty.show {
+  background: var(--workspace-card-bg) !important;
+  border-color: rgba(72, 139, 174, 0.20) !important;
+  color: var(--workspace-muted) !important;
+}
+
+/* Finder label sub-groups (inline-style overrides via selectors) */
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .lp-name {
+  color: var(--workspace-text) !important;
+  font-family: var(--p1-font) !important;
+}
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .lp-addr,
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .lp-dist {
+  color: var(--workspace-muted) !important;
+}
+
+/* Finder close button */
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .rp-close {
+  color: var(--workspace-text) !important;
+  background: var(--workspace-control-bg) !important;
+  border-color: rgba(72, 139, 174, 0.50) !important;
+}
+
+/* ─── Explorer (provider-explorer-drawer) — navy glass matching sidebar ─────── */
+html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer.open {
+  background: linear-gradient(180deg, #07111d 0%, #050d16 100%) !important;
+  border: 1px solid rgba(163, 197, 217, 0.28) !important;
+  border-top: 0 !important;
+  box-shadow:
+    10px 12px 30px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+  backdrop-filter: blur(22px) saturate(130%) !important;
+  color: var(--workspace-text) !important;
+}
+html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer.open .provider-drawer-body {
+  color: var(--workspace-text) !important;
+  background: transparent !important;
+}
+
+/* Explorer header title — phase1-section-label treatment */
+html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer .provider-drawer-title strong {
+  color: var(--neon-c1) !important;
+  font-size: 13px !important;
+  font-family: var(--p1-font) !important;
+  text-shadow: 0 0 10px rgba(163, 197, 217, 0.28) !important;
+}
+html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer .provider-drawer-title small {
+  color: rgba(163, 197, 217, 0.62) !important;
+  font-family: var(--p1-font) !important;
+}
+
+/* Explorer section titles — phase1-section-label treatment */
+html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer .provider-drawer-section-title span {
+  font-size: 9.5px !important;
+  font-weight: 860 !important;
+  letter-spacing: 0.08em !important;
+  color: var(--neon-c2) !important;
+  text-shadow: 0 0 8px rgba(163, 197, 217, 0.30) !important;
+  font-family: var(--p1-font) !important;
+}
+html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer .provider-drawer-section-title small {
+  color: rgba(163, 197, 217, 0.58) !important;
+  font-family: var(--p1-font) !important;
+}
+
+/* Explorer section dividers */
+html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer .provider-drawer-section {
+  border-bottom-color: rgba(163, 197, 217, 0.12) !important;
+}
+
+/* Explorer inputs */
+html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer select,
+html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer textarea {
+  color: #e7f5f9 !important;
+  background: #061522 !important;
+  border-color: rgba(72, 139, 174, 0.34) !important;
+  font-family: var(--p1-font) !important;
+}
+
+/* ─── Sidebar sub-group label font cleanup ───────────────────────────────────
+   unified-source-divider uses uppercase labels — override IBM Plex Mono/Inter
+   in those selectors to use the new SF Pro font stack.
+   Do NOT touch PDF report strings or map tooltip HTML. */
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope .unified-source-divider {
+  font-family: var(--p1-font) !important;
+  color: var(--neon-c2) !important;
+  font-size: 9px !important;
+  letter-spacing: 0.06em !important;
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope .unified-source-divider small {
+  color: rgba(163, 197, 217, 0.55) !important;
+  font-family: var(--p1-font) !important;
+}
+
+/* command-section-title (used in other sections like Service Presence) */
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope .command-section-title {
+  font-family: var(--p1-font) !important;
+  color: var(--neon-c2) !important;
+  font-size: 9.5px !important;
+  font-weight: 850 !important;
+  letter-spacing: 0.08em !important;
+  text-shadow: 0 0 8px rgba(163, 197, 217, 0.28) !important;
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope .command-section-title small {
+  font-family: var(--p1-font) !important;
+  color: rgba(163, 197, 217, 0.52) !important;
+  font-size: 8px !important;
+}
+
+/* command-section-toggle text */
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope .command-section-toggle {
+  font-family: var(--p1-font) !important;
+  font-size: 10px !important;
+  font-weight: 820 !important;
+}
+
+/* Finder top-level group label inside lp-controls divs that are
+   used as section markers (inline-style letter-spacing elements).
+   We override font-family only — color is intentionally kept as-is
+   so the existing monospace accent remains for data-dense Finder content. */
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel [style*="letter-spacing"] {
+  font-family: var(--p1-font) !important;
+}
+
+/* ── Mobile: floating menu button visible, search bar narrower ── */
+@media (max-width: 768px) {
+  :root {
+    --command-header-height: 0px;
+  }
+  .map-wrap .floating-search-bar {
+    top: 10px;
+    width: calc(100% - 20px);
+    left: 10px;
+    right: 10px;
+    transform: none;
+  }
+  .map-wrap .floating-search-bar .floating-menu-button {
+    display: inline-flex;
+  }
+  /* Mobile sidebar starts from top=0 now that header is gone */
+  html[data-occumed-workspace-ready="true"] body .app-wrap .app-body .sidebar.occumed-sidebar-workspace-scope {
+    inset: 0 auto 0 0 !important;
+  }
+  html[data-occumed-workspace-ready="true"] body .mobile-sidebar-backdrop {
+    inset: 0 0 0 min(326px, 88vw) !important;
+  }
+}

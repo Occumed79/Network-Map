@@ -1,11 +1,16 @@
 /**
  * Regression tests for healthcare-access scoring defect fixes.
+ * Updated after independent review to cover additional blockers:
  *
- * Fix #2 — zero providers must signal scarcity, not missing data
- * Fix #4 — unavailable HRSA must return null designation, not false
- * Fix #3 — vaccinations / occMed / drugTest / audiometry must resolve backend terms
- * Fix #1 — international score persistence accepts sourceYears/sourceNames/missingIndicators
- * Fix #5 — missing indicator reduces confidence without forcing Easy or Critical
+ * A. provider DB failure != zero-provider scarcity
+ * B. successful zero-provider search = scarcity
+ * C. successful zero-facility search = capacity scarcity
+ * D. failed facility search = missing capacity
+ * E. actual international_access_scores persistence uses real DB schema
+ *    (source_years=jsonb, source_names=text[], missing_indicators=text[])
+ * F. HRSA upstream failure = null, never false
+ * G. vaccinations/occMed/drugTest/audiometry SERVICE_TERMS keys present
+ * H. missing international indicator reduces confidence, stays between 1 and 5
  *
  * Run with:
  *   node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/healthcare-access-regression-smoke.ts
@@ -17,158 +22,234 @@ import { scoringRouteInternals } from "../src/routes/scoringDatabase";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const provider = (relevant: number, facilities: number, nearestMiles: number | null = null) => ({
+// providerEvidenceAvailable controls whether zero is scarcity or missing
+const provider = (
+  relevant: number,
+  facilities: number,
+  nearestMiles: number | null,
+  evidenceAvailable = true,
+) => ({
   relevant, facilities, nearestMiles,
   nearestName: nearestMiles !== null ? "Test Facility" : null,
   nearestLat: nearestMiles !== null ? 0 : null,
   nearestLng: nearestMiles !== null ? 0 : null,
+  providerEvidenceAvailable: evidenceAvailable,
+  successfulSources: evidenceAvailable ? 1 : 0,
+  failedSources: evidenceAvailable ? 0 : 1,
 });
 const travel = (minutes: number | null) => ({ minutes, source: minutes !== null ? "Mapbox Directions" : null });
-const shortage = (hpsaScore: number | null, hpsaDesignated: boolean | null, muaDesignated: boolean | null, facilityCount: number | null = null) =>
-  ({ hpsaScore, hpsaDesignated, muaDesignated, facilityCount, sourceYear: 2025 });
+const shortage = (
+  hpsaScore: number | null,
+  hpsaDesignated: boolean | null,
+  muaDesignated: boolean | null,
+  facilityCount: number | null = null,
+) => ({ hpsaScore, hpsaDesignated, muaDesignated, facilityCount, sourceYear: 2025 });
 
-const denseUrbanCounty = {
+const urbanCounty = {
   countyFips: "06037", countyName: "Los Angeles County", state: "CA",
   population: 10_000_000, landSquareMiles: 4_058, density: 2_465, sourceYear: 2024,
 };
-const sparseRuralCounty = {
+const ruralCounty = {
   countyFips: "30069", countyName: "Petroleum County", state: "MT",
   population: 519, landSquareMiles: 1_655, density: 0.31, sourceYear: 2024,
 };
 
-// ─── Test A: zero providers ⇒ high scarcity, NOT missing workforce ─────────────
+// ─── Test A: provider DB failure must NOT become scarcity ─────────────────────
 
 {
-  // Previously: if(evidence.relevant>0) would skip workforce/coverage entirely.
-  // Now: zero must produce score 5 (max scarcity) on workforce and coverage.
-  const noProviders = scoringRouteInternals.usInputs(
-    denseUrbanCounty,
+  // All provider DB queries failed → evidenceAvailable=false
+  const dbFailure = scoringRouteInternals.usInputs(
+    urbanCounty,
     shortage(null, null, null),
-    provider(0, 0),
+    provider(0, 0, null, false), // evidenceAvailable=false
     travel(null),
   );
 
-  assert.ok("workforce" in noProviders, "A: zero providers must produce a workforce component (not skip it)");
-  assert.ok("coverage" in noProviders, "A: zero providers must produce a coverage component (not skip it)");
-  assert.equal((noProviders as any).workforce?.score, 5, "A: zero providers must yield max scarcity on workforce");
-  assert.equal((noProviders as any).coverage?.score, 5, "A: zero providers must yield max scarcity on coverage");
+  // workforce and coverage must be MISSING (not scored) when evidence unavailable
+  assert.equal((dbFailure as any).workforce, undefined,
+    "A: DB failure must omit workforce (not score as scarcity)");
+  assert.equal((dbFailure as any).coverage, undefined,
+    "A: DB failure must omit coverage (not score as scarcity)");
 
-  const zeroScore = calculateUnifiedAccessScore(noProviders as any);
-  assert.ok(zeroScore.score > 3, `A: zero providers must score above 3 (Challenging+), got ${zeroScore.score}`);
+  const dbFailScore = calculateUnifiedAccessScore(dbFailure as any);
+  // geographic is still present (from census), so score won't throw — but confidence is reduced
+  assert.ok(dbFailScore.confidence < 1,
+    `A: DB failure must reduce confidence below 1, got ${dbFailScore.confidence}`);
+  assert.ok(dbFailScore.missingIndicators.includes("workforce"),
+    "A: workforce must be listed as missing when DB failed");
 
-  // Contrast: a well-served county must score lower
-  const wellServed = scoringRouteInternals.usInputs(
-    denseUrbanCounty,
+  console.log(`  A ✓  DB failure: workforce=missing, confidence=${dbFailScore.confidence}`);
+}
+
+// ─── Test B: successful zero-provider search = scarcity ───────────────────────
+
+{
+  // Evidence available but zero relevant providers found
+  const zeroProviders = scoringRouteInternals.usInputs(
+    urbanCounty,
     shortage(null, null, null),
-    provider(5000, 500, 0.5),
-    travel(3),
-  );
-  const wellScore = calculateUnifiedAccessScore(wellServed as any);
-  assert.ok(zeroScore.score > wellScore.score, "A: zero providers must score worse than a well-served county");
-
-  console.log(`  A ✓  zero providers workforce.score=${(noProviders as any).workforce?.score}, overall=${zeroScore.score}`);
-}
-
-// ─── Test B: unavailable HRSA ⇒ null designation, NOT false ──────────────────
-
-{
-  // The HRSA state fetch uses Promise.allSettled now.  Simulate a rejection for both
-  // HPSA and MUA by temporarily replacing the module-private cache with a pre-filled
-  // entry that carries hpsaAvailable:false.
-  // We test the outcome indirectly: when hrsaEvidence returns nulls for designation,
-  // usInputs must not penalise coverage as if muaDesignated=false (which would cap at 1).
-
-  // usInputs with muaDesignated=null (unavailable) and relevant>0 should use the
-  // scarcity formula, NOT the "muaDesignated?4:1" branch.
-  const inputsWithNullHrsa = scoringRouteInternals.usInputs(
-    sparseRuralCounty,
-    shortage(null, null, null),  // null = HRSA unavailable
-    provider(1, 1, 47.8),
-    travel(83),
-  );
-  const inputsWithFalseHrsa = scoringRouteInternals.usInputs(
-    sparseRuralCounty,
-    shortage(null, false, false), // false = confirmed not-designated
-    provider(1, 1, 47.8),
-    travel(83),
+    provider(0, 0, null, true), // evidenceAvailable=true, relevant=0
+    travel(null),
   );
 
-  // Both should have coverage, but the evidence.muaDesignated field must reflect the input
-  assert.equal((inputsWithNullHrsa as any).coverage?.evidence?.muaDesignated, null, "B: null HRSA must stay null in evidence");
-  assert.equal((inputsWithFalseHrsa as any).coverage?.evidence?.muaDesignated, false, "B: false HRSA must stay false in evidence");
+  assert.ok("workforce" in zeroProviders,
+    "B: successful zero-provider search must produce workforce component");
+  assert.equal((zeroProviders as any).workforce?.score, 5,
+    "B: zero providers (evidence available) must score workforce at max scarcity");
+  assert.equal((zeroProviders as any).coverage?.score, 5,
+    "B: zero providers (evidence available) must score coverage at max scarcity");
+  assert.equal((zeroProviders as any).workforce?.evidence?.observedScarcity, true,
+    "B: observedScarcity flag must be true when relevant=0 and evidence available");
 
-  // Verify that the hrsaEvidence return type contract is satisfied by reading the route source
-  const routeSrc = readFileSync(new URL("../src/routes/scoringDatabase.ts", import.meta.url), "utf8");
-  assert.match(routeSrc, /hpsaAvailable/, "B: hrsaEvidence must track availability to distinguish null from false");
-  assert.match(routeSrc, /muaAvailable/, "B: hrsaEvidence must track MUA availability separately");
-  assert.match(routeSrc, /Promise\.allSettled/, "B: HRSA fetches must use allSettled to capture failures without swallowing them");
+  const zeroScore = calculateUnifiedAccessScore(zeroProviders as any);
+  assert.ok(zeroScore.score > 3, `B: zero-provider score must be >3 (Difficult+), got ${zeroScore.score}`);
 
-  console.log("  B ✓  HRSA null vs false distinction verified");
+  console.log(`  B ✓  zero providers (evidence available): workforce.score=5, overall=${zeroScore.score}`);
 }
 
-// ─── Test C: vaccinations / occMed / drugTest / audiometry resolve backend terms ─
+// ─── Test C: successful zero-facility search = capacity scarcity ──────────────
 
 {
-  const routeSrc = readFileSync(new URL("../src/routes/scoringDatabase.ts", import.meta.url), "utf8");
+  // Provider evidence available, facility count confirmed as zero (not from HRSA, from DB)
+  const zeroFacilities = scoringRouteInternals.usInputs(
+    urbanCounty,
+    shortage(null, null, null, null), // facilityCount=null (no HRSA)
+    provider(5, 0, 2.0, true),       // facilities=0, evidenceAvailable=true
+    travel(10),
+  );
 
-  // Each frontend service key must appear as a primary key in SERVICE_TERMS
-  const frontendKeys = ["vaccinations", "occMed", "drugTest", "audiometry"];
-  for (const key of frontendKeys) {
-    // The key should appear as a property key (not just a value) in SERVICE_TERMS
-    assert.match(routeSrc, new RegExp(`\\b${key}\\s*:`), `C: SERVICE_TERMS must define '${key}' as a primary key`);
-  }
+  // capacity must be present with score 5 (zero confirmed via DB)
+  assert.ok("capacity" in zeroFacilities,
+    "C: zero facilities with evidence available must produce capacity component");
+  assert.equal((zeroFacilities as any).capacity?.score, 5,
+    "C: zero confirmed facilities must score capacity at max scarcity");
+  assert.equal((zeroFacilities as any).capacity?.evidence?.observedScarcity, true,
+    "C: capacity observedScarcity must be true when facilities=0 and evidence available");
 
-  // vaccinations must resolve to terms related to vaccines
-  assert.match(routeSrc, /vaccinations:.*vaccin/s, "C: vaccinations must include a vaccine-related term");
-  // occMed must resolve to occupational terms
-  assert.match(routeSrc, /occMed:.*occupational/s, "C: occMed must include occupational term");
-  // drugTest must resolve to drug/lab terms
-  assert.match(routeSrc, /drugTest:.*drug/s, "C: drugTest must include drug-related term");
-  // audiometry must resolve to audiometry/audiology terms
-  assert.match(routeSrc, /audiometry:.*audiometr/s, "C: audiometry must include audiometry term");
-
-  console.log("  C ✓  vaccinations / occMed / drugTest / audiometry all have primary keys in SERVICE_TERMS");
+  console.log("  C ✓  zero facilities (evidence available): capacity.score=5");
 }
 
-// ─── Test D: international score persistence accepts array fields ──────────────
+// ─── Test D: failed facility source = missing capacity ────────────────────────
 
 {
-  // Verify that the SQL strings in both persistence files include explicit array casts.
-  // This is the direct fix for PostgreSQL error 22P02.
+  // DB failed and no HRSA facility count → capacity must be MISSING
+  const noFacilityEvidence = scoringRouteInternals.usInputs(
+    urbanCounty,
+    shortage(null, null, null, null), // facilityCount=null (HRSA unavailable)
+    provider(0, 0, null, false),      // DB failed → db_facilities=null
+    travel(null),
+  );
+
+  assert.equal((noFacilityEvidence as any).capacity, undefined,
+    "D: failed DB + no HRSA → capacity must be omitted (not scarcity)");
+
+  console.log("  D ✓  DB failure + no HRSA: capacity=missing");
+}
+
+// ─── Test E: actual schema — source_years is jsonb, not integer[] ─────────────
+
+{
   const routeSrc = readFileSync(new URL("../src/routes/scoringDatabase.ts", import.meta.url), "utf8");
   const jobSrc = readFileSync(new URL("../src/jobs/syncHealthcareAccessIndicators.ts", import.meta.url), "utf8");
 
-  assert.match(routeSrc, /source_years=\$\d+::integer\[\]/, "D: scoringDatabase.ts UPDATE must cast source_years to integer[]");
-  assert.match(routeSrc, /source_names=\$\d+::text\[\]/, "D: scoringDatabase.ts UPDATE must cast source_names to text[]");
-  assert.match(routeSrc, /missing_indicators=\$\d+::text\[\]/, "D: scoringDatabase.ts UPDATE must cast missing_indicators to text[]");
-  assert.match(routeSrc, /\$\d+::integer\[\],\$\d+::text\[\],\$\d+::text\[\]/, "D: scoringDatabase.ts INSERT must cast all three array params");
+  // source_years must use ::jsonb (confirmed live column type)
+  assert.match(routeSrc, /source_years=\$\d+::jsonb/,
+    "E: scoringDatabase.ts UPDATE must cast source_years as ::jsonb (live schema is jsonb, not integer[])");
+  assert.match(jobSrc, /source_years=\$\d+::jsonb/,
+    "E: syncJob UPDATE must cast source_years as ::jsonb");
 
-  assert.match(jobSrc, /source_years=\$\d+::integer\[\]/, "D: syncJob UPDATE must cast source_years to integer[]");
-  assert.match(jobSrc, /source_names=\$\d+::text\[\]/, "D: syncJob UPDATE must cast source_names to text[]");
-  assert.match(jobSrc, /missing_indicators=\$\d+::text\[\]/, "D: syncJob UPDATE must cast missing_indicators to text[]");
+  // source_names and missing_indicators remain text[]
+  assert.match(routeSrc, /source_names=\$\d+::text\[\]/,
+    "E: source_names must be cast ::text[]");
+  assert.match(routeSrc, /missing_indicators=\$\d+::text\[\]/,
+    "E: missing_indicators must be cast ::text[]");
 
-  // Also verify that persistence errors are now logged, not swallowed
-  assert.match(routeSrc, /persistInternationalScore failed/, "D: scoringDatabase.ts must log persistence failures with context");
-  assert.match(jobSrc, /check array column casts \(22P02\)/, "D: syncJob must log persistence failures mentioning 22P02");
+  // Must NOT use the wrong integer[] cast for source_years
+  assert.doesNotMatch(routeSrc, /source_years=\$\d+::integer\[\]/,
+    "E: source_years must NOT use ::integer[] (column is jsonb)");
+  assert.doesNotMatch(jobSrc, /source_years=\$\d+::integer\[\]/,
+    "E: syncJob source_years must NOT use ::integer[]");
 
-  console.log("  D ✓  array column casts present in both UPDATE and INSERT SQL");
+  // sourceYears must be JSON-serialized before passing as parameter
+  assert.match(routeSrc, /JSON\.stringify\(result\.sourceYears\)/,
+    "E: routeDB must JSON.stringify(sourceYears) before passing to query");
+  assert.match(jobSrc, /JSON\.stringify\(score\.sourceYears\)/,
+    "E: syncJob must JSON.stringify(score.sourceYears) before passing to query");
+
+  // Verify INSERT also uses ::jsonb for source_years
+  assert.match(routeSrc, /\$\d+::jsonb,\$\d+::text\[\],\$\d+::text\[\]/,
+    "E: INSERT must have ::jsonb then ::text[] ::text[] for source_years, source_names, missing_indicators");
+
+  console.log("  E ✓  source_years=jsonb confirmed in both UPDATE and INSERT SQL");
 }
 
-// ─── Test E: missing international indicator reduces confidence, no Easy/Critical ─
+// ─── Test F: HRSA upstream failure = null, never false ────────────────────────
+
+{
+  const routeSrc = readFileSync(new URL("../src/routes/scoringDatabase.ts", import.meta.url), "utf8");
+
+  // Must use Promise.allSettled (not Promise.all with catch)
+  assert.match(routeSrc, /Promise\.allSettled/,
+    "F: HRSA fetches must use Promise.allSettled to capture failures without converting to false");
+
+  // Must track availability separately
+  assert.match(routeSrc, /hpsaAvailable/,
+    "F: hrsaEvidence must track hpsaAvailable to distinguish null from false");
+  assert.match(routeSrc, /muaAvailable/,
+    "F: hrsaEvidence must track muaAvailable separately");
+
+  // Behavioral: usInputs with null HRSA designation must not penalise as false
+  const withNullHrsa = scoringRouteInternals.usInputs(
+    ruralCounty,
+    shortage(null, null, null), // all null = HRSA unavailable
+    provider(1, 1, 47.8, true),
+    travel(83),
+  );
+  assert.equal((withNullHrsa as any).coverage?.evidence?.muaDesignated, null,
+    "F: null HRSA must stay null in coverage evidence");
+  assert.equal((withNullHrsa as any).workforce?.evidence?.hpsaDesignated, null,
+    "F: null HRSA must stay null in workforce evidence");
+
+  console.log("  F ✓  HRSA unavailability stays null throughout");
+}
+
+// ─── Test G: vaccinations/occMed/drugTest/audiometry SERVICE_TERMS ────────────
+
+{
+  const routeSrc = readFileSync(new URL("../src/routes/scoringDatabase.ts", import.meta.url), "utf8");
+
+  for (const key of ["vaccinations", "occMed", "drugTest", "audiometry"]) {
+    assert.match(routeSrc, new RegExp(`\\b${key}\\s*:`),
+      `G: SERVICE_TERMS must define '${key}' as a primary key`);
+  }
+  assert.match(routeSrc, /vaccinations:.*vaccin/s, "G: vaccinations must include vaccine term");
+  assert.match(routeSrc, /occMed:.*occupational/s, "G: occMed must include occupational term");
+  assert.match(routeSrc, /drugTest:.*drug/s, "G: drugTest must include drug term");
+  assert.match(routeSrc, /audiometry:.*audiometr/s, "G: audiometry must include audiometry term");
+
+  console.log("  G ✓  vaccinations/occMed/drugTest/audiometry all primary keys in SERVICE_TERMS");
+}
+
+// ─── Test H: missing indicator reduces confidence, no Easy/Critical extremes ──
 
 {
   type IndicatorRow = {
     indicator_code: string; indicator_name: string; value: unknown; year: unknown;
-    source_name: string; source_url?: string; geography_level: string;
+    source_name: string; geography_level: string;
     admin1_code?: string | null; admin1_name?: string | null;
   };
 
   const rows = (workforce: number | null): IndicatorRow[] => [
-    ...(workforce !== null ? [{ indicator_code: "SH.MED.PHYS.ZS", indicator_name: "Physicians", value: workforce, year: 2023, source_name: "World Bank", geography_level: "country" }] : []),
-    { indicator_code: "SH.MED.BEDS.ZS", indicator_name: "Beds", value: 2.4, year: 2022, source_name: "World Bank", geography_level: "country" },
-    { indicator_code: "SH.UHC.SRVS.CV.XD", indicator_name: "UHC", value: 82, year: 2021, source_name: "WHO / World Bank", geography_level: "country" },
-    { indicator_code: "SP.RUR.TOTL.ZS", indicator_name: "Rural", value: 39.8, year: 2024, source_name: "World Bank", geography_level: "country" },
-    { indicator_code: "EN.POP.DNST", indicator_name: "Density", value: 124, year: 2024, source_name: "World Bank", geography_level: "country" },
+    ...(workforce !== null ? [{ indicator_code: "SH.MED.PHYS.ZS", indicator_name: "Physicians",
+      value: workforce, year: 2023, source_name: "World Bank", geography_level: "country" }] : []),
+    { indicator_code: "SH.MED.BEDS.ZS", indicator_name: "Beds", value: 2.4, year: 2022,
+      source_name: "World Bank", geography_level: "country" },
+    { indicator_code: "SH.UHC.SRVS.CV.XD", indicator_name: "UHC", value: 82, year: 2021,
+      source_name: "WHO / World Bank", geography_level: "country" },
+    { indicator_code: "SP.RUR.TOTL.ZS", indicator_name: "Rural", value: 39.8, year: 2024,
+      source_name: "World Bank", geography_level: "country" },
+    { indicator_code: "EN.POP.DNST", indicator_name: "Density", value: 124, year: 2024,
+      source_name: "World Bank", geography_level: "country" },
   ];
 
   const withWorkforce = calculateUnifiedAccessScore(
@@ -178,17 +259,16 @@ const sparseRuralCounty = {
     scoringRouteInternals.internationalInputs(rows(null), provider(18, 6, 4.9), travel(14)),
   );
 
-  assert.ok(withoutWorkforce.missingIndicators.includes("workforce"), "E: missing workforce must appear in missingIndicators");
-  assert.ok(withoutWorkforce.confidence < withWorkforce.confidence, `E: missing workforce must reduce confidence (${withoutWorkforce.confidence} < ${withWorkforce.confidence})`);
+  assert.ok(withoutWorkforce.missingIndicators.includes("workforce"),
+    "H: missing workforce must appear in missingIndicators");
+  assert.ok(withoutWorkforce.confidence < withWorkforce.confidence,
+    `H: missing workforce must reduce confidence (${withoutWorkforce.confidence} < ${withWorkforce.confidence})`);
+  assert.ok(withoutWorkforce.score > 1, `H: score must not collapse to Easy=1, got ${withoutWorkforce.score}`);
+  assert.ok(withoutWorkforce.score < 5, `H: score must not collapse to Critical=5, got ${withoutWorkforce.score}`);
+  assert.equal(withoutWorkforce.components.workforce, undefined,
+    "H: missing workforce must have no component entry");
 
-  // Must not collapse to the Easy (1) or Critical (5) extreme
-  assert.ok(withoutWorkforce.score > 1, `E: missing workforce must not force score to Easy (1), got ${withoutWorkforce.score}`);
-  assert.ok(withoutWorkforce.score < 5, `E: missing workforce must not force score to Critical (5), got ${withoutWorkforce.score}`);
-
-  // Components object must not include workforce at all
-  assert.equal(withoutWorkforce.components.workforce, undefined, "E: missing workforce must have no component entry");
-
-  console.log(`  E ✓  missing workforce: confidence=${withoutWorkforce.confidence} < ${withWorkforce.confidence}, score=${withoutWorkforce.score} (not 1 or 5)`);
+  console.log(`  H ✓  missing workforce: confidence=${withoutWorkforce.confidence} < ${withWorkforce.confidence}, score=${withoutWorkforce.score}`);
 }
 
 console.log("\nAll healthcare-access regression tests passed ✓");

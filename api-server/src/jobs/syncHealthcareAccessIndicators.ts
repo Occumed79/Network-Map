@@ -76,15 +76,19 @@ async function populateInternationalAccessScores(): Promise<number> {
     if (geographicScores.length) inputs.geographic = { score: geographicScores.reduce((sum, value) => sum + value, 0) / geographicScores.length, evidence: { ruralPopulationPercent: rural, populationDensity: density }, sources: ["World Bank"], year: Math.max(present(indicators["SP.RUR.TOTL.ZS"]?.year) ?? 0, present(indicators["EN.POP.DNST"]?.year) ?? 0) || undefined };
     if (!Object.keys(inputs).length) continue;
     const score = calculateUnifiedAccessScore(inputs as any);
-    // Fix #1: cast array columns explicitly to prevent PostgreSQL 22P02.
-    // source_years is integer[], source_names and missing_indicators are text[].
-    // Passing a bare JS array without a cast is rejected by the pg driver for typed columns.
-    const values = [row.country_code, row.country_name, score.score, score.confidence, score.components.workforce?.score ?? null, score.components.capacity?.score ?? null, score.components.coverage?.score ?? null, score.components.geographic?.score ?? null, JSON.stringify(Object.fromEntries(Object.entries(score.components).map(([key, component]) => [key, component?.evidence]))), score.sourceYears, score.sourceNames, score.missingIndicators, score.algorithmVersion];
+    // Live schema (confirmed 2026-09-29):
+    //   source_years       → jsonb   (NOT integer[]; was the root cause of PG 22P02)
+    //   source_names       → text[]  (::text[] cast correct)
+    //   missing_indicators → text[]  (::text[] cast correct)
+    //   component_details  → jsonb   (already correct)
+    const sourceYearsJson = JSON.stringify(score.sourceYears);
+    const componentDetailsJson = JSON.stringify(Object.fromEntries(Object.entries(score.components).map(([key, component]) => [key, component?.evidence])));
+    const values = [row.country_code, row.country_name, score.score, score.confidence, score.components.workforce?.score ?? null, score.components.capacity?.score ?? null, score.components.coverage?.score ?? null, score.components.geographic?.score ?? null, componentDetailsJson, sourceYearsJson, score.sourceNames, score.missingIndicators, score.algorithmVersion];
     try {
-      const updated = await pool.query(`UPDATE public.international_access_scores SET country_name=$2,score=$3,confidence=$4,workforce_component=$5,capacity_component=$6,coverage_component=$7,geographic_component=$8,local_access_component=NULL,component_details=$9::jsonb,source_years=$10::integer[],source_names=$11::text[],missing_indicators=$12::text[],geography_level='country',algorithm_version=$13,calculated_at=now(),updated_at=now() WHERE country_code=$1 AND admin1_code IS NULL AND service_type='overall'`, values);
-      if (!updated.rowCount) await pool.query(`INSERT INTO public.international_access_scores(id,country_code,country_name,service_type,score,confidence,workforce_component,capacity_component,coverage_component,geographic_component,local_access_component,component_details,source_years,source_names,missing_indicators,geography_level,algorithm_version,calculated_at,updated_at) VALUES($14,$1,$2,'overall',$3,$4,$5,$6,$7,$8,NULL,$9::jsonb,$10::integer[],$11::text[],$12::text[],'country',$13,now(),now())`, [...values, randomUUID()]);
+      const updated = await pool.query(`UPDATE public.international_access_scores SET country_name=$2,score=$3,confidence=$4,workforce_component=$5,capacity_component=$6,coverage_component=$7,geographic_component=$8,local_access_component=NULL,component_details=$9::jsonb,source_years=$10::jsonb,source_names=$11::text[],missing_indicators=$12::text[],geography_level='country',algorithm_version=$13,calculated_at=now(),updated_at=now() WHERE country_code=$1 AND admin1_code IS NULL AND service_type='overall'`, values);
+      if (!updated.rowCount) await pool.query(`INSERT INTO public.international_access_scores(id,country_code,country_name,service_type,score,confidence,workforce_component,capacity_component,coverage_component,geographic_component,local_access_component,component_details,source_years,source_names,missing_indicators,geography_level,algorithm_version,calculated_at,updated_at) VALUES($14,$1,$2,'overall',$3,$4,$5,$6,$7,$8,NULL,$9::jsonb,$10::jsonb,$11::text[],$12::text[],'country',$13,now(),now())`, [...values, randomUUID()]);
     } catch (persistErr) {
-      logger.error({ countryCode: row.country_code, sourceYears: score.sourceYears, sourceNames: score.sourceNames, missingIndicators: score.missingIndicators, error: persistErr instanceof Error ? persistErr.message : String(persistErr) }, "syncHealthcareAccessIndicators: failed to persist access score — check array column casts (22P02)");
+      logger.error({ countryCode: row.country_code, sourceYears: score.sourceYears, sourceNames: score.sourceNames, missingIndicators: score.missingIndicators, error: persistErr instanceof Error ? persistErr.message : String(persistErr) }, "syncHealthcareAccessIndicators: persist failed (schema: source_years=jsonb, source_names=text[], missing_indicators=text[])");
       continue;
     }
     populated += 1;

@@ -31,7 +31,9 @@ const SERVICE_TERMS: Record<string, string[]> = {
 const COUNTRY_ALIASES: Record<string, string> = { GB:"GBR", UK:"GBR", PL:"POL", US:"USA", DE:"DEU", FR:"FRA", CA:"CAN", AU:"AUS" };
 const FIPS_TO_STATE:Record<string,string>={"01":"AL","02":"AK","04":"AZ","05":"AR","06":"CA","08":"CO","09":"CT","10":"DE","11":"DC","12":"FL","13":"GA","15":"HI","16":"ID","17":"IL","18":"IN","19":"IA","20":"KS","21":"KY","22":"LA","23":"ME","24":"MD","25":"MA","26":"MI","27":"MN","28":"MS","29":"MO","30":"MT","31":"NE","32":"NV","33":"NH","34":"NJ","35":"NM","36":"NY","37":"NC","38":"ND","39":"OH","40":"OK","41":"OR","42":"PA","44":"RI","45":"SC","46":"SD","47":"TN","48":"TX","49":"UT","50":"VT","51":"VA","53":"WA","54":"WV","55":"WI","56":"WY"};
 
-type ProviderEvidence = { relevant:number; facilities:number; nearestMiles:number|null; nearestName:string|null; nearestLat:number|null; nearestLng:number|null };
+// providerEvidenceAvailable: true when ≥1 provider DB query succeeded (zero = observed scarcity).
+// false when ALL queries failed (zero = infrastructure failure, not scarcity — lowers confidence).
+type ProviderEvidence = { relevant:number; facilities:number; nearestMiles:number|null; nearestName:string|null; nearestLat:number|null; nearestLng:number|null; providerEvidenceAvailable:boolean; successfulSources:number; failedSources:number };
 type AssessmentQuery = { lat:number; lng:number; service:string; countryCode:string; admin1?:string; countyFips?:string };
 type UsProfile = { countyFips:string; countyName:string; state:string; population:number; landSquareMiles:number; density:number; sourceYear:number };
 type ShortageEvidence = { hpsaScore:number|null; hpsaDesignated:boolean|null; muaDesignated:boolean|null; facilityCount:number|null; sourceYear:number|null };
@@ -103,10 +105,25 @@ async function hrsaEvidence(profile:UsProfile):Promise<ShortageEvidence>{
 }
 async function providerEvidence(query:AssessmentQuery):Promise<ProviderEvidence>{
   const terms=SERVICE_TERMS[query.service]||[query.service]; const patterns=terms.map(term=>`%${term.toLowerCase()}%`);
-  const results=await Promise.allSettled(getProviderDatabaseProjects().map(({pool})=>pool.query(`WITH candidates AS (SELECT name,lat,lng,primary_provider_type,capability_tags,3959*acos(least(1,greatest(-1,cos(radians($1))*cos(radians(lat))*cos(radians(lng)-radians($2))+sin(radians($1))*sin(radians(lat))))) distance FROM public.provider_master_map_view WHERE lat BETWEEN $1-1 AND $1+1 AND lng BETWEEN $2-1.3 AND $2+1.3), relevant AS (SELECT * FROM candidates WHERE distance<=$4 AND (lower(coalesce(primary_provider_type,'')) LIKE ANY($3::text[]) OR lower(coalesce(array_to_string(capability_tags,' '),'')) LIKE ANY($3::text[]))) SELECT (SELECT count(*)::int FROM relevant) relevant,(SELECT count(*)::int FROM candidates WHERE distance<=$4 AND lower(coalesce(primary_provider_type,''))~'hospital|facility|clinic|urgent') facilities,(SELECT distance FROM relevant ORDER BY distance LIMIT 1) nearest_miles,(SELECT name FROM relevant ORDER BY distance LIMIT 1) nearest_name,(SELECT lat FROM relevant ORDER BY distance LIMIT 1) nearest_lat,(SELECT lng FROM relevant ORDER BY distance LIMIT 1) nearest_lng`,[query.lat,query.lng,patterns,LOCAL_RADIUS_MILES])));
-  let relevant=0,facilities=0;let nearestMiles:number|null=null,nearestName:string|null=null,nearestLat:number|null=null,nearestLng:number|null=null;
-  for(const result of results)if(result.status==="fulfilled"){const row=result.value.rows[0]||{};relevant+=Number(row.relevant||0);facilities+=Number(row.facilities||0);const distance=finite(row.nearest_miles);if(distance!==null&&(nearestMiles===null||distance<nearestMiles)){nearestMiles=distance;nearestName=row.nearest_name||null;nearestLat=finite(row.nearest_lat);nearestLng=finite(row.nearest_lng);}}
-  return {relevant,facilities,nearestMiles,nearestName,nearestLat,nearestLng};
+  const projects=getProviderDatabaseProjects();
+  // If no provider databases are configured at all, evidence is unavailable — not scarcity.
+  if(!projects.length)return {relevant:0,facilities:0,nearestMiles:null,nearestName:null,nearestLat:null,nearestLng:null,providerEvidenceAvailable:false,successfulSources:0,failedSources:0};
+  const results=await Promise.allSettled(projects.map(({pool})=>pool.query(`WITH candidates AS (SELECT name,lat,lng,primary_provider_type,capability_tags,3959*acos(least(1,greatest(-1,cos(radians($1))*cos(radians(lat))*cos(radians(lng)-radians($2))+sin(radians($1))*sin(radians(lat))))) distance FROM public.provider_master_map_view WHERE lat BETWEEN $1-1 AND $1+1 AND lng BETWEEN $2-1.3 AND $2+1.3), relevant AS (SELECT * FROM candidates WHERE distance<=$4 AND (lower(coalesce(primary_provider_type,'')) LIKE ANY($3::text[]) OR lower(coalesce(array_to_string(capability_tags,' '),'')) LIKE ANY($3::text[]))) SELECT (SELECT count(*)::int FROM relevant) relevant,(SELECT count(*)::int FROM candidates WHERE distance<=$4 AND lower(coalesce(primary_provider_type,''))~'hospital|facility|clinic|urgent') facilities,(SELECT distance FROM relevant ORDER BY distance LIMIT 1) nearest_miles,(SELECT name FROM relevant ORDER BY distance LIMIT 1) nearest_name,(SELECT lat FROM relevant ORDER BY distance LIMIT 1) nearest_lat,(SELECT lng FROM relevant ORDER BY distance LIMIT 1) nearest_lng`,[query.lat,query.lng,patterns,LOCAL_RADIUS_MILES])));
+  let relevant=0,facilities=0,successfulSources=0,failedSources=0;
+  let nearestMiles:number|null=null,nearestName:string|null=null,nearestLat:number|null=null,nearestLng:number|null=null;
+  for(const result of results){
+    if(result.status==="fulfilled"){
+      successfulSources++;
+      const row=result.value.rows[0]||{};relevant+=Number(row.relevant||0);facilities+=Number(row.facilities||0);
+      const distance=finite(row.nearest_miles);if(distance!==null&&(nearestMiles===null||distance<nearestMiles)){nearestMiles=distance;nearestName=row.nearest_name||null;nearestLat=finite(row.nearest_lat);nearestLng=finite(row.nearest_lng);}
+    } else {
+      failedSources++;
+      console.warn("[providerEvidence] provider DB query failed:",result.reason?.message||String(result.reason));
+    }
+  }
+  // Evidence is available only when ≥1 source succeeded. All-failure → unavailable (not scarcity).
+  const providerEvidenceAvailable=successfulSources>0;
+  return {relevant,facilities,nearestMiles,nearestName,nearestLat,nearestLng,providerEvidenceAvailable,successfulSources,failedSources};
 }
 async function travelMinutes(query:AssessmentQuery,evidence:ProviderEvidence):Promise<{minutes:number|null;source:string|null}>{
   if(evidence.nearestMiles===null)return {minutes:null,source:null};const token=process.env.MAPBOX_ACCESS_TOKEN||process.env.VITE_MAPBOX_TOKEN;
@@ -114,21 +131,33 @@ async function travelMinutes(query:AssessmentQuery,evidence:ProviderEvidence):Pr
   return {minutes:Number(Math.max(1,evidence.nearestMiles/35*60).toFixed(1)),source:"Distance-based travel estimate"};
 }
 function localPopulation(profile:UsProfile):number{return Math.min(profile.population,profile.density*Math.PI*LOCAL_RADIUS_MILES**2);}
-// Fix #2: zero relevant providers is observed scarcity, not missing evidence.
-// The previous code used `if(evidence.relevant>0)` which silently dropped workforce and
-// coverage when the search returned zero, making zero indistinguishable from "never searched".
-// A verified search that returns zero is strong evidence of difficult access → score at max scarcity.
+// Provider/facility scarcity vs unavailability rules (applied in usInputs and state scoring):
+//   providerEvidenceAvailable=true  + relevant===0  → observed scarcity   → score 5
+//   providerEvidenceAvailable=false                  → evidence missing    → component omitted (lowers confidence)
+//   facilities===0 with evidenceAvailable            → observed scarcity   → score 5 for capacity
+//   facilityCount known from HRSA (non-null)         → use HRSA value as-is
 function usInputs(profile:UsProfile,shortage:ShortageEvidence,evidence:ProviderEvidence,travel:{minutes:number|null;source:string|null}):Partial<Record<keyof typeof import("../lib/healthcareAccessScoring").ACCESS_COMPONENT_WEIGHTS,ComponentInput>>{
   const population=localPopulation(profile);const inputs:Record<string,ComponentInput>={};
-  // workforce: always present when provider search has been executed (relevant may be 0 = scarcity)
-  const workforceScore=evidence.relevant===0?5:Math.max(scarcityScore(evidence.relevant/population*100_000,120,10),shortage.hpsaScore===null?1:burdenScore(shortage.hpsaScore,0,26));
-  inputs.workforce={score:workforceScore,evidence:{relevantProviders:evidence.relevant,compatibleLocalPopulation:Math.round(population),providersPer100k:Number((evidence.relevant/population*100_000).toFixed(2)),hpsaScore:shortage.hpsaScore,hpsaDesignated:shortage.hpsaDesignated},sources:["Network Map provider registries","U.S. Census ACS 5-year",...(shortage.hpsaScore!==null?["HRSA HPSA"]:[])],year:profile.sourceYear};
-  const facilities=shortage.facilityCount??evidence.facilities;if(facilities>0)inputs.capacity={score:scarcityScore(facilities/population*100_000,20,1),evidence:{facilities,facilitiesPer100k:Number((facilities/population*100_000).toFixed(2))},sources:[shortage.facilityCount!==null?"HRSA healthcare facilities":"Network Map provider registries"],year:shortage.sourceYear??profile.sourceYear};
-  // coverage: always present; zero relevant = max scarcity on coverage too
-  const coverageScore=evidence.relevant===0?5:Math.max(scarcityScore(evidence.relevant,50,1),shortage.muaDesignated?4:1);
-  inputs.coverage={score:coverageScore,evidence:{relevantProviders:evidence.relevant,muaDesignated:shortage.muaDesignated,serviceRadiusMiles:LOCAL_RADIUS_MILES},sources:["Network Map provider registries",...(shortage.muaDesignated!==null?["HRSA MUA/P"]:[])]};
+  if(evidence.providerEvidenceAvailable){
+    // Observed zero = max scarcity; positive count = normal scoring
+    const workforceScore=evidence.relevant===0?5:Math.max(scarcityScore(evidence.relevant/population*100_000,120,10),shortage.hpsaScore===null?1:burdenScore(shortage.hpsaScore,0,26));
+    inputs.workforce={score:workforceScore,evidence:{relevantProviders:evidence.relevant,compatibleLocalPopulation:Math.round(population),providersPer100k:Number((evidence.relevant/population*100_000).toFixed(2)),hpsaScore:shortage.hpsaScore,hpsaDesignated:shortage.hpsaDesignated,observedScarcity:evidence.relevant===0},sources:["Network Map provider registries","U.S. Census ACS 5-year",...(shortage.hpsaScore!==null?["HRSA HPSA"]:[])],year:profile.sourceYear};
+    // coverage: observed zero = max scarcity; positive = normal
+    const coverageScore=evidence.relevant===0?5:Math.max(scarcityScore(evidence.relevant,50,1),shortage.muaDesignated?4:1);
+    inputs.coverage={score:coverageScore,evidence:{relevantProviders:evidence.relevant,muaDesignated:shortage.muaDesignated,serviceRadiusMiles:LOCAL_RADIUS_MILES,observedScarcity:evidence.relevant===0},sources:["Network Map provider registries",...(shortage.muaDesignated!==null?["HRSA MUA/P"]:[])]};
+  }
+  // capacity: HRSA facility count (authoritative) OR provider DB count (both distingush 0 vs null)
+  const hrsa_facilities=shortage.facilityCount; // null = HRSA unavailable; 0 = confirmed none
+  const db_facilities=evidence.providerEvidenceAvailable?evidence.facilities:null; // null = DB failed
+  const resolvedFacilities=hrsa_facilities??db_facilities; // prefer HRSA; fallback to DB if available
+  if(resolvedFacilities!==null){
+    // observed zero = scarcity (score 5); positive = normal scoring
+    const capacityScore=resolvedFacilities===0?5:scarcityScore(resolvedFacilities/population*100_000,20,1);
+    inputs.capacity={score:capacityScore,evidence:{facilities:resolvedFacilities,facilitiesPer100k:Number((resolvedFacilities/population*100_000).toFixed(2)),observedScarcity:resolvedFacilities===0},sources:[hrsa_facilities!==null?"HRSA healthcare facilities":"Network Map provider registries"],year:shortage.sourceYear??profile.sourceYear};
+  }
   inputs.geographic={score:scarcityScore(profile.density,500,5),evidence:{populationDensity:profile.density,landSquareMiles:profile.landSquareMiles,ruralityProxy:"Census population density"},sources:["U.S. Census ACS 5-year","Census TIGER/Line"],year:profile.sourceYear};
-  if(travel.minutes!==null)inputs.localAccess={score:burdenScore(travel.minutes,10,120),evidence:{nearestRelevantProviderMiles:evidence.nearestMiles,nearestRelevantProvider:evidence.nearestName,travelMinutes:travel.minutes},sources:[travel.source||"Network Map provider registries"]};return inputs as any;
+  if(travel.minutes!==null)inputs.localAccess={score:burdenScore(travel.minutes,10,120),evidence:{nearestRelevantProviderMiles:evidence.nearestMiles,nearestRelevantProvider:evidence.nearestName,travelMinutes:travel.minutes},sources:[travel.source||"Network Map provider registries"]};
+  return inputs as any;
 }
 
 type IndicatorRow={indicator_code:string;indicator_name:string;value:unknown;year:unknown;source_name:string;source_url?:string;geography_level:string;admin1_code?:string|null;admin1_name?:string|null};
@@ -148,11 +177,11 @@ async function internationalRows(query:AssessmentQuery):Promise<{rows:IndicatorR
   if(query.admin1){const regional=await pool.query(`SELECT indicator_code,indicator_name,value,year,source_name,source_url,geography_level,admin1_code,admin1_name FROM public.international_health_indicators WHERE upper(country_code) IN (upper($1),upper($2)) AND (lower(admin1_name)=lower($3) OR lower(admin1_code)=lower($3)) ORDER BY year DESC`,[query.countryCode,code,query.admin1]);if(regional.rows.length)return {rows:regional.rows,level:"admin1",fallback:false};}
   const country=await pool.query(`SELECT indicator_code,indicator_name,value,year,source_name,source_url,geography_level,admin1_code,admin1_name FROM public.international_health_indicators WHERE upper(country_code) IN (upper($1),upper($2)) AND admin1_code IS NULL ORDER BY year DESC`,[query.countryCode,code]);return {rows:country.rows,level:"country",fallback:Boolean(query.admin1)};
 }
-// Fix #1: PostgreSQL 22P02 — sourceYears (integer[]), sourceNames (text[]), and
-// missingIndicators (text[]) must be cast explicitly.  Passing a JS array as a plain
-// parameter is rejected by pg for typed array columns unless the SQL includes ::text[]
-// or ::integer[] casts.  Also: persistence failures are now logged with context instead
-// of being silently swallowed by the .catch(()=>undefined) at the call site.
+// Persistence fix (confirmed against live DB schema 2026-09-29):
+//   source_years      → jsonb     (was assumed integer[]; that caused PG 22P02)
+//   source_names      → text[]    (::text[] cast is correct)
+//   missing_indicators→ text[]    (::text[] cast is correct)
+//   component_details → jsonb     (::jsonb cast was already correct)
 async function persistInternationalScore(query:AssessmentQuery, result:ReturnType<typeof calculateUnifiedAccessScore>, level:string, fallback:boolean):Promise<void>{
   if(!process.env.DATABASE_URL_2)return;
   const pool=getScoringPool();
@@ -160,11 +189,12 @@ async function persistInternationalScore(query:AssessmentQuery, result:ReturnTyp
   const persistedAdmin1=level==="admin1"?query.admin1||null:null;
   const columns={workforce:result.components.workforce?.score??null,capacity:result.components.capacity?.score??null,coverage:result.components.coverage?.score??null,geographic:result.components.geographic?.score??null,localAccess:result.components.localAccess?.score??null};
   const details=Object.fromEntries(Object.entries(result.components).map(([key,value])=>[key,value?.evidence]));
-  // $12 cast to integer[], $13/$14 cast to text[] — prevents PG error 22P02 "invalid input syntax"
-  const params=[code,persistedAdmin1,query.service,result.score,result.confidence,columns.workforce,columns.capacity,columns.coverage,columns.geographic,columns.localAccess,JSON.stringify(details),result.sourceYears,result.sourceNames,result.missingIndicators,level,result.algorithmVersion];
+  // source_years is jsonb (array stored as JSON), source_names/missing_indicators are text[]
+  const sourceYearsJson=JSON.stringify(result.sourceYears);
+  const params=[code,persistedAdmin1,query.service,result.score,result.confidence,columns.workforce,columns.capacity,columns.coverage,columns.geographic,columns.localAccess,JSON.stringify(details),sourceYearsJson,result.sourceNames,result.missingIndicators,level,result.algorithmVersion];
   try {
-    const updated=await pool.query(`UPDATE public.international_access_scores SET score=$4,confidence=$5,workforce_component=$6,capacity_component=$7,coverage_component=$8,geographic_component=$9,local_access_component=$10,component_details=$11::jsonb,source_years=$12::integer[],source_names=$13::text[],missing_indicators=$14::text[],geography_level=$15,algorithm_version=$16,calculated_at=now(),updated_at=now() WHERE country_code=$1 AND admin1_code IS NOT DISTINCT FROM $2 AND service_type=$3`,params);
-    if(!updated.rowCount)await pool.query(`INSERT INTO public.international_access_scores(id,country_code,country_name,admin1_code,admin1_name,service_type,score,confidence,workforce_component,capacity_component,coverage_component,geographic_component,local_access_component,component_details,source_years,source_names,missing_indicators,geography_level,algorithm_version,calculated_at,updated_at) VALUES($17,$1,$1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::integer[],$13::text[],$14::text[],$15,$16,now(),now())`,[...params,randomUUID()]);
+    const updated=await pool.query(`UPDATE public.international_access_scores SET score=$4,confidence=$5,workforce_component=$6,capacity_component=$7,coverage_component=$8,geographic_component=$9,local_access_component=$10,component_details=$11::jsonb,source_years=$12::jsonb,source_names=$13::text[],missing_indicators=$14::text[],geography_level=$15,algorithm_version=$16,calculated_at=now(),updated_at=now() WHERE country_code=$1 AND admin1_code IS NOT DISTINCT FROM $2 AND service_type=$3`,params);
+    if(!updated.rowCount)await pool.query(`INSERT INTO public.international_access_scores(id,country_code,country_name,admin1_code,admin1_name,service_type,score,confidence,workforce_component,capacity_component,coverage_component,geographic_component,local_access_component,component_details,source_years,source_names,missing_indicators,geography_level,algorithm_version,calculated_at,updated_at) VALUES($17,$1,$1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13::text[],$14::text[],$15,$16,now(),now())`,[...params,randomUUID()]);
   } catch(err){
     console.error("[scoring] persistInternationalScore failed",{countryCode:code,admin1:persistedAdmin1,service:query.service,sourceYears:result.sourceYears,sourceNames:result.sourceNames,missingIndicators:result.missingIndicators,error:err instanceof Error?err.message:String(err)});
     throw err;
@@ -193,41 +223,53 @@ router.get("/scoring/us/states", async (req, res) => {
     const key = process.env.CENSUS_DATA_API_KEY ? `&key=${encodeURIComponent(process.env.CENSUS_DATA_API_KEY)}` : "";
     const census = await fetchJson(new URL(`https://api.census.gov/data/${ACS_YEAR}/acs/acs5?get=NAME,B01003_001E&for=state:*${key}`));
     const populations = new Map<string,number|null>((census||[]).slice(1).map((row:any[]) => [String(row[2]).padStart(2,"0"), finite(row[1])] as [string,number|null]));
-    const projects = await Promise.allSettled(getProviderDatabaseProjects().map(({pool}) => pool.query(`
-      SELECT upper(admin_area) state,
-        count(*) FILTER (WHERE lower(coalesce(primary_provider_type,'')) LIKE ANY($1::text[])
-          OR lower(coalesce(array_to_string(capability_tags,' '),'')) LIKE ANY($1::text[]))::int relevant,
-        count(*) FILTER (WHERE lower(coalesce(primary_provider_type,'')) ~ 'hospital|facility|clinic|urgent')::int facilities
-      FROM public.provider_master_map_view
-      WHERE admin_area IS NOT NULL AND (country IS NULL OR upper(country) IN ('US','USA','UNITED STATES'))
-      GROUP BY upper(admin_area)
-    `, [patterns])));
+    const stateProjects=getProviderDatabaseProjects();
+    let stateQuerySucceeded=false;
     const providerCounts = new Map<string,{relevant:number;facilities:number}>();
-    for (const project of projects) if (project.status === "fulfilled") for (const row of project.value.rows) {
-      const prior = providerCounts.get(row.state) || { relevant:0, facilities:0 };
-      prior.relevant += Number(row.relevant || 0); prior.facilities += Number(row.facilities || 0); providerCounts.set(row.state, prior);
+    if(stateProjects.length){
+      const projectResults = await Promise.allSettled(stateProjects.map(({pool}) => pool.query(`
+        SELECT upper(admin_area) state,
+          count(*) FILTER (WHERE lower(coalesce(primary_provider_type,'')) LIKE ANY($1::text[])
+            OR lower(coalesce(array_to_string(capability_tags,' '),'')) LIKE ANY($1::text[]))::int relevant,
+          count(*) FILTER (WHERE lower(coalesce(primary_provider_type,'')) ~ 'hospital|facility|clinic|urgent')::int facilities
+        FROM public.provider_master_map_view
+        WHERE admin_area IS NOT NULL AND (country IS NULL OR upper(country) IN ('US','USA','UNITED STATES'))
+        GROUP BY upper(admin_area)
+      `, [patterns])));
+      for (const project of projectResults) {
+        if (project.status === "fulfilled") {
+          stateQuerySucceeded=true;
+          for (const row of project.value.rows) {
+            const prior = providerCounts.get(row.state) || { relevant:0, facilities:0 };
+            prior.relevant += Number(row.relevant || 0); prior.facilities += Number(row.facilities || 0);
+            providerCounts.set(row.state, prior);
+          }
+        } else {
+          console.warn("[scoring/us/states] provider DB query failed:",project.reason?.message||String(project.reason));
+        }
+      }
     }
-    // Fix #2 & #5: state-level scoring must follow the same unified contract as point assessments.
-    // Zero relevant providers = observed scarcity, not missing evidence.
-    // Only skip a state entirely if we have no population (can't derive per-100k).
+    // State scoring rules (matching usInputs contract):
+    //   stateQuerySucceeded=true  + relevant===0  → observed scarcity → workforce/coverage score 5
+    //   stateQuerySucceeded=false                 → evidence unavailable → omit workforce/coverage
+    //   facilities===0 with stateQuerySucceeded   → observed scarcity → capacity score 5
+    //   stateQuerySucceeded=false                 → omit capacity (missing, not scarcity)
+    // localAccess: not defensible from state-level aggregate data — always omitted.
     const states=[];
     for (const [fips,state] of Object.entries(FIPS_TO_STATE)) {
       const population=populations.get(fips)??null; if(population===null) continue;
-      // providerCounts contains only states with ≥1 provider row; absent means the query returned
-      // zero relevant providers for that state — treat as observed scarcity, not missing data.
-      const providerSearchExecuted=true; // the batch query was always executed for all states
       const {relevant,facilities}=providerCounts.get(state)||{relevant:0,facilities:0};
       const inputs:Record<string,ComponentInput>={};
-      // workforce: always present (zero = scarcity score 5, matching usInputs behaviour)
-      inputs.workforce={score:relevant===0?5:scarcityScore(relevant/population*100000,120,10),evidence:{relevant,providersPer100k:Number((relevant/population*100000).toFixed(2)),observedScarcity:relevant===0},sources:["Network Map provider registries","U.S. Census ACS 5-year"],year:ACS_YEAR};
-      if(facilities>0) inputs.capacity={score:scarcityScore(facilities/population*100000,20,1),evidence:{facilities},sources:["Network Map provider registries"]};
-      // coverage: always present (zero = max scarcity)
-      inputs.coverage={score:relevant===0?5:scarcityScore(relevant/population*100000,120,10),evidence:{relevant,observedScarcity:relevant===0},sources:["Network Map provider registries"]};
+      if(stateQuerySucceeded){
+        inputs.workforce={score:relevant===0?5:scarcityScore(relevant/population*100000,120,10),evidence:{relevant,providersPer100k:Number((relevant/population*100000).toFixed(2)),observedScarcity:relevant===0},sources:["Network Map provider registries","U.S. Census ACS 5-year"],year:ACS_YEAR};
+        inputs.coverage={score:relevant===0?5:scarcityScore(relevant/population*100000,120,10),evidence:{relevant,observedScarcity:relevant===0},sources:["Network Map provider registries"]};
+        // facilities: observed zero = scarcity; positive = normal
+        const capacityScore=facilities===0?5:scarcityScore(facilities/population*100000,20,1);
+        inputs.capacity={score:capacityScore,evidence:{facilities,observedScarcity:facilities===0},sources:["Network Map provider registries"]};
+      }
       const landArea=finite(stateAreas.get(fips));
       if(landArea!==null){const density=population/landArea;inputs.geographic={score:scarcityScore(density,500,5),evidence:{populationDensity:density,landSquareMiles:landArea},sources:["U.S. Census ACS 5-year","Census TIGER/Line"],year:ACS_YEAR};}
-      // localAccess: not defensible from state-level data — omitted to reduce confidence appropriately
-      void providerSearchExecuted; // suppress unused var warning
-      states.push({state,population,...calculateUnifiedAccessScore(inputs as any)});
+      if(Object.keys(inputs).length) states.push({state,population,...calculateUnifiedAccessScore(inputs as any)});
     }
     res.json({ok:true,service,states});
   } catch(error) { res.status(503).json({ok:false,error:error instanceof Error?error.message:String(error)}); }

@@ -15,6 +15,7 @@
  */
 
 import crypto from "node:crypto";
+import { createStandalonePool } from "@workspace/db";
 import { logger } from "./logger";
 import type { ProviderCandidate } from "../providerSources/types";
 
@@ -53,11 +54,10 @@ export type AutosaveLookupResult = AutosaveCacheHit | AutosaveCacheMiss;
 
 // ─── Source safety ────────────────────────────────────────────────────────────
 
-/** Sources whose provider content must NOT be permanently stored. */
-const NON_PERSISTABLE_SOURCES = new Set(["google", "google_places", "googleplaces", "google-places"]);
-
-function isPersistableSource(source: string): boolean {
-  return !NON_PERSISTABLE_SOURCES.has(source.toLowerCase().replace(/[\s_-]+/g, ""));
+/** Google-derived provider content is not eligible for durable autosave storage. */
+export function isPersistableSource(source: string): boolean {
+  const normalized = source.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return !normalized.includes("google");
 }
 
 // ─── Search key ──────────────────────────────────────────────────────────────
@@ -142,39 +142,22 @@ export function shardForKey(providerKey: string): "shard_a" | "shard_b" {
 
 // ─── Database connections ─────────────────────────────────────────────────────
 
-interface DbClient {
-  query: (sql: string, params?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }>;
-  end: () => Promise<void>;
-}
+type DbClient = ReturnType<typeof createStandalonePool>;
 
 let _cacheDb: DbClient | null = null;
 let _shardA: DbClient | null = null;
 let _shardB: DbClient | null = null;
-let _initialized = false;
 
-async function makeClient(url: string): Promise<DbClient | null> {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const pgMod = await import("pg" as string) as any;
-    const Pool = pgMod?.default?.Pool ?? pgMod?.Pool;
-    if (!Pool) throw new Error("pg.Pool not found");
-    const pool = new Pool({ connectionString: url, max: 3, idleTimeoutMillis: 30_000 });
-    return {
-      query: (sql: string, params?: unknown[]) => pool.query(sql, params) as Promise<{ rows: Record<string, unknown>[] }>,
-      end: () => pool.end() as Promise<void>,
-    };
-  } catch (err) {
-    logger.warn({ err }, "autosaveCache: pg driver unavailable; cache disabled");
-    return null;
+function ensureConnections(): void {
+  if (!_cacheDb && CACHE_DB_URL) {
+    _cacheDb = createStandalonePool(CACHE_DB_URL, "network-map-autosave-index", 2);
   }
-}
-
-async function initConnections(): Promise<void> {
-  if (_initialized) return;
-  _initialized = true;
-  if (CACHE_DB_URL) _cacheDb = await makeClient(CACHE_DB_URL);
-  if (SHARD_A_URL) _shardA = await makeClient(SHARD_A_URL);
-  if (SHARD_B_URL) _shardB = await makeClient(SHARD_B_URL);
+  if (!_shardA && SHARD_A_URL) {
+    _shardA = createStandalonePool(SHARD_A_URL, "network-map-autosave-shard-a", 2);
+  }
+  if (!_shardB && SHARD_B_URL) {
+    _shardB = createStandalonePool(SHARD_B_URL, "network-map-autosave-shard-b", 2);
+  }
 }
 
 function shardClient(shard: "shard_a" | "shard_b"): DbClient | null {
@@ -193,8 +176,8 @@ export async function lookupCache(params: AutosaveLookupParams): Promise<Autosav
   if (!isAutosaveConfigured()) return { cacheHit: false, searchKey };
 
   try {
-    await initConnections();
-    if (!_cacheDb) return { cacheHit: false, searchKey };
+    ensureConnections();
+    if (!_cacheDb || !_shardA || !_shardB) return { cacheHit: false, searchKey };
 
     const { rows } = await _cacheDb.query(
       `SELECT result_refs, last_seen_at FROM autosave_search_cache
@@ -206,6 +189,7 @@ export async function lookupCache(params: AutosaveLookupParams): Promise<Autosav
 
     const row = rows[0];
     const refs: Array<{ provider_key: string; shard: "shard_a" | "shard_b" }> = Array.isArray(row.result_refs) ? row.result_refs as typeof refs : [];
+    if (!refs.length) return { cacheHit: false, searchKey };
 
     // Retrieve providers from shards
     const providers: ProviderCandidate[] = [];
@@ -228,6 +212,13 @@ export async function lookupCache(params: AutosaveLookupParams): Promise<Autosav
       loadFromShard(_shardA, byShardA),
       loadFromShard(_shardB, byShardB),
     ]);
+
+    // A partial or empty shard read must never suppress the authoritative live
+    // search. Treat it as a miss and let the normal pipeline repair the cache.
+    if (providers.length !== refs.length) {
+      logger.warn({ searchKey, expected: refs.length, loaded: providers.length }, "autosaveCache: incomplete cache read; falling back to live search");
+      return { cacheHit: false, searchKey };
+    }
 
     // Update hit counters (best-effort, non-blocking)
     _cacheDb.query(
@@ -262,17 +253,20 @@ export async function writeCache(
   if (!isAutosaveConfigured()) return;
 
   try {
-    await initConnections();
+    ensureConnections();
 
-    // Filter out non-persistable sources (e.g. Google Places)
-    const persistable = candidates.filter((c) => isPersistableSource(c.source));
+    // Filter out non-persistable sources (especially Google-derived content)
+    // and de-duplicate before writing so each provider key appears once.
+    const uniquePersistable = new Map<string, ProviderCandidate>();
+    for (const candidate of candidates) {
+      if (!isPersistableSource(candidate.source)) continue;
+      uniquePersistable.set(buildProviderKey(candidate), candidate);
+    }
 
-    // Upsert providers into shards and collect refs
     const refs: Array<{ provider_key: string; shard: "shard_a" | "shard_b" }> = [];
 
     await Promise.all(
-      persistable.map(async (candidate) => {
-        const providerKey = buildProviderKey(candidate);
+      [...uniquePersistable.entries()].map(async ([providerKey, candidate]) => {
         const shard = shardForKey(providerKey);
         const client = shardClient(shard);
         if (!client) return;
@@ -287,6 +281,18 @@ export async function writeCache(
                 first_seen_at, last_seen_at, updated_at)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,now(),now(),now())
              ON CONFLICT (provider_key) DO UPDATE SET
+               source       = EXCLUDED.source,
+               source_id    = COALESCE(EXCLUDED.source_id, autosave_providers.source_id),
+               name         = EXCLUDED.name,
+               normalized_name = EXCLUDED.normalized_name,
+               clinic_type  = EXCLUDED.clinic_type,
+               services     = EXCLUDED.services,
+               address      = COALESCE(EXCLUDED.address, autosave_providers.address),
+               city         = COALESCE(EXCLUDED.city, autosave_providers.city),
+               admin_area   = COALESCE(EXCLUDED.admin_area, autosave_providers.admin_area),
+               country      = COALESCE(EXCLUDED.country, autosave_providers.country),
+               postal_code  = COALESCE(EXCLUDED.postal_code, autosave_providers.postal_code),
+               source_url   = COALESCE(EXCLUDED.source_url, autosave_providers.source_url),
                last_seen_at = now(),
                updated_at   = now(),
                lat          = COALESCE(EXCLUDED.lat, autosave_providers.lat),
@@ -324,6 +330,11 @@ export async function writeCache(
       }),
     );
 
+    // Never create a fresh "empty hit" from a search whose only results were
+    // non-persistable (for example Google Places), or whose provider writes all
+    // failed. That would hide valid live results on the next request.
+    if (!refs.length) return;
+
     if (!_cacheDb) return;
 
     // Upsert the search cache entry
@@ -349,7 +360,7 @@ export async function writeCache(
         params.radiusMiles,
         params as unknown as object,
         JSON.stringify(refs),
-        persistable.length,
+        refs.length,
         expiresAt,
       ],
     );
@@ -361,6 +372,8 @@ export async function writeCache(
 // ─── Row → ProviderCandidate ─────────────────────────────────────────────────
 
 function rowToCandidate(row: Record<string, unknown>): ProviderCandidate {
+  const parsedScore = Number(row.confidence_score);
+  const score = Number.isFinite(parsedScore) ? parsedScore : 50;
   return {
     id: String(row.provider_key ?? ""),
     name: String(row.name ?? ""),
@@ -378,10 +391,9 @@ function rowToCandidate(row: Record<string, unknown>): ProviderCandidate {
     services: Array.isArray(row.services) ? (row.services as string[]) : [],
     source: String(row.source ?? "autosave"),
     sourceUrl: row.source_url ? String(row.source_url) : undefined,
-    confidence: row.confidence_score != null && Number(row.confidence_score) >= 70 ? "high"
-      : row.confidence_score != null && Number(row.confidence_score) >= 40 ? "medium" : "low",
+    confidence: score >= 70 ? "high" : score >= 40 ? "medium" : "low",
     trustTier: "directory",
-    score: typeof row.confidence_score === "number" ? row.confidence_score : 50,
+    score,
     badges: ["Autosave"],
     evidence: [],
     lastSeenAt: row.last_seen_at ? String(row.last_seen_at) : undefined,

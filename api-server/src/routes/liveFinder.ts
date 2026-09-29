@@ -174,7 +174,8 @@ router.get("/live-finder/search", async (req: Request, res: Response) => {
     }, "Live Finder compatibility response completed");
 
     // ── Write to autosave cache (non-blocking, best-effort) ──
-    if (isAutosaveConfigured() && unified.results.length > 0) {
+    // Never freeze a degraded/partial upstream search into a seven-day cache hit.
+    if (isAutosaveConfigured() && unified.results.length > 0 && !unified.incomplete) {
       writeCache(searchKey, cacheParams, unified.results).catch((err) =>
         logger.warn({ err, searchKey }, "autosaveCache: background write failed"),
       );

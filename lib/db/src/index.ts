@@ -184,6 +184,19 @@ export function getPool(): pg.Pool {
 }
 
 /**
+ * Creates a small standalone PostgreSQL pool for a dedicated database whose
+ * lifecycle is owned by the caller. This keeps packages that already depend on
+ * @workspace/db from importing pg transitively at runtime.
+ */
+export function createStandalonePool(
+  connectionString: string,
+  applicationName: string,
+  max = 2,
+): pg.Pool {
+  return createPool(connectionString, applicationName, positiveInteger(String(max), 2, 1, 10));
+}
+
+/**
  * Returns the provider-map Neon projects in a stable order. Every configured
  * project is expected to contain the same provider schema. Source-specific
  * projects only provide additional storage; they do not change the provider

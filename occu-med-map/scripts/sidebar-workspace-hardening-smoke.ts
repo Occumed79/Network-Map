@@ -55,6 +55,10 @@ assert.match(appSource, /aria-selected=\{sidebarWorkspace===id\}/, "React rerend
 assert.match(appSource, /MapToolsWorkspaceHost = React\.memo/, "the imperative Map Tools subtree must be isolated from unrelated React rerenders");
 assert.match(appSource, /network-map:sidebar-workspace/, "React workspace state must publish explicit diagnostic events");
 assert.match(appSource, /aria-controls=\{controls\}/, "workspace tabs must identify their controlled panels");
+assert.match(appSource, /\{id:'find',label:'Find'/, "visible navigation must expose Find");
+assert.match(appSource, /\{id:'results',label:'Results'/, "visible navigation must expose Results");
+assert.doesNotMatch(appSource, /\{id:'liveFinder',label:'Finder'/, "legacy Finder must not remain a visible workspace tab");
+assert.doesNotMatch(appSource, /\{id:'explorer',label:'Explorer'/, "legacy Explorer must not remain a visible workspace tab");
 assert.match(
   appSource,
   /setMasterProviderTypeFilter\(''\);setProviderExplorerFilters\(INITIAL_PROVIDER_EXPLORER_FILTERS\)[\s\S]*Clear filters/,
@@ -62,12 +66,15 @@ assert.match(
 );
 assert.doesNotMatch(main, new RegExp(["liveFinder", "ControlCleanupRuntime"].join("")), "obsolete Finder cleanup runtime must stay retired");
 
-for (const tab of ["providers", "mapTools", "liveFinder", "explorer"]) {
-  assert.match(appSource, new RegExp(`id:'${tab}'`), `React must register workspace tab ${tab}`);
+for (const tab of ["providers", "mapTools", "find", "results"]) {
+  assert.match(appSource, new RegExp(`id:'${tab}'`), `React must register visible workspace tab ${tab}`);
 }
 
-assert.match(appSource, /setShowProviderExplorerDrawer\(workspace === 'explorer'\)/, "React must derive Explorer visibility from the selected workspace");
-assert.match(appSource, /workspace === 'liveFinder' \? 'liveFinder'/, "React must derive Finder visibility from the selected workspace");
+assert.match(appSource, /id="sidebar-find-panel"/, "Find must be a React-owned inline workspace");
+assert.match(appSource, /id="sidebar-results-panel"/, "Results must be a React-owned inline workspace");
+assert.match(appSource, /type FindMode = 'nearby' \| 'npi' \| 'database'/, "Find must preserve Nearby, NPI, and Database submodes");
+assert.match(appSource, /setResultsSource\('nearby'\)/, "Nearby searches must route to Results");
+assert.match(appSource, /setResultsSource\('npi'\)/, "NPI searches must route to Results");
 assert.match(appSource, /handleSidebarTabKeyDown[\s\S]*ArrowLeft[\s\S]*ArrowRight[\s\S]*Home[\s\S]*End/, "React tabs must support keyboard navigation");
 assert.match(appSource, /new ResizeObserver\(updateGeometry\)/, "React must observe sidebar geometry without polling");
 assert.match(appSource, /observer\?\.disconnect\(\)/, "React must clean up sidebar geometry observation");
@@ -113,8 +120,6 @@ assert.match(workspaceCss, /data-occumedworkspace\]:not\(\[data-occumedworkspace
 
 assert.match(productionUi, /assertWorkspace\("providers"\)/, "production UI smoke must exercise Providers");
 assert.match(productionUi, /assertWorkspace\("mapTools"/, "production UI smoke must exercise Map Tools");
-assert.match(productionUi, /assertWorkspace\("liveFinder"/, "production UI smoke must exercise Finder");
-assert.match(productionUi, /assertWorkspace\("explorer"/, "production UI smoke must exercise Explorer");
 assert.match(productionUi, /phantom right-side column/, "production UI smoke must reject map gutters");
 assert.match(productionUi, /setViewportSize\(\{ width: 1024, height: 768 \}\)/, "workspace UI must be checked at a narrower desktop viewport");
 assert.match(productionUi, /__NETWORK_MAP_UI_INTEGRITY__/, "production UI smoke must consume the runtime audit");
@@ -128,17 +133,14 @@ for (const control of [
 ]) {
   assert.match(uiAcceptance, new RegExp(control), `rendered UI acceptance must exercise ${control}`);
 }
-assert.match(uiAcceptance, /closing Finder must return to Providers/, "Finder Close must not leave an empty selected workspace");
 assert.match(uiAcceptance, /assertRapidSidebarStress/, "UI acceptance must repeatedly stress the four-tab sequence");
 assert.match(uiAcceptance, /control state must survive a tab round trip/, "UI acceptance must verify control persistence");
 assert.match(uiAcceptance, /scrolling must remain attached after switching/, "UI acceptance must verify workspace scrolling after tab changes");
 assert.match(uiAcceptance, /assertSidebarResizeStress/, "UI acceptance must verify sidebar controls while resizing");
-assert.match(uiAcceptance, /second ArrowRight must select Finder/, "keyboard acceptance must traverse Finder");
-assert.match(uiAcceptance, /third ArrowRight must select Explorer/, "keyboard acceptance must traverse Explorer");
 assert.match(uiAcceptance, /fourth ArrowRight must wrap to Providers/, "keyboard acceptance must cover all four tabs");
 
-for (const tab of ["providers", "mapTools", "liveFinder", "explorer"]) {
-  assert.match(postIdleProbe, new RegExp(`tab: "${tab}"`), `post-idle probe must cycle ${tab}`);
+for (const tab of ["providers", "mapTools"]) {
+  assert.match(postIdleProbe, new RegExp(`tab: "${tab}"`), `post-idle probe must preserve core workspace cycle ${tab}`);
 }
 assert.match(postIdleProbe, /assertFourWorkspaceCycle\(page, "before-idle"\)/, "post-idle probe must verify every tab before settling");
 assert.match(postIdleProbe, /waitForTimeout\(10_000\)/, "post-idle probe must include a real idle window");

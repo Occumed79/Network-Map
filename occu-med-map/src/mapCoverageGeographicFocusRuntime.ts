@@ -192,7 +192,17 @@ function providerAtClick(map: mapboxgl.Map, event: mapboxgl.MapMouseEvent): Prov
     [event.point.x + 12, event.point.y + 12],
   ];
   const feature = map.queryRenderedFeatures(hitBox, { layers })
-    .find((candidate) => candidate.geometry?.type === "Point");
+    .filter((candidate) => candidate.geometry?.type === "Point")
+    .sort((left, right) => {
+      const leftPoint = left.geometry.type === "Point"
+        ? map.project(left.geometry.coordinates as [number, number])
+        : event.point;
+      const rightPoint = right.geometry.type === "Point"
+        ? map.project(right.geometry.coordinates as [number, number])
+        : event.point;
+      return Math.hypot(leftPoint.x - event.point.x, leftPoint.y - event.point.y)
+        - Math.hypot(rightPoint.x - event.point.x, rightPoint.y - event.point.y);
+    })[0];
   if (!feature || feature.geometry.type !== "Point") return null;
 
   const lng = Number(feature.geometry.coordinates[0]);

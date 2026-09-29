@@ -995,7 +995,9 @@ function generateReportHtml(data:ReportData,evidence:EvidencePayload|null):strin
 // ─────────────────────────────────────────────────────────────────────────────
 // Main App Component
 // ─────────────────────────────────────────────────────────────────────────────
-type SidebarWorkspace = 'providers' | 'mapTools' | 'liveFinder' | 'explorer';
+type SidebarWorkspace = 'providers' | 'mapTools' | 'liveFinder' | 'explorer' | 'find' | 'results';
+// Phase-2 find submode
+type FindMode = 'nearby' | 'npi' | 'database';
 
 declare global {
   interface Window {
@@ -1015,8 +1017,8 @@ const SIDEBAR_WORKSPACES: ReadonlyArray<{
 }> = [
   {id:'providers',label:'Providers',ariaLabel:'Providers workspace — provider layers and workflows',controls:'sidebar-providers-panel'},
   {id:'mapTools',label:'Map Tools',ariaLabel:'Map Tools workspace — routing and map tools',controls:'sidebar-map-tools-panel'},
-  {id:'liveFinder',label:'Finder',ariaLabel:'Finder workspace — live provider finder',controls:'sidebar-finder-panel'},
-  {id:'explorer',label:'Explorer',ariaLabel:'Explorer workspace — provider explorer',controls:'sidebar-explorer-panel'},
+  {id:'find',label:'Find',ariaLabel:'Find workspace — live finder, NPI registry and database explorer',controls:'sidebar-find-panel'},
+  {id:'results',label:'Results',ariaLabel:'Results workspace — provider search results',controls:'sidebar-results-panel'},
 ];
 
 const MapToolsWorkspaceHost = React.memo(React.forwardRef<HTMLDivElement>(function MapToolsWorkspaceHost(_props, ref) {
@@ -1061,6 +1063,9 @@ export default function App() {
   const [view, setView] = useState<'world'|'us'|'east'|'central'|'west'>('world');
   const [activeTool, setActiveTool] = useState<ActiveTool>(null);
   const [providerToolMode,setProviderToolMode] = useState<'live'|'npi'>('live');
+  const [findMode, setFindMode] = useState<FindMode>('nearby');
+  // Results workspace: persists across tab switches
+  const [resultsSource, setResultsSource] = useState<'nearby'|'npi'|'database'>('nearby');
   // U.S.-only coverage diagnostics (population density, state fill, difficulty
   // legend/filter/distribution, 70mi ring). Off by default so the global map
   // stays a clean world viewer. Only shown when explicitly enabled.
@@ -2895,13 +2900,14 @@ export default function App() {
   const selectSidebarWorkspace = useCallback((workspace:SidebarWorkspace) => {
     sidebarWorkspaceRef.current = workspace;
     setSidebarWorkspace(workspace);
+    // find tab drives liveFinder/explorer machinery; results is purely presentational
     setShowProviderExplorerDrawer(workspace === 'explorer');
     setActiveTool(current => {
-      const nextTool: ActiveTool = workspace === 'liveFinder' ? 'liveFinder' : current === 'liveFinder' ? null : current;
+      const nextTool: ActiveTool = (workspace === 'liveFinder' || workspace === 'find') ? 'liveFinder' : current === 'liveFinder' ? null : current;
       activeToolRef.current = nextTool;
       return nextTool;
     });
-    if (workspace === 'liveFinder') {
+    if (workspace === 'liveFinder' || workspace === 'find') {
       setProviderToolMode(current => current === 'npi' ? 'npi' : 'live');
       if (!['live','npi'].includes(document.body.dataset.providerTool || '')) document.body.dataset.providerTool = 'live';
     } else {
@@ -3040,6 +3046,397 @@ export default function App() {
             ))}
           </div>
           <MapToolsWorkspaceHost ref={mapToolsHostRef} />
+
+          {/* ── FIND PANEL ── */}
+          <div
+            id="sidebar-find-panel"
+            className="occumed-sidebar-find-content"
+            role="tabpanel"
+            aria-label="Find workspace"
+            aria-hidden={sidebarWorkspace !== 'find'}
+          >
+            {/* Submode selector: Nearby | NPI | Database */}
+            <div className="find-submode-bar">
+              <div className="find-submode-label">SEARCH MODE</div>
+              <div className="find-submode-pills">
+                <button
+                  className={`find-submode-pill${findMode==='nearby'?' active':''}`}
+                  onClick={()=>{setFindMode('nearby');setProviderToolMode('live');document.body.dataset.providerTool='live';}}
+                >Nearby</button>
+                <button
+                  className={`find-submode-pill${findMode==='npi'?' active':''}`}
+                  onClick={()=>{setFindMode('npi');setProviderToolMode('npi');document.body.dataset.providerTool='npi';}}
+                >NPI</button>
+                <button
+                  className={`find-submode-pill${findMode==='database'?' active':''}`}
+                  onClick={()=>{setFindMode('database');delete document.body.dataset.providerTool;}}
+                >Database</button>
+              </div>
+            </div>
+
+            {/* ─ NEARBY submode (existing Live Finder behavior) ─ */}
+            {findMode === 'nearby' && (
+              <div className="find-submode-body">
+                <div className="find-section-glow-label">LOCATION</div>
+                <div style={{fontSize:10,color:'#3d5478',lineHeight:1.5}}>
+                  {liveLocation?`Center · ${liveLocation}`:'Double-click the map or search an address to run a live search.'}
+                  {liveMirror&&<div style={{fontSize:9,color:'#2d4060',marginTop:3}}>{liveMirror}</div>}
+                </div>
+                {!npiCategory&&liveResults.length>0&&(
+                  <DriveTimeControlStrip
+                    origin={etaOrigin}
+                    candidates={etaCandidates}
+                    loading={providerEta.loading}
+                    rankedCount={providerEta.rankings.length}
+                    error={providerEta.error}
+                    onRank={(options)=>{
+                      if(!etaOrigin) return;
+                      void providerEta.rank(etaOrigin,etaCandidates,options).catch(()=>undefined);
+                    }}
+                    onCopy={()=>{ void providerEta.copy(); }}
+                    onClear={providerEta.clear}
+                  />
+                )}
+
+                <div className="find-section-glow-label">FILTERS</div>
+                <div style={{display:'flex',alignItems:'center',gap:6}}>
+                  <span style={{fontSize:9.5,color:'#3d5478',whiteSpace:'nowrap'}}>Radius:</span>
+                  <input type="range" min={1} max={50} value={liveRadius} onChange={e=>setLiveRadius(Number(e.target.value))} onMouseUp={()=>{ if(lastRadiusRef.current) doLiveSearch(lastRadiusRef.current.lat,lastRadiusRef.current.lng); }}/>
+                  <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:'#89d4fe',whiteSpace:'nowrap'}}>{liveRadius} mi</span>
+                </div>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'6px 8px',borderRadius:8,background:'rgba(125,211,252,0.06)',border:'1px solid rgba(125,211,252,0.18)'}}>
+                  <span style={{fontSize:9.5,color:'#9cc7eb'}}>Double-click the map to run a live search</span>
+                  <span style={{fontSize:9,color:'#285b78',fontFamily:"'IBM Plex Mono',monospace"}}>{liveSearched?'Search active':'Choose a location'}</span>
+                </div>
+                <div style={{fontSize:8.5,color:'#64748b',fontFamily:"'IBM Plex Mono',monospace",letterSpacing:'0.08em',marginBottom:4}}>LIVE SOURCE FILTERS</div>
+                <div style={{display:'flex',flexWrap:'wrap',gap:3,marginBottom:6}}>
+                  {([
+                    {key:'clinical',label:'Clinical',count:livePriorityCounts?.clinical},
+                    {key:'occMed',label:'Occ-Med',count:livePriorityCounts?.occMed},
+                    {key:'hospital',label:'Hospitals',count:liveFacets?.hospital},
+                    {key:'clinic',label:'Clinics',count:liveFacets?.clinic},
+                    {key:'doctor',label:'Doctors',count:liveFacets?.doctor},
+                    {key:'urgent',label:'Urgent',count:liveFacets?.urgent},
+                    {key:'lab',label:'Labs',count:liveFacets?.lab},
+                    {key:'pharmacy',label:'Pharmacy',count:livePriorityCounts?.pharmacy},
+                    {key:'dentist',label:'Dental',count:livePriorityCounts?.dental},
+                    {key:'eye',label:'Eye',count:livePriorityCounts?.eye},
+                    {key:'dotExam',label:'DOT Exam',count:undefined},
+                    {key:'faaMedical',label:'FAA Medical',count:undefined},
+                    {key:'all',label:'All',count:undefined},
+                  ] as const).map(btn => {
+                    const count = btn.count;
+                    const countStr = (typeof count === 'number' && count > 0) ? count.toLocaleString() : '';
+                    return (
+                      <button
+                        key={btn.key}
+                        className={`lp-chip${liveBackendCategory===btn.key?' on':''}`}
+                        onClick={()=>{
+                          setLiveBackendCategory(btn.key);
+                          setNpiCategory(null);
+                          setNpiResults([]);
+                          setNpiError('');
+                          setNpiSearchMeta(null);
+                          setShowCustomSearch(false);
+                          if(lastRadiusRef.current) doLiveSearch(lastRadiusRef.current.lat,lastRadiusRef.current.lng, btn.key);
+                        }}
+                      >{btn.label}{countStr?` ${countStr}`:''}</button>
+                    );
+                  })}
+                </div>
+                <input
+                  className="rp-input"
+                  placeholder="Filter providers by name, address, or type..."
+                  value={liveTextFilter}
+                  onChange={e=>setLiveTextFilter(e.target.value)}
+                />
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}}>
+                  <select className="rp-select" value={liveRegionFilter} onChange={e=>setLiveRegionFilter(e.target.value as any)}>
+                    <option value="all">All Regions</option>
+                    <option value="us">US Only</option>
+                    <option value="intl">International Only</option>
+                  </select>
+                  <select className="rp-select" value={liveSort} onChange={e=>setLiveSort(e.target.value as any)}>
+                    <option value="distance">Sort: Distance</option>
+                    <option value="name">Sort: Name</option>
+                  </select>
+                </div>
+
+                {/* Results shortcut */}
+                {(liveResults.length>0||npiResults.length>0) && (
+                  <button
+                    className="find-view-results-btn"
+                    onClick={()=>{setResultsSource('nearby');selectSidebarWorkspace('results');}}
+                  ><Download size={13}/>View {(npiCategory?npiResults.length:filterAndSortLiveResults(liveResults).length)} results</button>
+                )}
+              </div>
+            )}
+
+            {/* ─ NPI submode (existing NPI Finder behavior) ─ */}
+            {findMode === 'npi' && (
+              <div className="find-submode-body">
+                <div className="find-section-glow-label">LOCATION</div>
+                <div style={{fontSize:10,color:'#3d5478',lineHeight:1.5}}>
+                  {liveLocation?`Center · ${liveLocation}`:'Double-click the map or search an address to set a location.'}
+                </div>
+
+                {lastRadiusRef.current && isUsPoint(lastRadiusRef.current.lat, lastRadiusRef.current.lng) ? (
+                  <>
+                    <div className="find-section-glow-label">U.S. NPI REGISTRY</div>
+                    <div style={{display:'flex',flexWrap:'wrap',gap:3}}>
+                      <button className={`lp-chip${!npiCategory?' on':''}`} onClick={()=>{setLiveFilter('all');setNpiCategory(null);setNpiResults([]);setNpiError('');setNpiSearchMeta(null);setShowCustomSearch(false);}}>All</button>
+                      {NPI_CATEGORY_KEYS.map((cat)=>{
+                        const c=NPI_CATEGORY_MAP[cat];
+                        return (
+                          <button key={cat} className={`lp-chip${npiCategory===cat?' on':''}`} onClick={()=>{setLiveFilter(cat);doNpiCategorySearch(cat);setShowCustomSearch(false);}}>{c.icon} {c.label}</button>
+                        );
+                      })}
+                      <button className={`lp-chip${npiCategory==='custom'?' on':''}`} onClick={()=>{setShowCustomSearch(!showCustomSearch);setNpiCategory(null);setNpiResults([]);setNpiError('');}}> Custom NPI</button>
+                    </div>
+
+                    {showCustomSearch && (
+                      <div style={{padding:'10px',background:'rgba(7,20,42,0.6)',border:'1px solid rgba(103,232,249,0.2)',borderRadius:6,marginTop:8}}>
+                        <div style={{fontSize:9,color:'#89d4fe',fontFamily:"'IBM Plex Mono',monospace",marginBottom:8,letterSpacing:'0.08em'}}>CUSTOM NPI SEARCH</div>
+                        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:8}}>
+                          <div>
+                            <div style={{fontSize:8,color:'#3d5478',marginBottom:2}}>Organization Name</div>
+                            <input className="rp-input" style={{fontSize:9,padding:'4px 6px'}} placeholder="e.g. Mayo Clinic" value={customOrgName} onChange={e=>setCustomOrgName(e.target.value)}/>
+                          </div>
+                          <div>
+                            <div style={{fontSize:8,color:'#3d5478',marginBottom:2}}>First Name</div>
+                            <input className="rp-input" style={{fontSize:9,padding:'4px 6px'}} placeholder="e.g. John" value={customFirstName} onChange={e=>setCustomFirstName(e.target.value)}/>
+                          </div>
+                          <div>
+                            <div style={{fontSize:8,color:'#3d5478',marginBottom:2}}>Last Name</div>
+                            <input className="rp-input" style={{fontSize:9,padding:'4px 6px'}} placeholder="e.g. Smith" value={customLastName} onChange={e=>setCustomLastName(e.target.value)}/>
+                          </div>
+                          <div>
+                            <div style={{fontSize:8,color:'#3d5478',marginBottom:2}}>Taxonomy</div>
+                            <input className="rp-input" style={{fontSize:9,padding:'4px 6px'}} placeholder="e.g. Cardiology" value={customTaxonomyDesc} onChange={e=>setCustomTaxonomyDesc(e.target.value)}/>
+                          </div>
+                          <div>
+                            <div style={{fontSize:8,color:'#3d5478',marginBottom:2}}>Taxonomy Code</div>
+                            <input className="rp-input" style={{fontSize:9,padding:'4px 6px'}} placeholder="e.g. 207RC0000X" value={customTaxonomyCode} onChange={e=>setCustomTaxonomyCode(e.target.value)}/>
+                          </div>
+                          <div>
+                            <div style={{fontSize:8,color:'#3d5478',marginBottom:2}}>Provider Type</div>
+                            <select className="rp-select" style={{fontSize:9,padding:'4px 6px'}} value={customEnumType} onChange={e=>setCustomEnumType(e.target.value as any)}>
+                              <option value="">Any</option>
+                              <option value="NPI-1">Individual (NPI-1)</option>
+                              <option value="NPI-2">Organization (NPI-2)</option>
+                            </select>
+                          </div>
+                        </div>
+                        <button className="rp-assess-btn" style={{width:'100%',padding:'6px 12px',fontSize:9}} onClick={doCustomNpiSearch} disabled={npiLoading}>
+                          {npiLoading ? <><LoaderCircle className="command-spin" size={14}/>Searching</> : <><Search size={14}/>Search NPI Registry</>}
+                        </button>
+                      </div>
+                    )}
+                    {npiLoading&&<div style={{fontSize:9,color:'#89d4fe',padding:'4px 0'}}>Querying NPI Registry for {npiCategory ? NPI_CATEGORY_MAP[npiCategory]?.label : ''}...</div>}
+                    {npiError&&!npiLoading&&<div style={{fontSize:9,color:'#fca5a5',padding:'6px 8px',background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.25)',borderRadius:5,lineHeight:1.5}}>{npiError}</div>}
+                    {npiSearchMeta&&!npiLoading&&(
+                      <div style={{fontSize:8.5,color:'#2d4060',fontFamily:"'IBM Plex Mono',monospace",padding:'3px 0',display:'flex',alignItems:'center',gap:8}}>
+                        <span>{npiSearchMeta.normalizedCount} norm → {npiSearchMeta.dedupedCount} dedup → {npiSearchMeta.geocodedCount} geo → {npiSearchMeta.finalMarkerCount} markers · {npiSearchMeta.durationMs}ms</span>
+                        <button onClick={()=>setShowAuditView(v=>!v)} style={{fontSize:8,padding:'2px 6px',borderRadius:3,background:'rgba(59,130,246,0.1)',border:'1px solid rgba(59,130,246,0.25)',color:'#93c5fd',cursor:'pointer',fontFamily:"'IBM Plex Mono',monospace"}}>{showAuditView?'Hide':'Audit'}</button>
+                      </div>
+                    )}
+                    {showAuditView&&npiUnifiedResponse&&(
+                      <div style={{fontSize:8.5,color:'#3d5478',fontFamily:"'IBM Plex Mono',monospace",padding:'6px 8px',background:'rgba(7,20,42,0.5)',border:'1px solid rgba(103,232,249,0.15)',borderRadius:5,lineHeight:1.6}}>
+                        <div style={{color:'#89d4fe',marginBottom:3}}>ADAPTER STATUS</div>
+                        {npiUnifiedResponse.sourceResults.map((sr)=>(
+                          <div key={sr.sourceId} style={{display:'flex',gap:6}}>
+                            <span style={{color:sr.ok?'#1c8f6d':'#b42318'}}>{sr.ok?<Check size={13}/>:<X size={13}/>}</span>
+                            <span>{sr.sourceLabel}: {sr.count}{sr.error ? ` · ${sr.error}` : ''}</span>
+                          </div>
+                        ))}
+                        {Object.keys(npiUnifiedResponse.audit.errorsBySource).length===0&&<div style={{color:'#34d399'}}>All sources responded cleanly.</div>}
+                      </div>
+                    )}
+                    {npiResults.length>0&&(
+                      <button className="find-view-results-btn" onClick={()=>{setResultsSource('npi');selectSidebarWorkspace('results');}}><Download size={13}/>View {npiResults.length} NPI results</button>
+                    )}
+                  </>
+                ) : (
+                  <div style={{padding:'10px 0',fontSize:10,color:'#3d5478',lineHeight:1.5}}>Choose a U.S. location, then select an NPI category or open Custom NPI Search.</div>
+                )}
+              </div>
+            )}
+
+            {/* ─ DATABASE submode (existing Provider Explorer behavior) ─ */}
+            {findMode === 'database' && (
+              <div className="find-submode-body">
+                <div className="find-section-glow-label">VISUALIZATION</div>
+                <div className="provider-visualization-grid">
+                  {([
+                    ['density','Density'],
+                    ['hex','Hex field'],
+                    ['pins','8px points'],
+                    ['density-pins','Density + points'],
+                    ['dot-density','Dot density'],
+                  ] as Array<[ProviderExplorerMode,string]>).map(([mode,label])=>(
+                    <button key={mode} className={providerExplorerMode===mode?'active':''} onClick={()=>void renderProviderExplorerMap(mode)}>{label}</button>
+                  ))}
+                </div>
+
+                <div className="find-section-glow-label">FILTERS</div>
+                <label className="provider-field-label" htmlFor="find-provider-type-filter">Provider type</label>
+                <select id="find-provider-type-filter" className="provider-type-filter" value={masterProviderTypeFilter} onChange={event=>{const value=event.target.value;setMasterProviderTypeFilter(value);setProviderExplorerFilters(prev=>({...prev,clinicType:value}));}}>
+                  {MASTER_PROVIDER_TYPE_OPTIONS.map(([value,label])=><option key={value} value={value}>{label}</option>)}
+                </select>
+                <label className="provider-live-toggle">
+                  <input type="checkbox" checked={providerExplorerLiveEnabled} onChange={event=>setProviderExplorerLiveEnabled(event.target.checked)}/>
+                  <span><strong>Live discovery overlay</strong><small>{liveResults.length.toLocaleString()} results are not stored</small></span>
+                </label>
+
+                <div className="find-section-glow-label">DATABASE SCOPE</div>
+                <div className="provider-action-list">
+                  <button onClick={useCurrentProviderMapBoundsInDatabase}><MapIcon size={15}/><span><strong>Current map view</strong><small>Open records inside visible bounds</small></span><ChevronRight size={15}/></button>
+                  <button onClick={useCurrentProviderRadiusInDatabase}><Crosshair size={15}/><span><strong>Current radius</strong><small>{hasRadiusCenter?'Use active center and distance':'Select a map or radius center first'}</small></span><ChevronRight size={15}/></button>
+                  <button onClick={()=>setShowDatasetBrowser(true)}><Database size={15}/><span><strong>Matching records</strong><small>Browse, filter, and inspect source data</small></span><ChevronRight size={15}/></button>
+                </div>
+
+                <div className="provider-secondary-actions" style={{marginTop:8}}>
+                  <button onClick={()=>void compareProviderExplorerArea(providerExplorerFilters)}><GitCompareArrows size={15}/>Compare stored and live</button>
+                  <button onClick={()=>void renderProviderExplorerMap(providerExplorerMode,providerExplorerFilters)}><RefreshCw size={15}/>Refresh map</button>
+                  <button disabled={!providerExplorerLiveEnabled} onClick={()=>void renderProviderExplorerLiveLayer()}><Radar size={15}/>Refresh live</button>
+                  <button onClick={()=>{clearProviderExplorerMap();setMasterProviderTypeFilter('');setProviderExplorerFilters(INITIAL_PROVIDER_EXPLORER_FILTERS);setProviderExplorerStatus('Provider map and database filters cleared');}}><X size={15}/>Clear filters</button>
+                </div>
+
+                <details className="provider-legend" style={{marginTop:8}}>
+                  <summary>Provider category colors</summary>
+                  <div className="provider-category-legend">{PROVIDER_CATEGORY_LEGEND.map(key=><span key={key}><i style={{background:PROVIDER_CATEGORY_STYLES[key].color}}/>{PROVIDER_CATEGORY_STYLES[key].label}</span>)}</div>
+                </details>
+                <div className="provider-map-status" role="status">{providerExplorerStatus}</div>
+              </div>
+            )}
+          </div>
+
+          {/* ── RESULTS PANEL ── */}
+          <div
+            id="sidebar-results-panel"
+            className="occumed-sidebar-results-content"
+            role="tabpanel"
+            aria-label="Results workspace"
+            aria-hidden={sidebarWorkspace !== 'results'}
+          >
+            {/* Results action bar */}
+            <div className="results-action-bar">
+              <div className="results-action-bar-label">
+                {resultsSource === 'npi' ? 'NPI Registry' : resultsSource === 'database' ? 'Database' : 'Nearby'}
+                {' · '}
+                <span style={{color:'#89d4fe'}}>
+                  {resultsSource === 'npi'
+                    ? npiResults.length
+                    : filterAndSortLiveResults(liveResults).length} results
+                </span>
+              </div>
+              <div className="results-action-pills">
+                <button
+                  className="results-action-pill"
+                  disabled={pinnedCities.length === 0}
+                  title={pinnedCities.length === 0 ? 'Pin cities in the Coverage tool to compare' : 'Open comparison table'}
+                  onClick={()=>toggleCommandTool('compare')}
+                ><GitCompareArrows size={13}/>Compare</button>
+                <button
+                  className="results-action-pill"
+                  disabled={resultsSource === 'database'}
+                  title={resultsSource === 'database' ? 'Use the Find tab to refresh database results' : 'Re-run the current search'}
+                  onClick={()=>{
+                    if(resultsSource === 'npi' && npiCategory) doNpiCategorySearch(npiCategory);
+                    else if(lastRadiusRef.current) doLiveSearch(lastRadiusRef.current.lat, lastRadiusRef.current.lng);
+                  }}
+                ><RefreshCw size={13}/>Refresh</button>
+                <button
+                  className="results-action-pill"
+                  disabled={resultsSource === 'npi' ? npiResults.length === 0 : liveResults.length === 0}
+                  title="Export results as CSV"
+                  onClick={exportOutreachCsv}
+                ><Download size={13}/>Export</button>
+              </div>
+            </div>
+
+            {/* Results list */}
+            <div className="results-list">
+              {/* Empty states */}
+              {resultsSource !== 'npi' && !liveLoading && liveResults.length === 0 && (
+                <div className="results-empty">
+                  <div>No results yet.</div>
+                  <div style={{fontSize:9,color:'#3d5478',marginTop:4}}>Use the <strong style={{color:'#89d4fe'}}>Find</strong> tab to search for providers.</div>
+                </div>
+              )}
+              {resultsSource === 'npi' && !npiLoading && npiResults.length === 0 && (
+                <div className="results-empty">
+                  <div>No NPI results yet.</div>
+                  <div style={{fontSize:9,color:'#3d5478',marginTop:4}}>Use the <strong style={{color:'#89d4fe'}}>Find → NPI</strong> tab to search.</div>
+                </div>
+              )}
+              {(liveLoading||npiLoading) && (
+                <div className="results-loading"><div className="lp-spin"/><span>Searching providers…</span></div>
+              )}
+
+              {/* NPI results cards */}
+              {resultsSource === 'npi' && npiCategory && npiResults.length > 0 && npiResults.map((p)=>{
+                const c=NPI_CATEGORY_MAP[npiCategory];
+                const saveKey = providerSaveKey(p);
+                const saveState = savedToMyClinics[saveKey];
+                const saveError = savedToMyClinicsErrors[saveKey];
+                return (
+                  <div key={p.id} className="result-card" onClick={()=>p.lat!=null&&p.lng!=null&&lpFly(p.lat,p.lng,p.id)}>
+                    <div className="result-card-header">
+                      <span className="result-card-icon">{c?.icon}</span>
+                      <span className="result-card-name">{p.name}</span>
+                      {p.distanceMiles !== undefined && <span className="result-card-dist">{p.distanceMiles.toFixed(1)} mi</span>}
+                    </div>
+                    <div className="result-card-addr">{p.city ? `${p.city}, ${p.state} ${p.postalCode}` : p.address}</div>
+                    <div className="result-card-type" style={{color:c?.color}}>{c?.label}</div>
+                    <div className="result-card-actions">
+                      <button type="button" className="lp-act" disabled={saveState==='saving'||saveState==='saved'} onClick={e=>{e.stopPropagation();void saveLiveResultToMyClinics(p,{isNpi:true,categoryLabel:c?.label});}}>{saveState==='saving'?'Saving…':saveState==='saved'?'Saved':saveState==='error'?'Retry':'Save'}</button>
+                      {p.website&&<a href={p.website} target="_blank" rel="noopener" className="lp-act" onClick={e=>e.stopPropagation()}>Website</a>}
+                      {p.phone&&<a href={`tel:${p.phone}`} className="lp-act" onClick={e=>e.stopPropagation()}>Call</a>}
+                      {p.lat!=null&&p.lng!=null&&<a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.name+(p.address?' '+p.address:''))}`} target="_blank" rel="noopener" className="lp-act" onClick={e=>e.stopPropagation()}>Directions</a>}
+                    </div>
+                    {saveState==='error'&&saveError&&<div className="lp-save-error" role="alert">{saveError}</div>}
+                  </div>
+                );
+              })}
+
+              {/* Live / Nearby results cards */}
+              {resultsSource !== 'npi' && !npiCategory && filterAndSortLiveResults(liveResults).map((r:any)=>{
+                const c=CATS[r.cat]||CATS.clinic;
+                const gm=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name+(r.addr?' '+r.addr:''))}`;
+                const resultEta=providerEta.findEta(r.name);
+                const saveKey=providerSaveKey(r);
+                const saveState=savedToMyClinics[saveKey];
+                const saveError=savedToMyClinicsErrors[saveKey];
+                return (
+                  <div key={r.id} className={`result-card${liveHighlightId===r.id?' hl':''}`} onClick={()=>lpFly(r.lat,r.lng,r.id)}>
+                    <div className="result-card-header">
+                      <span className="result-card-icon">{c.ico}</span>
+                      <span className="result-card-name">{r.name}</span>
+                      <span className="result-card-dist">{fmtDist(r.dist)}</span>
+                    </div>
+                    {r.addr&&<div className="result-card-addr">{r.addr}</div>}
+                    <div className="result-card-type" style={{color:c.col}}>{c.lbl}</div>
+                    {resultEta&&(
+                      <ProviderEtaBadge
+                        eta={resultEta}
+                        onRoute={requestEtaRoute}
+                        onCopy={(row)=>{ void copyTextSafely(`${row.name} — ${Math.round(row.driveMinutes)} min / ${row.driveMiles.toFixed(1)} mi`); }}
+                      />
+                    )}
+                    <div className="result-card-actions">
+                      <a href={gm} target="_blank" rel="noopener" className="lp-act pri" onClick={e=>e.stopPropagation()}>Directions</a>
+                      {r.website&&<a href={r.website} target="_blank" rel="noopener" className="lp-act" onClick={e=>e.stopPropagation()}>Website</a>}
+                      {r.phone&&<a href={`tel:${r.phone}`} className="lp-act" onClick={e=>e.stopPropagation()}>Call</a>}
+                      <button type="button" className="lp-act" disabled={saveState==='saving'||saveState==='saved'} onClick={e=>{e.stopPropagation();void saveLiveResultToMyClinics(r);}}>{saveState==='saving'?'Saving…':saveState==='saved'?'Saved':saveState==='error'?'Retry':'Save'}</button>
+                    </div>
+                    {saveState==='error'&&saveError&&<div className="lp-save-error" role="alert">{saveError}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
           <div id="sidebar-providers-panel" className="occumed-sidebar-provider-content" role="tabpanel" aria-label="Providers workspace">
           {/* Phase 1: compact Providers header — replaces marketing hero */}
           <div className="providers-compact-header">

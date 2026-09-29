@@ -773,93 +773,6 @@ async function geocodeQuery(q:string):Promise<{lat:number;lng:number;display:str
   }
 }
 
-// ── Build popup HTML ──────────────────────────────────────────────────────────
-function buildStatePopup(postal:string):string {
-  const d=SD[postal];
-  // Handle non-US locations gracefully
-  if(!d) {
-    return `<div class="pi">
-      <div class="pt">${postal}</div>
-      <div class="ps">Detailed data only available for US locations</div>
-      <div class="pdiv"></div>
-      <div class="pcl">WORLDWIDE SUPPORT</div>
-      <div class="pg">
-        <div><div class="psl">Status</div><div class="psv">Geocoding enabled</div></div>
-        <div><div class="psl">Provider Search</div><div class="psv">OpenStreetMap</div></div>
-      </div>
-    </div>`;
-  }
-  const pop=STATE_POP[postal];
-  const tier=STATE_COST_TIER[postal]||'Average';
-  const costIdx=STATE_COST_INDEX[postal]??1.0;
-  const metrics=ALL_METRICS;
-  const rows=metrics.map(m=>{
-    const v=getVal(d,m);
-    return `<div class="pcrow">
-      <span class="pcico">${MICONS[m]}</span>
-      <span class="pcn">${MLBL[m]}</span>
-      <div class="pct"><div class="pcf" style="width:${v*20}%;background:${DCOL[v]}"></div></div>
-      <span class="pcs" style="color:${DCOL[v]}">${DLBL[v]}</span>
-    </div>`;
-  }).join('');
-  const popBlock=pop?`
-    <div class="pdiv"></div>
-    <div class="pcl">POPULATION (2020 CENSUS)</div>
-    <div class="pg">
-      <div><div class="psl">Population</div><div class="psv">${pop.pop.toLocaleString()}</div></div>
-      <div><div class="psl">Density</div><div class="psv">${pop.density>=1000?(pop.density/1000).toFixed(1)+'k':Math.round(pop.density)}/mi²</div></div>
-      <div><div class="psl">Land Area</div><div class="psv">${pop.area.toLocaleString()} mi²</div></div>
-    </div>
-    <div class="pdiv"></div>
-    <div class="pcl">HEALTHCARE COST INDEX</div>
-    <div class="pg">
-      <div><div class="psl">Cost Tier</div><div class="psv" style="color:${tierColor(tier)}">${tier}</div></div>
-      <div><div class="psl">vs. National</div><div class="psv" style="color:${costIdx>1.05?'#f97316':costIdx<0.95?'#22c55e':'#67e8f9'}">${costIdx>=1?'+':''}${((costIdx-1)*100).toFixed(0)}%</div></div>
-    </div>`:'';
-  return `<div class="pi">
-    <div class="pt">${d.n}</div>
-    <div class="ps">${postal} · ${d.rur}% Rural</div>
-    <div class="pg">
-      <div><div class="psl">Providers/100k</div><div class="psv">${d.prov}</div></div>
-      <div><div class="psl">Avg Wait</div><div class="psv">${d.wait}d</div></div>
-    </div>
-    ${popBlock}
-    <div class="pdiv"></div>
-    <div class="pcl">SERVICE METRICS</div>
-    ${rows}
-  </div>`;
-}
-
-function buildCityPopup(loc:any,examKey:string):string {
-  const [name,state,,,,,,,,,,,,,,,,prov,wait]=loc;
-  const tier=loc[4];
-  const v=getVal(loc,examKey);
-  const col=DCOL[v];
-  const tierLabel=tier===1?'Major Metro':tier===2?'Mid-Size City':tier===3?'Small City':'Rural';
-  const metrics=ALL_METRICS;
-  const rows=metrics.map(m=>{
-    const mv=getVal(loc,m);
-    const isHL=m===examKey;
-    return `<div class="pcrow" style="${isHL?'background:rgba(59,130,246,0.06);padding:1px 3px;border-radius:3px':''}">
-      <span class="pcico">${MICONS[m]}</span>
-      <span class="pcn" style="${isHL?'color:#cdd9f0;font-weight:600':''}">${MLBL[m]}</span>
-      <div class="pct"><div class="pcf" style="width:${mv*20}%;background:${DCOL[mv]}"></div></div>
-      <span class="pcs" style="color:${DCOL[mv]}">${DLBL[mv]}</span>
-    </div>`;
-  }).join('');
-  return `<div class="pi">
-    <div class="pt">${name}</div>
-    <div class="ps">${state} · ${tierLabel.toUpperCase()} · ${prov} prov/100k · ~${wait}d wait</div>
-    <div class="pb" style="background:${col}12;border:1px solid ${col}30;color:${col}">
-      <span style="width:8px;height:8px;border-radius:50%;background:${col};display:inline-block;box-shadow:0 0 6px ${col}"></span>
-      ${MLBL[examKey]}: <strong>${DLBL[v]}</strong> (${v}/5)
-    </div>
-    <div class="pdiv"></div>
-    <div class="pcl">ALL METRICS</div>
-    ${rows}
-  </div>`;
-}
-
 // ── Report generator ─────────────────────────────────────────────────────────
 interface ReportData {
   locName:string;stateCode:string;examKey:string;
@@ -1133,7 +1046,6 @@ export default function App() {
   const [showPopDensity, setShowPopDensity] = useState(false);
   const [showStateColors, setShowStateColors] = useState(false);
   const [filterDiff, setFilterDiff] = useState<number|null>(null);
-  const [showCityDots, setShowCityDots] = useState(false);
   // Address search
   const [addrSearch, setAddrSearch] = useState('');
   const [addrLoading, setAddrLoading] = useState(false);
@@ -1502,7 +1414,6 @@ export default function App() {
   const [mapReady, setMapReady] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [sheetState, setSheetState] = useState<'default'|'collapsed'|'expanded'>('default');
-  const [localPopInfo, setLocalPopInfo] = useState<null|{lat:number;lng:number;density:number;state:string;population:number;nearestCity:string;nearestDist:number}>(null);
 
   // ── Import shared price reports from URL on first load ────────────────────
   useEffect(()=>{
@@ -1558,11 +1469,6 @@ export default function App() {
         drawDropRadius(lat, lng, dropRadiusMilesRef.current);
         return;
       }
-
-      if (tool === 'coverage' && isUsPoint(lat, lng)) {
-        const est = estimateLocalPopulationDensity(lat, lng);
-        setLocalPopInfo(est ?? null);
-      }
     };
 
     const onNativeMapDoubleClick = (rawEvent: Event) => {
@@ -1571,7 +1477,6 @@ export default function App() {
       const tool = activeToolRef.current;
       if (tool !== null && tool !== 'liveFinder') return;
       const { lat, lng } = detail;
-      setLocalPopInfo(null);
       setDropCenter({ lat, lng });
       activeToolRef.current = 'liveFinder';
       setActiveTool('liveFinder');
@@ -1884,7 +1789,6 @@ export default function App() {
     // Tearing down U.S./radius artifacts when their tool is deactivated so they
     // never linger over the default global map.
     if(activeTool !== 'radius') clearDropRadius();
-    if(activeTool !== 'coverage') setLocalPopInfo(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[activeTool]);
 
@@ -1984,14 +1888,12 @@ export default function App() {
       rawStateFeaturesRef.current=[];
       clearNativeDiagnosticChannel('states');
       clearNativeDiagnosticChannel('population');
-      clearNativeDiagnosticChannel('cities');
       clearNativeDiagnosticChannel('timezones');
       setShowLabels(false);
       setShowTZ(false);
       setShowPopDensity(false);
       setShowStateColors(false);
       setShowRadius(false);
-      setShowCityDots(false);
       setFilterDiff(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2008,39 +1910,6 @@ export default function App() {
       .catch(error=>{if(!controller.signal.aborted) console.warn('Authoritative U.S. scoring unavailable',error);});
     return()=>controller.abort();
   },[showUsDiagnostics,metric]);
-
-  function estimateLocalPopulationDensity(lat:number,lng:number) {
-    // U.S.-only intelligence: LOCS/STATE_POP are U.S. cities/states. Never run
-    // for international coordinates.
-    if(!isUsPoint(lat,lng)) return null;
-    const nearest = LOCS
-      .map((l:any)=>({name:l[0],state:l[1],dist:Math.max(approxMiles(lat,lng,l[2],l[3]),1)}))
-      .sort((a,b)=>a.dist-b.dist)
-      .slice(0,8);
-    if(!nearest.length) return null;
-    let weightedDensity = 0;
-    let weightedPop = 0;
-    let totalWeight = 0;
-    let nearestState = nearest[0].state || '';
-    nearest.forEach(n=>{
-      const sp = STATE_POP[n.state];
-      if(!sp) return;
-      const w = 1 / n.dist;
-      totalWeight += w;
-      weightedDensity += sp.density * w;
-      weightedPop += sp.pop * w;
-    });
-    if(!totalWeight) return null;
-    return {
-      lat,
-      lng,
-      density: weightedDensity / totalWeight,
-      state: nearestState,
-      population: Math.round(weightedPop / totalWeight),
-      nearestCity: nearest[0].name,
-      nearestDist: nearest[0].dist,
-    };
-  }
 
   const REQUIRED_NETWORK_CATS = ['mammogram','dotchiro','dotmd','faa','physical','urgent','lab','drugscreen','dentist','stress','audiology'] as const;
   function territoryGapSummary() {
@@ -2217,36 +2086,6 @@ export default function App() {
     renderSavedRadiusOverlays(savedRadii,showGlowPoints);
     return ()=>renderSavedRadiusOverlays([],showGlowPoints);
   },[savedRadii,showGlowPoints]);
-
-  // ── City markers: native Mapbox points ───────────────────────────────────
-  useEffect(()=>{
-    if(!showCityDots) {
-      clearNativeDiagnosticChannel('cities');
-      return;
-    }
-    const visibleLocs=LOCS.filter(loc=>filterDiff===null || getVal(loc,metric)===filterDiff);
-    const features=visibleLocs.map((loc:any)=>{
-      const [name,state,lat,lng,tier]=loc;
-      const value=getVal(loc,metric);
-      const color=DCOL[value];
-      const radius=tier===1?9:tier===2?6:tier===3?4:3;
-      return {
-        type:'Feature',
-        geometry:{type:'Point',coordinates:[lng,lat]},
-        properties:{
-          color,
-          radius,
-          strokeWidth:tier<=2?2:1.5,
-          strokeColor:tier===1?'rgba(255,255,255,0.8)':'rgba(255,255,255,0.55)',
-          blur:showGlowPoints?0.12:0,
-          popupHtml:buildCityPopup(loc,metricRef.current),
-          tooltipHtml:`<div style="padding:5px 8px;font-family:'IBM Plex Mono',monospace"><span style="font-weight:700;color:#eef4ff">${name}, ${state}</span><br/><span style="font-size:9px;color:${DCOL[getVal(loc,metricRef.current)]}">${DLBL[getVal(loc,metricRef.current)]}</span></div>`,
-        },
-      };
-    });
-    setNativeDiagnosticCollection('cities',{type:'FeatureCollection',features} as any);
-  },[metric,filterDiff,mapReady,showGlowPoints,showCityDots]);
-
   // ── Time-zone overlay: native Mapbox polygons + labels ───────────────────
   useEffect(()=>{
     if(!showTZ) {
@@ -3022,7 +2861,6 @@ export default function App() {
     const popupHtml=`<div class="pi"><div class="pt">${escapeHtml(name.split(',')[0])}</div><div class="ps">Address Search Result</div></div>`;
     setNativeAddressPin({lat:lLat,lng:lLng,color:'#7bd7ff',popupHtml});
     openNativeMapPopup(lLat,lLng,popupHtml,'260px');
-    setLocalPopInfo(null);
     setDropCenter({ lat: lLat, lng: lLng });
     setActiveTool('liveFinder');
     doLiveSearch(lLat, lLng, undefined, name, 'address_search');
@@ -3345,7 +3183,6 @@ export default function App() {
               <LayerToggle label="Population Density" checked={showPopDensity} onChange={setShowPopDensity} disabled={!showUsDiagnostics} status={showPopDensity?'Population density visible':usLayerStatus}/>
               <LayerToggle label="State Color Fill" checked={showStateColors} onChange={setShowStateColors} disabled={!showUsDiagnostics} status={showStateColors?'State colors visible':usLayerStatus}/>
               <LayerToggle label="Radius Ring" checked={showRadius} onChange={setShowRadius} disabled={!showUsDiagnostics||!hasRadiusCenter} status={!showUsDiagnostics?'Enable U.S. Diagnostics first':!hasRadiusCenter?'Select a location first':showRadius?'70 mile radius visible':'Ready'}/>
-              <LayerToggle label="City Dots" checked={showCityDots} onChange={setShowCityDots} disabled={!showUsDiagnostics} status={showCityDots?'City dots visible':usLayerStatus}/>
               </div>}
               <div className="diagnostic-city-filter">
                 <span>Difficulty filter</span>
@@ -3377,7 +3214,6 @@ export default function App() {
                     {rpSuggestions.map((loc,i)=>(
                       <div key={i} className="rp-sug-item" onClick={()=>selectSuggestion(loc)}>
                         <div className="rp-sug-main">{loc[0]}, {loc[1]}</div>
-                        <div className="rp-sug-sub">{loc[4]===1?'Major Metro':loc[4]===2?'Mid-Size City':loc[4]===3?'Small City':'Rural'} · {DLBL[getVal(loc,metric)]}</div>
                       </div>
                     ))}
                   </div>
@@ -3491,18 +3327,6 @@ export default function App() {
         {/* ── MAP ── */}
         <div className="map-wrap">
           <div id="map" ref={mapDivRef}/>
-
-          {localPopInfo&&isUsPoint(localPopInfo.lat,localPopInfo.lng)&&(
-            <div className="local-pop-card">
-              <div className="local-pop-title">Local population estimate</div>
-              <div className="local-pop-row"><span>Density</span><strong>{Math.round(localPopInfo.density).toLocaleString()}/mi²</strong></div>
-              <div className="local-pop-row"><span>State baseline</span><strong>{localPopInfo.state}</strong></div>
-              <div className="local-pop-row"><span>Population context</span><strong>{localPopInfo.population.toLocaleString()}</strong></div>
-              <div className="local-pop-row"><span>Nearest city</span><strong>{localPopInfo.nearestCity}</strong></div>
-              <div className="local-pop-row"><span>Distance</span><strong>{localPopInfo.nearestDist.toFixed(1)} mi</strong></div>
-              <div className="local-pop-meta">{localPopInfo.lat.toFixed(4)}, {localPopInfo.lng.toFixed(4)}</div>
-            </div>
-          )}
           {(activeTool === 'radius')&&(
             <div className="local-pop-card radius-extractor-card" style={{top: dropCenter ? 184 : 96, borderColor:'rgba(252,165,165,0.35)', boxShadow:'0 10px 30px rgba(239,68,68,0.16)'}}>
               <div className="local-pop-title" style={{color:'#fecaca'}}>Radius extractor</div>

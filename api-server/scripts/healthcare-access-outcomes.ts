@@ -23,7 +23,7 @@ assert.equal(hrsaAuthorization,"Bearer acceptance-hrsa-token","HRSA_DATA_API_TOK
 assert.equal(fetchedHrsa.hpsaScore,18);
 globalThis.fetch=originalFetch;
 
-const provider = (relevant:number, facilities:number, nearestMiles:number) => ({ relevant, facilities, nearestMiles, nearestName:"Nearest verified facility", nearestLat:0, nearestLng:0 });
+const provider = (relevant:number, facilities:number, nearestMiles:number) => ({ relevant, facilities, nearestMiles, nearestName:"Nearest verified facility", nearestLat:0, nearestLng:0, providerEvidenceAvailable:true, successfulSources:1, failedSources:0 });
 const travel = (minutes:number) => ({ minutes, source:"Mapbox Directions" });
 const shortage = (hpsaScore:number|null, muaDesignated:boolean|null, facilityCount:number|null) => ({ hpsaScore, hpsaDesignated:hpsaScore!==null, muaDesignated, facilityCount, sourceYear:2025 });
 

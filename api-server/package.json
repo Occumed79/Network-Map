@@ -20,7 +20,8 @@
     "test:provider-database-projects": "node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/provider-database-projects-smoke.ts",
     "test:external-source-resilience": "node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/external-source-resilience-smoke.ts",
     "test:observability": "node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/observability-diagnostics-smoke.ts",
-    "test:international-registries": "node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/international-registry-contract-smoke.ts"
+    "test:international-registries": "node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/international-registry-contract-smoke.ts",
+    "test:healthcare-access-scoring": "node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/healthcare-access-scoring-smoke.ts && node --import ../occu-med-map/node_modules/tsx/dist/loader.mjs scripts/healthcare-access-outcomes.ts"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",

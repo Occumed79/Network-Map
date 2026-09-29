@@ -1,4 +1,5 @@
 import app from "./app";
+import { startHealthcareAccessIndicatorSync } from "./jobs/syncHealthcareAccessIndicators";
 import { logger } from "./lib/logger";
 import { startNacchoLhdGeocoder } from "./jobs/geocodeNacchoLhd";
 import { closeDatabasePools } from "@workspace/db";
@@ -15,6 +16,8 @@ const server = app.listen(port, (err) => {
   logger.info({ port }, "Server listening");
   startNacchoLhdGeocoder();
 });
+
+startHealthcareAccessIndicatorSync();
 
 let shuttingDown = false;
 async function shutdown(signal: string) {

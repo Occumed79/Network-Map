@@ -187,15 +187,30 @@ function refreshOverlays(): void {
 function providerAtClick(map: mapboxgl.Map, event: mapboxgl.MapMouseEvent): ProviderSelection | null {
   const layers = providerLayerIds(map);
   if (!layers.length) return null;
-  const feature = map.queryRenderedFeatures(event.point, { layers })
-    .find((candidate) => candidate.geometry?.type === "Point");
+  const hitBox: [[number, number], [number, number]] = [
+    [event.point.x - 12, event.point.y - 12],
+    [event.point.x + 12, event.point.y + 12],
+  ];
+  const feature = map.queryRenderedFeatures(hitBox, { layers })
+    .filter((candidate) => candidate.geometry?.type === "Point")
+    .sort((left, right) => {
+      const leftPoint = left.geometry.type === "Point"
+        ? map.project(left.geometry.coordinates as [number, number])
+        : event.point;
+      const rightPoint = right.geometry.type === "Point"
+        ? map.project(right.geometry.coordinates as [number, number])
+        : event.point;
+      return Math.hypot(leftPoint.x - event.point.x, leftPoint.y - event.point.y)
+        - Math.hypot(rightPoint.x - event.point.x, rightPoint.y - event.point.y);
+    })[0];
   if (!feature || feature.geometry.type !== "Point") return null;
 
   const lng = Number(feature.geometry.coordinates[0]);
   const lat = Number(feature.geometry.coordinates[1]);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   const properties = feature.properties || {};
-  const key = String(properties.providerId || properties.id || properties.sourceId || `${lat.toFixed(6)},${lng.toFixed(6)}`);
+  const providerId = String(properties.providerId || properties.id || properties.sourceId || `${lat.toFixed(6)},${lng.toFixed(6)}`);
+  const key = `${feature.layer?.id || feature.source || "provider"}:${providerId}`;
   const name = stripHtml(properties.name || properties.label || properties.popupHtml || "Provider").slice(0, 80) || "Provider";
   return { key, name, lat, lng };
 }
@@ -267,7 +282,7 @@ function refreshCoverageViews(): void {
 
 function setRadius(miles: number): void {
   radiusMiles = miles;
-  if (miles === 0) selectingProviders = false;
+  selectingProviders = miles > 0;
   refreshOverlays();
   refreshCoverageViews();
 }
@@ -335,6 +350,10 @@ async function queryBoundaryLayer(kind: BoundaryKind, config: { layer: number; l
   url.searchParams.set("outFields", "*");
   url.searchParams.set("returnGeometry", "true");
   url.searchParams.set("outSR", "4326");
+  // TIGERweb place geometries can contain hundreds of thousands of vertices.
+  // Simplify them server-side so choosing a city remains responsive in Mapbox.
+  url.searchParams.set("maxAllowableOffset", "0.0005");
+  url.searchParams.set("geometryPrecision", "5");
   url.searchParams.set("resultRecordCount", "12");
   url.searchParams.set("f", "geojson");
 

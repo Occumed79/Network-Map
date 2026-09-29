@@ -213,7 +213,7 @@ async function workspaceContentState(page, label) {
             ? "#sidebar-find-panel"
             : normalized === "results"
               ? "#sidebar-results-panel"
-              : ".live-panel.open",  // legacy liveFinder fallback
+              : null
       )].filter(Boolean);
     const text = panels.map((panel) => panel.textContent || "").join(" ").replace(/\s+/g, " ").trim();
     const actionCount = panels.reduce((total, panel) => total + panel.querySelectorAll(
@@ -242,7 +242,7 @@ async function assertWorkspaceReady(page, label, viewportName) {
             ? "#sidebar-find-panel"
             : normalized === "results"
               ? "#sidebar-results-panel"
-              : ".live-panel.open",  // legacy liveFinder fallback
+              : null
       )].filter(Boolean);
     const text = panels.map((panel) => panel.textContent || "").join(" ").replace(/\s+/g, " ").trim();
     const actionCount = panels.reduce((total, panel) => total + panel.querySelectorAll(

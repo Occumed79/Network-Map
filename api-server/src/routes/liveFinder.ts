@@ -176,9 +176,13 @@ router.get("/live-finder/search", async (req: Request, res: Response) => {
     // ── Write to autosave cache (non-blocking, best-effort) ──
     // Never freeze a degraded/partial upstream search into a seven-day cache hit.
     if (isAutosaveConfigured() && unified.results.length > 0 && !unified.incomplete) {
-      writeCache(searchKey, cacheParams, unified.results).catch((err) =>
-        logger.warn({ err, searchKey }, "autosaveCache: background write failed"),
-      );
+      try {
+        // Complete the cache write before returning so an immediate repeat of
+        // the same search can reliably be a cache hit.
+        await writeCache(searchKey, cacheParams, unified.results);
+      } catch (err) {
+        logger.warn({ err, searchKey }, "autosaveCache: write failed");
+      }
     }
 
     res.setHeader("X-Network-Map-Search-Pipeline", "provider-sources");

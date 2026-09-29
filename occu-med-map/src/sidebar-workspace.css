@@ -908,33 +908,31 @@ html[data-occumed-workspace-ready="true"] body .app-wrap .app-body {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   NEON BORDER — adapted from inspira-ui.com/docs/components/special-effects/neon-border
-   Uses a rotating conic-gradient ::before pseudo-element as the glow track.
-   The effect is applied directly on interactive elements (no wrapper class).
-   Palette: #F0F8FF · #D1DCE5 · #A3C5D9 — elegant, not cyberpunk.
+   NEON BORDER — React/CSS adaptation of Inspira UI's actual NeonBorder.vue.
+   Source pattern: two opposing 135deg linear-gradient glow layers, each blurred
+   with drop-shadow and rotated together by a transform-based 6s animation.
+   The Vue wrapper/divs are mapped to ::before/::after so existing React controls
+   keep their current DOM, handlers, rounded geometry, and workspace ownership.
+   Palette: #F0F8FF · #D1DCE5 · #A3C5D9.
    ───────────────────────────────────────────────────────────────────────────── */
 
-/* Shared animation + @property for all neon-border targets */
 @keyframes neon-border-rotate {
-  from { --neon-angle: 0deg; }
-  to   { --neon-angle: 360deg; }
-}
-@property --neon-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
-/* ── Workspace tabs — neon glow on active/hover ─────────────────────────────── */
+/* Workspace tabs — actual Inspira two-layer linear-gradient technique. */
 html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
   .sidebar.occumed-sidebar-workspace-scope
   > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab {
   position: relative;
   overflow: visible;
   isolation: isolate;
+  font-family: var(--p1-font) !important;
 }
-/* Subtle rest-state border is inherited from sidebar-workspace.css base rules.
-   On hover the ::after pseudo provides the animated neon halo. */
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab::before,
 html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
   .sidebar.occumed-sidebar-workspace-scope
   > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab::after {
@@ -943,18 +941,39 @@ html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
   inset: -1px;
   border-radius: inherit;
   z-index: -1;
-  background: conic-gradient(
-    from var(--neon-angle, 0deg),
-    transparent 0deg,
-    var(--neon-c3) 60deg,
-    var(--neon-c2) 120deg,
-    transparent 360deg
-  );
   opacity: 0;
   pointer-events: none;
-  transition: opacity 240ms ease;
-  animation: neon-border-rotate 5s linear infinite paused;
+  transform-origin: center;
+  animation: neon-border-rotate 6s linear infinite paused;
+  transition: opacity 220ms ease;
 }
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab::before {
+  background: linear-gradient(
+    135deg,
+    var(--neon-c3) 0%,
+    var(--neon-c3) 25%,
+    transparent 50%,
+    transparent 100%
+  );
+  filter: blur(1px) drop-shadow(0 0 12px var(--neon-c3));
+}
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab::after {
+  background: linear-gradient(
+    135deg,
+    transparent 0%,
+    transparent 50%,
+    var(--neon-c1) 75%,
+    var(--neon-c1) 100%
+  );
+  filter: blur(1px) drop-shadow(0 0 12px var(--neon-c1));
+}
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab:hover:not(:disabled)::before,
 html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
   .sidebar.occumed-sidebar-workspace-scope
   > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab:hover:not(:disabled)::after {
@@ -963,15 +982,19 @@ html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
 }
 html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
   .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab.active::before,
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
   > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab.active::after,
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab[aria-selected="true"]::before,
 html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
   .sidebar.occumed-sidebar-workspace-scope
   > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab[aria-selected="true"]::after {
   opacity: 0.55;
   animation-play-state: running;
-  animation-duration: 3s;
 }
-/* Active tab: luminous border colour override */
 html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
   .sidebar.occumed-sidebar-workspace-scope
   > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab.active,
@@ -984,7 +1007,7 @@ html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
     0 0 18px rgba(163, 197, 217, 0.28) !important;
 }
 
-/* ── Primary sidebar tool buttons (command-tool-grid) ───────────────────────── */
+/* Primary sidebar tool buttons — same two rotating glow layers. */
 html[data-occumed-workspace-ready="true"] body
   .sidebar.occumed-sidebar-workspace-scope
   .command-tool-grid button {
@@ -995,24 +1018,48 @@ html[data-occumed-workspace-ready="true"] body
 }
 html[data-occumed-workspace-ready="true"] body
   .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button::before,
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
   .command-tool-grid button::after {
   content: "";
   position: absolute;
   inset: -1px;
   border-radius: inherit;
   z-index: -1;
-  background: conic-gradient(
-    from var(--neon-angle, 0deg),
-    transparent 0deg,
-    var(--neon-c3) 60deg,
-    var(--neon-c2) 120deg,
-    transparent 360deg
-  );
   opacity: 0;
   pointer-events: none;
+  transform-origin: center;
+  animation: neon-border-rotate 6s linear infinite paused;
   transition: opacity 220ms ease;
-  animation: neon-border-rotate 5s linear infinite paused;
 }
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button::before {
+  background: linear-gradient(
+    135deg,
+    var(--neon-c3) 0%,
+    var(--neon-c3) 25%,
+    transparent 50%,
+    transparent 100%
+  );
+  filter: blur(1px) drop-shadow(0 0 12px var(--neon-c3));
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button::after {
+  background: linear-gradient(
+    135deg,
+    transparent 0%,
+    transparent 50%,
+    var(--neon-c1) 75%,
+    var(--neon-c1) 100%
+  );
+  filter: blur(1px) drop-shadow(0 0 12px var(--neon-c1));
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button:hover:not(:disabled)::before,
 html[data-occumed-workspace-ready="true"] body
   .sidebar.occumed-sidebar-workspace-scope
   .command-tool-grid button:hover:not(:disabled)::after {
@@ -1021,13 +1068,18 @@ html[data-occumed-workspace-ready="true"] body
 }
 html[data-occumed-workspace-ready="true"] body
   .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button.active::before,
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
   .command-tool-grid button.active::after,
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button[aria-pressed="true"]::before,
 html[data-occumed-workspace-ready="true"] body
   .sidebar.occumed-sidebar-workspace-scope
   .command-tool-grid button[aria-pressed="true"]::after {
   opacity: 0.52;
   animation-play-state: running;
-  animation-duration: 3s;
 }
 html[data-occumed-workspace-ready="true"] body
   .sidebar.occumed-sidebar-workspace-scope
@@ -1060,27 +1112,51 @@ html[data-occumed-workspace-ready="true"] body
 }
 html[data-occumed-workspace-ready="true"] body
   .sidebar.occumed-sidebar-workspace-scope
-  .provider-layers-section .workflow-layer::before {
+  .provider-layers-section .workflow-layer::before,
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .provider-layers-section .workflow-layer::after {
   content: "";
   position: absolute;
   inset: -1px;
   border-radius: inherit;
   z-index: -1;
-  background: conic-gradient(
-    from var(--neon-angle, 0deg),
-    transparent 0deg,
-    var(--neon-c3) 60deg,
-    var(--neon-c2) 120deg,
-    transparent 360deg
-  );
   opacity: 0;
   pointer-events: none;
-  transition: opacity 260ms ease;
+  transform-origin: center;
   animation: neon-border-rotate 6s linear infinite paused;
+  transition: opacity 260ms ease;
 }
 html[data-occumed-workspace-ready="true"] body
   .sidebar.occumed-sidebar-workspace-scope
-  .provider-layers-section .workflow-layer:hover::before {
+  .provider-layers-section .workflow-layer::before {
+  background: linear-gradient(
+    135deg,
+    var(--neon-c3) 0%,
+    var(--neon-c3) 25%,
+    transparent 50%,
+    transparent 100%
+  );
+  filter: blur(1px) drop-shadow(0 0 12px var(--neon-c3));
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .provider-layers-section .workflow-layer::after {
+  background: linear-gradient(
+    135deg,
+    transparent 0%,
+    transparent 50%,
+    var(--neon-c1) 75%,
+    var(--neon-c1) 100%
+  );
+  filter: blur(1px) drop-shadow(0 0 12px var(--neon-c1));
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .provider-layers-section .workflow-layer:hover::before,
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .provider-layers-section .workflow-layer:hover::after {
   opacity: 0.28;
   animation-play-state: running;
 }
@@ -1095,7 +1171,10 @@ html[data-occumed-workspace-ready="true"] body
 }
 html[data-occumed-workspace-ready="true"] body
   .sidebar.occumed-sidebar-workspace-scope
-  .provider-layers-section .workflow-layer.active::before {
+  .provider-layers-section .workflow-layer.active::before,
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .provider-layers-section .workflow-layer.active::after {
   opacity: 0.55;
   animation-play-state: running;
 }

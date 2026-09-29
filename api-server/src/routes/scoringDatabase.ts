@@ -36,8 +36,9 @@ const FIPS_TO_STATE:Record<string,string>={"01":"AL","02":"AK","04":"AZ","05":"A
 //   complete + zero  → confirmed scarcity (score 5)
 //   partial  + zero  → unknown (component omitted)
 //   all-fail + zero  → unknown (component omitted)
-//   partial  + >0    → retained as partial evidence, but confidence is naturally reduced because
-//                       missing sources lower availableWeight in calculateUnifiedAccessScore
+//   partial  + >0    → retained as partial evidence; confidence is multiplied by
+//                       successfulSources/(successfulSources+failedSources) to reflect
+//                       that some provider DBs did not contribute to the count
 type ProviderEvidence = { relevant:number; facilities:number; nearestMiles:number|null; nearestName:string|null; nearestLat:number|null; nearestLng:number|null; providerEvidenceAvailable:boolean; providerEvidenceComplete:boolean; successfulSources:number; failedSources:number };
 type AssessmentQuery = { lat:number; lng:number; service:string; countryCode:string; admin1?:string; countyFips?:string };
 type UsProfile = { countyFips:string; countyName:string; state:string; population:number; landSquareMiles:number; density:number; sourceYear:number };
@@ -218,6 +219,20 @@ async function persistInternationalScore(query:AssessmentQuery, result:ReturnTyp
     throw err;
   }
 }
+// When a point assessment had partial provider evidence (some DBs failed but ≥1 succeeded
+// and returned positive counts), multiply confidence by the source-completeness ratio so that
+// assessments backed by fewer sources are clearly less confident than complete ones.
+// Score values are NOT changed — only confidence is reduced.
+function applyProviderCompletenessToScore(
+  score: ReturnType<typeof calculateUnifiedAccessScore>,
+  evidence: ProviderEvidence,
+): ReturnType<typeof calculateUnifiedAccessScore> {
+  if (evidence.successfulSources > 0 && evidence.failedSources > 0) {
+    const completeness = evidence.successfulSources / (evidence.successfulSources + evidence.failedSources);
+    return { ...score, confidence: Number((score.confidence * completeness).toFixed(2)) };
+  }
+  return score;
+}
 async function buildAssessment(query:AssessmentQuery){
   const evidence=await providerEvidence(query);const travel=await travelMinutes(query,evidence);let inputs:Record<string,ComponentInput>={};let population:number|null=null,density:number|null=null,rurality:number|null=null,geographyLevel="country",nationalBaselineFallback=false;let profile:UsProfile|null=null;
   if(query.countryCode==="US"){profile=await usProfile(query);if(profile){population=profile.population;density=profile.density;geographyLevel="county";const shortage=await hrsaEvidence(profile);inputs=usInputs(profile,shortage,evidence,travel) as Record<string,ComponentInput>;}}
@@ -225,7 +240,7 @@ async function buildAssessment(query:AssessmentQuery){
   // Fix #1 continued: propagate persistence errors (they are now thrown) so callers can log them.
   // The .catch logs + rethrows in persistInternationalScore, so we only suppress here to not
   // fail the HTTP response — the error is already logged with full context.
-  const score=calculateUnifiedAccessScore(inputs as any);if(query.countryCode!=="US")await persistInternationalScore(query,score,geographyLevel,nationalBaselineFallback).catch((err)=>console.warn("[scoring] international score persist suppressed after logging:",err instanceof Error?err.message:String(err)));
+  const score=applyProviderCompletenessToScore(calculateUnifiedAccessScore(inputs as any),evidence);if(query.countryCode!=="US")await persistInternationalScore(query,score,geographyLevel,nationalBaselineFallback).catch((err)=>console.warn("[scoring] international score persist suppressed after logging:",err instanceof Error?err.message:String(err)));
   return {...score,service:query.service,geography:{countryCode:query.countryCode,admin1:query.admin1||null,countyFips:profile?.countyFips||null,countyName:profile?.countyName||null,level:geographyLevel,nationalBaselineFallback,lat:query.lat,lng:query.lng},evidence:{population,populationDensity:density,rurality,remotenessClass:density===null?null:density<10?"Remote":density<100?"Rural / low density":"Urban / higher density",nearestRelevantProviderMiles:evidence.nearestMiles,nearestRelevantProvider:evidence.nearestName,travelMinutes:travel.minutes,relevantProviders:evidence.relevant,facilities:evidence.facilities},warnings:score.missingIndicators.length?["Some authoritative indicators are unavailable; confidence has been reduced. Missing data was not scored as zero, Easy, or Critical."]:[]};
 }
 router.get("/scoring/assessment",async(req,res)=>{const lat=numberParam(req.query.lat,-90,90),lng=numberParam(req.query.lng,-180,180);if(lat===null||lng===null){res.status(400).json({error:"Valid lat and lng are required"});return;}const query:AssessmentQuery={lat,lng,service:String(req.query.service||"primaryCare"),countryCode:String(req.query.countryCode||"US").toUpperCase(),admin1:req.query.admin1?String(req.query.admin1):undefined,countyFips:req.query.countyFips?String(req.query.countyFips):undefined};try{res.json({ok:true,assessment:await buildAssessment(query)});}catch(error){res.status(503).json({ok:false,error:error instanceof Error?error.message:String(error)});}});
@@ -294,7 +309,12 @@ router.get("/scoring/us/states", async (req, res) => {
       }
       const landArea=finite(stateAreas.get(fips));
       if(landArea!==null){const density=population/landArea;inputs.geographic={score:scarcityScore(density,500,5),evidence:{populationDensity:density,landSquareMiles:landArea},sources:["U.S. Census ACS 5-year","Census TIGER/Line"],year:ACS_YEAR};}
-      if(Object.keys(inputs).length) states.push({state,population,...calculateUnifiedAccessScore(inputs as any)});
+      if(Object.keys(inputs).length){
+        // Apply provider-source completeness to state scores the same way as point assessments.
+        const stateCompleteness=(anyProjectSucceeded&&stateFailedCount>0)?stateSucceededCount/(stateSucceededCount+stateFailedCount):1;
+        const stateScore=calculateUnifiedAccessScore(inputs as any);
+        states.push({state,population,...stateScore,confidence:Number((stateScore.confidence*stateCompleteness).toFixed(2))});
+      }
     }
     res.json({ok:true,service,states});
   } catch(error) { res.status(503).json({ok:false,error:error instanceof Error?error.message:String(error)}); }

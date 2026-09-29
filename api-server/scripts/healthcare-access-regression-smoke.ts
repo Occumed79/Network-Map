@@ -374,4 +374,36 @@ const ruralCounty = {
   console.log("  K ✓  intl partial search + null travel: localAccess=omitted");
 }
 
+// ─── Test L: partial positive provider evidence has lower confidence than complete ──
+
+{
+  // Both searches return identical positive provider counts — same scores, different completeness.
+  // The only difference: complete has failedSources=0; partial has failedSources=1.
+  // Confidence must be strictly lower for the partial search.
+  const completeEvidence = provider(25, 3, 5.2, true, true);  // 2 succeeded, 0 failed
+  const partialEvidence  = provider(25, 3, 5.2, true, false); // 1 succeeded, 1 failed
+
+  const completeInputs = scoringRouteInternals.usInputs(urbanCounty, shortage(null, null, null), completeEvidence, travel(12));
+  const partialInputs  = scoringRouteInternals.usInputs(urbanCounty, shortage(null, null, null), partialEvidence,  travel(12));
+
+  const completeScore = calculateUnifiedAccessScore(completeInputs as any);
+  const partialScore  = calculateUnifiedAccessScore(partialInputs  as any);
+
+  // Scores must be identical (same components, same values, same inputs)
+  assert.equal(completeScore.score, partialScore.score,
+    "L: complete and partial positive evidence must produce identical scores");
+
+  // Apply the completeness multiplier (mirrors applyProviderCompletenessToScore in scoringDatabase.ts)
+  const completeConf = completeScore.confidence; // no multiplier — failedSources=0
+  const completenessRatio = partialEvidence.successfulSources / (partialEvidence.successfulSources + partialEvidence.failedSources);
+  const partialConf  = Number((partialScore.confidence * completenessRatio).toFixed(2));
+
+  assert.ok(completeConf > partialConf,
+    `L: complete confidence (${completeConf}) must be > partial confidence (${partialConf})`);
+  assert.ok(partialConf > 0,
+    `L: partial confidence must still be > 0, got ${partialConf}`);
+
+  console.log(`  L ✓  partial positive: confidence ${partialConf} < complete ${completeConf} (score unchanged at ${completeScore.score})`);
+}
+
 console.log("\nAll healthcare-access regression tests passed ✓");

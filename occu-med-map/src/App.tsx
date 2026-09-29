@@ -50,6 +50,8 @@ import './features/driveTime/driveTimeControls.css';
 import './features/driveTime/driveTimeBadge.css';
 import DatasetBrowser, { filterSummary, type ProviderFeature, type ProviderExplorerFilters } from './DatasetBrowser';
 import { fetchProviderLayer } from './providerLayerRequestRuntime';
+import { fetchHealthcareAccessAssessment, type HealthcareAccessAssessment } from './healthcareAccessScoring';
+import { healthcareAccessStateStyle } from './healthcareAccessDiagnostics';
 import {
   clearProviderExplorerNative,
   renderProviderExplorerPins,
@@ -733,22 +735,22 @@ function normalizeLookupQuery(q:string):{normalized:string;stateCode:string|null
   return {normalized:cleaned,stateCode:null};
 }
 
-async function geocodeQuery(q:string):Promise<{lat:number;lng:number;display:string;city:string;state:string;zip:string}|null> {
+async function geocodeQuery(q:string):Promise<{lat:number;lng:number;display:string;city:string;state:string;zip:string;countryCode:string}|null> {
   const {normalized:qNorm,stateCode}=normalizeLookupQuery(q);
   const results=localSearch(qNorm,8);
   if(results.length) {
     const best=stateCode ? (results.find(l=>l[1]===stateCode) || results[0]) : results[0];
-    return{lat:best[2],lng:best[3],display:`${best[0]}, ${best[1]}`,city:best[0],state:best[1],zip:''};
+    return{lat:best[2],lng:best[3],display:`${best[0]}, ${best[1]}`,city:best[0],state:best[1],zip:'',countryCode:'US'};
   }
   const ql=qNorm.toLowerCase();
   if(EXTRA_COORDS[ql]) {
     const [lat,lng]=EXTRA_COORDS[ql];
     const parts=ql.split(' ');
     const city=parts.join(' ').replace(/ [a-z]{2}$/,'').replace(/^./,s=>s.toUpperCase());
-    return{lat,lng,display:city,city,state:stateCode||'',zip:''};
+    return{lat,lng,display:city,city,state:stateCode||'',zip:'',countryCode:'US'};
   }
   try {
-    const resp=await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(qNorm)}`);
+    const resp=await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&q=${encodeURIComponent(qNorm)}`);
     if(!resp.ok) return null;
     const data=await resp.json() as Array<{lat:string;lon:string;display_name?:string;address?:{city?:string;town?:string;village?:string;municipality?:string;state?:string;country?:string;country_code?:string;postcode?:string;}}>;
     if(!data?.length) return null;
@@ -764,6 +766,7 @@ async function geocodeQuery(q:string):Promise<{lat:number;lng:number;display:str
       city,
       state,
       zip:addr.postcode||'',
+      countryCode:String(addr.country_code||'').toUpperCase(),
     };
   } catch {
     return null;
@@ -1152,6 +1155,7 @@ export default function App() {
   // legend/filter/distribution, 70mi ring). Off by default so the global map
   // stays a clean world viewer. Only shown when explicitly enabled.
   const [showUsDiagnostics, setShowUsDiagnostics] = useState(false);
+  const [backendStateScores, setBackendStateScores] = useState<Record<string,{score:number;label:string;confidence:number;population:number}>>({});
   const [stateGeoRevision, setStateGeoRevision] = useState(0);
         const [showPdf, setShowPdf] = useState(false);
   const [pdfHtml, setPdfHtml] = useState('');
@@ -1904,12 +1908,9 @@ export default function App() {
   }
 
   function sStyle(postal:string,m:string) {
-    const d=SD[postal];
-    if(!d) return{fillColor:'#0a1830',fillOpacity:0.38,weight:1,color:'rgba(99,179,237,0.15)',opacity:0.6};
-    if(!showStateColorsRef.current) return {fillColor:'#11243f',fillOpacity:0.12,weight:1,color:'rgba(161,209,255,0.25)',opacity:0.8};
-    const v=getVal(d,m);
-    const col=DCOL[v]||'#3d5478';
-    return{fillColor:col,fillOpacity:0.25,weight:1,color:col,opacity:0.45};
+    const authoritative=backendStateScores[postal];
+    const style=healthcareAccessStateStyle(authoritative?.score??null,showStateColorsRef.current,filterDiff);
+    return{fillColor:style.fillColor,fillOpacity:style.fillOpacity,weight:style.lineWidth,color:style.fillColor,opacity:style.lineOpacity};
   }
 
   function renderStateDiagnostics() {
@@ -1922,8 +1923,8 @@ export default function App() {
     features.forEach((feature:any)=>{
       const postal=feature.properties?.postal||'';
       const style=sStyle(postal,metricRef.current);
-      const d=SD[postal];
-      const value=d?getVal(d,metricRef.current):0;
+      const authoritative=backendStateScores[postal];
+      const value=authoritative?Math.max(1,Math.min(5,Math.round(authoritative.score))):0;
       rendered.push({
         ...feature,
         properties:{
@@ -1933,8 +1934,8 @@ export default function App() {
           lineColor:style.color,
           lineOpacity:style.opacity,
           lineWidth:style.weight,
-          popupHtml:buildStatePopup(postal),
-          tooltipHtml:d?`<div style="padding:5px 8px;font-family:'IBM Plex Mono',monospace"><span style="font-weight:700;font-size:11px;color:#eef4ff">${postal}</span>&nbsp;<span style="font-size:9px;color:${DCOL[value]};font-weight:700">${DLBL[value]}</span></div>`:postal,
+          popupHtml:authoritative?`<div class="pi"><div class="pt">${postal}</div><div class="ps">Backend healthcare-access score</div><div class="pg"><div><div class="psl">Difficulty</div><div class="psv">${authoritative.score.toFixed(1)} · ${authoritative.label}</div></div><div><div class="psl">Confidence</div><div class="psv">${Math.round(authoritative.confidence*100)}%</div></div><div><div class="psl">Population</div><div class="psv">${authoritative.population.toLocaleString()}</div></div></div></div>`:'<div class="pi"><div class="ps">Authoritative score unavailable</div></div>',
+          tooltipHtml:authoritative?`<div style="padding:5px 8px;font-family:'IBM Plex Mono',monospace"><span style="font-weight:700;font-size:11px;color:#eef4ff">${postal}</span>&nbsp;<span style="font-size:9px;color:${DCOL[value]};font-weight:700">${authoritative.label}</span></div>`:postal,
         },
       });
       const fallback=featureCenter(feature);
@@ -1973,7 +1974,7 @@ export default function App() {
   }
 
   const metricRef=useRef(metric);
-  useEffect(()=>{ metricRef.current=metric; renderStateDiagnostics(); },[metric]);
+  useEffect(()=>{ metricRef.current=metric; renderStateDiagnostics(); },[metric,backendStateScores,filterDiff]);
   useEffect(()=>{ showStateColorsRef.current=showStateColors; renderStateDiagnostics(); },[showStateColors]);
 
   useEffect(()=>{
@@ -1995,6 +1996,18 @@ export default function App() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[showUsDiagnostics]);
+
+  useEffect(()=>{
+    if(!showUsDiagnostics) return;
+    setShowStateColors(true);
+    setBackendStateScores({});
+    const controller=new AbortController();
+    void fetch(`/api/scoring/us/states?service=${encodeURIComponent(metric)}`,{signal:controller.signal})
+      .then(response=>response.ok?response.json():Promise.reject(new Error(`HTTP ${response.status}`)))
+      .then(data=>setBackendStateScores(Object.fromEntries((data.states||[]).map((row:any)=>[row.state,row]))))
+      .catch(error=>{if(!controller.signal.aborted) console.warn('Authoritative U.S. scoring unavailable',error);});
+    return()=>controller.abort();
+  },[showUsDiagnostics,metric]);
 
   function estimateLocalPopulationDensity(lat:number,lng:number) {
     // U.S.-only intelligence: LOCS/STATE_POP are U.S. cities/states. Never run
@@ -2330,103 +2343,71 @@ export default function App() {
     if(!match) match=LOCS.find(l=>l[0].toLowerCase().startsWith(query));
     if(!match) match=LOCS.find(l=>l[0].toLowerCase().includes(query)&&(!stateCode||l[1]===stateCode));
     if(!match) match=LOCS.find(l=>l[0].toLowerCase().includes(query));
-    if(match){ renderDatasetMatch(match); return; }
+    if(match){ void renderDatasetMatch(match); return; }
     let geo=lastGeoResult;
     if(!geo||!inputVal.toLowerCase().includes((geo.city||'').toLowerCase())) geo=await geocodeQuery(inputVal);
     setLastGeoResult(null);
     if(!geo){ setRpResult(<div style={{fontSize:'11px',color:'#3d5478',textAlign:'center',padding:'14px 0'}}>LOCATION NOT FOUND.<br/>Try city + state abbreviation, e.g. "Sweetwater TX".</div>); return; }
-    renderGeocodedResult(geo);
+    void renderGeocodedResult(geo);
   }
 
-  function renderDatasetMatch(match:any) {
+  async function renderDatasetMatch(match:any) {
     const [name,state,lat,lng,tier]=match;
-    const prov=match[16];const wait=match[17];
-    const v=getVal(match,rpExam);const col=DCOL[v];
+    setRpResult(<div className="rp-city-meta">Loading authoritative healthcare-access assessment…</div>);
+    let assessment:HealthcareAccessAssessment;
+    try { assessment=await fetchHealthcareAccessAssessment({lat,lng,service:rpExam,countryCode:'US',admin1:state}); }
+    catch(error) { setRpResult(<AssessmentError error={error}/>); return; }
+    const v=Math.max(1,Math.min(5,Math.round(assessment.score)));const col=DCOL[v];
     const tierLabel=tier===1?'Major Metro':tier===2?'Mid-Size City':tier===3?'Small City':'Rural / Remote';
-    const nearby=findNearby(lat,lng,match,rpExam);
-    const scores=ALL_METRICS.map(mk=>({key:mk,v:getVal(match,mk)}));
-    const nearbyData=LOCS.filter(l=>l!==match&&l[4]<=2).map(l=>{const dist=approxMiles(l[2],l[3],lat,lng);return{name:l[0],state:l[1],dist,v:getVal(l,rpExam)};}).filter(l=>l.dist<250&&l.dist>0).sort((a,b)=>a.dist-b.dist).slice(0,4);
-    const rd:ReportData={locName:`${name}, ${state}`,stateCode:state,examKey:rpExam,scores,nearby:nearbyData,recommendation:v,isGeo:false,prov,wait,tier,queryCity:name,queryState:state,isIntl:false,lat,lng};
+    const rd:ReportData={locName:`${name}, ${state}`,stateCode:state,examKey:rpExam,scores:[{key:rpExam,v}],nearby:[],recommendation:v,isGeo:false,prov:assessment.evidence.relevantProviders,wait:null,tier,queryCity:name,queryState:state,isIntl:false,lat,lng};
     setLastReportData(rd);
     flyNativeMap(lat,lng,tier<=2?9:11,1200);
     drawRadiusCircle(lat,lng);
     placeCustomPin(lat,lng,`${name}, ${state}`,col);
     setDriveLocA(a=>{ setDriveLocB(a||null); return {name:`${name}, ${state}`,lat,lng}; });
-    const provData=countProvidersInRadius(lat,lng,rpExam);
-    const nearerItems=findNearestEasier(lat,lng,v,rpExam,name);
     setRpResult(
       <div className="fadein">
         <div className="rp-divider"/>
         <div className="rp-city-name">{name}</div>
-        <div className="rp-city-meta">{state} · {tierLabel.toUpperCase()} · Prov/100k: {prov} · Wait: ~{wait}d</div>
+        <div className="rp-city-meta">{state} · {tierLabel.toUpperCase()} · {assessment.geography.level.toUpperCase()} ASSESSMENT</div>
         <div className="rp-alert" style={{background:`${col}12`,border:`1px solid ${col}30`,color:col}}>
-          {MLBL[rpExam]}: <strong>{DLBL[v]}</strong> — Score {v}/5
+          {MLBL[rpExam]}: <strong>{assessment.label}</strong> — Score {assessment.score.toFixed(1)}/5
         </div>
-        <ScoreCard scores={ALL_METRICS.map(m=>({key:m,v:getVal(match,m),hl:m===rpExam}))}/>
+        <AccessAssessmentCard assessment={assessment}/>
         <div className="rp-rec">{buildRecText(v)}</div>
-        {nearby.length>0&&<div className="rp-nearby">
-          <div className="rp-nearby-ttl">Nearest Markets</div>
-          {nearby.map((n,i)=><div key={i} className="rp-nearby-item">
-            <span className="rp-nearby-city">{n.name}, {n.state}</span>
-            <span style={{display:'flex',gap:8,alignItems:'center'}}>
-              <span style={{fontSize:10,color:DCOL[n.v]}}>{DLBL[n.v]}</span>
-              <span className="rp-nearby-dist">~{n.dist}mi</span>
-            </span>
-          </div>)}
-        </div>}
-        <ProviderBox data={provData} examKey={rpExam} cityName={`${name}, ${state}`} locIdx={LOCS.indexOf(match)} onPin={pinCity}/>
         <DriveTimeBox fromLat={lat} fromLng={lng} fromName={`${name}, ${state}`} locB={null}/>
-        {nearerItems.length>0&&<NearestEasier items={nearerItems} onFly={flyToNearer}/>}
         <button className="export-btn" onClick={()=>doExportReport(rd)}><Download size={15}/>Export PDF report</button>
       </div>
     );
   }
 
-  function renderGeocodedResult(geo:any) {
+  async function renderGeocodedResult(geo:any) {
     const {lat,lng,city,state,zip,display}=geo;
-    if(!isLikelyUsCoord(lat,lng)){ renderInternationalResult(geo); return; }
-    const v=estimateDifficultyFromNeighbors(lat,lng,rpExam);
+    if(!isLikelyUsCoord(lat,lng)){ await renderInternationalResult(geo); return; }
+    setRpResult(<div className="rp-city-meta">Loading authoritative healthcare-access assessment…</div>);
+    let assessment:HealthcareAccessAssessment;
+    try { assessment=await fetchHealthcareAccessAssessment({lat,lng,service:rpExam,countryCode:'US',admin1:state}); }
+    catch(error) { setRpResult(<AssessmentError error={error}/>); return; }
+    const v=Math.max(1,Math.min(5,Math.round(assessment.score)));
     const col=DCOL[v];
-    const stD=SD[state]||null;
-    const nearby=findNearby(lat,lng,null,rpExam);
-    const scores=ALL_METRICS.map(mk=>({key:mk,v:estimateDifficultyFromNeighbors(lat,lng,mk)}));
-    const nearbyData=LOCS.filter(l=>l[4]<=2).map(l=>{const dist=approxMiles(l[2],l[3],lat,lng);return{name:l[0],state:l[1],dist,v:getVal(l,rpExam)};}).filter(l=>l.dist<250&&l.dist>0).sort((a,b)=>a.dist-b.dist).slice(0,4);
-    const rd:ReportData={locName:`${city||display}${state?', '+state:''}`,stateCode:state||'',examKey:rpExam,scores,nearby:nearbyData,recommendation:v,isGeo:true,prov:stD?stD.prov:null,wait:stD?stD.wait:null,tier:null,queryCity:city||display,queryState:state||'',isIntl:false,lat,lng};
+    const rd:ReportData={locName:`${city||display}${state?', '+state:''}`,stateCode:state||'',examKey:rpExam,scores:[{key:rpExam,v}],nearby:[],recommendation:v,isGeo:true,prov:assessment.evidence.relevantProviders,wait:null,tier:null,queryCity:city||display,queryState:state||'',isIntl:false,lat,lng};
     setLastReportData(rd);
     flyNativeMap(lat,lng,11,1200);
     drawRadiusCircle(lat,lng);
     placeCustomPin(lat,lng,`${city}${zip?', '+zip:''}`,col);
     setDriveLocA(a=>{ setDriveLocB(a||null); return {name:`${city}, ${state}`,lat,lng}; });
-    const provData=countProvidersInRadius(lat,lng,rpExam);
-    const nearerItems=findNearestEasier(lat,lng,v,rpExam,city||'');
-    let geoLocIdx=LOCS.findIndex(l=>l[0].toLowerCase()===(city||'').toLowerCase()&&l[1]===(state||''));
-    if(geoLocIdx<0){let best=100,bi=-1;LOCS.forEach((l,i)=>{const d=approxMiles(l[2],l[3],lat,lng);if(d<best){best=d;bi=i;}});geoLocIdx=bi;}
     setRpResult(
       <div className="fadein">
         <div className="rp-divider"/>
         <div className="rp-city-name">{city||display}</div>
-        <div className="rp-city-meta" style={{marginBottom:4}}>{state}{zip?' · ZIP '+zip:''} · <span style={{color:'#3b82f6'}}>Geocoded estimate</span></div>
-        <div style={{fontSize:'9.5px',color:'#3d5478',marginBottom:8,padding:'5px 8px',background:'rgba(59,130,246,0.06)',borderRadius:5,lineHeight:1.5}}>
-          Interpolated from nearest data points{stD?` · State baseline: <strong style="color:${DCOL[getVal(stD,rpExam)]}">${DLBL[getVal(stD,rpExam)]}</strong>`:''}
-        </div>
+        <div className="rp-city-meta" style={{marginBottom:4}}>{state}{zip?' · ZIP '+zip:''} · <span style={{color:'#3b82f6'}}>Backend assessment</span></div>
+        <div style={{fontSize:'9.5px',color:'#3d5478',marginBottom:8,padding:'5px 8px',background:'rgba(59,130,246,0.06)',borderRadius:5,lineHeight:1.5}}>Authoritative backend assessment · {assessment.geography.level} resolution</div>
         <div className="rp-alert" style={{background:`${col}12`,border:`1px solid ${col}30`,color:col}}>
-          {MLBL[rpExam]}: <strong>{DLBL[v]}</strong> difficulty (est. {v}/5)
+          {MLBL[rpExam]}: <strong>{assessment.label}</strong> — Score {assessment.score.toFixed(1)}/5
         </div>
-        <GeoScoreCard lat={lat} lng={lng} examKey={rpExam}/>
+        <AccessAssessmentCard assessment={assessment}/>
         <div className="rp-rec">{buildRecText(v)}</div>
-        {nearby.length>0&&<div className="rp-nearby">
-          <div className="rp-nearby-ttl">Nearest Markets</div>
-          {nearby.map((n,i)=><div key={i} className="rp-nearby-item">
-            <span className="rp-nearby-city">{n.name}, {n.state}</span>
-            <span style={{display:'flex',gap:8,alignItems:'center'}}>
-              <span style={{fontSize:10,color:DCOL[n.v]}}>{DLBL[n.v]}</span>
-              <span className="rp-nearby-dist">~{n.dist}mi</span>
-            </span>
-          </div>)}
-        </div>}
-        <ProviderBox data={provData} examKey={rpExam} cityName={`${city}, ${state}`} locIdx={geoLocIdx} onPin={pinCity}/>
         <DriveTimeBox fromLat={lat} fromLng={lng} fromName={`${city}, ${state}`} locB={null}/>
-        {nearerItems.length>0&&<NearestEasier items={nearerItems} onFly={flyToNearer}/>}
         <button className="export-btn" onClick={()=>doExportReport(rd)}><Download size={15}/>Export PDF report</button>
       </div>
     );
@@ -2436,10 +2417,15 @@ export default function App() {
   // The U.S.-only difficulty model and LOCS dataset are not used here.
   // Instead, confidence and availability signals come from the Live Finder
   // (OpenStreetMap/Overpass) so the user gets real, actionable information.
-  function renderInternationalResult(geo:any) {
+  async function renderInternationalResult(geo:any) {
     const {lat,lng,city,state,zip,display}=geo;
     const label=`${city||display}${state?', '+state:''}`;
-    const rd:ReportData={locName:label,stateCode:state||'',examKey:rpExam,scores:[],nearby:[],recommendation:0,isGeo:true,prov:null,wait:null,tier:null,queryCity:city||display,queryState:state||'',isIntl:true,lat,lng};
+    setRpResult(<div className="rp-city-meta">Loading authoritative healthcare-access assessment…</div>);
+    let assessment:HealthcareAccessAssessment;
+    try { assessment=await fetchHealthcareAccessAssessment({lat,lng,service:rpExam,countryCode:String(geo.countryCode||'').toUpperCase(),admin1:state}); }
+    catch(error) { setRpResult(<AssessmentError error={error}/>); return; }
+    const v=Math.max(1,Math.min(5,Math.round(assessment.score)));
+    const rd:ReportData={locName:label,stateCode:state||'',examKey:rpExam,scores:[],nearby:[],recommendation:v,isGeo:true,prov:assessment.evidence.relevantProviders,wait:null,tier:null,queryCity:city||display,queryState:state||'',isIntl:true,lat,lng};
     setLastReportData(rd);
     flyNativeMap(lat,lng,11,1200);
     drawRadiusCircle(lat,lng);
@@ -2455,15 +2441,10 @@ export default function App() {
           {[state,zip?'ZIP '+zip:null].filter(Boolean).join(' · ')}
           {state||zip?' · ':''}<span style={{color:'var(--accent2)'}}>INTERNATIONAL LOCATION</span>
         </div>
-        <div className="rp-alert" style={{background:'rgba(137,212,254,0.08)',border:'1px solid rgba(137,212,254,0.22)',color:'#89d4fe'}}>
-          U.S. difficulty scoring does not apply to international locations.
-          Live Finder results below show real nearby facilities via OpenStreetMap.
+        <div className="rp-alert" style={{background:`${DCOL[v]}12`,border:`1px solid ${DCOL[v]}30`,color:DCOL[v]}}>
+          {MLBL[rpExam]}: <strong>{assessment.label}</strong> — Score {assessment.score.toFixed(1)}/5
         </div>
-        <div style={{fontSize:'9.5px',color:'#8fb3d8',marginBottom:8,padding:'6px 9px',background:'rgba(137,212,254,0.06)',borderRadius:5,lineHeight:1.55}}>
-          Coordinates: {lat.toFixed(5)}, {lng.toFixed(5)}.
-          Searching facilities within {liveRadius} miles via Overpass/OpenStreetMap.
-          Confidence and availability are based on live data, not pre-scored datasets.
-        </div>
+        <AccessAssessmentCard assessment={assessment}/>
         <DriveTimeBox fromLat={lat} fromLng={lng} fromName={label} locB={null}/>
         <button className="export-btn" onClick={()=>doExportReport(rd)}><Download size={15}/>Export location report</button>
       </div>
@@ -4174,37 +4155,33 @@ export default function App() {
 }
 
 // ── Sub-components ───────────────────────────────────────────────────────────
-function ScoreCard({scores}:{scores:{key:string;v:number;hl:boolean}[]}) {
-  return (
-    <div className="rp-scorecard">
-      {scores.map(s=>(
-        <div key={s.key} className="rp-score-row" style={s.hl?{background:'rgba(59,130,246,0.06)',padding:'2px 4px',borderRadius:4}:{}}>
-          <span className="rp-score-icon">{MICONS[s.key]}</span>
-          <span className="rp-score-name" style={s.hl?{color:'#cdd9f0',fontWeight:600}:{}}>{MLBL[s.key]}</span>
-          <div className="rp-score-bar"><div className="rp-score-fill" style={{width:`${s.v*20}%`,background:DCOL[s.v]}}/></div>
-          <span className="rp-score-val" style={{color:DCOL[s.v]}}>{DLBL[s.v]}</span>
-        </div>
-      ))}
-    </div>
-  );
+function AssessmentError({error}:{error:unknown}) {
+  return <div className="rp-alert" style={{color:'#fca5a5'}}>Assessment unavailable: {error instanceof Error?error.message:'Backend scoring failed'}. No fallback score was invented.</div>;
 }
 
-function GeoScoreCard({lat,lng,examKey}:{lat:number;lng:number;examKey:string}) {
-  return (
-    <div className="rp-scorecard">
-      {ALL_METRICS.map(m=>{
-        const v=estimateDifficultyFromNeighbors(lat,lng,m);
-        return (
-          <div key={m} className="rp-score-row">
-            <span className="rp-score-icon">{MICONS[m]}</span>
-            <span className="rp-score-name">{MLBL[m]}</span>
-            <div className="rp-score-bar"><div className="rp-score-fill" style={{width:`${v*20}%`,background:DCOL[v]}}/></div>
-            <span className="rp-score-val" style={{color:DCOL[v]}}>{DLBL[v]}</span>
-          </div>
-        );
-      })}
+const COMPONENT_LABELS:Record<string,string>={workforce:'Workforce scarcity',capacity:'Health-system capacity',coverage:'Essential-service coverage',geographic:'Geographic / rurality burden',localAccess:'Observed local access'};
+function AccessAssessmentCard({assessment}:{assessment:HealthcareAccessAssessment}) {
+  const confidence=Math.round(assessment.confidence*100);
+  const evidence=assessment.evidence;
+  const display=(value:number|null,suffix='')=>value===null?'Unavailable':`${value.toLocaleString()}${suffix}`;
+  return <div className="rp-scorecard" data-access-assessment="authoritative">
+    <div className="rp-score-row"><strong>Backend score</strong><span/><strong style={{color:DCOL[Math.round(assessment.score)]}}>{assessment.score.toFixed(1)} / 5 · {assessment.label}</strong></div>
+    <div className="rp-score-row"><span>Confidence</span><span/><strong>{confidence}%</strong></div>
+    {Object.entries(assessment.components).map(([key,component])=><div className="rp-score-row" key={key}>
+      <span className="rp-score-name">{COMPONENT_LABELS[key]||key} ({Math.round(component.weight*100)}%)</span>
+      <div className="rp-score-bar"><div className="rp-score-fill" style={{width:`${component.score*20}%`,background:DCOL[Math.round(component.score)]}}/></div>
+      <span className="rp-score-val">{component.score.toFixed(1)}</span>
+    </div>)}
+    <div style={{fontSize:9,lineHeight:1.55,padding:'6px 4px',color:'#8fb3d8'}}>
+      <div>Relevant providers: <strong>{evidence.relevantProviders}</strong> · Facilities: <strong>{evidence.facilities}</strong></div>
+      <div>Population: <strong>{display(evidence.population)}</strong> · Density: <strong>{display(evidence.populationDensity,'/mi²')}</strong></div>
+      <div>Rurality: <strong>{display(evidence.rurality,'%')}</strong> · Remoteness: <strong>{evidence.remotenessClass||'Unavailable'}</strong></div>
+      <div>Nearest relevant provider/facility: <strong>{evidence.nearestRelevantProvider||'Unavailable'}</strong> · <strong>{display(evidence.nearestRelevantProviderMiles,' mi')}</strong></div>
+      <div>Travel burden: <strong>{display(evidence.travelMinutes,' min')}</strong> · Resolution: <strong>{assessment.geography.level}</strong>{assessment.geography.nationalBaselineFallback?' (national-baseline fallback)':''}</div>
+      <div>Sources: <strong>{assessment.sourceNames.join(', ')||'No source available'}</strong>{assessment.sourceYears.length?` · ${assessment.sourceYears.join(', ')}`:''}</div>
     </div>
-  );
+    {assessment.missingIndicators.length>0&&<div className="rp-alert" style={{color:'#fbbf24'}}>Missing indicators: {assessment.missingIndicators.map(key=>COMPONENT_LABELS[key]||key).join(', ')}. Confidence reduced; missing values were not scored as zero or Critical.</div>}
+  </div>;
 }
 
 function ProviderBox({data,examKey,cityName,locIdx,onPin}:{data:any;examKey:string;cityName:string;locIdx:number;onPin:(i:number)=>void}) {

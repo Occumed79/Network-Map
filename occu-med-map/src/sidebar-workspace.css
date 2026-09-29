@@ -1558,7 +1558,7 @@ html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspac
 .find-submode-label {
   font-size: 8.5px;
   color: #64748b;
-  font-family: 'IBM Plex Mono', monospace;
+  font-family: var(--p1-font);
   letter-spacing: 0.09em;
   margin-bottom: 6px;
 }
@@ -1612,7 +1612,7 @@ html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspac
 .find-section-glow-label {
   font-size: 8.5px;
   color: #5f9bbf;
-  font-family: 'IBM Plex Mono', monospace;
+  font-family: var(--p1-font);
   letter-spacing: 0.09em;
   margin: 4px 0 1px;
   text-shadow: 0 0 8px rgba(103, 198, 235, 0.35);
@@ -1660,7 +1660,7 @@ html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspac
 .results-action-bar-label {
   font-size: 9.5px;
   color: var(--workspace-muted);
-  font-family: 'IBM Plex Mono', monospace;
+  font-family: var(--p1-font);
   letter-spacing: 0.04em;
   flex: 1 1 auto;
 }
@@ -1750,7 +1750,7 @@ html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspac
 .result-card-dist {
   font-size: 9px;
   color: #89d4fe;
-  font-family: 'IBM Plex Mono', monospace;
+  font-family: var(--p1-font);
   flex: 0 0 auto;
   white-space: nowrap;
 }

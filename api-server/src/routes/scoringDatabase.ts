@@ -6,10 +6,27 @@ import { burdenScore, calculateUnifiedAccessScore, scarcityScore, type Component
 const router: IRouter = Router();
 const ACS_YEAR = 2024;
 const LOCAL_RADIUS_MILES = 50;
+// Fix #3: service IDs must match the frontend keys exactly.
+// vaccinations, occMed, drugTest, audiometry were missing — added as primary keys.
+// occupationalMedicine / drugScreening kept as aliases so existing callers are unaffected.
 const SERVICE_TERMS: Record<string, string[]> = {
-  primaryCare: ["primary", "general", "family", "internal"], specialist: ["specialist"], urgentCare: ["urgent", "walk_in"],
-  dental: ["dent"], pharmacy: ["pharmacy"], vision: ["vision", "ophthalm", "optometr"], audiology: ["audiolog", "hearing"],
-  occupationalMedicine: ["occupational"], physicalTherapy: ["physical"], drugScreening: ["drug", "laboratory", "lab"], dotExam: ["dot"], faaExam: ["faa"],
+  primaryCare: ["primary", "general", "family", "internal"],
+  specialist: ["specialist"],
+  urgentCare: ["urgent", "walk_in"],
+  dental: ["dent"],
+  pharmacy: ["pharmacy"],
+  vaccinations: ["vaccin", "immuniz", "shot", "travel vaccine"],
+  occMed: ["occupational", "occ med", "workplace health", "industrial"],
+  drugTest: ["drug", "toxicol", "mro", "urine", "collection", "laboratory", "lab"],
+  audiometry: ["audiometr", "audiolog", "hearing"],
+  vision: ["vision", "ophthalm", "optometr"],
+  // legacy / alias keys — kept so any existing integrations still resolve
+  audiology: ["audiolog", "hearing"],
+  occupationalMedicine: ["occupational"],
+  physicalTherapy: ["physical"],
+  drugScreening: ["drug", "laboratory", "lab"],
+  dotExam: ["dot"],
+  faaExam: ["faa"],
 };
 const COUNTRY_ALIASES: Record<string, string> = { GB:"GBR", UK:"GBR", PL:"POL", US:"USA", DE:"DEU", FR:"FRA", CA:"CAN", AU:"AUS" };
 const FIPS_TO_STATE:Record<string,string>={"01":"AL","02":"AK","04":"AZ","05":"AR","06":"CA","08":"CO","09":"CT","10":"DE","11":"DC","12":"FL","13":"GA","15":"HI","16":"ID","17":"IL","18":"IN","19":"IA","20":"KS","21":"KY","22":"LA","23":"ME","24":"MD","25":"MA","26":"MI","27":"MN","28":"MS","29":"MO","30":"MT","31":"NE","32":"NV","33":"NH","34":"NJ","35":"NM","36":"NY","37":"NC","38":"ND","39":"OH","40":"OK","41":"OR","42":"PA","44":"RI","45":"SC","46":"SD","47":"TN","48":"TX","49":"UT","50":"VT","51":"VA","53":"WA","54":"WV","55":"WI","56":"WY"};
@@ -41,26 +58,46 @@ async function usProfile(query:AssessmentQuery):Promise<UsProfile|null>{
   const landSquareMiles=areaMeters/2_589_988.110336;
   return {...county,countyName:String(census?.[1]?.[0]||county.countyName).split(",")[0],population,landSquareMiles,density:population/landSquareMiles,sourceYear:ACS_YEAR};
 }
+// Fix #4: HRSA failures must produce null designation, not false.
+// Previously .catch(()=>[]) on the state-level fetch silently returned an empty array,
+// causing hpsa.length?true:false to produce false (confirmed not-designated) even when
+// the request itself failed. We now track whether the upstream call succeeded.
 async function hrsaEvidence(profile:UsProfile):Promise<ShortageEvidence>{
-  const token=process.env.HRSA_DATA_API_TOKEN?.trim(); if(!token)return {hpsaScore:null,hpsaDesignated:null,muaDesignated:null,facilityCount:null,sourceYear:null};
+  const token=process.env.HRSA_DATA_API_TOKEN?.trim();
+  if(!token)return {hpsaScore:null,hpsaDesignated:null,muaDesignated:null,facilityCount:null,sourceYear:null};
   const configured=process.env.HRSA_DATA_API_URL?.trim();
   if (!configured) {
-    let cached=hrsaStateCache.get(profile.state);
+    // Use a separate mutable ref so TS tracks definite assignment after cache population.
+    let cached:any=hrsaStateCache.get(profile.state);
     if(!cached||cached.expires<Date.now()){
       const headers={Authorization:`Bearer ${token}`,"x-api-key":token};
-      const [hpsa,mua]=await Promise.all([
-        fetchJson(new URL(`https://data.hrsa.gov/hpsafind/find?state=${encodeURIComponent(profile.state)}&counties=&id=`),{headers}).catch(()=>[]),
-        fetchJson(new URL(`https://data.hrsa.gov/Muafind/find?state=${encodeURIComponent(profile.state)}&counties=&id=`),{headers}).catch(()=>[]),
+      // Track whether each call succeeded so failures stay null rather than false.
+      const [hpsaResult,muaResult]=await Promise.allSettled([
+        fetchJson(new URL(`https://data.hrsa.gov/hpsafind/find?state=${encodeURIComponent(profile.state)}&counties=&id=`),{headers}),
+        fetchJson(new URL(`https://data.hrsa.gov/Muafind/find?state=${encodeURIComponent(profile.state)}&counties=&id=`),{headers}),
       ]);
-      cached={expires:Date.now()+6*60*60*1000,hpsa:Array.isArray(hpsa)?hpsa:[],mua:Array.isArray(mua)?mua:[]};hrsaStateCache.set(profile.state,cached);
+      if(hpsaResult.status==="rejected")console.warn("[HRSA] HPSA state fetch failed for",profile.state,":",hpsaResult.reason?.message||String(hpsaResult.reason));
+      if(muaResult.status==="rejected")console.warn("[HRSA] MUA state fetch failed for",profile.state,":",muaResult.reason?.message||String(muaResult.reason));
+      const hpsaData=hpsaResult.status==="fulfilled"&&Array.isArray(hpsaResult.value)?hpsaResult.value:null;
+      const muaData=muaResult.status==="fulfilled"&&Array.isArray(muaResult.value)?muaResult.value:null;
+      cached={expires:Date.now()+6*60*60*1000,hpsa:hpsaData??[],mua:muaData??[],hpsaAvailable:hpsaData!==null,muaAvailable:muaData!==null};
+      hrsaStateCache.set(profile.state,cached);
     }
     const county=profile.countyName.replace(/ County$/i,"").toLowerCase();
-    const hpsa=cached.hpsa.filter(row=>String(row.PRIMARY_COUNTY_NM||row.county_name||row.HF_AUTO_HPSA_SITE_CNTY_NM||"").toLowerCase()===county&&String(row.hpsa_status_desc||row.hpsa_status||"").toLowerCase()!=="withdrawn");
-    const mua=cached.mua.filter(row=>String(row.PRIMARY_COUNTY_NM||row.county_name||row.COUNTY_NM||"").toLowerCase()===county&&String(row.mua_status_desc||row.status||"").toLowerCase()!=="withdrawn");
-    return {hpsaScore:hpsa.map(row=>finite(row.current_score??row.HPSA_SCORE)).filter((value):value is number=>value!==null).sort((a,b)=>b-a)[0]??null,hpsaDesignated:hpsa.length?true:false,muaDesignated:mua.length?true:false,facilityCount:hpsa.filter(row=>row.HF_AUTO_HPSA_SITE_ADDRESS).length||null,sourceYear:new Date().getUTCFullYear()};
+    const hpsaAvailable:boolean=cached.hpsaAvailable??true;
+    const muaAvailable:boolean=cached.muaAvailable??true;
+    const hpsa=cached.hpsa.filter((row:any)=>String(row.PRIMARY_COUNTY_NM||row.county_name||row.HF_AUTO_HPSA_SITE_CNTY_NM||"").toLowerCase()===county&&String(row.hpsa_status_desc||row.hpsa_status||"").toLowerCase()!=="withdrawn");
+    const mua=cached.mua.filter((row:any)=>String(row.PRIMARY_COUNTY_NM||row.county_name||row.COUNTY_NM||"").toLowerCase()===county&&String(row.mua_status_desc||row.status||"").toLowerCase()!=="withdrawn");
+    // null = data not available (request failed); false = confirmed not designated; true = designated
+    const hpsaDesignated=hpsaAvailable?(hpsa.length?true:false):null;
+    const muaDesignated=muaAvailable?(mua.length?true:false):null;
+    return {hpsaScore:hpsa.map((row:any)=>finite(row.current_score??row.HPSA_SCORE)).filter((value:unknown):value is number=>value!==null&&Number.isFinite(value)).sort((a:number,b:number)=>b-a)[0]??null,hpsaDesignated,muaDesignated,facilityCount:hpsa.filter((row:any)=>row.HF_AUTO_HPSA_SITE_ADDRESS).length||null,sourceYear:new Date().getUTCFullYear()};
   }
   const url=new URL(configured);url.searchParams.set("countyFips",profile.countyFips);
-  const data=await fetchJson(url,{headers:{Authorization:`Bearer ${token}`,"x-api-key":token}}).catch(()=>null);
+  // Fix #4 continued: a failed configured-endpoint request must return null, not false.
+  let data:any=null;
+  try { data=await fetchJson(url,{headers:{Authorization:`Bearer ${token}`,"x-api-key":token}}); }
+  catch(err){ console.warn("[HRSA] configured endpoint failed for",profile.countyFips,":",err instanceof Error?err.message:String(err)); return {hpsaScore:null,hpsaDesignated:null,muaDesignated:null,facilityCount:null,sourceYear:null}; }
   if(!data)return {hpsaScore:null,hpsaDesignated:null,muaDesignated:null,facilityCount:null,sourceYear:null};
   return {hpsaScore:finite(data.hpsaScore??data.hpsa_score),hpsaDesignated:typeof(data.hpsaDesignated??data.hpsa_designated)==="boolean"?(data.hpsaDesignated??data.hpsa_designated):null,muaDesignated:typeof(data.muaDesignated??data.mua_designated)==="boolean"?(data.muaDesignated??data.mua_designated):null,facilityCount:finite(data.facilityCount??data.facility_count),sourceYear:finite(data.year)};
 }
@@ -77,11 +114,19 @@ async function travelMinutes(query:AssessmentQuery,evidence:ProviderEvidence):Pr
   return {minutes:Number(Math.max(1,evidence.nearestMiles/35*60).toFixed(1)),source:"Distance-based travel estimate"};
 }
 function localPopulation(profile:UsProfile):number{return Math.min(profile.population,profile.density*Math.PI*LOCAL_RADIUS_MILES**2);}
+// Fix #2: zero relevant providers is observed scarcity, not missing evidence.
+// The previous code used `if(evidence.relevant>0)` which silently dropped workforce and
+// coverage when the search returned zero, making zero indistinguishable from "never searched".
+// A verified search that returns zero is strong evidence of difficult access → score at max scarcity.
 function usInputs(profile:UsProfile,shortage:ShortageEvidence,evidence:ProviderEvidence,travel:{minutes:number|null;source:string|null}):Partial<Record<keyof typeof import("../lib/healthcareAccessScoring").ACCESS_COMPONENT_WEIGHTS,ComponentInput>>{
   const population=localPopulation(profile);const inputs:Record<string,ComponentInput>={};
-  if(evidence.relevant>0)inputs.workforce={score:Math.max(scarcityScore(evidence.relevant/population*100_000,120,10),shortage.hpsaScore===null?1:burdenScore(shortage.hpsaScore,0,26)),evidence:{relevantProviders:evidence.relevant,compatibleLocalPopulation:Math.round(population),providersPer100k:Number((evidence.relevant/population*100_000).toFixed(2)),hpsaScore:shortage.hpsaScore,hpsaDesignated:shortage.hpsaDesignated},sources:["Network Map provider registries","U.S. Census ACS 5-year",...(shortage.hpsaScore!==null?["HRSA HPSA"]:[])],year:profile.sourceYear};
+  // workforce: always present when provider search has been executed (relevant may be 0 = scarcity)
+  const workforceScore=evidence.relevant===0?5:Math.max(scarcityScore(evidence.relevant/population*100_000,120,10),shortage.hpsaScore===null?1:burdenScore(shortage.hpsaScore,0,26));
+  inputs.workforce={score:workforceScore,evidence:{relevantProviders:evidence.relevant,compatibleLocalPopulation:Math.round(population),providersPer100k:Number((evidence.relevant/population*100_000).toFixed(2)),hpsaScore:shortage.hpsaScore,hpsaDesignated:shortage.hpsaDesignated},sources:["Network Map provider registries","U.S. Census ACS 5-year",...(shortage.hpsaScore!==null?["HRSA HPSA"]:[])],year:profile.sourceYear};
   const facilities=shortage.facilityCount??evidence.facilities;if(facilities>0)inputs.capacity={score:scarcityScore(facilities/population*100_000,20,1),evidence:{facilities,facilitiesPer100k:Number((facilities/population*100_000).toFixed(2))},sources:[shortage.facilityCount!==null?"HRSA healthcare facilities":"Network Map provider registries"],year:shortage.sourceYear??profile.sourceYear};
-  if(evidence.relevant>0)inputs.coverage={score:Math.max(scarcityScore(evidence.relevant,50,1),shortage.muaDesignated?4:1),evidence:{relevantProviders:evidence.relevant,muaDesignated:shortage.muaDesignated,serviceRadiusMiles:LOCAL_RADIUS_MILES},sources:["Network Map provider registries",...(shortage.muaDesignated!==null?["HRSA MUA/P"]:[])]};
+  // coverage: always present; zero relevant = max scarcity on coverage too
+  const coverageScore=evidence.relevant===0?5:Math.max(scarcityScore(evidence.relevant,50,1),shortage.muaDesignated?4:1);
+  inputs.coverage={score:coverageScore,evidence:{relevantProviders:evidence.relevant,muaDesignated:shortage.muaDesignated,serviceRadiusMiles:LOCAL_RADIUS_MILES},sources:["Network Map provider registries",...(shortage.muaDesignated!==null?["HRSA MUA/P"]:[])]};
   inputs.geographic={score:scarcityScore(profile.density,500,5),evidence:{populationDensity:profile.density,landSquareMiles:profile.landSquareMiles,ruralityProxy:"Census population density"},sources:["U.S. Census ACS 5-year","Census TIGER/Line"],year:profile.sourceYear};
   if(travel.minutes!==null)inputs.localAccess={score:burdenScore(travel.minutes,10,120),evidence:{nearestRelevantProviderMiles:evidence.nearestMiles,nearestRelevantProvider:evidence.nearestName,travelMinutes:travel.minutes},sources:[travel.source||"Network Map provider registries"]};return inputs as any;
 }
@@ -103,18 +148,36 @@ async function internationalRows(query:AssessmentQuery):Promise<{rows:IndicatorR
   if(query.admin1){const regional=await pool.query(`SELECT indicator_code,indicator_name,value,year,source_name,source_url,geography_level,admin1_code,admin1_name FROM public.international_health_indicators WHERE upper(country_code) IN (upper($1),upper($2)) AND (lower(admin1_name)=lower($3) OR lower(admin1_code)=lower($3)) ORDER BY year DESC`,[query.countryCode,code,query.admin1]);if(regional.rows.length)return {rows:regional.rows,level:"admin1",fallback:false};}
   const country=await pool.query(`SELECT indicator_code,indicator_name,value,year,source_name,source_url,geography_level,admin1_code,admin1_name FROM public.international_health_indicators WHERE upper(country_code) IN (upper($1),upper($2)) AND admin1_code IS NULL ORDER BY year DESC`,[query.countryCode,code]);return {rows:country.rows,level:"country",fallback:Boolean(query.admin1)};
 }
+// Fix #1: PostgreSQL 22P02 — sourceYears (integer[]), sourceNames (text[]), and
+// missingIndicators (text[]) must be cast explicitly.  Passing a JS array as a plain
+// parameter is rejected by pg for typed array columns unless the SQL includes ::text[]
+// or ::integer[] casts.  Also: persistence failures are now logged with context instead
+// of being silently swallowed by the .catch(()=>undefined) at the call site.
 async function persistInternationalScore(query:AssessmentQuery, result:ReturnType<typeof calculateUnifiedAccessScore>, level:string, fallback:boolean):Promise<void>{
-  if(!process.env.DATABASE_URL_2)return;const pool=getScoringPool();const code=normalizeCountry(query.countryCode);const persistedAdmin1=level==="admin1"?query.admin1||null:null;const columns:any={workforce:result.components.workforce?.score??null,capacity:result.components.capacity?.score??null,coverage:result.components.coverage?.score??null,geographic:result.components.geographic?.score??null,localAccess:result.components.localAccess?.score??null};
+  if(!process.env.DATABASE_URL_2)return;
+  const pool=getScoringPool();
+  const code=normalizeCountry(query.countryCode);
+  const persistedAdmin1=level==="admin1"?query.admin1||null:null;
+  const columns={workforce:result.components.workforce?.score??null,capacity:result.components.capacity?.score??null,coverage:result.components.coverage?.score??null,geographic:result.components.geographic?.score??null,localAccess:result.components.localAccess?.score??null};
   const details=Object.fromEntries(Object.entries(result.components).map(([key,value])=>[key,value?.evidence]));
+  // $12 cast to integer[], $13/$14 cast to text[] — prevents PG error 22P02 "invalid input syntax"
   const params=[code,persistedAdmin1,query.service,result.score,result.confidence,columns.workforce,columns.capacity,columns.coverage,columns.geographic,columns.localAccess,JSON.stringify(details),result.sourceYears,result.sourceNames,result.missingIndicators,level,result.algorithmVersion];
-  const updated=await pool.query(`UPDATE public.international_access_scores SET score=$4,confidence=$5,workforce_component=$6,capacity_component=$7,coverage_component=$8,geographic_component=$9,local_access_component=$10,component_details=$11::jsonb,source_years=$12,source_names=$13,missing_indicators=$14,geography_level=$15,algorithm_version=$16,calculated_at=now(),updated_at=now() WHERE country_code=$1 AND admin1_code IS NOT DISTINCT FROM $2 AND service_type=$3`,params);
-  if(!updated.rowCount)await pool.query(`INSERT INTO public.international_access_scores(id,country_code,country_name,admin1_code,admin1_name,service_type,score,confidence,workforce_component,capacity_component,coverage_component,geographic_component,local_access_component,component_details,source_years,source_names,missing_indicators,geography_level,algorithm_version,calculated_at,updated_at) VALUES($17,$1,$1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16,now(),now())`,[...params,randomUUID()]);
+  try {
+    const updated=await pool.query(`UPDATE public.international_access_scores SET score=$4,confidence=$5,workforce_component=$6,capacity_component=$7,coverage_component=$8,geographic_component=$9,local_access_component=$10,component_details=$11::jsonb,source_years=$12::integer[],source_names=$13::text[],missing_indicators=$14::text[],geography_level=$15,algorithm_version=$16,calculated_at=now(),updated_at=now() WHERE country_code=$1 AND admin1_code IS NOT DISTINCT FROM $2 AND service_type=$3`,params);
+    if(!updated.rowCount)await pool.query(`INSERT INTO public.international_access_scores(id,country_code,country_name,admin1_code,admin1_name,service_type,score,confidence,workforce_component,capacity_component,coverage_component,geographic_component,local_access_component,component_details,source_years,source_names,missing_indicators,geography_level,algorithm_version,calculated_at,updated_at) VALUES($17,$1,$1,$2,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::integer[],$13::text[],$14::text[],$15,$16,now(),now())`,[...params,randomUUID()]);
+  } catch(err){
+    console.error("[scoring] persistInternationalScore failed",{countryCode:code,admin1:persistedAdmin1,service:query.service,sourceYears:result.sourceYears,sourceNames:result.sourceNames,missingIndicators:result.missingIndicators,error:err instanceof Error?err.message:String(err)});
+    throw err;
+  }
 }
 async function buildAssessment(query:AssessmentQuery){
   const evidence=await providerEvidence(query);const travel=await travelMinutes(query,evidence);let inputs:Record<string,ComponentInput>={};let population:number|null=null,density:number|null=null,rurality:number|null=null,geographyLevel="country",nationalBaselineFallback=false;let profile:UsProfile|null=null;
   if(query.countryCode==="US"){profile=await usProfile(query);if(profile){population=profile.population;density=profile.density;geographyLevel="county";const shortage=await hrsaEvidence(profile);inputs=usInputs(profile,shortage,evidence,travel) as Record<string,ComponentInput>;}}
   else{const available=await internationalRows(query);geographyLevel=available.level;nationalBaselineFallback=available.fallback;inputs=internationalInputs(available.rows,evidence,travel);const ruralRow=indicator(available.rows,["SP.RUR.TOTL.ZS"]),densityRow=indicator(available.rows,["EN.POP.DNST"]),popRow=indicator(available.rows,["SP.POP.TOTL"]);rurality=finite(ruralRow?.value);density=finite(densityRow?.value);population=finite(popRow?.value);}
-  const score=calculateUnifiedAccessScore(inputs as any);if(query.countryCode!=="US")await persistInternationalScore(query,score,geographyLevel,nationalBaselineFallback).catch(()=>undefined);
+  // Fix #1 continued: propagate persistence errors (they are now thrown) so callers can log them.
+  // The .catch logs + rethrows in persistInternationalScore, so we only suppress here to not
+  // fail the HTTP response — the error is already logged with full context.
+  const score=calculateUnifiedAccessScore(inputs as any);if(query.countryCode!=="US")await persistInternationalScore(query,score,geographyLevel,nationalBaselineFallback).catch((err)=>console.warn("[scoring] international score persist suppressed after logging:",err instanceof Error?err.message:String(err)));
   return {...score,service:query.service,geography:{countryCode:query.countryCode,admin1:query.admin1||null,countyFips:profile?.countyFips||null,countyName:profile?.countyName||null,level:geographyLevel,nationalBaselineFallback,lat:query.lat,lng:query.lng},evidence:{population,populationDensity:density,rurality,remotenessClass:density===null?null:density<10?"Remote":density<100?"Rural / low density":"Urban / higher density",nearestRelevantProviderMiles:evidence.nearestMiles,nearestRelevantProvider:evidence.nearestName,travelMinutes:travel.minutes,relevantProviders:evidence.relevant,facilities:evidence.facilities},warnings:score.missingIndicators.length?["Some authoritative indicators are unavailable; confidence has been reduced. Missing data was not scored as zero, Easy, or Critical."]:[]};
 }
 router.get("/scoring/assessment",async(req,res)=>{const lat=numberParam(req.query.lat,-90,90),lng=numberParam(req.query.lng,-180,180);if(lat===null||lng===null){res.status(400).json({error:"Valid lat and lng are required"});return;}const query:AssessmentQuery={lat,lng,service:String(req.query.service||"primaryCare"),countryCode:String(req.query.countryCode||"US").toUpperCase(),admin1:req.query.admin1?String(req.query.admin1):undefined,countyFips:req.query.countyFips?String(req.query.countyFips):undefined};try{res.json({ok:true,assessment:await buildAssessment(query)});}catch(error){res.status(503).json({ok:false,error:error instanceof Error?error.message:String(error)});}});
@@ -144,17 +207,27 @@ router.get("/scoring/us/states", async (req, res) => {
       const prior = providerCounts.get(row.state) || { relevant:0, facilities:0 };
       prior.relevant += Number(row.relevant || 0); prior.facilities += Number(row.facilities || 0); providerCounts.set(row.state, prior);
     }
+    // Fix #2 & #5: state-level scoring must follow the same unified contract as point assessments.
+    // Zero relevant providers = observed scarcity, not missing evidence.
+    // Only skip a state entirely if we have no population (can't derive per-100k).
     const states=[];
     for (const [fips,state] of Object.entries(FIPS_TO_STATE)) {
       const population=populations.get(fips)??null; if(population===null) continue;
+      // providerCounts contains only states with ≥1 provider row; absent means the query returned
+      // zero relevant providers for that state — treat as observed scarcity, not missing data.
+      const providerSearchExecuted=true; // the batch query was always executed for all states
       const {relevant,facilities}=providerCounts.get(state)||{relevant:0,facilities:0};
       const inputs:Record<string,ComponentInput>={};
-      if(relevant) inputs.workforce={score:scarcityScore(relevant/population*100000,120,10),evidence:{relevant,providersPer100k:relevant/population*100000},sources:["Network Map provider registries","U.S. Census ACS 5-year"],year:ACS_YEAR};
-      if(facilities) inputs.capacity={score:scarcityScore(facilities/population*100000,20,1),evidence:{facilities},sources:["Network Map provider registries"]};
-      if(relevant) inputs.coverage={score:scarcityScore(relevant/population*100000,120,10),evidence:{relevant},sources:["Network Map provider registries"]};
+      // workforce: always present (zero = scarcity score 5, matching usInputs behaviour)
+      inputs.workforce={score:relevant===0?5:scarcityScore(relevant/population*100000,120,10),evidence:{relevant,providersPer100k:Number((relevant/population*100000).toFixed(2)),observedScarcity:relevant===0},sources:["Network Map provider registries","U.S. Census ACS 5-year"],year:ACS_YEAR};
+      if(facilities>0) inputs.capacity={score:scarcityScore(facilities/population*100000,20,1),evidence:{facilities},sources:["Network Map provider registries"]};
+      // coverage: always present (zero = max scarcity)
+      inputs.coverage={score:relevant===0?5:scarcityScore(relevant/population*100000,120,10),evidence:{relevant,observedScarcity:relevant===0},sources:["Network Map provider registries"]};
       const landArea=finite(stateAreas.get(fips));
       if(landArea!==null){const density=population/landArea;inputs.geographic={score:scarcityScore(density,500,5),evidence:{populationDensity:density,landSquareMiles:landArea},sources:["U.S. Census ACS 5-year","Census TIGER/Line"],year:ACS_YEAR};}
-      if (Object.keys(inputs).length) states.push({state,population,...calculateUnifiedAccessScore(inputs as any)});
+      // localAccess: not defensible from state-level data — omitted to reduce confidence appropriately
+      void providerSearchExecuted; // suppress unused var warning
+      states.push({state,population,...calculateUnifiedAccessScore(inputs as any)});
     }
     res.json({ok:true,service,states});
   } catch(error) { res.status(503).json({ok:false,error:error instanceof Error?error.message:String(error)}); }

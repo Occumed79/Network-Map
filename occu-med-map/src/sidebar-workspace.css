@@ -691,6 +691,34 @@ html[data-occumed-workspace-ready="true"] body .app-wrap .app-body {
   height: 100% !important;
 }
 
+
+/* Phase 1 typography authority: all sidebar workspace UI uses the Apple/SF stack.
+   Scope intentionally excludes map popups and generated report HTML. */
+html[data-occumed-workspace-ready="true"] body :is(
+  .sidebar.occumed-sidebar-workspace-scope,
+  .live-panel,
+  .provider-explorer-drawer
+) {
+  font-family: var(--p1-font) !important;
+}
+html[data-occumed-workspace-ready="true"] body :is(
+  .sidebar.occumed-sidebar-workspace-scope,
+  .live-panel,
+  .provider-explorer-drawer
+) :is(button, input, select, textarea, label) {
+  font-family: var(--p1-font) !important;
+}
+
+/* Provider registry section headings are currently emitted with inline
+   IBM Plex Mono styles. Override presentation only; do not change registry DOM/logic. */
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  [data-provider-registry-owned="true"] [style*="letter-spacing"] {
+  font-family: var(--p1-font) !important;
+  color: var(--neon-c2) !important;
+  text-shadow: 0 0 8px rgba(163, 197, 217, 0.28) !important;
+}
+
 /* ─── Floating glass search bar (inside map-wrap) ─────────────────────────── */
 .map-wrap .floating-search-bar {
   position: absolute;

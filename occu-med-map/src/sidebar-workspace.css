@@ -662,8 +662,8 @@ html[data-occumed-workspace-ready="true"] body
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   PHASE 1 — Sidebar shell unification + floating search bar + neon borders
-   Palette: #F0F8FF · #D1DCE5 · #A3C5D9
+   PHASE 1 — Sidebar shell unification + floating search + neon borders
+   Palette: #F0F8FF · #D1DCE5 · #A3C5D9  (Phase 1 correction commit)
    ───────────────────────────────────────────────────────────────────────────── */
 
 /* The full-width command-header has been removed.  Zero-out the height variable
@@ -674,7 +674,6 @@ html[data-occumed-workspace-ready="true"] body
   --neon-c1: #F0F8FF;
   --neon-c2: #D1DCE5;
   --neon-c3: #A3C5D9;
-  --neon-glow-rest:   rgba(161, 197, 217, 0.22);
   --neon-glow-hover:  rgba(209, 220, 229, 0.40);
   --neon-glow-active: rgba(240, 248, 255, 0.62);
   /* Phase 1 font stack (Apple / macOS Tahoe) */
@@ -910,66 +909,12 @@ html[data-occumed-workspace-ready="true"] body .app-wrap .app-body {
 
 /* ─────────────────────────────────────────────────────────────────────────────
    NEON BORDER — adapted from inspira-ui.com/docs/components/special-effects/neon-border
-   Original uses a CSS @keyframes rotating conic-gradient "aura" technique.
-   Adapted here for React+CSS: ::before is the glow track, ::after is the border.
-   Preserves rounded/pill geometry. Uses our palette instead of cyberpunk colors.
+   Uses a rotating conic-gradient ::before pseudo-element as the glow track.
+   The effect is applied directly on interactive elements (no wrapper class).
+   Palette: #F0F8FF · #D1DCE5 · #A3C5D9 — elegant, not cyberpunk.
    ───────────────────────────────────────────────────────────────────────────── */
 
-/* The neon-border wrapper is a relative container; its ::before and ::after
-   provide the animated rotating glow.  We isolate it so stacking is correct. */
-.neon-border-wrap {
-  position: relative;
-  isolation: isolate;
-  border-radius: 13px;   /* matches .sb-section card radius */
-}
-
-/* Rotating glow track (behind the card surface) */
-.neon-border-wrap::before {
-  content: "";
-  position: absolute;
-  inset: -2px;
-  border-radius: inherit;
-  z-index: -2;
-  background: conic-gradient(
-    from var(--neon-angle, 0deg),
-    transparent 0deg,
-    var(--neon-c3) 60deg,
-    var(--neon-c2) 120deg,
-    var(--neon-c1) 180deg,
-    var(--neon-c2) 240deg,
-    var(--neon-c3) 300deg,
-    transparent 360deg
-  );
-  opacity: 0.18;
-  animation: neon-border-rotate 6s linear infinite;
-  transition: opacity 300ms ease;
-  pointer-events: none;
-}
-
-/* Glass surface that sits above the glow track */
-.neon-border-wrap::after {
-  content: "";
-  position: absolute;
-  inset: 1px;
-  border-radius: calc(13px - 1px);
-  z-index: -1;
-  background: var(--workspace-card-bg, #0a1c2c);
-  pointer-events: none;
-}
-
-/* Hover: slightly stronger glow */
-.neon-border-wrap:hover::before {
-  opacity: 0.32;
-  animation-duration: 4s;
-}
-
-/* Active / selected: clearly luminous */
-.neon-border-wrap.neon-active::before,
-.neon-border-wrap[data-active="true"]::before {
-  opacity: 0.58;
-  animation-duration: 3s;
-}
-
+/* Shared animation + @property for all neon-border targets */
 @keyframes neon-border-rotate {
   from { --neon-angle: 0deg; }
   to   { --neon-angle: 360deg; }
@@ -978,6 +923,122 @@ html[data-occumed-workspace-ready="true"] body .app-wrap .app-body {
   syntax: "<angle>";
   inherits: false;
   initial-value: 0deg;
+}
+
+/* ── Workspace tabs — neon glow on active/hover ─────────────────────────────── */
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab {
+  position: relative;
+  overflow: visible;
+  isolation: isolate;
+}
+/* Subtle rest-state border is inherited from sidebar-workspace.css base rules.
+   On hover the ::after pseudo provides the animated neon halo. */
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  z-index: -1;
+  background: conic-gradient(
+    from var(--neon-angle, 0deg),
+    transparent 0deg,
+    var(--neon-c3) 60deg,
+    var(--neon-c2) 120deg,
+    transparent 360deg
+  );
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 240ms ease;
+  animation: neon-border-rotate 5s linear infinite paused;
+}
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab:hover:not(:disabled)::after {
+  opacity: 0.30;
+  animation-play-state: running;
+}
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab.active::after,
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab[aria-selected="true"]::after {
+  opacity: 0.55;
+  animation-play-state: running;
+  animation-duration: 3s;
+}
+/* Active tab: luminous border colour override */
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab.active,
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
+  .sidebar.occumed-sidebar-workspace-scope
+  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab[aria-selected="true"] {
+  border-color: rgba(209, 220, 229, 0.68) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.09),
+    0 0 18px rgba(163, 197, 217, 0.28) !important;
+}
+
+/* ── Primary sidebar tool buttons (command-tool-grid) ───────────────────────── */
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button {
+  position: relative;
+  isolation: isolate;
+  overflow: visible;
+  font-family: var(--p1-font) !important;
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  z-index: -1;
+  background: conic-gradient(
+    from var(--neon-angle, 0deg),
+    transparent 0deg,
+    var(--neon-c3) 60deg,
+    var(--neon-c2) 120deg,
+    transparent 360deg
+  );
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms ease;
+  animation: neon-border-rotate 5s linear infinite paused;
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button:hover:not(:disabled)::after {
+  opacity: 0.25;
+  animation-play-state: running;
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button.active::after,
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button[aria-pressed="true"]::after {
+  opacity: 0.52;
+  animation-play-state: running;
+  animation-duration: 3s;
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button.active,
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button[aria-pressed="true"] {
+  border-color: rgba(209, 220, 229, 0.58) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.06),
+    0 0 14px rgba(163, 197, 217, 0.24) !important;
 }
 
 /* ─── Provider layer cards: dark navy glass with neon borders ─────────────── */
@@ -1062,6 +1123,240 @@ html[data-occumed-workspace-ready="true"] body
   .provider-layers-section .workflow-layer-status {
   color: rgba(163, 197, 217, 0.62) !important;
   font-size: 8.5px !important;
+}
+
+/* ─── Finder (live-panel) — navy glass language matching sidebar ────────────── */
+
+/* Override the light-glass live-finder-ux.css with the Phase 1 dark navy palette */
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body .live-panel.open {
+  background: linear-gradient(180deg, #07111d 0%, #050d16 100%) !important;
+  border: 1px solid rgba(163, 197, 217, 0.28) !important;
+  border-top: 0 !important;
+  box-shadow:
+    10px 12px 30px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+  backdrop-filter: blur(22px) saturate(130%) !important;
+  color: var(--workspace-text) !important;
+}
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel.open .lp-inner {
+  color: var(--workspace-text) !important;
+  background: transparent !important;
+}
+
+/* Finder header / title — phase1-section-label treatment */
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .lp-title {
+  font-size: 10px !important;
+  font-weight: 860 !important;
+  letter-spacing: 0.09em !important;
+  color: var(--neon-c2) !important;
+  text-shadow: 0 0 8px rgba(163, 197, 217, 0.30) !important;
+  font-family: var(--p1-font) !important;
+}
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .analysis-panel-title small {
+  color: rgba(163, 197, 217, 0.58) !important;
+  font-family: var(--p1-font) !important;
+  font-size: 8.5px !important;
+}
+
+/* Finder panel header separator */
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .lp-panel-header {
+  border-bottom-color: rgba(163, 197, 217, 0.16) !important;
+}
+
+/* Finder inputs/selects */
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .rp-input,
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .rp-select,
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel textarea,
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel select {
+  color: #e7f5f9 !important;
+  background: #061522 !important;
+  border-color: rgba(72, 139, 174, 0.34) !important;
+  font-family: var(--p1-font) !important;
+}
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .rp-input::placeholder,
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel textarea::placeholder {
+  color: #829ead !important;
+}
+
+/* Finder result items */
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .lp-item {
+  color: var(--workspace-text) !important;
+  background: var(--workspace-card-bg) !important;
+  border-color: rgba(72, 139, 174, 0.24) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+/* Finder chips */
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .lp-chip {
+  color: var(--workspace-text) !important;
+  background: var(--workspace-control-bg) !important;
+  border-color: rgba(72, 139, 174, 0.46) !important;
+}
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .lp-chip.on {
+  color: #ffffff !important;
+  background: linear-gradient(180deg, #123f5d, #08283f) !important;
+  border-color: rgba(113, 192, 224, 0.68) !important;
+}
+
+/* Finder empty state */
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .lp-empty.show {
+  background: var(--workspace-card-bg) !important;
+  border-color: rgba(72, 139, 174, 0.20) !important;
+  color: var(--workspace-muted) !important;
+}
+
+/* Finder label sub-groups (inline-style overrides via selectors) */
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .lp-name {
+  color: var(--workspace-text) !important;
+  font-family: var(--p1-font) !important;
+}
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .lp-addr,
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .lp-dist {
+  color: var(--workspace-muted) !important;
+}
+
+/* Finder close button */
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel .rp-close {
+  color: var(--workspace-text) !important;
+  background: var(--workspace-control-bg) !important;
+  border-color: rgba(72, 139, 174, 0.50) !important;
+}
+
+/* ─── Explorer (provider-explorer-drawer) — navy glass matching sidebar ─────── */
+html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer.open {
+  background: linear-gradient(180deg, #07111d 0%, #050d16 100%) !important;
+  border: 1px solid rgba(163, 197, 217, 0.28) !important;
+  border-top: 0 !important;
+  box-shadow:
+    10px 12px 30px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+  backdrop-filter: blur(22px) saturate(130%) !important;
+  color: var(--workspace-text) !important;
+}
+html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer.open .provider-drawer-body {
+  color: var(--workspace-text) !important;
+  background: transparent !important;
+}
+
+/* Explorer header title — phase1-section-label treatment */
+html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer .provider-drawer-title strong {
+  color: var(--neon-c1) !important;
+  font-size: 13px !important;
+  font-family: var(--p1-font) !important;
+  text-shadow: 0 0 10px rgba(163, 197, 217, 0.28) !important;
+}
+html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer .provider-drawer-title small {
+  color: rgba(163, 197, 217, 0.62) !important;
+  font-family: var(--p1-font) !important;
+}
+
+/* Explorer section titles — phase1-section-label treatment */
+html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer .provider-drawer-section-title span {
+  font-size: 9.5px !important;
+  font-weight: 860 !important;
+  letter-spacing: 0.08em !important;
+  color: var(--neon-c2) !important;
+  text-shadow: 0 0 8px rgba(163, 197, 217, 0.30) !important;
+  font-family: var(--p1-font) !important;
+}
+html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer .provider-drawer-section-title small {
+  color: rgba(163, 197, 217, 0.58) !important;
+  font-family: var(--p1-font) !important;
+}
+
+/* Explorer section dividers */
+html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer .provider-drawer-section {
+  border-bottom-color: rgba(163, 197, 217, 0.12) !important;
+}
+
+/* Explorer inputs */
+html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer select,
+html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
+  .provider-explorer-drawer textarea {
+  color: #e7f5f9 !important;
+  background: #061522 !important;
+  border-color: rgba(72, 139, 174, 0.34) !important;
+  font-family: var(--p1-font) !important;
+}
+
+/* ─── Sidebar sub-group label font cleanup ───────────────────────────────────
+   unified-source-divider uses uppercase labels — override IBM Plex Mono/Inter
+   in those selectors to use the new SF Pro font stack.
+   Do NOT touch PDF report strings or map tooltip HTML. */
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope .unified-source-divider {
+  font-family: var(--p1-font) !important;
+  color: var(--neon-c2) !important;
+  font-size: 9px !important;
+  letter-spacing: 0.06em !important;
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope .unified-source-divider small {
+  color: rgba(163, 197, 217, 0.55) !important;
+  font-family: var(--p1-font) !important;
+}
+
+/* command-section-title (used in other sections like Service Presence) */
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope .command-section-title {
+  font-family: var(--p1-font) !important;
+  color: var(--neon-c2) !important;
+  font-size: 9.5px !important;
+  font-weight: 850 !important;
+  letter-spacing: 0.08em !important;
+  text-shadow: 0 0 8px rgba(163, 197, 217, 0.28) !important;
+}
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope .command-section-title small {
+  font-family: var(--p1-font) !important;
+  color: rgba(163, 197, 217, 0.52) !important;
+  font-size: 8px !important;
+}
+
+/* command-section-toggle text */
+html[data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope .command-section-toggle {
+  font-family: var(--p1-font) !important;
+  font-size: 10px !important;
+  font-weight: 820 !important;
+}
+
+/* Finder top-level group label inside lp-controls divs that are
+   used as section markers (inline-style letter-spacing elements).
+   We override font-family only — color is intentionally kept as-is
+   so the existing monospace accent remains for data-dense Finder content. */
+html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
+  .live-panel [style*="letter-spacing"] {
+  font-family: var(--p1-font) !important;
 }
 
 /* ── Mobile: floating menu button visible, search bar narrower ── */

@@ -147,8 +147,9 @@ function auditLayout(): UiIntegrityResult {
     }
   }
 
-  // live-panel remains hidden when find tab drives it through activeTool; skip visibility check for find
-  const inactiveLive = tab !== "liveFinder" && tab !== "find" && elementIsVisible(document.querySelector(".live-panel"));
+  // Find is React-owned inline content; the legacy floating Finder overlay must
+  // remain hidden unless the legacy runtime tab is explicitly selected internally.
+  const inactiveLive = tab !== "liveFinder" && elementIsVisible(document.querySelector(".live-panel"));
   const inactiveExplorer = tab !== "explorer" && elementIsVisible(document.querySelector(".provider-explorer-drawer"));
   if (inactiveLive) failures.push("inactive-finder-visible");
   if (inactiveExplorer) failures.push("inactive-explorer-visible");

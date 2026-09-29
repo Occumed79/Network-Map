@@ -109,20 +109,8 @@ async function assertWorkspace(tab, panelSelector = "") {
   assert.ok(snapshot.map.left >= snapshot.sidebar.right + 4, `${tab} map must not overlap the sidebar`);
   assert.equal(snapshot.panelScrollOverflow <= 2, true, `${tab} panel must not overflow horizontally`);
 
-  // Phase-2: Find tab drives liveFinder machinery; no overlay checks for find/results
-  if (tab === "liveFinder") {
-    assert.equal(snapshot.liveVisible, true, "Finder panel must be visible");
-    assert.equal(snapshot.explorerVisible, false, "Explorer must be hidden while Finder is active");
-  } else if (tab === "explorer") {
-    assert.equal(snapshot.explorerVisible, true, "Explorer panel must be visible");
-    assert.equal(snapshot.liveVisible, false, "Finder must be hidden while Explorer is active");
-  } else if (tab === "find" || tab === "results") {
-    // find/results are inline sidebar panels — no overlay geometry expectations
-    assert.equal(snapshot.explorerVisible, false, `${tab} must hide Explorer`);
-  } else {
-    assert.equal(snapshot.liveVisible, false, `${tab} must hide Finder`);
-    assert.equal(snapshot.explorerVisible, false, `${tab} must hide Explorer`);
-  }
+  assert.equal(snapshot.liveVisible, false, `${tab} must keep the legacy Finder overlay hidden`);
+  assert.equal(snapshot.explorerVisible, false, `${tab} must keep the legacy Explorer overlay hidden`);
 
   if (panelSelector) {
     assert.equal(snapshot.panelVisible, true, `${tab} content panel must be visible`);
@@ -159,9 +147,7 @@ async function generalSnapshot() {
     return {
       viewport: { width: window.innerWidth, height: window.innerHeight },
       documentWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
-      // Phase-2: header is now floating-search-bar; fall back to command-header for older builds
-      header: rect(document.querySelector(".floating-search-bar") || document.querySelector(".command-header")),
-      search: rect(document.querySelector(".floating-search-bar") || document.querySelector(".command-search")),
+      search: rect(document.querySelector(".floating-search-bar")),
       audit: window.__NETWORK_MAP_GENERAL_UI__?.audit?.() || null,
     };
   });
@@ -170,10 +156,8 @@ async function generalSnapshot() {
 async function assertGeneralGeometry(label) {
   await page.waitForTimeout(300);
   const snapshot = await generalSnapshot();
-  assert.ok(snapshot.header, `${label}: search bar must exist`);
-  assert.ok(snapshot.search, `${label}: map search must exist`);
-  assert.ok(snapshot.header.left >= -2 && snapshot.header.right <= snapshot.viewport.width + 2, `${label}: search bar must fit viewport`);
-  assert.ok(snapshot.search.left >= -2 && snapshot.search.right <= snapshot.viewport.width + 2, `${label}: search must fit viewport`);
+  assert.ok(snapshot.search, `${label}: floating map search must exist`);
+  assert.ok(snapshot.search.left >= -2 && snapshot.search.right <= snapshot.viewport.width + 2, `${label}: floating search must fit viewport`);
   assert.ok(snapshot.search.height >= 32, `${label}: search must remain usable`);
   assert.ok(snapshot.documentWidth <= snapshot.viewport.width + 3, `${label}: document must not overflow horizontally`);
   assert.ok(snapshot.audit, `${label}: general UI runtime must be available`);
@@ -183,11 +167,10 @@ async function assertGeneralGeometry(label) {
 async function exerciseSearchDropdown() {
   await page.evaluate(() => {
     document.querySelector(".smoke-search-results")?.remove();
-    // Phase-2: floating-search-bar; fall back to legacy command-search
-    const host = document.querySelector(".floating-search-bar") || document.querySelector(".command-search");
+    const host = document.querySelector(".floating-search-bar");
     if (!(host instanceof HTMLElement)) throw new Error("Search host missing");
     const results = document.createElement("div");
-    results.className = "command-search-results smoke-search-results";
+    results.className = "floating-search-results smoke-search-results";
     for (let index = 0; index < 30; index += 1) {
       const button = document.createElement("button");
       button.type = "button";

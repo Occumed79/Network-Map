@@ -1066,7 +1066,9 @@ export default function App() {
   const [providerToolMode,setProviderToolMode] = useState<'live'|'npi'>('live');
   const [findMode, setFindMode] = useState<FindMode>('nearby');
   // Results workspace: persists across tab switches
-  const [resultsSource, setResultsSource] = useState<'nearby'|'npi'>('nearby');
+  const [resultsSource, setResultsSource] = useState<'nearby'|'npi'|'database'>('nearby');
+  const [databaseResults, setDatabaseResults] = useState<ProviderFeature[]>([]);
+  const [databaseResultsTotal, setDatabaseResultsTotal] = useState(0);
   // U.S.-only coverage diagnostics (population density, state fill, difficulty
   // legend/filter/distribution, 70mi ring). Off by default so the global map
   // stays a clean world viewer. Only shown when explicitly enabled.
@@ -1335,7 +1337,17 @@ export default function App() {
     const categoryLabel = npiCategory
       ? (NPI_CATEGORY_MAP[npiCategory]?.label || (npiCategory === 'custom' ? 'Custom NPI' : npiCategory))
       : 'NPI';
-    const rows = resultsSource === 'npi'
+    const rows = resultsSource === 'database'
+      ? databaseResults.map((provider) => ({
+          name: provider.name || '',
+          address: [provider.address, provider.city, provider.admin_area, provider.country, provider.postal_code].filter(Boolean).join(', '),
+          type: provider.clinic_type || (provider.services||[]).join(', ') || '',
+          distance_miles: Number.isFinite(provider.distance_miles ?? undefined) ? Number(provider.distance_miles).toFixed(1) : '',
+          phone: provider.phone || '',
+          website: provider.website || '',
+          source: provider.source || provider.source_kind || 'Database',
+        }))
+      : resultsSource === 'npi'
       ? npiResults.map((provider:any) => ({
           name: provider.name || '',
           address: provider.address || [provider.city, provider.state, provider.postalCode].filter(Boolean).join(', '),
@@ -3360,6 +3372,12 @@ export default function App() {
                   <div className="provider-category-legend">{PROVIDER_CATEGORY_LEGEND.map(key=><span key={key}><i style={{background:PROVIDER_CATEGORY_STYLES[key].color}}/>{PROVIDER_CATEGORY_STYLES[key].label}</span>)}</div>
                 </details>
                 <div className="provider-map-status" role="status">{providerExplorerStatus}</div>
+                {databaseResults.length > 0 && (
+                  <button
+                    className="find-view-results-btn"
+                    onClick={()=>{setResultsSource('database');selectSidebarWorkspace('results');}}
+                  ><Download size={13}/>View {databaseResults.length} of {databaseResultsTotal.toLocaleString()} DB results</button>
+                )}
               </div>
             )}
           </div>
@@ -3375,10 +3393,12 @@ export default function App() {
             {/* Results action bar */}
             <div className="results-action-bar">
               <div className="results-action-bar-label">
-                {resultsSource === 'npi' ? 'NPI Registry' : 'Nearby'}
+                {resultsSource === 'npi' ? 'NPI Registry' : resultsSource === 'database' ? 'Database' : 'Nearby'}
                 {' · '}
                 <span style={{color:'#89d4fe'}}>
-                  {resultsSource === 'npi'
+                  {resultsSource === 'database'
+                    ? `${databaseResults.length} of ${databaseResultsTotal.toLocaleString()}`
+                    : resultsSource === 'npi'
                     ? npiResults.length
                     : filterAndSortLiveResults(liveResults).length} results
                 </span>
@@ -3386,16 +3406,17 @@ export default function App() {
               <div className="results-action-pills">
                 <button
                   className="results-action-pill"
-                  disabled={resultsSource === 'npi' || filterAndSortLiveResults(liveResults).length === 0}
+                  disabled={resultsSource === 'npi'}
                   title={resultsSource === 'npi' ? 'Provider Explorer comparison is not available for NPI-only results' : 'Compare stored providers with current live discovery'}
                   onClick={()=>void compareProviderExplorerArea(providerExplorerFilters)}
                 ><GitCompareArrows size={13}/>Compare</button>
                 <button
                   className="results-action-pill"
-                  disabled={resultsSource === 'npi' ? !npiCategory : !lastRadiusRef.current}
-                  title="Re-run the current provider search"
+                  disabled={resultsSource === 'database' ? false : resultsSource === 'npi' ? !npiCategory : !lastRadiusRef.current}
+                  title={resultsSource === 'database' ? 'Open Database browser to refresh results' : 'Re-run the current provider search'}
                   onClick={()=>{
-                    if(resultsSource === 'npi') {
+                    if(resultsSource === 'database') { setShowDatasetBrowser(true); }
+                    else if(resultsSource === 'npi') {
                       if(npiCategory === 'custom') void doCustomNpiSearch();
                       else if(npiCategory) void doNpiCategorySearch(npiCategory);
                     } else if(lastRadiusRef.current) {
@@ -3405,7 +3426,7 @@ export default function App() {
                 ><RefreshCw size={13}/>Refresh</button>
                 <button
                   className="results-action-pill"
-                  disabled={resultsSource === 'npi' ? npiResults.length === 0 : filterAndSortLiveResults(liveResults).length === 0}
+                  disabled={resultsSource === 'database' ? databaseResults.length === 0 : resultsSource === 'npi' ? npiResults.length === 0 : filterAndSortLiveResults(liveResults).length === 0}
                   title="Export the currently displayed provider results as CSV"
                   onClick={exportCurrentProviderResultsCsv}
                 ><Download size={13}/>Export</button>
@@ -3427,9 +3448,41 @@ export default function App() {
                   <div style={{fontSize:9,color:'#3d5478',marginTop:4}}>Use the <strong style={{color:'#89d4fe'}}>Find → NPI</strong> tab to search.</div>
                 </div>
               )}
+              {resultsSource === 'database' && databaseResults.length === 0 && (
+                <div className="results-empty">
+                  <div>No database results yet.</div>
+                  <div style={{fontSize:9,color:'#3d5478',marginTop:4}}>Use <strong style={{color:'#89d4fe'}}>Find → Database</strong> to query the provider database.</div>
+                </div>
+              )}
               {((resultsSource==='nearby'&&liveLoading)||(resultsSource==='npi'&&npiLoading)) && (
                 <div className="results-loading"><div className="lp-spin"/><span>Searching providers…</span></div>
               )}
+
+              {/* Database result cards */}
+              {resultsSource === 'database' && databaseResults.map((p)=>{
+                const gm=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([p.name,p.address,p.city,p.admin_area,p.country].filter(Boolean).join(' '))}`;
+                const saveKey=providerSaveKey(p);
+                const saveState=savedToMyClinics[saveKey];
+                const saveError=savedToMyClinicsErrors[saveKey];
+                return (
+                  <div key={p.id} className="result-card" onClick={()=>{ if(p.lat!=null&&p.lng!=null) lpFly(p.lat,p.lng,p.id); }}>
+                    <div className="result-card-header">
+                      <span className="result-card-name">{p.name}</span>
+                      {p.distance_miles!=null && <span className="result-card-dist">{Number(p.distance_miles).toFixed(1)} mi</span>}
+                    </div>
+                    <div className="result-card-addr">{[p.address,p.city,p.admin_area,p.country].filter(Boolean).join(', ') || 'Address unavailable'}</div>
+                    <div className="result-card-type" style={{color:'#A3C5D9'}}>{p.clinic_type || (p.services||[]).join(', ') || p.source}</div>
+                    <div style={{fontSize:8,color:'#2d4060',marginBottom:3}}>{p.source} · {p.source_kind} · {p.trust_tier}</div>
+                    <div className="result-card-actions">
+                      <button type="button" className="lp-act" disabled={saveState==='saving'||saveState==='saved'} onClick={e=>{e.stopPropagation();void saveProviderExplorerCandidate(p);}}>{saveState==='saving'?'Saving…':saveState==='saved'?'Saved':saveState==='error'?'Retry':'Save'}</button>
+                      {p.website&&<a href={p.website} target="_blank" rel="noopener" className="lp-act" onClick={e=>e.stopPropagation()}>Website</a>}
+                      {p.phone&&<a href={`tel:${p.phone}`} className="lp-act" onClick={e=>e.stopPropagation()}>Call</a>}
+                      <a href={gm} target="_blank" rel="noopener" className="lp-act" onClick={e=>e.stopPropagation()}>Directions</a>
+                    </div>
+                    {saveState==='error'&&saveError&&<div className="lp-save-error" role="alert">{saveError}</div>}
+                  </div>
+                );
+              })}
 
               {/* NPI results cards */}
               {resultsSource === 'npi' && npiCategory && npiResults.length > 0 && npiResults.map((p)=>{
@@ -3654,6 +3707,7 @@ export default function App() {
           sharedFilters={providerExplorerFilters}
           onFiltersChange={setProviderExplorerFilters}
           onOpenMatchingInDatabase={(filters)=>{ setProviderExplorerFilters(filters); setShowDatasetBrowser(true); }}
+          onRowsChange={(rows: ProviderFeature[], _filters: ProviderExplorerFilters, total: number)=>{ setDatabaseResults(rows); setDatabaseResultsTotal(total); }}
         />
 
         {showProviderExplorerDrawer && <button className="provider-drawer-backdrop" aria-label="Close Provider Explorer" onClick={()=>setShowProviderExplorerDrawer(false)}/>}

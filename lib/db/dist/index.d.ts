@@ -8,6 +8,7 @@ export type ProviderDatabaseProject = {
     pool: pg.Pool;
 };
 export declare const REGISTRY_DATABASE_CONFIG: {
+    readonly "uk-fcdo-recommended": "UK_EMBASSY_DATABASE_URL";
     readonly "finland-ptv-healthcare": "FINLAND_REGISTRY_DATABASE_URL";
     readonly "argentina-refes": "ARGENTINA_REGISTRY_DATABASE_URL";
     readonly "czechia-nrpzs": "CZECHIA_REGISTRY_DATABASE_URL";

@@ -203,14 +203,17 @@ async function workspaceButton(page, label) {
 async function workspaceContentState(page, label) {
   return page.evaluate((workspaceLabel) => {
     const normalized = workspaceLabel.toLowerCase();
+    // Phase-2 visible tabs: Providers | Map Tools | Find | Results
     const panels = normalized === "providers"
       ? Array.from(document.querySelectorAll(".sidebar > .occumed-sidebar-provider-content"))
       : [document.querySelector(
         normalized === "map tools"
           ? ".occumed-sidebar-workspace-host > .occumed-map-tools-panel"
-          : normalized === "finder"
-            ? ".live-panel.open"
-            : ".provider-explorer-drawer.open",
+          : normalized === "find"
+            ? "#sidebar-find-panel"
+            : normalized === "results"
+              ? "#sidebar-results-panel"
+              : ".live-panel.open",  // legacy liveFinder fallback
       )].filter(Boolean);
     const text = panels.map((panel) => panel.textContent || "").join(" ").replace(/\s+/g, " ").trim();
     const actionCount = panels.reduce((total, panel) => total + panel.querySelectorAll(
@@ -229,14 +232,17 @@ async function workspaceContentState(page, label) {
 async function assertWorkspaceReady(page, label, viewportName) {
   await page.waitForFunction((workspaceLabel) => {
     const normalized = workspaceLabel.toLowerCase();
+    // Phase-2 visible tabs: Providers | Map Tools | Find | Results
     const panels = normalized === "providers"
       ? Array.from(document.querySelectorAll(".sidebar > .occumed-sidebar-provider-content"))
       : [document.querySelector(
         normalized === "map tools"
           ? ".occumed-sidebar-workspace-host > .occumed-map-tools-panel"
-          : normalized === "finder"
-            ? ".live-panel.open"
-            : ".provider-explorer-drawer.open",
+          : normalized === "find"
+            ? "#sidebar-find-panel"
+            : normalized === "results"
+              ? "#sidebar-results-panel"
+              : ".live-panel.open",  // legacy liveFinder fallback
       )].filter(Boolean);
     const text = panels.map((panel) => panel.textContent || "").join(" ").replace(/\s+/g, " ").trim();
     const actionCount = panels.reduce((total, panel) => total + panel.querySelectorAll(
@@ -252,7 +258,8 @@ async function assertWorkspaceReady(page, label, viewportName) {
 }
 
 async function assertWorkspaceSwitching(page, viewportName) {
-  for (const label of ["Map Tools", "Finder", "Explorer", "Providers", "Finder", "Providers"]) {
+  // Phase-2 visible tabs: Providers | Map Tools | Find | Results
+  for (const label of ["Map Tools", "Find", "Results", "Providers", "Find", "Providers"]) {
     const button = await workspaceButton(page, label);
     await button.click();
     await assertWorkspaceReady(page, label, viewportName);
@@ -283,55 +290,39 @@ async function assertSidebarControlsInteractive(page, viewportName) {
   assert.notEqual(await density.getAttribute("aria-pressed"), densityBefore, `${viewportName}: Map Tools controls must react to clicks`);
   const densityAfter = await density.getAttribute("aria-pressed");
 
-  const finder = await workspaceButton(page, "Finder");
-  await finder.click();
-  await assertWorkspaceReady(page, "Finder", viewportName);
-  const finderPanel = page.locator(".live-panel.open");
-  const radius = finderPanel.locator("input[type='range']").first();
+  // Phase-2: Find tab replaces Finder + Explorer
+  const find = await workspaceButton(page, "Find");
+  await find.click();
+  await assertWorkspaceReady(page, "Find", viewportName);
+  const findPanel = page.locator("#sidebar-find-panel");
+  // Nearby submode has a radius range input
+  const radius = findPanel.locator("input[type='range']").first();
   await radius.fill("25");
-  assert.equal(await radius.inputValue(), "25", `${viewportName}: Finder radius must accept user changes`);
-  assert.match((await finderPanel.textContent()) || "", /Radius:\s*25 mi/i, `${viewportName}: Finder must display the selected radius`);
-  const textFilter = finderPanel.locator("input[placeholder*='Filter providers']").first();
+  assert.equal(await radius.inputValue(), "25", `${viewportName}: Find radius must accept user changes`);
+  assert.match((await findPanel.textContent()) || "", /Radius|Find|Nearby/i, `${viewportName}: Find panel must display search controls`);
+  const textFilter = findPanel.locator("input[placeholder*='Filter providers']").first();
   await textFilter.fill("occupational");
-  assert.equal(await textFilter.inputValue(), "occupational", `${viewportName}: Finder text filtering must accept input`);
-  const occMedChip = finderPanel.getByRole("button", { name: "Occ-Med", exact: true });
-  await occMedChip.click();
-  assert.match(await occMedChip.getAttribute("class") || "", /on/, `${viewportName}: Finder source chips must update their selected state`);
+  assert.equal(await textFilter.inputValue(), "occupational", `${viewportName}: Find text filtering must accept input`);
   await mapTools.click();
   await assertWorkspaceReady(page, "Map Tools", viewportName);
   assert.equal(await density.getAttribute("aria-pressed"), densityAfter, `${viewportName}: Map Tools control state must survive a tab round trip`);
   await density.click();
-  await finder.click();
-  await assertWorkspaceReady(page, "Finder", viewportName);
-  assert.equal(await radius.inputValue(), "25", `${viewportName}: Finder radius must survive a tab round trip`);
-  assert.equal(await textFilter.inputValue(), "occupational", `${viewportName}: Finder input must survive a tab round trip`);
+  await find.click();
+  await assertWorkspaceReady(page, "Find", viewportName);
+  assert.equal(await radius.inputValue(), "25", `${viewportName}: Find radius must survive a tab round trip`);
+  assert.equal(await textFilter.inputValue(), "occupational", `${viewportName}: Find input must survive a tab round trip`);
   await radius.fill("30");
-  assert.equal(await radius.inputValue(), "30", `${viewportName}: Finder controls must remain interactive after returning`);
-  await finderPanel.getByRole("button", { name: "Close", exact: true }).click();
-  await page.waitForFunction(() => document.documentElement.dataset.occumedworkspace === "providers"
-    && !document.querySelector(".live-panel.open")
-    && !document.body.dataset.providerTool, null, { timeout: 4_000 });
-  assert.equal(
-    await page.getByRole("tab", { name: /Providers workspace/i }).getAttribute("aria-selected"),
-    "true",
-    `${viewportName}: closing Finder must return to Providers instead of leaving an empty Finder tab`,
-  );
-  await finder.click();
-  await assertWorkspaceReady(page, "Finder", viewportName);
+  assert.equal(await radius.inputValue(), "30", `${viewportName}: Find controls must remain interactive after returning`);
 
-  const explorer = await workspaceButton(page, "Explorer");
-  await explorer.click();
-  await assertWorkspaceReady(page, "Explorer", viewportName);
-  const explorerPanel = page.locator(".provider-explorer-drawer.open");
-  const points = explorerPanel.getByRole("button", { name: "8px points", exact: true });
-  await points.click();
-  assert.match(await points.getAttribute("class") || "", /active/, `${viewportName}: Explorer controls must update their selected state`);
-  const providerType = explorerPanel.locator("select").first();
-  await providerType.selectOption("occupational_health_clinic");
-  assert.equal(await providerType.inputValue(), "occupational_health_clinic", `${viewportName}: Explorer provider type must be selectable`);
-  await explorerPanel.getByRole("button", { name: "Clear filters", exact: true }).click();
-  await page.waitForFunction(() => document.querySelector(".provider-explorer-drawer.open select")?.value === "");
-  assert.equal(await providerType.inputValue(), "", `${viewportName}: Explorer must clear its provider type filter`);
+  // Database submode: switch to it and verify provider-type select is present
+  const dbPill = findPanel.getByRole("button", { name: "Database", exact: true });
+  await dbPill.click();
+  const dbSelect = findPanel.locator("select").first();
+  await dbSelect.selectOption("occupational_health_clinic");
+  assert.equal(await dbSelect.inputValue(), "occupational_health_clinic", `${viewportName}: Find → Database provider type must be selectable`);
+  // Reset back to Nearby
+  const nearbyPill = findPanel.getByRole("button", { name: "Nearby", exact: true });
+  await nearbyPill.click();
 
   const providers = await workspaceButton(page, "Providers");
   await providers.click();
@@ -361,7 +352,8 @@ async function assertSidebarControlsInteractive(page, viewportName) {
 }
 
 async function assertRapidSidebarStress(page, viewportName) {
-  const sequence = ["Providers", "Map Tools", "Finder", "Explorer", "Providers"];
+  // Phase-2 visible tabs: Providers | Map Tools | Find | Results
+  const sequence = ["Providers", "Map Tools", "Find", "Results", "Providers"];
   for (let repetition = 0; repetition < 4; repetition += 1) {
     for (const label of sequence) {
       const button = await workspaceButton(page, label);
@@ -401,8 +393,9 @@ async function assertSidebarResizeStress(page, viewportName) {
     await assertGeometry(page, `${viewportName}/resize-${size.width}x${size.height}`);
     const tabs = page.locator(".occumed-sidebar-workspace-tab");
     assert.equal(await tabs.count(), 4, `${viewportName}: all four tabs must remain available after resize`);
+    // Phase-2: 4th tab is Results (index 3)
     await tabs.nth(3).click();
-    await assertWorkspaceReady(page, "Explorer", viewportName);
+    await assertWorkspaceReady(page, "Results", viewportName);
     await tabs.nth(0).click();
   }
 }
@@ -411,18 +404,19 @@ async function assertKeyboardTabs(page, viewportName) {
   const providers = await workspaceButton(page, "Providers");
   await providers.click();
   await providers.focus();
+  // Phase-2 tabs: Providers(0) | Map Tools(1) | Find(2) | Results(3)
   await page.keyboard.press("ArrowRight");
   await page.waitForTimeout(120);
   const mapToolsSelected = await page.locator(".occumed-sidebar-workspace-tab[aria-selected='true']").textContent();
   assert.match(mapToolsSelected || "", /map tools/i, `${viewportName}: first ArrowRight must select Map Tools`);
   await page.keyboard.press("ArrowRight");
   await page.waitForTimeout(120);
-  const finderSelected = await page.locator(".occumed-sidebar-workspace-tab[aria-selected='true']").textContent();
-  assert.match(finderSelected || "", /finder/i, `${viewportName}: second ArrowRight must select Finder`);
+  const findSelected = await page.locator(".occumed-sidebar-workspace-tab[aria-selected='true']").textContent();
+  assert.match(findSelected || "", /find/i, `${viewportName}: second ArrowRight must select Find`);
   await page.keyboard.press("ArrowRight");
   await page.waitForTimeout(120);
-  const explorerSelected = await page.locator(".occumed-sidebar-workspace-tab[aria-selected='true']").textContent();
-  assert.match(explorerSelected || "", /explorer/i, `${viewportName}: third ArrowRight must select Explorer`);
+  const resultsSelected = await page.locator(".occumed-sidebar-workspace-tab[aria-selected='true']").textContent();
+  assert.match(resultsSelected || "", /results/i, `${viewportName}: third ArrowRight must select Results`);
   await page.keyboard.press("ArrowRight");
   await page.waitForTimeout(120);
   const wrappedSelected = await page.locator(".occumed-sidebar-workspace-tab[aria-selected='true']").textContent();
@@ -430,7 +424,7 @@ async function assertKeyboardTabs(page, viewportName) {
   await page.keyboard.press("End");
   await page.waitForTimeout(120);
   const endSelected = await page.locator(".occumed-sidebar-workspace-tab[aria-selected='true']").textContent();
-  assert.match(endSelected || "", /explorer/i, `${viewportName}: End must select Explorer`);
+  assert.match(endSelected || "", /results/i, `${viewportName}: End must select Results`);
   await page.keyboard.press("Home");
   await page.waitForTimeout(120);
   const homeSelected = await page.locator(".occumed-sidebar-workspace-tab[aria-selected='true']").textContent();

@@ -289,7 +289,7 @@ export default function ProviderLayerRegistryPanel() {
     <div data-provider-registry-owned="true">
       {PROVIDER_LAYER_CATEGORIES.map((definition, index) => <div key={definition.id}>
         {(index === 0 || PROVIDER_LAYER_CATEGORIES[index - 1].section !== definition.section) &&
-          <div className="apple-glow-subtitle provider-registry-section-title">{definition.section}</div>
+          <div className="apple-glow-subtitle provider-registry-section-title">{definition.section}</div>}
         <Toggle definition={definition} state={layers[definition.id] || EMPTY_LAYER_STATE}
           onChange={(enabled) => setEnabled(definition, enabled)} />
       </div>)}

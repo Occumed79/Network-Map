@@ -318,7 +318,7 @@ async function runCase(browser, viewport, routeVariant) {
     await page.waitForTimeout(700);
 
     await assertNoGeometryFailure(page, `${label}/initial`);
-    for (const workspace of ["Providers", "Map Tools", "Finder", "Explorer", "Providers"]) {
+    for (const workspace of ["Providers", "Map Tools", "Find", "Results", "Providers"]) {
       await assertWorkspace(page, workspace);
       await assertNoGeometryFailure(page, `${label}/${workspace}`);
     }

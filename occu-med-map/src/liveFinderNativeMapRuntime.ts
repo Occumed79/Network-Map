@@ -18,6 +18,10 @@ type NativeOverlaySnapshot = {
   channel: Channel;
   featureCount: number;
   geometryTypes: string[];
+  features: Array<{
+    geometryType: GeoJSON.Geometry["type"];
+    coordinates: unknown;
+  }>;
 };
 
 type NativeOverlayDiagnosticsGlobal = typeof globalThis & {
@@ -49,6 +53,10 @@ function getNativeOverlaySnapshot(channel: Channel): NativeOverlaySnapshot {
     channel,
     featureCount: features.length,
     geometryTypes: features.map((feature) => feature.geometry.type),
+    features: features.map((feature) => ({
+      geometryType: feature.geometry.type,
+      coordinates: "coordinates" in feature.geometry ? feature.geometry.coordinates : null,
+    })),
   };
 }
 

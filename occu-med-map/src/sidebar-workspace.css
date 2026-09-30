@@ -1336,3 +1336,125 @@ html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspac
     min-height: 92px !important;
   }
 }
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   FINAL TYPOGRAPHY + LUMINOUS SUBTITLE AUTHORITY
+   Apple/macOS Tahoe treatment for the visible sidebar only.
+   Border animation and subtitle glow are intentionally separate systems.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --sf-pro-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif;
+  --sf-pro-text: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", sans-serif;
+}
+
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope {
+  font-family: var(--sf-pro-text) !important;
+  font-variant-numeric: tabular-nums;
+}
+
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+  :is(input, select, textarea, label, small, .workflow-layer-status, .providers-compact-meta, .result-card-addr, .result-card-type) {
+  font-family: var(--sf-pro-text) !important;
+}
+
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+  :is(
+    .occumed-sidebar-workspace-tab,
+    .command-tool-grid button,
+    .find-submode-pill,
+    .results-action-pill,
+    .workflow-layer-name,
+    .result-card-name,
+    .providers-compact-title,
+    .occumed-basemap-title
+  ) {
+  font-family: var(--sf-pro-display) !important;
+}
+
+/* Shared luminous subsection style: static text light only, never animated. */
+.apple-glow-subtitle,
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope .phase1-section-label,
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope .find-section-glow-label,
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope .find-submode-label,
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope .unified-source-divider,
+html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope .occumed-map-tools-panel .occumed-map-tools-section-title {
+  font-family: var(--sf-pro-display) !important;
+  font-size: 9.5px !important;
+  font-weight: 650 !important;
+  line-height: 1.2 !important;
+  letter-spacing: 0.10em !important;
+  text-transform: uppercase !important;
+  color: #D1DCE5 !important;
+  text-shadow:
+    0 0 4px rgba(240, 248, 255, 0.42),
+    0 0 10px rgba(163, 197, 217, 0.30) !important;
+}
+
+/* Registry category labels are real rendered elements, not inline IBM Plex overrides. */
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+  .provider-registry-section-title {
+  display: block;
+  margin: 10px 0 6px;
+  padding: 0;
+}
+
+/* Section icons are illuminated independently from the text. */
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+  .phase1-section-label svg {
+  color: #A3C5D9 !important;
+  opacity: 0.92 !important;
+  filter: drop-shadow(0 0 5px rgba(163, 197, 217, 0.24));
+}
+
+/* Major workspace headings: SF Pro Display with a restrained ice glow. */
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+  .providers-compact-title,
+html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body
+  .sidebar.occumed-sidebar-workspace-scope .occumed-map-tools-panel .occumed-basemap-title {
+  font-family: var(--sf-pro-display) !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.09em !important;
+  color: #F0F8FF !important;
+  text-shadow:
+    0 0 5px rgba(240, 248, 255, 0.34),
+    0 0 12px rgba(163, 197, 217, 0.22) !important;
+}
+
+/* Top workspace tabs and workflow buttons should read like native macOS controls. */
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+  .occumed-sidebar-workspace-tab {
+  font-weight: 650 !important;
+  letter-spacing: -0.01em !important;
+}
+
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+  .command-tool-grid button {
+  font-weight: 650 !important;
+  letter-spacing: -0.005em !important;
+}
+
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+  .workflow-layer-name {
+  font-weight: 650 !important;
+  letter-spacing: -0.006em !important;
+}
+
+/* Reduce the old dashboard-heavy weights while preserving hierarchy. */
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+  .command-section-title,
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+  .command-section-toggle {
+  font-family: var(--sf-pro-display) !important;
+  font-weight: 650 !important;
+}
+
+/* Results metadata stays quieter than luminous section headings. */
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+  .results-action-bar-label {
+  font-family: var(--sf-pro-text) !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.01em !important;
+}

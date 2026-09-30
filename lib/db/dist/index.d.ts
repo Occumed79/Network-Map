@@ -8,6 +8,7 @@ export type ProviderDatabaseProject = {
     pool: pg.Pool;
 };
 export declare const REGISTRY_DATABASE_CONFIG: {
+    readonly "uk-fcdo-recommended": "UK_EMBASSY_DATABASE_URL";
     readonly "finland-ptv-healthcare": "FINLAND_REGISTRY_DATABASE_URL";
     readonly "argentina-refes": "ARGENTINA_REGISTRY_DATABASE_URL";
     readonly "czechia-nrpzs": "CZECHIA_REGISTRY_DATABASE_URL";
@@ -91,6 +92,12 @@ export declare function getDatabaseConfigurationSummary(): {
 };
 export declare function getRegistryDatabaseProject(id: RegistryDatabaseId): RegistryDatabaseProject | null;
 export declare function getPool(): pg.Pool;
+/**
+ * Creates a small standalone PostgreSQL pool for a dedicated database whose
+ * lifecycle is owned by the caller. This keeps packages that already depend on
+ * @workspace/db from importing pg transitively at runtime.
+ */
+export declare function createStandalonePool(connectionString: string, applicationName: string, max?: number): pg.Pool;
 /**
  * Returns the provider-map Neon projects in a stable order. Every configured
  * project is expected to contain the same provider schema. Source-specific

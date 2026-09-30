@@ -228,7 +228,7 @@ export async function lookupCache(params: AutosaveLookupParams): Promise<Autosav
            last_seen_at = now()
        WHERE search_key = $1`,
       [searchKey],
-    ).catch((err) => logger.warn({ err }, "autosaveCache: failed to update hit counters"));
+    ).catch((err: unknown) => logger.warn({ err }, "autosaveCache: failed to update hit counters"));
 
     return {
       cacheHit: true,

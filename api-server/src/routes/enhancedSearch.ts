@@ -7,6 +7,7 @@ import {
   type GooglePlacesMetadata,
 } from "../lib/googleHealthcarePlaces";
 import { isPersistenceConfigured } from "../lib/networkMapPersistence";
+import { isPersistableSource } from "../lib/autosaveCache";
 import { logger } from "../lib/logger";
 import { haversineMiles, runUnifiedSearch } from "../providerSources/orchestrator";
 import { upsertProvider } from "../providerSources/persistence";
@@ -157,9 +158,18 @@ router.get("/enhanced-search", async (req: Request, res: Response) => {
       })
       .sort((left, right) => (left.distanceMiles || 999) - (right.distanceMiles || 999));
 
+    // Only persist candidates from non-Google sources.
+    // Google Places content (source, coordinateSource, or _rawSources) must not
+    // be written to the durable provider database.
+    const persistableCandidates = sorted.filter(c =>
+      isPersistableSource(c.source || "") &&
+      c.coordinateSource !== "google-places" &&
+      !(c._rawSources || []).includes("google_places")
+    );
+
     let savedCount = 0;
     if (isPersistenceConfigured()) {
-      for (const candidate of sorted) {
+      for (const candidate of persistableCandidates) {
         try {
           await upsertProvider(candidate, serviceType);
           savedCount += 1;

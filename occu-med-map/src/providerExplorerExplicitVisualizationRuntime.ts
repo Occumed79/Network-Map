@@ -32,7 +32,7 @@ function visibleButtonLabel(button: HTMLButtonElement): string {
 }
 
 function bindVisualizationControls(): void {
-  document.querySelectorAll<HTMLButtonElement>(".provider-explorer-drawer .provider-visualization-grid button").forEach((button) => {
+  document.querySelectorAll<HTMLButtonElement>(".occumed-sidebar-find-content .provider-visualization-grid button").forEach((button) => {
     if (boundVisualizationButtons.has(button)) return;
     boundVisualizationButtons.add(button);
     // Bind on the control itself as well as the document owner below. This is
@@ -52,14 +52,14 @@ function restoreInactivePresentation(): void {
   const dotCount = native?.getSnapshot?.("dots")?.featureCount || 0;
   if (aggregateCount > 0 || dotCount > 0) clearProviderExplorerNative(["aggregate", "dots"]);
 
-  const drawer = document.querySelector<HTMLElement>(".provider-explorer-drawer");
-  if (!drawer) return;
+  const findPanel = document.querySelector<HTMLElement>(".occumed-sidebar-find-content");
+  if (!findPanel) return;
 
-  drawer.querySelectorAll<HTMLButtonElement>(".provider-visualization-grid button.active").forEach((button) => {
+  findPanel.querySelectorAll<HTMLButtonElement>(".provider-visualization-grid button.active").forEach((button) => {
     button.classList.remove("active");
   });
 
-  const status = drawer.querySelector<HTMLElement>(".provider-map-status");
+  const status = findPanel.querySelector<HTMLElement>(".provider-map-status");
   const readyText = "Choose a visualization to render providers on the map.";
   if (status && status.textContent?.trim() !== readyText) status.textContent = readyText;
 }
@@ -75,8 +75,8 @@ function handleClick(event: MouseEvent): void {
   const button = target?.closest<HTMLButtonElement>("button");
   if (!button || button.disabled) return;
 
-  const drawer = button.closest<HTMLElement>(".provider-explorer-drawer");
-  if (!drawer) return;
+  const findPanel = button.closest<HTMLElement>(".occumed-sidebar-find-content");
+  if (!findPanel || document.documentElement.dataset.occumedFindMode !== "database") return;
 
   if (button.closest(".provider-visualization-grid")) {
     setIntent(true);
@@ -84,14 +84,14 @@ function handleClick(event: MouseEvent): void {
   }
 
   const label = visibleButtonLabel(button);
-  if (button.getAttribute("aria-label") === "Close Provider Explorer" || label === "clear filters") {
-    reset();
-  }
+  if (label === "clear filters") reset();
 }
 
 function handleWorkspaceChange(): void {
   window.requestAnimationFrame(() => {
-    if (document.documentElement.dataset.occumedworkspace !== "explorer") {
+    const inDatabaseFind = document.documentElement.dataset.occumedworkspace === "find"
+      && document.documentElement.dataset.occumedFindMode === "database";
+    if (!inDatabaseFind) {
       reset();
       return;
     }
@@ -99,9 +99,14 @@ function handleWorkspaceChange(): void {
   });
 }
 
+function handleFindModeChange(): void {
+  handleWorkspaceChange();
+}
+
 function cleanup(): void {
   document.removeEventListener("click", handleClick, true);
   window.removeEventListener("network-map:sidebar-workspace", handleWorkspaceChange);
+  window.removeEventListener("network-map:find-mode", handleFindModeChange);
   unsubscribeDom?.();
   unsubscribeDom = null;
 }
@@ -115,6 +120,7 @@ function install(): void {
   setIntent(false);
   document.addEventListener("click", handleClick, true);
   window.addEventListener("network-map:sidebar-workspace", handleWorkspaceChange);
+  window.addEventListener("network-map:find-mode", handleFindModeChange);
   unsubscribeDom = subscribeToSharedDomObserver(
     "provider-explorer-explicit-visualization",
     restoreInactivePresentation,

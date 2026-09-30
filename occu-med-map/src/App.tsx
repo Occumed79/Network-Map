@@ -1064,6 +1064,10 @@ export default function App() {
   const [activeTool, setActiveTool] = useState<ActiveTool>(null);
   const [providerToolMode,setProviderToolMode] = useState<'live'|'npi'>('live');
   const [findMode, setFindMode] = useState<FindMode>('nearby');
+  useEffect(() => {
+    document.documentElement.dataset.occumedFindMode = findMode;
+    window.dispatchEvent(new CustomEvent('network-map:find-mode', {detail:{mode:findMode}}));
+  }, [findMode]);
   // Results workspace: persists across tab switches
   const [resultsSource, setResultsSource] = useState<'nearby'|'npi'|'database'>('nearby');
   const [databaseResults, setDatabaseResults] = useState<ProviderFeature[]>([]);

@@ -28,7 +28,7 @@ export async function fetchHealthcareAccessAssessment(input: {
 }): Promise<HealthcareAccessAssessment> {
   const params = new URLSearchParams({ lat: String(input.lat), lng: String(input.lng), service: input.service, countryCode: input.countryCode });
   if (input.admin1) params.set("admin1", input.admin1);
-  const response = await fetch(`/api/scoring/assessment?${params}`);
+  const response = await fetch(`/api/scoring/assessment?${params}`, { signal: AbortSignal.timeout(60_000) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data.assessment) throw new Error(data.error || `Assessment request failed (HTTP ${response.status})`);
   return data.assessment;

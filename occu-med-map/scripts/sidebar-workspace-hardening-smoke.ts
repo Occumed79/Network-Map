@@ -86,8 +86,8 @@ assert.match(appSource, /sidebarWorkspace !== 'mapTools'[\s\S]*requestAnimationF
 assert.match(appSource, /sync: \(\) => \{ dockMapToolsPanel/, "the explicit workspace sync API must restore Map Tools without simulated clicks");
 assert.match(appSource, /__NETWORK_MAP_SIDEBAR_WORKSPACES__ =/, "React must expose diagnostics and explicit external control");
 assert.doesNotMatch(appSource, /PANEL_RETRY_DELAYS_MS|panelHasContent|launcher\?\.click\(\)|handleWorkspaceTabClick|sidebarWorkspaceControllerRuntime/, "workspace ownership must not retain imperative controller workarounds");
-assert.match(appSource, /aria-hidden=\{activeTool !== 'liveFinder'\} inert=\{activeTool !== 'liveFinder'\}/, "inactive Finder must be natively non-interactive");
-assert.match(appSource, /aria-hidden=\{!showProviderExplorerDrawer\}[\s\S]*inert=\{!showProviderExplorerDrawer\}/, "inactive Explorer must be natively non-interactive");
+assert.match(appSource, /aria-hidden=\{sidebarWorkspace !== 'find'\}/, "inactive Find workspace must be hidden");
+assert.match(appSource, /aria-hidden=\{sidebarWorkspace !== 'results'\}/, "inactive Results workspace must be hidden");
 
 assert.match(panelGuard, /registerRuntimeOwner\("sidebar-workspace-integrity"/, "sidebar integrity diagnostics must have an explicit owner");
 assert.doesNotMatch(panelGuard, /new MutationObserver/, "sidebar integrity diagnostics must not add a competing DOM observer");
@@ -105,8 +105,8 @@ assert.match(workspaceCss, /\.occumed-sidebar-workspace-host > \.occumed-map-too
 assert.match(workspaceCss, /\.occumed-sidebar-workspace-tab\s*\{[\s\S]*font-size: 11\.5px !important;/, "workspace tab labels must retain readable text");
 assert.match(workspaceCss, /grid-template-columns: var\(--command-sidebar-width\) minmax\(0, 1fr\) !important;/, "desktop layout must have only sidebar and map columns");
 assert.doesNotMatch(workspaceCss, /minmax\(0, 1fr\) 0 !important/, "a zero-width third column must not remain");
-assert.match(workspaceCss, /Floating Finder\/Explorer panels/i, "authoritative layout must document floating panel ownership");
-assert.match(workspaceCss, /position: fixed !important;[\s\S]*--workspace-panel-top/, "Finder and Explorer must align to measured sidebar geometry");
+assert.match(workspaceCss, /Find panel visibility/i, "Find visibility must be owned by the sidebar stylesheet");
+assert.match(workspaceCss, /occumed-sidebar-find-content \{[\s\S]*width: 100% !important;/, "Find must fit its inline sidebar host");
 assert.match(workspaceCss, /data-occumedworkspace="mapTools"/, "Map Tools must have a workspace-scoped final theme");
 assert.match(workspaceCss, /background: var\(--workspace-card-bg\) !important;/, "workspace cards must share the navy panel palette");
 assert.match(workspaceCss, /occumed-sidebar-provider-content > :is\(\.hero-card, \.sb-section\)/, "React's provider wrapper must retain the direct-child card styling");
@@ -115,8 +115,8 @@ assert.match(workspaceCss, /--command-sidebar-width: clamp\(292px, 21vw, 320px\)
 assert.match(workspaceCss, /overflow-x: hidden !important;/, "workspace panels must prevent horizontal overflow");
 assert.match(workspaceCss, /occumed-sidebar-workspace-scope::before[\s\S]*pointer-events: none !important;/, "decorative sidebar pseudo-elements must never intercept pointers");
 assert.match(workspaceCss, /--workspace-layer-panel: 3100;[\s\S]*--workspace-layer-tabs: 3110;/, "sidebar overlays must use the documented application layer band");
-assert.match(workspaceCss, /data-occumedworkspace\]:not\(\[data-occumedworkspace="liveFinder"\]\)/, "inactive Finder must be forcibly hidden");
-assert.match(workspaceCss, /data-occumedworkspace\]:not\(\[data-occumedworkspace="explorer"\]\)/, "inactive Explorer must be forcibly hidden");
+assert.match(workspaceCss, /occumed-sidebar-find-content \{[\s\S]*display: none !important;/, "inactive Find must be hidden by default");
+assert.match(workspaceCss, /occumed-sidebar-results-content \{[\s\S]*display: none !important;/, "inactive Results must be hidden by default");
 
 assert.match(productionUi, /assertWorkspace\("providers"\)/, "production UI smoke must exercise Providers");
 assert.match(productionUi, /assertWorkspace\("mapTools"/, "production UI smoke must exercise Map Tools");
@@ -128,7 +128,7 @@ for (const control of [
   "Route starting location",
   "Route destination",
   "Luminous Density",
-  "Occ-Med",
+  "occupational",
   "occupational_health_clinic",
 ]) {
   assert.match(uiAcceptance, new RegExp(control), `rendered UI acceptance must exercise ${control}`);

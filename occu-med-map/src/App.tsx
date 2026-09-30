@@ -21,7 +21,6 @@ import {
   Radar,
   RefreshCw,
   Search,
-  SlidersHorizontal,
   Upload,
   X,
 } from 'lucide-react';
@@ -996,7 +995,7 @@ function generateReportHtml(data:ReportData,evidence:EvidencePayload|null):strin
 // ─────────────────────────────────────────────────────────────────────────────
 // Main App Component
 // ─────────────────────────────────────────────────────────────────────────────
-type SidebarWorkspace = 'providers' | 'mapTools' | 'liveFinder' | 'explorer' | 'find' | 'results';
+type SidebarWorkspace = 'providers' | 'mapTools' | 'find' | 'results';
 // Phase-2 find submode
 type FindMode = 'nearby' | 'npi' | 'database';
 
@@ -1146,7 +1145,6 @@ export default function App() {
   const [serviceInventoryEnabled, setServiceInventoryEnabled] = useState(false);
   const inventoryFetchRef = useRef<AbortController|null>(null);
   const [showDatasetBrowser, setShowDatasetBrowser] = useState(false);
-  const [showProviderExplorerDrawer, setShowProviderExplorerDrawer] = useState(false);
   const [providerRegistrySummary, setProviderRegistrySummary] = useState({ active: 0, visible: 0 });
   const [uploadedRegistrySummary, setUploadedRegistrySummary] = useState({ active: 0, visible: 0 });
   useEffect(() => {
@@ -1177,8 +1175,6 @@ export default function App() {
     mapView: true,
     usDiagnostics: true,
   });
-  const [outreachNotes, setOutreachNotes] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_notes')||'{}'); } catch { return {}; } });
-  const [outreachStatus, setOutreachStatus] = useState<Record<string,string>>(() => { try { return JSON.parse(localStorage.getItem('outreach_status')||'{}'); } catch { return {}; } });
   const [savedToMyClinics, setSavedToMyClinics] = useState<Record<string,MyClinicSaveStatus>>({});
   const [savedToMyClinicsErrors, setSavedToMyClinicsErrors] = useState<Record<string,string>>({});
   const saveToMyClinicsInFlightRef = useRef<Set<string>>(new Set());
@@ -1200,21 +1196,6 @@ export default function App() {
   useEffect(()=>{
     providerEta.clear();
   },[liveResults,dropCenter?.lat,dropCenter?.lng,providerEta.clear]);
-
-  function updateOutreachNote(id:any, value:string) {
-    setOutreachNotes(prev=>{
-      const next={...prev,[String(id)]:value};
-      localStorage.setItem('outreach_notes', JSON.stringify(next));
-      return next;
-    });
-  }
-  function updateOutreachStatus(id:any, value:string) {
-    setOutreachStatus(prev=>{
-      const next={...prev,[String(id)]:value};
-      localStorage.setItem('outreach_status', JSON.stringify(next));
-      return next;
-    });
-  }
 
   // ── Price Finder state ────────────────────────────────────────────────────
     const [pfCity, setPfCity] = useState('');
@@ -1316,21 +1297,6 @@ export default function App() {
     if (txt.includes('radiology')) score += 1;
     if (txt.includes('federally qualified') || c.isFqhc) score += 2;
     return Math.min(score, 10);
-  }
-
-  function exportOutreachCsv() {
-    const rows = [
-      ['facility_id','status','notes'],
-      ...Object.keys(outreachStatus).map(id => [id, outreachStatus[id] || 'new', (outreachNotes[id] || '').replace(/\n/g,' ')])
-    ];
-    const csv = rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv],{type:'text/csv;charset=utf-8'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `outreach_export_${new Date().toISOString().slice(0,10)}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
   }
 
   function exportCurrentProviderResultsCsv() {
@@ -1467,7 +1433,6 @@ export default function App() {
 
   const [mapReady, setMapReady] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [sheetState, setSheetState] = useState<'default'|'collapsed'|'expanded'>('default');
 
   // ── Import shared price reports from URL on first load ────────────────────
   useEffect(()=>{
@@ -2961,25 +2926,22 @@ export default function App() {
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
-  const selectSidebarWorkspace = useCallback((workspace:SidebarWorkspace) => {
+  const selectSidebarWorkspace = useCallback((workspace:SidebarWorkspace, findModeOverride?:FindMode) => {
+    const effectiveFindMode = findModeOverride ?? findMode;
     sidebarWorkspaceRef.current = workspace;
     setSidebarWorkspace(workspace);
-    // Legacy Finder/Explorer states remain available to their runtimes, but the
-    // visible Find tab controls whether Live/NPI finder behavior is active.
-    setShowProviderExplorerDrawer(workspace === 'explorer');
     setActiveTool(current => {
       let nextTool: ActiveTool = current;
-      if (workspace === 'liveFinder') nextTool = 'liveFinder';
-      else if (workspace === 'find') nextTool = findMode === 'database' ? (current === 'liveFinder' ? null : current) : 'liveFinder';
-      else if (current === 'liveFinder') nextTool = null;
+      if (workspace === 'find') {
+        nextTool = effectiveFindMode === 'database' ? (current === 'liveFinder' ? null : current) : 'liveFinder';
+      } else if (current === 'liveFinder') {
+        nextTool = null;
+      }
       activeToolRef.current = nextTool;
       return nextTool;
     });
-    if (workspace === 'liveFinder') {
-      setProviderToolMode(current => current === 'npi' ? 'npi' : 'live');
-      if (!['live','npi'].includes(document.body.dataset.providerTool || '')) document.body.dataset.providerTool = 'live';
-    } else if (workspace === 'find' && findMode !== 'database') {
-      const mode = findMode === 'npi' ? 'npi' : 'live';
+    if (workspace === 'find' && effectiveFindMode !== 'database') {
+      const mode = effectiveFindMode === 'npi' ? 'npi' : 'live';
       setProviderToolMode(mode);
       document.body.dataset.providerTool = mode;
     } else {
@@ -3569,11 +3531,11 @@ export default function App() {
           <section className="sb-section command-section">
             <div className="phase1-section-label"><Radar size={13}/><span>Workflows</span></div>
             <div className="command-tool-grid">
-              <button className={String((activeTool==='liveFinder'?'active':'') || '').concat(' unified-live-tool').trim()} onClick={()=>{setFindMode('nearby');setProviderToolMode('live');document.body.dataset.providerTool='live';selectSidebarWorkspace('find');}}><Radar size={16}/><span>Live Finder</span></button>
-                <button type="button" className="unified-npi-tool" onClick={()=>{setFindMode('npi');setProviderToolMode('npi');document.body.dataset.providerTool='npi';selectSidebarWorkspace('find');}} aria-pressed={providerToolMode==='npi'}>
+              <button className={String((activeTool==='liveFinder'?'active':'') || '').concat(' unified-live-tool').trim()} onClick={()=>{setFindMode('nearby');setProviderToolMode('live');document.body.dataset.providerTool='live';selectSidebarWorkspace('find','nearby');}}><Radar size={16}/><span>Live Finder</span></button>
+                <button type="button" className="unified-npi-tool" onClick={()=>{setFindMode('npi');setProviderToolMode('npi');document.body.dataset.providerTool='npi';selectSidebarWorkspace('find','npi');}} aria-pressed={providerToolMode==='npi'}>
                   <span>NPI Registry</span>
                 </button>
-                <button type="button" className="unified-explorer-tool" onClick={()=>{setFindMode('database');selectSidebarWorkspace('find');}}>
+                <button type="button" className="unified-explorer-tool" onClick={()=>{setFindMode('database');selectSidebarWorkspace('find','database');}}>
                   <span>Provider Explorer</span>
                 </button>
               <button className={activeTool==='radius'?'active':''} onClick={()=>toggleCommandTool('radius')}><Crosshair size={16}/><span>Radius Tool</span></button>
@@ -3717,78 +3679,6 @@ export default function App() {
           onRowsChange={(rows: ProviderFeature[], _filters: ProviderExplorerFilters, total: number)=>{ setDatabaseResults(rows); setDatabaseResultsTotal(total); }}
         />
 
-        {showProviderExplorerDrawer && <button className="provider-drawer-backdrop" aria-label="Close Provider Explorer" onClick={()=>setShowProviderExplorerDrawer(false)}/>}
-        <aside
-          id="sidebar-explorer-panel"
-          className={`provider-explorer-drawer${showProviderExplorerDrawer?' open':''}`}
-          role="dialog"
-          aria-label="Provider Explorer"
-          aria-modal={showProviderExplorerDrawer || undefined}
-          aria-hidden={!showProviderExplorerDrawer}
-          inert={!showProviderExplorerDrawer}
-        >
-          <div className="provider-drawer-header">
-            <div className="provider-drawer-title">
-              <span><SlidersHorizontal size={18}/></span>
-              <div><strong>Provider Explorer</strong><small>Map visualization and database scope</small></div>
-            </div>
-            <button type="button" className="rp-close" aria-label="Close Provider Explorer" onClick={()=>selectSidebarWorkspace('providers')}>Close</button>
-
-          </div>
-          <div className="provider-drawer-body">
-            <section className="provider-drawer-section">
-              <div className="provider-drawer-section-title"><span>Visualization</span><small>{providerExplorerMode.replace('-', ' + ')}</small></div>
-              <div className="provider-visualization-grid">
-                {([
-                  ['density','Density'],
-                  ['hex','Hex field'],
-                  ['pins','8px points'],
-                  ['density-pins','Density + points'],
-                  ['dot-density','Dot density'],
-                ] as Array<[ProviderExplorerMode,string]>).map(([mode,label])=>(
-                  <button key={mode} className={providerExplorerMode===mode?'active':''} onClick={()=>void renderProviderExplorerMap(mode)}>{label}</button>
-                ))}
-              </div>
-            </section>
-
-            <section className="provider-drawer-section">
-              <label className="provider-field-label" htmlFor="provider-type-filter">Provider type</label>
-              <select id="provider-type-filter" className="provider-type-filter" value={masterProviderTypeFilter} onChange={event=>{const value=event.target.value;setMasterProviderTypeFilter(value);setProviderExplorerFilters(prev=>({...prev,clinicType:value}));}}>
-                {MASTER_PROVIDER_TYPE_OPTIONS.map(([value,label])=><option key={value} value={value}>{label}</option>)}
-              </select>
-              <label className="provider-live-toggle">
-                <input type="checkbox" checked={providerExplorerLiveEnabled} onChange={event=>setProviderExplorerLiveEnabled(event.target.checked)}/>
-                <span><strong>Live discovery overlay</strong><small>{liveResults.length.toLocaleString()} results are not stored</small></span>
-              </label>
-            </section>
-
-            <section className="provider-drawer-section">
-              <div className="provider-drawer-section-title"><span>Database scope</span></div>
-              <div className="provider-action-list">
-                <button onClick={useCurrentProviderMapBoundsInDatabase}><MapIcon size={15}/><span><strong>Current map view</strong><small>Open records inside the visible bounds</small></span><ChevronRight size={15}/></button>
-                <button onClick={useCurrentProviderRadiusInDatabase}><Crosshair size={15}/><span><strong>Current radius</strong><small>{hasRadiusCenter?'Use the active center and distance':'Select a map or radius center first'}</small></span><ChevronRight size={15}/></button>
-                <button onClick={()=>setShowDatasetBrowser(true)}><Database size={15}/><span><strong>Matching records</strong><small>Browse, filter, and inspect source data</small></span><ChevronRight size={15}/></button>
-              </div>
-            </section>
-
-            <section className="provider-drawer-section">
-              <div className="provider-secondary-actions">
-                <button onClick={()=>void compareProviderExplorerArea(providerExplorerFilters)}><GitCompareArrows size={15}/>Compare stored and live</button>
-                <button onClick={()=>void renderProviderExplorerMap(providerExplorerMode,providerExplorerFilters)}><RefreshCw size={15}/>Refresh map</button>
-                <button disabled={!providerExplorerLiveEnabled} onClick={()=>void renderProviderExplorerLiveLayer()}><Radar size={15}/>Refresh live</button>
-                <button onClick={()=>{clearProviderExplorerMap();setMasterProviderTypeFilter('');setProviderExplorerFilters(INITIAL_PROVIDER_EXPLORER_FILTERS);setProviderExplorerStatus('Provider map and database filters cleared');}}><X size={15}/>Clear filters</button>
-              </div>
-            </section>
-
-            <details className="provider-legend">
-              <summary>Provider category colors</summary>
-              <div className="provider-category-legend">{PROVIDER_CATEGORY_LEGEND.map(key=><span key={key}><i style={{background:PROVIDER_CATEGORY_STYLES[key].color}}/>{PROVIDER_CATEGORY_STYLES[key].label}</span>)}</div>
-            </details>
-            <div className="provider-map-status" role="status">{providerExplorerStatus}</div>
-            <div className="provider-persistence-note">Live results remain separate until you explicitly save a candidate.</div>
-          </div>
-        </aside>
-
         {/* ── MAP ── */}
         <div className="map-wrap">
           {/* Floating search bar — replaces full-width command-header */}
@@ -3908,422 +3798,6 @@ export default function App() {
         </div>
 
 
-
-        {/* ── LIVE PANEL ── */}
-        <div id="sidebar-finder-panel" className={`live-panel${activeTool === 'liveFinder' ? ' open' : ''}${sheetState !== 'default' ? ` sheet-${sheetState}` : ''}`} role="region" aria-label="Provider finder workspace" aria-hidden={activeTool !== 'liveFinder'} inert={activeTool !== 'liveFinder'}>
-          {(activeTool === 'liveFinder')&&(
-            <div className="lp-inner">
-              {/* Mobile bottom sheet drag handle */}
-              <div
-                className="sheet-handle"
-                onTouchStart={(e)=>{
-                  (e.currentTarget as HTMLElement).dataset.startY = String(e.touches[0].clientY);
-                  (e.currentTarget as HTMLElement).dataset.startSheet = sheetState;
-                }}
-                onTouchMove={(e)=>{
-                  const el = e.currentTarget as HTMLElement;
-                  const startY = parseFloat(el.dataset.startY || '0');
-                  const delta = startY - e.touches[0].clientY;
-                  if (Math.abs(delta) > 60) {
-                    if (delta > 0 && sheetState !== 'expanded') setSheetState('expanded');
-                    else if (delta < 0 && sheetState === 'expanded') setSheetState('default');
-                    else if (delta < 0 && sheetState === 'default') setSheetState('collapsed');
-                    el.dataset.startY = String(e.touches[0].clientY);
-                  }
-                }}
-                onTouchEnd={()=>{
-                  const el = document.querySelector('.sheet-handle') as HTMLElement;
-                  if (el) delete el.dataset.startY;
-                }}
-                onClick={()=>{
-                  if (window.innerWidth <= 768) {
-                    setSheetState(sheetState === 'collapsed' ? 'default' : sheetState === 'default' ? 'expanded' : 'default');
-                  }
-                }}
-              >
-                <div className="sheet-handle-bar" />
-                <div className="sheet-handle-label">{providerToolMode==='npi'?'NPI Registry':'Live Places'}</div>
-              </div>
-              <div className="lp-panel-header" style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                <div className="analysis-panel-title" style={{display: sheetState === 'collapsed' ? 'none' : undefined}}><span className="lp-title">{providerToolMode==='npi'?'NPI Registry':'Live Places'}</span><small>{providerToolMode==='npi'?'U.S. provider registry search':'OpenStreetMap + Google Places'}</small></div>
-                <div style={{display:'flex',gap:6,alignItems:'center'}}>
-                  <button
-                    onClick={exportOutreachCsv}
-                    style={{fontSize:8,padding:'4px 7px',borderRadius:4,border:'1px solid rgba(52,211,153,0.28)',background:'rgba(52,211,153,0.1)',color:'#34d399',fontFamily:"'IBM Plex Mono',monospace",cursor:'pointer'}}
-                  >
-                    <Download size={13}/> Export CSV
-                  </button>
-                  <button className="rp-close" onClick={()=>{selectSidebarWorkspace('providers');setSheetState('default');}}>Close</button>
-                </div>
-              </div>
-              <div className="lp-controls">
-              <div style={{fontSize:10,color:'#3d5478',lineHeight:1.5}}>
-                {liveLocation?`Center · ${liveLocation}`:'Coordinate-first live search · double-click the map or search an address.'}
-                {liveMirror&&<div style={{fontSize:9,color:'#2d4060',marginTop:3}}>{liveMirror}</div>}
-              </div>
-              {!npiCategory&&liveResults.length>0&&(
-                <DriveTimeControlStrip
-                  origin={etaOrigin}
-                  candidates={etaCandidates}
-                  loading={providerEta.loading}
-                  rankedCount={providerEta.rankings.length}
-                  error={providerEta.error}
-                  onRank={(options)=>{
-                    if(!etaOrigin) return;
-                    void providerEta.rank(etaOrigin,etaCandidates,options).catch(()=>undefined);
-                  }}
-                  onCopy={()=>{ void providerEta.copy(); }}
-                  onClear={providerEta.clear}
-                />
-              )}
-              {showUsDiagnostics && (() => {
-                const gap = territoryGapSummary();
-                return (
-                  <div style={{padding:'7px 9px',borderRadius:6,background:'rgba(15,33,63,0.45)',border:'1px solid rgba(103,232,249,0.16)'}}>
-                    <div style={{fontSize:8.5,fontFamily:"'IBM Plex Mono',monospace",letterSpacing:'0.08em',color:'#89d4fe',marginBottom:4}}>TERRITORY GAP ANALYSIS (U.S.)</div>
-                    <div style={{fontSize:9,color:'#8fb3d8',marginBottom:4}}>Coverage: <strong style={{color:'#cfe9ff'}}>{gap.covered}/{gap.total}</strong> required categories in current map radius.</div>
-                    {gap.missing.length>0 ? (
-                      <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
-                        {gap.missing.map(cat=>(
-                          <span key={cat} style={{fontSize:8,padding:'2px 5px',borderRadius:999,background:'rgba(239,68,68,0.12)',border:'1px solid rgba(239,68,68,0.28)',color:'#fca5a5'}}>
-                            Missing: {CATS[cat]?.lbl || cat}
-                          </span>
-                        ))}
-                      </div>
-                    ) : <div style={{fontSize:9,color:'#34d399'}}>All required categories covered in this search area.</div>}
-                  </div>
-                );
-              })()}
-              <div style={{display:'flex',alignItems:'center',gap:6}}>
-                <span style={{fontSize:9.5,color:'#3d5478',whiteSpace:'nowrap'}}>Radius:</span>
-                <input type="range" min={1} max={50} value={liveRadius} onChange={e=>setLiveRadius(Number(e.target.value))} onMouseUp={()=>{ if(lastRadiusRef.current) doLiveSearch(lastRadiusRef.current.lat,lastRadiusRef.current.lng); }}/>
-                <span style={{fontFamily:'IBM Plex Mono,monospace',fontSize:10,color:'#89d4fe',whiteSpace:'nowrap'}}>{liveRadius} mi</span>
-              </div>
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'6px 8px',borderRadius:8,background:'rgba(125,211,252,0.06)',border:'1px solid rgba(125,211,252,0.18)'}}>
-                <span style={{fontSize:9.5,color:'#9cc7eb'}}>Double-click the map to run a live search</span>
-                <span style={{fontSize:9,color:'#285b78',fontFamily:"'IBM Plex Mono',monospace"}}>{liveSearched?'Search active':'Choose a location'}</span>
-              </div>
-              <div style={{fontSize:8.5,color:'#64748b',fontFamily:"'IBM Plex Mono',monospace",letterSpacing:'0.08em',marginBottom:4}} className="provider-tool-live-only">
-                LIVE SOURCE FILTERS
-              </div>
-              <div style={{display:'flex',flexWrap:'wrap',gap:3,marginBottom:6}} className="provider-tool-live-only">
-                {([
-                  {key:'clinical',label:'Clinical',count:livePriorityCounts?.clinical},
-                  {key:'occMed',label:'Occ-Med',count:livePriorityCounts?.occMed},
-                  {key:'hospital',label:'Hospitals',count:liveFacets?.hospital},
-                  {key:'clinic',label:'Clinics',count:liveFacets?.clinic},
-                  {key:'doctor',label:'Doctors',count:liveFacets?.doctor},
-                  {key:'urgent',label:'Urgent',count:liveFacets?.urgent},
-                  {key:'lab',label:'Labs',count:liveFacets?.lab},
-                  {key:'pharmacy',label:'Pharmacy',count:livePriorityCounts?.pharmacy},
-                  {key:'dentist',label:'Dental',count:livePriorityCounts?.dental},
-                  {key:'eye',label:'Eye',count:livePriorityCounts?.eye},
-                  {key:'dotExam',label:'DOT Exam',count:undefined},
-                  {key:'faaMedical',label:'FAA Medical',count:undefined},
-                  {key:'all',label:'All',count:undefined},
-                ] as const).map(btn => {
-                  const count = btn.count;
-                  const countStr = (typeof count === 'number' && count > 0) ? count.toLocaleString() : '';
-                  return (
-                    <button
-                      key={btn.key}
-                      className={`lp-chip${liveBackendCategory===btn.key?' on':''}`}
-                      onClick={()=>{
-                        setLiveBackendCategory(btn.key);
-                        setNpiCategory(null);
-                        setNpiResults([]);
-                        setNpiError('');
-                        setNpiSearchMeta(null);
-                        setShowCustomSearch(false);
-                        if(lastRadiusRef.current) doLiveSearch(lastRadiusRef.current.lat,lastRadiusRef.current.lng, btn.key);
-                      }}
-                    >{btn.label}{countStr?` ${countStr}`:''}</button>
-                  );
-                })}
-              </div>
-              <input
-                className="rp-input"
-                placeholder="Filter providers by name, address, or type..."
-                value={liveTextFilter}
-                onChange={e=>setLiveTextFilter(e.target.value)}
-              />
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}} className="provider-tool-live-only">
-                <select className="rp-select" value={liveRegionFilter} onChange={e=>setLiveRegionFilter(e.target.value as any)}>
-                  <option value="all">All Regions</option>
-                  <option value="us">US Only</option>
-                  <option value="intl">International Only</option>
-                </select>
-                <select className="rp-select" value={liveSort} onChange={e=>setLiveSort(e.target.value as any)}>
-                  <option value="distance">Sort: Distance</option>
-                  <option value="name">Sort: Name</option>
-                </select>
-              </div>
-              {/* Filter chips — now wired to NPI Registry category search */}
-              <div className="provider-tool-npi-only" style={{display:'contents'}}>{lastRadiusRef.current && isUsPoint(lastRadiusRef.current.lat, lastRadiusRef.current.lng) && (
-              <>
-              <div style={{fontSize:8.5,color:'#64748b',fontFamily:"'IBM Plex Mono',monospace",letterSpacing:'0.08em'}}>
-                U.S. NPI FILTERS
-              </div>
-              <div style={{display:'flex',flexWrap:'wrap',gap:3}}>
-                <button className={`lp-chip${!npiCategory?' on':''}`} onClick={()=>{setLiveFilter('all');setNpiCategory(null);setNpiResults([]);setNpiError('');setNpiSearchMeta(null);setShowCustomSearch(false);}}>All</button>
-                {NPI_CATEGORY_KEYS.map((cat)=>{
-                  const c=NPI_CATEGORY_MAP[cat];
-                  return (
-                    <button key={cat} className={`lp-chip${npiCategory===cat?' on':''}`} onClick={()=>{setLiveFilter(cat);doNpiCategorySearch(cat);setShowCustomSearch(false);}}>{c.icon} {c.label}</button>
-                  );
-                })}
-                <button className={`lp-chip${npiCategory==='custom'?' on':''}`} onClick={()=>{setShowCustomSearch(!showCustomSearch);setNpiCategory(null);setNpiResults([]);setNpiError('');}}> Custom NPI</button>
-              </div>
-
-              {/* Custom NPI Search Form */}
-              {showCustomSearch && (
-                <div style={{padding:'10px',background:'rgba(7,20,42,0.6)',border:'1px solid rgba(103,232,249,0.2)',borderRadius:6,marginTop:8}}>
-                  <div style={{fontSize:9,color:'#89d4fe',fontFamily:"'IBM Plex Mono',monospace",marginBottom:8,letterSpacing:'0.08em'}}>CUSTOM NPI SEARCH</div>
-                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:8}}>
-                    <div>
-                      <div style={{fontSize:8,color:'#3d5478',marginBottom:2}}>Organization Name</div>
-                      <input
-                        className="rp-input"
-                        style={{fontSize:9,padding:'4px 6px'}}
-                        placeholder="e.g. Mayo Clinic"
-                        value={customOrgName}
-                        onChange={e=>setCustomOrgName(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <div style={{fontSize:8,color:'#3d5478',marginBottom:2}}>First Name</div>
-                      <input
-                        className="rp-input"
-                        style={{fontSize:9,padding:'4px 6px'}}
-                        placeholder="e.g. John"
-                        value={customFirstName}
-                        onChange={e=>setCustomFirstName(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <div style={{fontSize:8,color:'#3d5478',marginBottom:2}}>Last Name</div>
-                      <input
-                        className="rp-input"
-                        style={{fontSize:9,padding:'4px 6px'}}
-                        placeholder="e.g. Smith"
-                        value={customLastName}
-                        onChange={e=>setCustomLastName(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <div style={{fontSize:8,color:'#3d5478',marginBottom:2}}>Taxonomy Description</div>
-                      <input
-                        className="rp-input"
-                        style={{fontSize:9,padding:'4px 6px'}}
-                        placeholder="e.g. Cardiology"
-                        value={customTaxonomyDesc}
-                        onChange={e=>setCustomTaxonomyDesc(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <div style={{fontSize:8,color:'#3d5478',marginBottom:2}}>Taxonomy Code</div>
-                      <input
-                        className="rp-input"
-                        style={{fontSize:9,padding:'4px 6px'}}
-                        placeholder="e.g. 207RC0000X"
-                        value={customTaxonomyCode}
-                        onChange={e=>setCustomTaxonomyCode(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <div style={{fontSize:8,color:'#3d5478',marginBottom:2}}>Provider Type</div>
-                      <select
-                        className="rp-select"
-                        style={{fontSize:9,padding:'4px 6px'}}
-                        value={customEnumType}
-                        onChange={e=>setCustomEnumType(e.target.value as any)}
-                      >
-                        <option value="">Any</option>
-                        <option value="NPI-1">Individual (NPI-1)</option>
-                        <option value="NPI-2">Organization (NPI-2)</option>
-                      </select>
-                    </div>
-                  </div>
-                  <button
-                    className="rp-assess-btn"
-                    style={{width:'100%',padding:'6px 12px',fontSize:9}}
-                    onClick={doCustomNpiSearch}
-                    disabled={npiLoading}
-                  >
-                    {npiLoading ? <><LoaderCircle className="command-spin" size={14}/>Searching</> : <><Search size={14}/>Search NPI Registry</>}
-                  </button>
-                </div>
-              )}
-              {npiLoading&&(
-                <div style={{fontSize:9,color:'#89d4fe',padding:'4px 0'}}>
-                  Querying NPI Registry for {npiCategory ? NPI_CATEGORY_MAP[npiCategory]?.label : ''}...
-                </div>
-              )}
-              {npiError&&!npiLoading&&(
-                <div style={{fontSize:9,color:'#fca5a5',padding:'6px 8px',background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.25)',borderRadius:5,lineHeight:1.5}}>
-                   {npiError}
-                </div>
-              )}
-              {npiSearchMeta&&!npiLoading&&(
-                <div style={{fontSize:8.5,color:'#2d4060',fontFamily:"'IBM Plex Mono',monospace",padding:'3px 0',display:'flex',alignItems:'center',gap:8}}>
-                  <span>{npiSearchMeta.normalizedCount} norm → {npiSearchMeta.dedupedCount} dedup → {npiSearchMeta.geocodedCount} geo → {npiSearchMeta.finalMarkerCount} markers · {npiSearchMeta.durationMs}ms</span>
-                  <button onClick={()=>setShowAuditView(v=>!v)} style={{fontSize:8,padding:'2px 6px',borderRadius:3,background:'rgba(59,130,246,0.1)',border:'1px solid rgba(59,130,246,0.25)',color:'#93c5fd',cursor:'pointer',fontFamily:"'IBM Plex Mono',monospace"}}>{showAuditView?'Hide':'Audit'}</button>
-                </div>
-              )}
-              {showAuditView&&npiUnifiedResponse&&(
-                <div style={{fontSize:8.5,color:'#3d5478',fontFamily:"'IBM Plex Mono',monospace",padding:'6px 8px',background:'rgba(7,20,42,0.5)',border:'1px solid rgba(103,232,249,0.15)',borderRadius:5,lineHeight:1.6}}>
-                  <div style={{color:'#89d4fe',marginBottom:3}}>ADAPTER STATUS</div>
-                  {npiUnifiedResponse.sourceResults.map((sr)=> (
-                    <div key={sr.sourceId} style={{display:'flex',gap:6}}>
-                      <span style={{color:sr.ok?'#1c8f6d':'#b42318'}}>{sr.ok?<Check size={13}/>:<X size={13}/>}</span>
-                      <span>{sr.sourceLabel}: {sr.count}{sr.error ? ` · ${sr.error}` : ''}</span>
-                    </div>
-                  ))}
-                  {Object.keys(npiUnifiedResponse.audit.errorsBySource).length===0&&<div style={{color:'#34d399'}}>All sources responded cleanly.</div>}
-                </div>
-              )}
-              </>
-              )}</div>
-              </div>
-              <div className="lp-results">
-                <div className="provider-tool-mode-prompt">{providerToolMode==='npi'?'Choose a U.S. location, then select an NPI category or open Custom NPI Search.':''}</div>
-              <div style={{fontSize:9,color:'#8fb3d8'}}>
-                {npiCategory
-                  ? `Showing ${npiResults.length} verified candidates`
-                  : `Showing ${filterAndSortLiveResults(liveResults).length} of ${liveResults.length} Provider results`}
-              </div>
-              <div className={`lp-loading${(liveLoading||npiLoading)?' show':''}`}>
-                <div className="lp-spin"/>
-                <div style={{fontSize:10,color:'#3d5478'}}>
-                  {npiLoading ? 'Querying NPI Registry...' : 'Querying provider sources...'}
-                </div>
-              </div>
-              {!npiLoading&&!npiCategory&&!liveLoading&&!liveError&&liveResults.length===0&&!liveSearched&&(
-                <div className="lp-empty show">Choose a location on the map or search for a city to run Live Finder.</div>
-              )}
-              {!liveLoading&&!liveError&&!npiCategory&&liveSearched&&liveResults.length===0&&(
-                <div className="lp-empty show">No live facilities found within {liveRadius} mi of this location. Try a larger radius or a different spot.</div>
-              )}
-              {!npiLoading&&npiCategory&&npiResults.length===0&&!npiError&&(
-                <div className="lp-empty show">No NPI providers found for {NPI_CATEGORY_MAP[npiCategory]?.label} in this area. Try a larger city or different category.</div>
-              )}
-              {!liveLoading&&liveError&&(
-                <div style={{padding:14,textAlign:'center',fontSize:10.5,color:'#ef4444',lineHeight:1.9}}>
-                  {liveError}
-                  <br/><button style={{marginTop:8,padding:'4px 12px',borderRadius:3,background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',color:'#ef4444',fontFamily:"'IBM Plex Mono',monospace",fontSize:9,cursor:'pointer'}} onClick={()=>{if(lastRadiusRef.current)doLiveSearch(lastRadiusRef.current.lat,lastRadiusRef.current.lng);}}><RefreshCw size={13}/>Retry</button>
-                </div>
-              )}
-              {npiCategory && npiResults.length > 0
-                ? npiResults.map((p)=>{
-                    const c=NPI_CATEGORY_MAP[npiCategory];
-                    const explanation = buildExplanation(p);
-                    const saveKey = providerSaveKey(p);
-                    const saveState = savedToMyClinics[saveKey];
-                    const saveError = savedToMyClinicsErrors[saveKey];
-                    return (
-                      <div key={p.id} className="lp-item">
-                        <div className="lp-row1">
-                          <span className="lp-ico">{c?.icon}</span>
-                          <span className="lp-name" style={{fontSize:10.5}}>{p.name}</span>
-                          <span className="lp-dist" style={{fontSize:8,color:'#89d4fe',fontFamily:"'IBM Plex Mono',monospace"}}>Score {p.score}</span>
-                        </div>
-                        <div className="lp-addr" style={{fontSize:9,color:'#4a6888'}}>{p.city ? `${p.city}, ${p.state} ${p.postalCode}` : p.address}</div>
-                        {p.distanceMiles !== undefined && (
-                          <div style={{fontSize:8.5,color:'#3d5478',marginTop:2}}> {p.distanceMiles.toFixed(1)} mi</div>
-                        )}
-                        <div className="lp-tags" style={{marginTop:4,flexWrap:'wrap'}}>
-                          <span className="lp-tag" style={{color:c?.color,borderColor:(c?.color||'')+'30',background:(c?.color||'')+'0d'}}>{c?.label}</span>
-                          {p.confidence==='high'&&<span className="lp-tag" style={{color:'#34d399',borderColor:'rgba(52,211,153,0.3)',background:'rgba(52,211,153,0.08)'}}>High Confidence</span>}
-                          {p.confidence==='medium'&&<span className="lp-tag" style={{color:'#fbbf24',borderColor:'rgba(251,191,36,0.3)',background:'rgba(251,191,36,0.08)'}}>Medium Confidence</span>}
-                          {p.confidence==='low'&&<span className="lp-tag" style={{color:'#fca5a5',borderColor:'rgba(252,165,165,0.3)',background:'rgba(239,68,68,0.08)'}}>Low Confidence</span>}
-                          {(p._rawSources||[]).map((src)=>{
-                            const badge = SOURCE_BADGES.find((b)=>b.id===src.toLowerCase()||src.toLowerCase().includes(b.id));
-                            return badge ? (
-                              <span key={src} className="lp-tag" style={{fontSize:7.5,padding:'1px 4px',color:badge.color,borderColor:badge.color+'44',background:badge.color+'11'}}>{badge.label}</span>
-                            ) : null;
-                          })}
-                        </div>
-                        <div style={{marginTop:5,fontSize:8,color:'#5d7a9e',lineHeight:1.5}}>
-                          {explanation}
-                        </div>
-                        {p.evidence && p.evidence.length > 0 && (
-                          <div style={{marginTop:4,fontSize:7.5,color:'#eab308',background:'rgba(234,179,8,0.06)',border:'1px solid rgba(234,179,8,0.15)',borderRadius:3,padding:'3px 5px',lineHeight:1.4}}>
-                            <strong>Website evidence:</strong> {p.evidence[0].serviceDetected} — "{p.evidence[0].evidenceTextSnippet.substring(0,60)}..."
-                          </div>
-                        )}
-                        <div className="lp-acts">
-                          {p.sourceUrl&&<a href={p.sourceUrl} target="_blank" rel="noopener" className="lp-act pri" onClick={e=>e.stopPropagation()}>{p.source}</a>}
-                          {p.phone&&<a href={`tel:${p.phone}`} className="lp-act" onClick={e=>e.stopPropagation()}>Call</a>}
-                          {p.website&&<a href={p.website} target="_blank" rel="noopener" className="lp-act" onClick={e=>e.stopPropagation()}>Website</a>}
-                          <button type="button" className="lp-act" disabled={saveState==='saving'||saveState==='saved'} onClick={e=>{e.stopPropagation();void saveLiveResultToMyClinics(p,{isNpi:true,categoryLabel:c?.label});}}>{saveState==='saving'?'Saving…':saveState==='saved'?'Saved':saveState==='error'?'Retry save':'Save to My Clinics'}</button>
-                        </div>
-                        {saveState==='error'&&saveError&&<div className="lp-save-error" role="alert">{saveError}</div>}
-                      </div>
-                    );
-                  })
-                  : filterAndSortLiveResults(liveResults).map((r:any)=>{
-                    const c=CATS[r.cat]||CATS.clinic;
-                    const gm=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name+(r.addr?' '+r.addr:''))}`;
-                    const resultEta=providerEta.findEta(r.name);
-                    const saveKey=providerSaveKey(r);
-                    const saveState=savedToMyClinics[saveKey];
-                    const saveError=savedToMyClinicsErrors[saveKey];
-                    return (
-                      <div key={r.id} className={`lp-item${liveHighlightId===r.id?' hl':''}`} onClick={()=>lpFly(r.lat,r.lng,r.id)}>
-                        <div className="lp-row1">
-                          <span className="lp-ico">{c.ico}</span>
-                          <span className="lp-name">{r.name}</span>
-                          <span className="lp-dist">{fmtDist(r.dist)}</span>
-                        </div>
-                        {r.addr&&<div className="lp-addr">{r.addr}</div>}
-                        <div className="lp-tags">
-                          <span className="lp-tag" style={{color:c.col,borderColor:c.col+'30',background:c.col+'0d'}}>{c.lbl}</span>
-                          {r.hours&&<span className="lp-tag">{r.hours.substring(0,30)}</span>}
-                          {r.phone&&<span className="lp-tag"><Phone size={11}/>Phone</span>}
-                        </div>
-                        {resultEta&&(
-                          <ProviderEtaBadge
-                            eta={resultEta}
-                            onRoute={requestEtaRoute}
-                            onCopy={(row)=>{
-                              void copyTextSafely(`${row.name} — ${Math.round(row.driveMinutes)} min / ${row.driveMiles.toFixed(1)} mi`);
-                            }}
-                          />
-                        )}
-                        <div className="lp-acts">
-                          <a href={gm} target="_blank" rel="noopener" className="lp-act pri" onClick={e=>e.stopPropagation()}>Google Maps</a>
-                          {r.website&&<a href={r.website} target="_blank" rel="noopener" className="lp-act" onClick={e=>e.stopPropagation()}>Website</a>}
-                          {r.phone&&<a href={`tel:${r.phone}`} className="lp-act" onClick={e=>e.stopPropagation()}>Call</a>}
-                          <button type="button" className="lp-act" disabled={saveState==='saving'||saveState==='saved'} onClick={e=>{e.stopPropagation();void saveLiveResultToMyClinics(r);}}>{saveState==='saving'?'Saving…':saveState==='saved'?'Saved':saveState==='error'?'Retry save':'Save to My Clinics'}</button>
-                        </div>
-                        {saveState==='error'&&saveError&&<div className="lp-save-error" role="alert">{saveError}</div>}
-                        <div style={{marginTop:6,display:'grid',gap:5}} onClick={e=>e.stopPropagation()}>
-                          <select
-                            value={outreachStatus[String(r.id)]||'new'}
-                            onChange={e=>updateOutreachStatus(r.id,e.target.value)}
-                            style={{fontSize:9,padding:'4px 6px',borderRadius:4,background:'rgba(7,20,42,0.7)',border:'1px solid rgba(103,232,249,0.2)',color:'#9cc7eb'}}
-                          >
-                            <option value="new">New</option>
-                            <option value="contacted">Contacted</option>
-                            <option value="interested">Interested</option>
-                            <option value="contracting">Contracting</option>
-                            <option value="closed">Closed</option>
-                          </select>
-                          <textarea
-                            value={outreachNotes[String(r.id)]||''}
-                            onChange={e=>updateOutreachNote(r.id,e.target.value)}
-                            placeholder="Outreach note..."
-                            style={{minHeight:46,resize:'vertical',fontSize:9,padding:'6px 7px',borderRadius:4,background:'rgba(7,20,42,0.6)',border:'1px solid rgba(103,232,249,0.18)',color:'#cce7ff'}}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
 
       {/* ── DIRECTORIES MODAL ── */}
 

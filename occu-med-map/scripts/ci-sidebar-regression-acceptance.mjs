@@ -129,12 +129,12 @@ async function explorerCounts(page) {
 async function assertWorkspaceButtons(page, label) {
   await activateWorkspace(page, label);
   const selector = label === "Providers"
-    ? ".sidebar.occumed-sidebar-workspace-scope"
+    ? ".occumed-sidebar-provider-content"
     : label === "Map Tools"
       ? ".occumed-map-tools-panel"
-      : label === "Finder"
-        ? ".live-panel.open"
-        : ".provider-explorer-drawer.open";
+      : label === "Find"
+        ? "#sidebar-find-panel"
+        : "#sidebar-results-panel";
   await page.locator(selector).waitFor({ state: "visible", timeout: 10_000 });
   await assertButtonsHittable(page, selector, `${label} workspace`);
 }
@@ -171,35 +171,32 @@ try {
   assert.equal(await page.locator('input[aria-label="Indexed Providers"]:visible').count(), 0, "Legacy Indexed Providers toggle must not remain visible");
 
   await assertWorkspaceButtons(page, "Map Tools");
-  await assertWorkspaceButtons(page, "Finder");
-  await assertWorkspaceButtons(page, "Explorer");
+  await assertWorkspaceButtons(page, "Find");
+  await assertWorkspaceButtons(page, "Results");
 
-  await page.waitForTimeout(750);
-  assert.equal(await page.evaluate(() => document.documentElement.dataset.providerExplorerVisualizationActive), "false", "Explorer visualization must begin explicitly off");
+  await activateWorkspace(page, "Find");
+  const databaseMode = page.locator("#sidebar-find-panel .find-submode-pill").filter({ hasText: /^Database$/ }).first();
+  await databaseMode.waitFor({ state: "visible", timeout: 10_000 });
+  await databaseMode.click();
+  await page.waitForFunction(() => document.documentElement.dataset.occumedFindMode === "database", null, { timeout: 10_000 });
+
+  await page.waitForTimeout(250);
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.providerExplorerVisualizationActive), "false", "Database visualization must begin explicitly off");
   assert.deepEqual(await explorerCounts(page), { pins: 0, aggregate: 0, dots: 0, live: 0, gaps: 0 }, "Provider Explorer must not render data before a visualization is selected");
 
-  const close = page.getByRole("button", { name: "Close Provider Explorer" });
-  const closeGeometry = await close.evaluate((button) => {
-    const rect = button.getBoundingClientRect();
-    return { width: rect.width, height: rect.height, scrollWidth: button.scrollWidth, clientWidth: button.clientWidth };
-  });
-  assert.ok(closeGeometry.width >= 60, `Explorer Close width is too small: ${closeGeometry.width}`);
-  assert.ok(closeGeometry.height >= 28, `Explorer Close height is too small: ${closeGeometry.height}`);
-  assert.ok(closeGeometry.scrollWidth <= closeGeometry.clientWidth + 2, "Explorer Close text must not wrap or overflow");
-
-  const explorer = page.locator(".provider-explorer-drawer.open");
-  await explorer.locator(".provider-visualization-grid button").filter({ hasText: /^Density$/ }).click();
+  const findPanel = page.locator("#sidebar-find-panel");
+  await findPanel.locator(".provider-visualization-grid button").filter({ hasText: /^Density$/ }).click();
   await page.waitForFunction(() => document.documentElement.dataset.providerExplorerVisualizationActive === "true");
   await page.waitForFunction(() => (window.__NETWORK_MAP_PROVIDER_EXPLORER_NATIVE__?.getSnapshot?.("aggregate")?.featureCount || 0) === 2, null, { timeout: 10_000 });
 
-  await close.click();
+  await activateWorkspace(page, "Providers");
   await page.waitForFunction(() => document.documentElement.dataset.occumedworkspace === "providers", null, { timeout: 10_000 });
-  assert.deepEqual(await explorerCounts(page), { pins: 0, aggregate: 0, dots: 0, live: 0, gaps: 0 }, "Closing Explorer must clear Explorer-owned map overlays");
+  assert.deepEqual(await explorerCounts(page), { pins: 0, aggregate: 0, dots: 0, live: 0, gaps: 0 }, "Leaving Find Database must clear Provider Explorer-owned map overlays");
 
   await switchMode(page, "3d");
-  for (const workspace of ["Providers", "Map Tools", "Finder", "Explorer"]) await assertWorkspaceButtons(page, workspace);
+  for (const workspace of ["Providers", "Map Tools", "Find", "Results"]) await assertWorkspaceButtons(page, workspace);
   await switchMode(page, "2d");
-  for (const workspace of ["Providers", "Map Tools", "Finder", "Explorer"]) await assertWorkspaceButtons(page, workspace);
+  for (const workspace of ["Providers", "Map Tools", "Find", "Results"]) await assertWorkspaceButtons(page, workspace);
 
   console.log(`Sidebar regression acceptance passed for ${browserName}.`);
 } finally {

@@ -1,6 +1,7 @@
 import app from "./app";
 import { startHealthcareAccessIndicatorSync } from "./jobs/syncHealthcareAccessIndicators";
 import { logger } from "./lib/logger";
+import { initializeAutosaveStorage } from "./lib/autosaveCache";
 import { startNacchoLhdGeocoder } from "./jobs/geocodeNacchoLhd";
 import { closeDatabasePools } from "@workspace/db";
 
@@ -15,6 +16,7 @@ const server = app.listen(port, (err) => {
   }
   logger.info({ port }, "Server listening");
   startNacchoLhdGeocoder();
+  void initializeAutosaveStorage();
 });
 
 startHealthcareAccessIndicatorSync();

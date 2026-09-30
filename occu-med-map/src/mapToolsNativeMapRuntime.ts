@@ -1,5 +1,6 @@
 import mapboxgl from "mapbox-gl";
 import { getActiveMapboxMap, getTrackedMapboxMaps, registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
+import { cancelRouteTravel, ensureLuminousRouteLayers, installRouteHover, startRoutePulse, travelAlongRoute, type RouteLayerIds } from "./routePresentationRuntime";
 
 export type NativeMapToolsPoint = { lat: number; lng: number; label?: string };
 
@@ -7,10 +8,10 @@ type Channel = "origin" | "route" | "zones" | "density" | "planner";
 
 const IDS = {
   origin: { source: "map-tools-native-origin", point: "map-tools-native-origin" },
-  route: { source: "map-tools-native-route", line: "map-tools-native-route-line", point: "map-tools-native-route-end" },
+  route: { source: "map-tools-native-route", outer: "map-tools-native-route-glow", line: "map-tools-native-route-line", core: "map-tools-native-route-core", pulse: "map-tools-native-route-pulse", point: "map-tools-native-route-end" },
   zones: { source: "map-tools-native-zones", fill: "map-tools-native-zones-fill", line: "map-tools-native-zones-line" },
   density: { source: "map-tools-native-density", heatmap: "map-tools-native-density-heatmap" },
-  planner: { source: "map-tools-native-planner", line: "map-tools-native-planner-line", point: "map-tools-native-planner-points", label: "map-tools-native-planner-labels" },
+  planner: { source: "map-tools-native-planner", outer: "map-tools-native-planner-glow", line: "map-tools-native-planner-line", core: "map-tools-native-planner-core", pulse: "map-tools-native-planner-pulse", point: "map-tools-native-planner-points", label: "map-tools-native-planner-labels" },
 } as const;
 
 const empty = (): GeoJSON.FeatureCollection => ({ type: "FeatureCollection", features: [] });
@@ -33,7 +34,16 @@ function validPoint(point: NativeMapToolsPoint | null | undefined): point is Nat
 function sourceData(map: mapboxgl.Map, sourceId: string, collection: GeoJSON.FeatureCollection): void {
   const source = map.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
   if (source) source.setData(collection);
-  else map.addSource(sourceId, { type: "geojson", data: collection, generateId: true });
+  else map.addSource(sourceId, {
+    type: "geojson",
+    data: collection,
+    generateId: true,
+    ...(sourceId === IDS.route.source || sourceId === IDS.planner.source ? { lineMetrics: true } : {}),
+  });
+}
+
+function luminousIds(ids: typeof IDS.route | typeof IDS.planner): RouteLayerIds {
+  return { source: ids.source, outer: ids.outer, body: ids.line, core: ids.core, pulse: ids.pulse };
 }
 
 function ensureLayers(map: mapboxgl.Map): void {
@@ -89,24 +99,8 @@ function ensureLayers(map: mapboxgl.Map): void {
       },
     });
   }
-  if (!map.getLayer(IDS.route.line)) {
-    map.addLayer({
-      id: IDS.route.line,
-      type: "line",
-      source: IDS.route.source,
-      filter: ["==", ["get", "role"], "route"],
-      paint: { "line-color": "#2563eb", "line-width": 5, "line-opacity": 0.9 },
-    });
-  }
-  if (!map.getLayer(IDS.planner.line)) {
-    map.addLayer({
-      id: IDS.planner.line,
-      type: "line",
-      source: IDS.planner.source,
-      filter: ["==", ["get", "role"], "route"],
-      paint: { "line-color": "#2563eb", "line-width": 6, "line-opacity": 0.92 },
-    });
-  }
+  ensureLuminousRouteLayers(map, luminousIds(IDS.route));
+  ensureLuminousRouteLayers(map, luminousIds(IDS.planner));
   if (!map.getLayer(IDS.origin.point)) {
     map.addLayer({
       id: IDS.origin.point,
@@ -210,10 +204,14 @@ export function setMapToolsRoute(coordinates: Array<[number, number]>, destinati
   if (line) features.push(line);
   if (validPoint(destination)) features.push(pointFeature(destination, { role: "destination" }));
   setCollection("route", features);
+  const map = getActiveMapboxMap();
+  if (line && map) requestAnimationFrame(() => travelAlongRoute(map, line.geometry.coordinates as Array<[number, number]>));
 }
 
 export function clearMapToolsRoute(): void {
   setCollection("route", []);
+  const map = getActiveMapboxMap();
+  if (map) cancelRouteTravel(map);
 }
 
 export function setMapToolsZones(data: GeoJSON.FeatureCollection | null): void {
@@ -257,10 +255,14 @@ export function setRoutePlannerOverlay(
   if (validPoint(from)) features.push(pointFeature(from, { role: "endpoint", kind: "from", markerLabel: "A" }));
   if (validPoint(to)) features.push(pointFeature(to, { role: "endpoint", kind: "to", markerLabel: "B" }));
   setCollection("planner", features);
+  const map = getActiveMapboxMap();
+  if (line && map) requestAnimationFrame(() => travelAlongRoute(map, line.geometry.coordinates as Array<[number, number]>));
 }
 
 export function clearRoutePlannerOverlay(): void {
   setCollection("planner", []);
+  const map = getActiveMapboxMap();
+  if (map) cancelRouteTravel(map);
 }
 
 export function fitActiveMapToRoute(coordinates: Array<[number, number]>, padding = 38): void {
@@ -296,9 +298,26 @@ registerMapboxMapInitializer({
   id: "map-tools-native-overlays",
   priority: 14,
   initialize: (map) => {
-    const apply = () => ensureLayers(map);
+    const cleanups: Array<() => void> = [];
+    let interactionsInstalled = false;
+    const apply = () => {
+      ensureLayers(map);
+      if (!interactionsInstalled) {
+        interactionsInstalled = true;
+        cleanups.push(
+          installRouteHover(map, luminousIds(IDS.route)),
+          installRouteHover(map, luminousIds(IDS.planner)),
+          startRoutePulse(map, luminousIds(IDS.route)),
+          startRoutePulse(map, luminousIds(IDS.planner)),
+        );
+      }
+    };
     map.on("style.load", apply);
     if (map.isStyleLoaded()) queueMicrotask(apply);
-    return () => map.off("style.load", apply);
+    return () => {
+      map.off("style.load", apply);
+      cancelRouteTravel(map);
+      cleanups.forEach((cleanup) => cleanup());
+    };
   },
 });

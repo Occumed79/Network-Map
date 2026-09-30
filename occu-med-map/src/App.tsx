@@ -3152,7 +3152,7 @@ export default function App() {
                   <span style={{fontSize:9.5,color:'#9cc7eb'}}>Double-click the map to run a live search</span>
                   <span style={{fontSize:9,color:'#285b78',fontFamily:'var(--p1-font)'}}>{liveSearched?'Search active':'Choose a location'}</span>
                 </div>
-                <div style={{fontSize:8.5,color:'#64748b',fontFamily:'var(--p1-font)',letterSpacing:'0.08em',marginBottom:4}}>LIVE SOURCE FILTERS</div>
+                <div className="find-section-glow-label">LIVE SOURCE FILTERS</div>
                 <div style={{display:'flex',flexWrap:'wrap',gap:3,marginBottom:6}}>
                   {([
                     {key:'clinical',label:'Clinical',count:livePriorityCounts?.clinical},
@@ -3240,7 +3240,7 @@ export default function App() {
 
                     {showCustomSearch && (
                       <div style={{padding:'10px',background:'rgba(7,20,42,0.6)',border:'1px solid rgba(103,232,249,0.2)',borderRadius:6,marginTop:8}}>
-                        <div style={{fontSize:9,color:'#89d4fe',fontFamily:'var(--p1-font)',marginBottom:8,letterSpacing:'0.08em'}}>CUSTOM NPI SEARCH</div>
+                        <div className="find-section-glow-label">CUSTOM NPI SEARCH</div>
                         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,marginBottom:8}}>
                           <div>
                             <div style={{fontSize:8,color:'#3d5478',marginBottom:2}}>Organization Name</div>

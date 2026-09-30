@@ -236,6 +236,13 @@ async function liveFinderSnapshotFeatureCount(page, channel) {
   ), channel);
 }
 
+async function liveFinderSnapshotPoint(page, channel) {
+  return page.evaluate((requestedChannel) => {
+    const snapshot = window.__NETWORK_MAP_LIVE_FINDER_NATIVE__?.getSnapshot?.(requestedChannel);
+    return snapshot?.features?.find((feature) => feature.geometryType === "Point")?.coordinates || null;
+  }, channel);
+}
+
 async function providerExplorerSnapshotPoint(page, needle) {
   return page.evaluate((popupNeedle) => {
     const maps = window.__NETWORK_MAP_MAPBOX_LIFECYCLE__?.getMaps?.() || [];
@@ -431,6 +438,8 @@ try {
   ), null, { timeout: 8_000 });
   const radiusCenterBefore = ((await radiusCard.textContent()) || "").match(/Center:\s*[-\d.]+,\s*[-\d.]+/)?.[0] || "";
   assert.ok(radiusCenterBefore, "Radius center must be visible after clicking the native Mapbox canvas");
+  const radiusPointBefore = await liveFinderSnapshotPoint(page, "drop");
+  assert.ok(radiusPointBefore, "Radius center must exist in first-party native overlay state");
 
   await page.locator(".map-dimension-toggle button[data-map-mode='3d']").evaluate((element) => element.click());
   await waitForMode(page, "3d");
@@ -504,8 +513,8 @@ try {
   console.log("STORED_PROVIDER_FEATURE_BEFORE_CLICK", JSON.stringify(providerPoint));
   await page.mouse.click(providerPoint.x, providerPoint.y);
   await page.getByText("CI Stored Clinic").first().waitFor({ state: "visible", timeout: 10_000 });
-  const radiusCenterAfterProviderClick = ((await radiusCard.textContent()) || "").match(/Center:\s*[-\d.]+,\s*[-\d.]+/)?.[0] || "";
-  assert.equal(radiusCenterAfterProviderClick, radiusCenterBefore, "Provider clicks must not fall through into Radius map-click ownership");
+  const radiusPointAfterProviderClick = await liveFinderSnapshotPoint(page, "drop");
+  assert.deepEqual(radiusPointAfterProviderClick, radiusPointBefore, "Provider clicks must not fall through into Radius map-click ownership");
 
   await page.getByRole("tab", { name: /Finder workspace/i }).click();
   await page.locator(".live-panel.open:visible").waitFor({ state: "visible", timeout: 10_000 });

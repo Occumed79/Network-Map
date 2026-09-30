@@ -169,6 +169,89 @@ export function isAutosaveConfigured(): boolean {
   return Boolean(CACHE_DB_URL && SHARD_A_URL && SHARD_B_URL);
 }
 
+
+const AUTOSAVE_INDEX_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS autosave_search_cache (
+  search_key text PRIMARY KEY,
+  source_mode text NOT NULL DEFAULT 'liveFinder',
+  service_category text NOT NULL DEFAULT 'all',
+  query_text text NOT NULL DEFAULT '',
+  center_lat double precision,
+  center_lng double precision,
+  radius_miles double precision,
+  normalized_request jsonb NOT NULL DEFAULT '{}'::jsonb,
+  result_refs jsonb NOT NULL DEFAULT '[]'::jsonb,
+  result_count integer NOT NULL DEFAULT 0,
+  first_seen_at timestamptz NOT NULL DEFAULT now(),
+  last_seen_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL DEFAULT (now() + interval '168 hours'),
+  cache_hits bigint NOT NULL DEFAULT 0,
+  external_calls_avoided bigint NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_autosave_cache_expires ON autosave_search_cache (expires_at);
+CREATE INDEX IF NOT EXISTS idx_autosave_cache_source_mode ON autosave_search_cache (source_mode);
+CREATE INDEX IF NOT EXISTS idx_autosave_cache_center ON autosave_search_cache (center_lat, center_lng);
+`;
+
+const AUTOSAVE_PROVIDER_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS autosave_providers (
+  provider_key text PRIMARY KEY,
+  source text NOT NULL,
+  source_id text,
+  name text NOT NULL,
+  normalized_name text NOT NULL,
+  clinic_type text NOT NULL DEFAULT 'unknown',
+  services text[] NOT NULL DEFAULT ARRAY[]::text[],
+  categories text[] NOT NULL DEFAULT ARRAY[]::text[],
+  address text,
+  city text,
+  admin_area text,
+  country text,
+  postal_code text,
+  lat double precision,
+  lng double precision,
+  phone text,
+  website text,
+  source_url text,
+  confidence_score numeric,
+  raw_source_data jsonb NOT NULL DEFAULT '{}'::jsonb,
+  first_seen_at timestamptz NOT NULL DEFAULT now(),
+  last_seen_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_autosave_providers_source ON autosave_providers (source);
+CREATE INDEX IF NOT EXISTS idx_autosave_providers_normalized_name ON autosave_providers (normalized_name);
+CREATE INDEX IF NOT EXISTS idx_autosave_providers_lat_lng ON autosave_providers (lat, lng);
+CREATE INDEX IF NOT EXISTS idx_autosave_providers_source_id ON autosave_providers (source, source_id) WHERE source_id IS NOT NULL;
+`;
+
+/**
+ * The autosave databases are dedicated cache stores and do not participate in
+ * the main provider-database migration stream. Initialize their small,
+ * idempotent schemas at API startup so a deployment with valid AUTO_SAVE_*
+ * environment variables becomes usable without a separate shell step.
+ */
+export async function initializeAutosaveStorage(): Promise<boolean> {
+  if (!isAutosaveConfigured()) {
+    logger.warn("autosaveCache: AUTO_SAVE_DATABASE, AUTO_SAVE_DATABASE_2 and AUTO_SAVE_DATABASE_3 are not all configured");
+    return false;
+  }
+  try {
+    ensureConnections();
+    if (!_cacheDb || !_shardA || !_shardB) return false;
+    await Promise.all([
+      _cacheDb.query(AUTOSAVE_INDEX_SCHEMA_SQL),
+      _shardA.query(AUTOSAVE_PROVIDER_SCHEMA_SQL),
+      _shardB.query(AUTOSAVE_PROVIDER_SCHEMA_SQL),
+    ]);
+    logger.info("autosaveCache: index and both provider shards are ready");
+    return true;
+  } catch (err) {
+    logger.error({ err }, "autosaveCache: schema initialization failed");
+    return false;
+  }
+}
+
 // ─── Cache lookup ─────────────────────────────────────────────────────────────
 
 export async function lookupCache(params: AutosaveLookupParams): Promise<AutosaveLookupResult> {

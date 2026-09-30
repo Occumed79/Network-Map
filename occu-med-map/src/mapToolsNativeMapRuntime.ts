@@ -1,6 +1,6 @@
 import mapboxgl from "mapbox-gl";
 import { getActiveMapboxMap, getTrackedMapboxMaps, registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
-import { cancelRouteTravel, ensureLuminousRouteLayers, installRouteHover, startRoutePulse, travelAlongRoute, type RouteLayerIds } from "./routePresentationRuntime";
+import { cancelRouteTravel, ensureLuminousRouteLayers, installRouteHover, startRoutePulse, scheduleRouteTravel, type RouteLayerIds } from "./routePresentationRuntime";
 
 export type NativeMapToolsPoint = { lat: number; lng: number; label?: string };
 
@@ -205,13 +205,13 @@ export function setMapToolsRoute(coordinates: Array<[number, number]>, destinati
   if (validPoint(destination)) features.push(pointFeature(destination, { role: "destination" }));
   setCollection("route", features);
   const map = getActiveMapboxMap();
-  if (line && map) requestAnimationFrame(() => travelAlongRoute(map, line.geometry.coordinates as Array<[number, number]>));
+  if (line && map) scheduleRouteTravel(map, line.geometry.coordinates as Array<[number, number]>);
+  else if (map) cancelRouteTravel(map);
 }
 
 export function clearMapToolsRoute(): void {
   setCollection("route", []);
-  const map = getActiveMapboxMap();
-  if (map) cancelRouteTravel(map);
+  getTrackedMapboxMaps().forEach(cancelRouteTravel);
 }
 
 export function setMapToolsZones(data: GeoJSON.FeatureCollection | null): void {
@@ -256,13 +256,13 @@ export function setRoutePlannerOverlay(
   if (validPoint(to)) features.push(pointFeature(to, { role: "endpoint", kind: "to", markerLabel: "B" }));
   setCollection("planner", features);
   const map = getActiveMapboxMap();
-  if (line && map) requestAnimationFrame(() => travelAlongRoute(map, line.geometry.coordinates as Array<[number, number]>));
+  if (line && map) scheduleRouteTravel(map, line.geometry.coordinates as Array<[number, number]>);
+  else if (map) cancelRouteTravel(map);
 }
 
 export function clearRoutePlannerOverlay(): void {
   setCollection("planner", []);
-  const map = getActiveMapboxMap();
-  if (map) cancelRouteTravel(map);
+  getTrackedMapboxMaps().forEach(cancelRouteTravel);
 }
 
 export function fitActiveMapToRoute(coordinates: Array<[number, number]>, padding = 38): void {

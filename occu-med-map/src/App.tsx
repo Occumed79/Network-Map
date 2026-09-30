@@ -1083,6 +1083,7 @@ export default function App() {
   // stays a clean world viewer. Only shown when explicitly enabled.
   const [showUsDiagnostics, setShowUsDiagnostics] = useState(false);
   const [backendStateScores, setBackendStateScores] = useState<Record<string,{score:number;label:string;confidence:number;population:number}>>({});
+  const [backendStateScoreStatus,setBackendStateScoreStatus]=useState<'loading'|'ready'|'error'>('loading');
   const [stateGeoRevision, setStateGeoRevision] = useState(0);
         const [showPdf, setShowPdf] = useState(false);
   const [pdfHtml, setPdfHtml] = useState('');
@@ -1868,7 +1869,7 @@ export default function App() {
           lineColor:style.color,
           lineOpacity:style.opacity,
           lineWidth:style.weight,
-          popupHtml:authoritative?`<div class="pi"><div class="pt">${postal}</div><div class="ps">Backend healthcare-access score</div><div class="pg"><div><div class="psl">Difficulty</div><div class="psv">${authoritative.score.toFixed(1)} · ${authoritative.label}</div></div><div><div class="psl">Confidence</div><div class="psv">${Math.round(authoritative.confidence*100)}%</div></div><div><div class="psl">Population</div><div class="psv">${authoritative.population.toLocaleString()}</div></div></div></div>`:'<div class="pi"><div class="ps">Authoritative score unavailable</div></div>',
+          popupHtml:authoritative?`<div class="pi"><div class="pt">${postal}</div><div class="ps">Backend healthcare-access score</div><div class="pg"><div><div class="psl">Difficulty</div><div class="psv">${authoritative.score.toFixed(1)} · ${authoritative.label}</div></div><div><div class="psl">Confidence</div><div class="psv">${Math.round(authoritative.confidence*100)}%</div></div><div><div class="psl">Population</div><div class="psv">${authoritative.population.toLocaleString()}</div></div></div></div>`:`<div class="pi"><div class="pt">${escapeHtml(postal)}</div><div class="ps">${backendStateScoreStatus==='loading'?'Loading healthcare-access assessment…':'State assessment unavailable. Open Coverage to assess a city or ZIP.'}</div></div>`,
           tooltipHtml:authoritative?`<div style="padding:5px 8px;font-family:'IBM Plex Mono',monospace"><span style="font-weight:700;font-size:11px;color:#eef4ff">${postal}</span>&nbsp;<span style="font-size:9px;color:${DCOL[value]};font-weight:700">${authoritative.label}</span></div>`:postal,
         },
       });
@@ -1908,7 +1909,7 @@ export default function App() {
   }
 
   const metricRef=useRef(metric);
-  useEffect(()=>{ metricRef.current=metric; renderStateDiagnostics(); },[metric,backendStateScores,filterDiff]);
+  useEffect(()=>{ metricRef.current=metric; renderStateDiagnostics(); },[metric,backendStateScores,backendStateScoreStatus,filterDiff]);
   useEffect(()=>{ showStateColorsRef.current=showStateColors; renderStateDiagnostics(); },[showStateColors]);
 
   useEffect(()=>{
@@ -1933,11 +1934,12 @@ export default function App() {
     if(!showUsDiagnostics) return;
     setShowStateColors(true);
     setBackendStateScores({});
+    setBackendStateScoreStatus('loading');
     const controller=new AbortController();
     void fetch(`/api/scoring/us/states?service=${encodeURIComponent(metric)}`,{signal:controller.signal})
       .then(response=>response.ok?response.json():Promise.reject(new Error(`HTTP ${response.status}`)))
-      .then(data=>setBackendStateScores(Object.fromEntries((data.states||[]).map((row:any)=>[row.state,row]))))
-      .catch(error=>{if(!controller.signal.aborted) console.warn('Authoritative U.S. scoring unavailable',error);});
+      .then(data=>{if(controller.signal.aborted) return; setBackendStateScores(Object.fromEntries((data.states||[]).map((row:any)=>[row.state,row]))); setBackendStateScoreStatus('ready');})
+      .catch(error=>{if(!controller.signal.aborted){setBackendStateScoreStatus('error'); console.warn('Authoritative U.S. scoring unavailable',error);}});
     return()=>controller.abort();
   },[showUsDiagnostics,metric]);
 

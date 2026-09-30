@@ -904,17 +904,17 @@ html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspac
 /* Coverage is embedded in the dark sidebar; legacy floating-panel glass
    colors must not override its labels or assessment evidence. */
 html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
-  .tool-detail-section :is(.rp-title, .rp-city-name, .rp-scorecard) {
+  .tool-detail-section :is(.rp-title, .rp-city-name, .rp-scorecard, .rp-alert) {
   color: var(--workspace-text) !important;
   text-shadow: none !important;
 }
 html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
-  .tool-detail-section :is(.rp-field label, .rp-city-meta, .rp-score-name, .rp-rec) {
+  .tool-detail-section :is(.rp-field label, .rp-city-meta, .rp-score-name, .rp-rec, .drivetime-lbl, .drivetime-sub) {
   color: var(--workspace-muted) !important;
   text-shadow: none !important;
 }
 html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
-  .tool-detail-section :is(.rp-scorecard, .rp-alert, .rp-rec, .rp-suggestions) {
+  .tool-detail-section :is(.rp-scorecard, .rp-alert, .rp-rec, .rp-suggestions, .drivetime-box) {
   background: var(--workspace-panel-bg) !important;
   border: 1px solid var(--workspace-border) !important;
   border-radius: 10px !important;

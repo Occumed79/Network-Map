@@ -806,93 +806,108 @@ html[data-occumed-workspace-ready="true"] body
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   NEON BORDER — React/CSS adaptation of Inspira UI's actual NeonBorder.vue.
-   Source pattern: two opposing 135deg linear-gradient glow layers, each blurred
-   with drop-shadow and rotated together by a transform-based 6s animation.
-   The Vue wrapper/divs are mapped to ::before/::after so existing React controls
-   keep their current DOM, handlers, rounded geometry, and workspace ownership.
+   NEON BORDER — InspiraNeonBorder component (fix/true-neon-border).
+   Light travels around the PERIMETER only. Button interiors stay dark.
+   Technique: InspiraNeonBorder wraps each element with overflow:hidden +
+   padding:1px. A spinning conic-gradient inside is clipped to the 1px ring.
    Palette: #F0F8FF · #D1DCE5 · #A3C5D9.
    ───────────────────────────────────────────────────────────────────────────── */
 
-@keyframes neon-border-rotate {
-  0%   { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+/* ── InspiraNeonBorder wrapper layout ──────────────────────────────────────── */
+
+/* Tab wrappers: stretch to fill their grid cell in the 4-column tab strip */
+.occumed-sidebar-workspace-tabs .inspira-neon-border {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+}
+/* Tab button inside the wrapper: fill the wrapper fully */
+.occumed-sidebar-workspace-tabs .inspira-neon-border .inspira-neon-content,
+.occumed-sidebar-workspace-tabs .inspira-neon-border .occumed-sidebar-workspace-tab {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
 }
 
-/* Workspace tabs — actual Inspira two-layer linear-gradient technique. */
+/* Workflow button wrappers: fill their grid cell */
+.command-tool-grid .inspira-neon-border {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+}
+/* Workflow buttons inside wrapper: fill fully */
+.command-tool-grid .inspira-neon-border .inspira-neon-content,
+.command-tool-grid .inspira-neon-border button {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+}
+
+/* Provider layer card wrappers: fill width */
+.workflow-layer-list > .inspira-neon-border,
+.provider-layers-section .inspira-neon-border {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+}
+/* Provider card inner fill */
+.workflow-layer-list > .inspira-neon-border .inspira-neon-content,
+.provider-layers-section .inspira-neon-border .inspira-neon-content,
+.workflow-layer-list > .inspira-neon-border .workflow-layer,
+.provider-layers-section .inspira-neon-border .workflow-layer {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+}
+
+/* ── Track animation: activate on hover / active / selected ─────────────────
+   The inspira-neon-track span starts opacity:0, animation paused (set inline).
+   These rules resume the animation and raise opacity when the wrapper or the
+   child button is hovered / active. ── */
+
+/* Tab: hover */
+.inspira-neon-border:hover .inspira-neon-track,
+.inspira-neon-border:focus-within .inspira-neon-track {
+  opacity: 0.30 !important;
+  animation-play-state: running !important;
+}
+
+/* Tab: selected (aria-selected on the child button) */
+.inspira-neon-border:has([aria-selected="true"]) .inspira-neon-track,
+.inspira-neon-border:has(.active) .inspira-neon-track {
+  opacity: 0.50 !important;
+  animation-play-state: running !important;
+}
+
+/* Workflow button: active (aria-pressed or .active class on child button) */
+.inspira-neon-border:has([aria-pressed="true"]) .inspira-neon-track {
+  opacity: 0.50 !important;
+  animation-play-state: running !important;
+}
+
+/* Provider layer: active (.active on the .workflow-layer child) */
+.inspira-neon-border:has(.workflow-layer.active) .inspira-neon-track {
+  opacity: 0.50 !important;
+  animation-play-state: running !important;
+}
+
+/* ── Content layer: children fill the wrapper, keep own background ──────────*/
+.inspira-neon-content {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ── Tab buttons: retain their existing styles; only font is overridden ────── */
 html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
   .sidebar.occumed-sidebar-workspace-scope
   > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab {
-  position: relative;
-  overflow: visible;
-  isolation: isolate;
   font-family: var(--p1-font) !important;
+  /* Remove overflow:visible that caused windmill bleed */
+  overflow: hidden;
 }
-html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
-  .sidebar.occumed-sidebar-workspace-scope
-  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab::before,
-html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
-  .sidebar.occumed-sidebar-workspace-scope
-  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab::after {
-  content: "";
-  position: absolute;
-  inset: -1px;
-  border-radius: inherit;
-  z-index: -1;
-  opacity: 0;
-  pointer-events: none;
-  transform-origin: center;
-  animation: neon-border-rotate 6s linear infinite paused;
-  transition: opacity 220ms ease;
-}
-html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
-  .sidebar.occumed-sidebar-workspace-scope
-  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab::before {
-  background: linear-gradient(
-    135deg,
-    var(--neon-c3) 0%,
-    var(--neon-c3) 25%,
-    transparent 50%,
-    transparent 100%
-  );
-  filter: blur(1px) drop-shadow(0 0 12px var(--neon-c3));
-}
-html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
-  .sidebar.occumed-sidebar-workspace-scope
-  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab::after {
-  background: linear-gradient(
-    135deg,
-    transparent 0%,
-    transparent 50%,
-    var(--neon-c1) 75%,
-    var(--neon-c1) 100%
-  );
-  filter: blur(1px) drop-shadow(0 0 12px var(--neon-c1));
-}
-html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
-  .sidebar.occumed-sidebar-workspace-scope
-  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab:hover:not(:disabled)::before,
-html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
-  .sidebar.occumed-sidebar-workspace-scope
-  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab:hover:not(:disabled)::after {
-  opacity: 0.30;
-  animation-play-state: running;
-}
-html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
-  .sidebar.occumed-sidebar-workspace-scope
-  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab.active::before,
-html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
-  .sidebar.occumed-sidebar-workspace-scope
-  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab.active::after,
-html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
-  .sidebar.occumed-sidebar-workspace-scope
-  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab[aria-selected="true"]::before,
-html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
-  .sidebar.occumed-sidebar-workspace-scope
-  > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab[aria-selected="true"]::after {
-  opacity: 0.55;
-  animation-play-state: running;
-}
+
+/* Selected tab glow — border and subtle outer shadow only, no interior wash */
 html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
   .sidebar.occumed-sidebar-workspace-scope
   > .occumed-sidebar-workspace-tabs .occumed-sidebar-workspace-tab.active,
@@ -902,83 +917,18 @@ html[data-occumed-workspace-ready="true"] body .app-wrap .app-body
   border-color: rgba(209, 220, 229, 0.68) !important;
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,.09),
-    0 0 18px rgba(163, 197, 217, 0.28) !important;
+    0 0 10px rgba(163, 197, 217, 0.20) !important;
 }
 
-/* Primary sidebar tool buttons — same two rotating glow layers. */
+/* ── Workflow buttons: retain existing styles; remove overflow:visible ──────── */
 html[data-occumed-workspace-ready="true"] body
   .sidebar.occumed-sidebar-workspace-scope
   .command-tool-grid button {
-  position: relative;
-  isolation: isolate;
-  overflow: visible;
   font-family: var(--p1-font) !important;
+  overflow: hidden;
 }
-html[data-occumed-workspace-ready="true"] body
-  .sidebar.occumed-sidebar-workspace-scope
-  .command-tool-grid button::before,
-html[data-occumed-workspace-ready="true"] body
-  .sidebar.occumed-sidebar-workspace-scope
-  .command-tool-grid button::after {
-  content: "";
-  position: absolute;
-  inset: -1px;
-  border-radius: inherit;
-  z-index: -1;
-  opacity: 0;
-  pointer-events: none;
-  transform-origin: center;
-  animation: neon-border-rotate 6s linear infinite paused;
-  transition: opacity 220ms ease;
-}
-html[data-occumed-workspace-ready="true"] body
-  .sidebar.occumed-sidebar-workspace-scope
-  .command-tool-grid button::before {
-  background: linear-gradient(
-    135deg,
-    var(--neon-c3) 0%,
-    var(--neon-c3) 25%,
-    transparent 50%,
-    transparent 100%
-  );
-  filter: blur(1px) drop-shadow(0 0 12px var(--neon-c3));
-}
-html[data-occumed-workspace-ready="true"] body
-  .sidebar.occumed-sidebar-workspace-scope
-  .command-tool-grid button::after {
-  background: linear-gradient(
-    135deg,
-    transparent 0%,
-    transparent 50%,
-    var(--neon-c1) 75%,
-    var(--neon-c1) 100%
-  );
-  filter: blur(1px) drop-shadow(0 0 12px var(--neon-c1));
-}
-html[data-occumed-workspace-ready="true"] body
-  .sidebar.occumed-sidebar-workspace-scope
-  .command-tool-grid button:hover:not(:disabled)::before,
-html[data-occumed-workspace-ready="true"] body
-  .sidebar.occumed-sidebar-workspace-scope
-  .command-tool-grid button:hover:not(:disabled)::after {
-  opacity: 0.25;
-  animation-play-state: running;
-}
-html[data-occumed-workspace-ready="true"] body
-  .sidebar.occumed-sidebar-workspace-scope
-  .command-tool-grid button.active::before,
-html[data-occumed-workspace-ready="true"] body
-  .sidebar.occumed-sidebar-workspace-scope
-  .command-tool-grid button.active::after,
-html[data-occumed-workspace-ready="true"] body
-  .sidebar.occumed-sidebar-workspace-scope
-  .command-tool-grid button[aria-pressed="true"]::before,
-html[data-occumed-workspace-ready="true"] body
-  .sidebar.occumed-sidebar-workspace-scope
-  .command-tool-grid button[aria-pressed="true"]::after {
-  opacity: 0.52;
-  animation-play-state: running;
-}
+
+/* Active workflow button glow */
 html[data-occumed-workspace-ready="true"] body
   .sidebar.occumed-sidebar-workspace-scope
   .command-tool-grid button.active,
@@ -988,10 +938,12 @@ html[data-occumed-workspace-ready="true"] body
   border-color: rgba(209, 220, 229, 0.58) !important;
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,.06),
-    0 0 14px rgba(163, 197, 217, 0.24) !important;
+    0 0 10px rgba(163, 197, 217, 0.18) !important;
 }
 
-/* ─── Provider layer cards: dark navy glass with neon borders ─────────────── */
+/* ─── Provider layer cards: dark navy glass ─────────────────────────────────
+   The InspiraNeonBorder wrapper handles the perimeter animation.
+   The .workflow-layer itself keeps its visual styling. ── */
 html[data-occumed-workspace-ready="true"] body
   .sidebar.occumed-sidebar-workspace-scope
   .provider-layers-section .workflow-layer {
@@ -1007,56 +959,7 @@ html[data-occumed-workspace-ready="true"] body
     inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
   backdrop-filter: blur(14px) saturate(120%);
   transition: border-color 200ms ease, box-shadow 200ms ease;
-}
-html[data-occumed-workspace-ready="true"] body
-  .sidebar.occumed-sidebar-workspace-scope
-  .provider-layers-section .workflow-layer::before,
-html[data-occumed-workspace-ready="true"] body
-  .sidebar.occumed-sidebar-workspace-scope
-  .provider-layers-section .workflow-layer::after {
-  content: "";
-  position: absolute;
-  inset: -1px;
-  border-radius: inherit;
-  z-index: -1;
-  opacity: 0;
-  pointer-events: none;
-  transform-origin: center;
-  animation: neon-border-rotate 6s linear infinite paused;
-  transition: opacity 260ms ease;
-}
-html[data-occumed-workspace-ready="true"] body
-  .sidebar.occumed-sidebar-workspace-scope
-  .provider-layers-section .workflow-layer::before {
-  background: linear-gradient(
-    135deg,
-    var(--neon-c3) 0%,
-    var(--neon-c3) 25%,
-    transparent 50%,
-    transparent 100%
-  );
-  filter: blur(1px) drop-shadow(0 0 12px var(--neon-c3));
-}
-html[data-occumed-workspace-ready="true"] body
-  .sidebar.occumed-sidebar-workspace-scope
-  .provider-layers-section .workflow-layer::after {
-  background: linear-gradient(
-    135deg,
-    transparent 0%,
-    transparent 50%,
-    var(--neon-c1) 75%,
-    var(--neon-c1) 100%
-  );
-  filter: blur(1px) drop-shadow(0 0 12px var(--neon-c1));
-}
-html[data-occumed-workspace-ready="true"] body
-  .sidebar.occumed-sidebar-workspace-scope
-  .provider-layers-section .workflow-layer:hover::before,
-html[data-occumed-workspace-ready="true"] body
-  .sidebar.occumed-sidebar-workspace-scope
-  .provider-layers-section .workflow-layer:hover::after {
-  opacity: 0.28;
-  animation-play-state: running;
+  overflow: hidden;
 }
 html[data-occumed-workspace-ready="true"] body
   .sidebar.occumed-sidebar-workspace-scope
@@ -1066,15 +969,6 @@ html[data-occumed-workspace-ready="true"] body
     0 4px 18px rgba(0, 0, 0, 0.36),
     0 0 14px var(--neon-glow-hover),
     inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
-}
-html[data-occumed-workspace-ready="true"] body
-  .sidebar.occumed-sidebar-workspace-scope
-  .provider-layers-section .workflow-layer.active::before,
-html[data-occumed-workspace-ready="true"] body
-  .sidebar.occumed-sidebar-workspace-scope
-  .provider-layers-section .workflow-layer.active::after {
-  opacity: 0.55;
-  animation-play-state: running;
 }
 html[data-occumed-workspace-ready="true"] body
   .sidebar.occumed-sidebar-workspace-scope

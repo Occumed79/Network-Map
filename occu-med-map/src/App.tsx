@@ -79,6 +79,7 @@ import {
   setNativeAddressPin,
   setNativeDiagnosticCollection,
 } from './usDiagnosticsNativeMapRuntime';
+import InspiraNeonBorder from './InspiraNeonBorder';
 
 
 const SERVICE_PRESENCE_OPTIONS = [
@@ -111,16 +112,20 @@ function LayerToggle({label,checked,onChange,status,disabled=false}: {
   status:string;
   disabled?:boolean;
 }) {
-  return <div className={`workflow-layer${checked?' active':''}${disabled?' disabled':''}`}>
-    <div className="workflow-layer-copy">
-      <span className="workflow-layer-name">{label}</span>
-      <span className="workflow-layer-status">{status}</span>
-    </div>
-    <label className="tog-switch">
-      <input aria-label={label} type="checkbox" checked={checked} disabled={disabled} onChange={e=>onChange(e.target.checked)}/>
-      <span className="tog-slider"/>
-    </label>
-  </div>;
+  return (
+    <InspiraNeonBorder animationType={checked ? 'half' : 'none'} borderRadius="11px">
+      <div className={`workflow-layer${checked?' active':''}${disabled?' disabled':''}`}>
+        <div className="workflow-layer-copy">
+          <span className="workflow-layer-name">{label}</span>
+          <span className="workflow-layer-status">{status}</span>
+        </div>
+        <label className="tog-switch">
+          <input aria-label={label} type="checkbox" checked={checked} disabled={disabled} onChange={e=>onChange(e.target.checked)}/>
+          <span className="tog-slider"/>
+        </label>
+      </div>
+    </InspiraNeonBorder>
+  );
 }
 
 function escapeHtml(value: unknown): string {
@@ -3065,22 +3070,23 @@ export default function App() {
         <aside ref={sidebarRef} className={`sidebar occumed-sidebar-workspace-scope${mobileSidebarOpen ? ' mobile-open' : ''}`} data-occumed-workspace-tab={sidebarWorkspace}>
           <div ref={sidebarTabsRef} className="occumed-sidebar-workspace-tabs" role="tablist" aria-label="Sidebar workspaces">
             {SIDEBAR_WORKSPACES.map(({id,label,ariaLabel,controls})=>(
-              <button
-                key={id}
-                type="button"
-                className="occumed-sidebar-workspace-tab"
-                data-workspace-tab={id}
-                data-workspace-react-owned="true"
-                role="tab"
-                aria-label={ariaLabel}
-                aria-controls={controls}
-                aria-selected={sidebarWorkspace===id}
-                tabIndex={sidebarWorkspace===id?0:-1}
-                onClick={()=>selectSidebarWorkspace(id)}
-                onKeyDown={event=>handleSidebarTabKeyDown(event,id)}
-              >
-                {label}
-              </button>
+              <InspiraNeonBorder key={id} animationType="half" borderRadius="9px">
+                <button
+                  type="button"
+                  className="occumed-sidebar-workspace-tab"
+                  data-workspace-tab={id}
+                  data-workspace-react-owned="true"
+                  role="tab"
+                  aria-label={ariaLabel}
+                  aria-controls={controls}
+                  aria-selected={sidebarWorkspace===id}
+                  tabIndex={sidebarWorkspace===id?0:-1}
+                  onClick={()=>selectSidebarWorkspace(id)}
+                  onKeyDown={event=>handleSidebarTabKeyDown(event,id)}
+                >
+                  {label}
+                </button>
+              </InspiraNeonBorder>
             ))}
           </div>
           <MapToolsWorkspaceHost ref={mapToolsHostRef} />
@@ -3535,18 +3541,31 @@ export default function App() {
           <section className="sb-section command-section">
             <div className="phase1-section-label"><Radar size={13}/><span>Workflows</span></div>
             <div className="command-tool-grid">
-              <button className={String((activeTool==='liveFinder'?'active':'') || '').concat(' unified-live-tool').trim()} onClick={()=>{setFindMode('nearby');setProviderToolMode('live');document.body.dataset.providerTool='live';selectSidebarWorkspace('find','nearby');}}><Radar size={16}/><span>Live Finder</span></button>
+              <InspiraNeonBorder animationType="half" borderRadius="9px">
+                <button className={String((activeTool==='liveFinder'?'active':'') || '').concat(' unified-live-tool').trim()} onClick={()=>{setFindMode('nearby');setProviderToolMode('live');document.body.dataset.providerTool='live';selectSidebarWorkspace('find','nearby');}}><Radar size={16}/><span>Live Finder</span></button>
+              </InspiraNeonBorder>
+              <InspiraNeonBorder animationType="half" borderRadius="9px">
                 <button type="button" className="unified-npi-tool" onClick={()=>{setFindMode('npi');setProviderToolMode('npi');document.body.dataset.providerTool='npi';selectSidebarWorkspace('find','npi');}} aria-pressed={providerToolMode==='npi'}>
                   <span>NPI Registry</span>
                 </button>
+              </InspiraNeonBorder>
+              <InspiraNeonBorder animationType="half" borderRadius="9px">
                 <button type="button" className="unified-explorer-tool" onClick={()=>{setFindMode('database');selectSidebarWorkspace('find','database');}}>
                   <span>Provider Explorer</span>
                 </button>
-              <button className={activeTool==='radius'?'active':''} onClick={()=>toggleCommandTool('radius')}><Crosshair size={16}/><span>Radius Tool</span></button>
-              <button className={activeTool==='coverage'?'active':''} onClick={()=>toggleCommandTool('coverage')}><Activity size={16}/><span>Coverage</span></button>
-
-              <button className={activeTool==='myClinics'?'active':''} aria-label="Upload Clinics" onClick={()=>setActiveTool(activeTool==='myClinics'?null:'myClinics')}><Upload size={16}/><span>Upload Clinics</span></button>
-              <button className={activeTool==='compare'?'active':''} onClick={()=>toggleCommandTool('compare')}><GitCompareArrows size={16}/><span>Compare</span></button>
+              </InspiraNeonBorder>
+              <InspiraNeonBorder animationType="half" borderRadius="9px">
+                <button className={activeTool==='radius'?'active':''} onClick={()=>toggleCommandTool('radius')}><Crosshair size={16}/><span>Radius Tool</span></button>
+              </InspiraNeonBorder>
+              <InspiraNeonBorder animationType="half" borderRadius="9px">
+                <button className={activeTool==='coverage'?'active':''} onClick={()=>toggleCommandTool('coverage')}><Activity size={16}/><span>Coverage</span></button>
+              </InspiraNeonBorder>
+              <InspiraNeonBorder animationType="half" borderRadius="9px">
+                <button className={activeTool==='myClinics'?'active':''} aria-label="Upload Clinics" onClick={()=>setActiveTool(activeTool==='myClinics'?null:'myClinics')}><Upload size={16}/><span>Upload Clinics</span></button>
+              </InspiraNeonBorder>
+              <InspiraNeonBorder animationType="half" borderRadius="9px">
+                <button className={activeTool==='compare'?'active':''} onClick={()=>toggleCommandTool('compare')}><GitCompareArrows size={16}/><span>Compare</span></button>
+              </InspiraNeonBorder>
             </div>
           </section>
 

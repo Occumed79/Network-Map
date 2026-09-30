@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import InspiraNeonBorder from './InspiraNeonBorder';
 import { createPortal } from 'react-dom';
 import { getActiveMapboxMap } from './dualMapEngineRuntime';
 import { fetchProviderLayer } from './providerLayerRequestRuntime';
@@ -102,22 +103,26 @@ function Toggle({ definition, state, onChange }: {
   state: LayerState;
   onChange: (enabled: boolean) => void;
 }) {
-  return <div className={`workflow-layer${state.enabled ? ' active' : ''}${state.loading ? ' disabled' : ''}`}>
-    <div className="workflow-layer-copy">
-      <span className="workflow-layer-name">{definition.label}</span>
-      <span className="workflow-layer-status">{layerStatus(state)}</span>
-    </div>
-    <label className="tog-switch">
-      <input
-        aria-label={definition.label}
-        type="checkbox"
-        checked={state.enabled}
-        disabled={state.loading && !state.enabled}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-      <span className="tog-slider" />
-    </label>
-  </div>;
+  return (
+    <InspiraNeonBorder animationType={state.enabled ? 'half' : 'none'} borderRadius="11px">
+      <div className={`workflow-layer${state.enabled ? ' active' : ''}${state.loading ? ' disabled' : ''}`}>
+        <div className="workflow-layer-copy">
+          <span className="workflow-layer-name">{definition.label}</span>
+          <span className="workflow-layer-status">{layerStatus(state)}</span>
+        </div>
+        <label className="tog-switch">
+          <input
+            aria-label={definition.label}
+            type="checkbox"
+            checked={state.enabled}
+            disabled={state.loading && !state.enabled}
+            onChange={(event) => onChange(event.target.checked)}
+          />
+          <span className="tog-slider" />
+        </label>
+      </div>
+    </InspiraNeonBorder>
+  );
 }
 
 function findProviderLayerRegistryHost(): HTMLElement | null {

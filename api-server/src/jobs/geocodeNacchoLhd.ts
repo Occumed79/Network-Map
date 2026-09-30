@@ -391,7 +391,10 @@ async function run(): Promise<void> {
 }
 
 export function startNacchoLhdGeocoder(): void {
-  if (started || process.env.NACCHO_STRICT_GEOCODER === "false") return;
+  // This is a bounded maintenance/geocoding job, not a required API startup
+  // dependency. Run it only when explicitly enabled so a missing/stale source
+  // import cannot create repeated production errors on every deploy.
+  if (started || process.env.NACCHO_STRICT_GEOCODER !== "true") return;
   started = true;
   setTimeout(() => {
     void run().catch((error) => logger.error({ err: error }, "County health department strict geocoding failed"));

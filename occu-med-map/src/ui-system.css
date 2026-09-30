@@ -57,7 +57,7 @@ body,
   box-sizing: border-box;
 }
 
-:is(.app-wrap, .app-body, .command-header, .sidebar, .map-wrap, .modal-box, .provider-explorer-drawer, .live-panel) > * {
+:is(.app-wrap, .app-body, .command-header, .sidebar, .map-wrap, .modal-box) > * {
   min-width: 0;
 }
 
@@ -162,8 +162,6 @@ textarea:disabled,
 /* Stable cards, controls, status blocks --------------------------------- */
 :is(
   .sidebar,
-  .live-panel,
-  .provider-explorer-drawer,
   .modal-box,
   .local-pop-card,
   .occumed-map-tools-panel
@@ -175,8 +173,6 @@ textarea:disabled,
 
 :is(
   .sidebar,
-  .live-panel,
-  .provider-explorer-drawer,
   .modal-box,
   .local-pop-card,
   .occumed-map-tools-panel
@@ -358,17 +354,13 @@ html[data-occumed-modal-open="true"] body {
 }
 
 /* Tables and long content ----------------------------------------------- */
-.modal-box table,
-.provider-explorer-drawer table,
-.live-panel table {
+.modal-box table {
   width: 100% !important;
   max-width: 100% !important;
   border-collapse: collapse !important;
 }
 
-.modal-box :is(.table-wrap, [class*="table-container"]),
-.provider-explorer-drawer :is(.table-wrap, [class*="table-container"]),
-.live-panel :is(.table-wrap, [class*="table-container"]) {
+.modal-box :is(.table-wrap, [class*="table-container"]) {
   max-width: 100% !important;
   overflow-x: auto !important;
 }

@@ -6,7 +6,7 @@ const router = Router();
 const MAX_PAGE_SIZE = 2000;
 const CANADA_ARCGIS_PAGE_SIZE = 1000;
 const GERMANY_LOCATIONS_URL = "https://bundes-klinik-atlas.de/fileadmin/json/locations.json";
-const CANADA_ODHF_QUERY_URL = "https://services.arcgis.com/wjcPoefzjpzCgffS/ArcGIS/rest/services/Open_Database_of_Healthcare_Facilities_/FeatureServer/0/query";
+const CANADA_ODHF_QUERY_URL = "https://maps-cartes.services.geo.ca/server2_serveur2/rest/services/StatCan/OpenDatabaseHealthFacilities/MapServer/0/query";
 const AUSTRALIA_HEALTHDIRECT_MAPSERVER = "https://services.ga.gov.au/gis/rest/services/National_HealthDirect_Health_Facilities/MapServer";
 
 type Bounds = { north: number; south: number; east: number; west: number };
@@ -25,7 +25,7 @@ type GermanyLocation = {
   link?: string;
 };
 
-type ArcGisFeature = { attributes?: Record<string, unknown> };
+type ArcGisFeature = { attributes?: Record<string, unknown>; geometry?: { x?: number; y?: number } };
 type ArcGisError = { message?: string; details?: string[] };
 type ArcGisFeatureResponse = { features?: ArcGisFeature[]; exceededTransferLimit?: boolean; error?: ArcGisError };
 type ArcGisCountResponse = { count?: number; error?: ArcGisError };
@@ -46,6 +46,19 @@ const AUSTRALIA_LAYERS: readonly AustraliaLayer[] = [
 function finiteNumber(value: unknown): number | null {
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function arcField(row: Record<string, unknown>, ...candidates: string[]): unknown {
+  const normalized = new Map(
+    Object.entries(row).map(([key, value]) => [key.toLowerCase().replace(/[^a-z0-9]+/g, ""), value]),
+  );
+  for (const candidate of candidates) {
+    const direct = row[candidate];
+    if (direct !== undefined) return direct;
+    const value = normalized.get(candidate.toLowerCase().replace(/[^a-z0-9]+/g, ""));
+    if (value !== undefined) return value;
+  }
+  return undefined;
 }
 
 function parseBounds(req: Request): Bounds | null {
@@ -157,10 +170,14 @@ async function loadGermany(bounds: Bounds | null, limit: number, page: number) {
 
 function normalizeCanada(feature: ArcGisFeature): Record<string, unknown> | null {
   const row = feature.attributes || {};
-  const lat = finiteNumber(row.latitude);
-  const lng = finiteNumber(row.longitude);
+  const lat = finiteNumber(feature.geometry?.y ?? arcField(row, "latitude", "lat"));
+  const lng = finiteNumber(feature.geometry?.x ?? arcField(row, "longitude", "lon", "lng", "long"));
   if (lat === null || lng === null || lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
-  const facilityType = String(row.odhf_facility_type || row.source_facility_type || "healthcare facility");
+
+  const facilityType = String(
+    arcField(row, "ODHF Facility Type", "odhf_facility_type", "Source Facility Type", "source_facility_type")
+      || "healthcare facility",
+  );
   const typeLower = facilityType.toLowerCase();
   const clinicType = typeLower.includes("hospital")
     ? "hospital"
@@ -169,22 +186,40 @@ function normalizeCanada(feature: ArcGisFeature): Record<string, unknown> | null
       : typeLower.includes("nursing") || typeLower.includes("residential")
         ? "residential_care"
         : "healthcare_facility";
-  const street = String(row.source_format_str_address || [row.unit, row.street_no, row.street_name].filter(Boolean).join(" ") || "").trim() || null;
-  const objectId = row.ObjectId2 ?? row.ObjectId ?? row.index_;
+
+  const street = String(
+    arcField(row, "Source-Format Street Address", "source_format_str_address")
+      || [
+        arcField(row, "Unit", "unit"),
+        arcField(row, "Street Number", "street_no", "street_number"),
+        arcField(row, "Street Name", "street_name"),
+      ].filter(Boolean).join(" ")
+      || "",
+  ).trim() || null;
+
+  const objectId = arcField(row, "OBJECTID", "ObjectId2", "ObjectId", "Index", "index_");
+  const name = String(arcField(row, "Facility Name", "facility_name", "name") || "Unnamed Canadian healthcare facility");
+  const city = arcField(row, "City", "city");
+  const province = arcField(row, "Province or Territory", "province", "province_territory");
+  const postalCode = arcField(row, "Postal Code", "postal_code", "postcode");
+  const provider = arcField(row, "Provider", "provider");
+  const sourceFacilityType = arcField(row, "Source Facility Type", "source_facility_type");
+
   const id = objectId == null
-    ? stableId("ca-odhf", [row.facility_name, street, row.city, lat, lng])
+    ? stableId("ca-odhf", [name, street, city, lat, lng])
     : `ca-odhf:${String(objectId)}`;
+
   return {
     id,
-    source_id: String(row.index_ || objectId || id),
-    name: String(row.facility_name || "Unnamed Canadian healthcare facility"),
+    source_id: String(objectId ?? id),
+    name,
     address: street,
     address_1: street,
-    city: row.city ?? null,
-    admin_area: row.province ?? null,
-    state: row.province ?? null,
-    postal_code: row.postal_code ?? null,
-    zip: row.postal_code ?? null,
+    city: city ?? null,
+    admin_area: province ?? null,
+    state: province ?? null,
+    postal_code: postalCode == null ? null : String(postalCode),
+    zip: postalCode == null ? null : String(postalCode),
     country: "Canada",
     country_code: "CA",
     lat,
@@ -197,8 +232,8 @@ function normalizeCanada(feature: ArcGisFeature): Record<string, unknown> | null
     services: [facilityType],
     categories: [facilityType],
     types: [clinicType],
-    source_provider: row.provider ?? null,
-    source_facility_type: row.source_facility_type ?? null,
+    source_provider: provider ?? null,
+    source_facility_type: sourceFacilityType ?? null,
     source: "ca_odhf",
     data_source: "ca_odhf",
     source_kind: "official_registry_live",
@@ -210,9 +245,9 @@ function normalizeCanada(feature: ArcGisFeature): Record<string, unknown> | null
 
 async function fetchCanadaChunk(common: URLSearchParams, resultOffset: number, resultRecordCount: number) {
   const params = new URLSearchParams(common);
-  params.set("outFields", "ObjectId2,ObjectId,index_,facility_name,source_facility_type,odhf_facility_type,provider,unit,street_no,street_name,postal_code,city,province,source_format_str_address,latitude,longitude");
-  params.set("returnGeometry", "false");
-  params.set("orderByFields", "ObjectId2 ASC");
+  params.set("outFields", "*");
+  params.set("returnGeometry", "true");
+  params.set("outSR", "4326");
   params.set("resultOffset", String(resultOffset));
   params.set("resultRecordCount", String(resultRecordCount));
   const payload = await fetchExternalJson<ArcGisFeatureResponse>(
@@ -227,7 +262,7 @@ async function fetchCanadaChunk(common: URLSearchParams, resultOffset: number, r
 
 async function loadCanada(bounds: Bounds | null, limit: number, page: number) {
   const common = geometryParams(bounds);
-  common.set("where", "latitude IS NOT NULL AND longitude IS NOT NULL");
+  common.set("where", "1=1");
   common.set("f", "json");
 
   const countParams = new URLSearchParams(common);

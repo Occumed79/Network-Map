@@ -1024,7 +1024,13 @@ const SIDEBAR_WORKSPACES: ReadonlyArray<{
 const MapToolsWorkspaceHost = React.memo(React.forwardRef<HTMLDivElement>(function MapToolsWorkspaceHost(_props, ref) {
   // This component deliberately never updates: the map runtime owns the panel
   // mounted inside this host, while React owns the host's lifetime.
-  return <div ref={ref} id="sidebar-map-tools-panel" className="occumed-sidebar-workspace-host" role="tabpanel" aria-label="Map tools workspace" />;
+  return <div ref={ref} id="sidebar-map-tools-panel" className="occumed-sidebar-workspace-host" role="tabpanel" aria-label="Map tools workspace">
+    <div className="map-tools-waiting" role="status">
+      <strong>Map Tools</strong>
+      <p>Route planning, service zones, and travel tools appear when the map is ready. If the map reports an error, use Retry Mapbox on the map.</p>
+      <button type="button" onClick={()=>window.location.reload()}>Reload map</button>
+    </div>
+  </div>;
 }));
 
 export default function App() {
@@ -1084,6 +1090,7 @@ export default function App() {
 
   // Coverage request panel state
   const [rpCity, setRpCity] = useState('');
+  const [rpBusy, setRpBusy] = useState(false);
   const [rpExam, setRpExam] = useState('primaryCare');
   const [rpResult, setRpResult] = useState<React.ReactNode>(null);
   const [rpSuggestions, setRpSuggestions] = useState<any[]>([]);
@@ -2192,8 +2199,13 @@ export default function App() {
   }
 
   async function runLookup() {
+    if (rpBusy) return;
     const inputVal=rpCity.trim();
     if(!inputVal){ alert('Please enter a city, address, or ZIP code.'); return; }
+    setRpBusy(true);
+    setLastReportData(null);
+    setRpResult(<div className="rp-city-meta" role="status">Assessing coverage…</div>);
+    try {
     setRpSuggestions([]);
     // try dataset match
     const query=inputVal.toLowerCase().replace(/,.*$/,'').trim();
@@ -2205,12 +2217,14 @@ export default function App() {
     if(!match) match=LOCS.find(l=>l[0].toLowerCase().startsWith(query));
     if(!match) match=LOCS.find(l=>l[0].toLowerCase().includes(query)&&(!stateCode||l[1]===stateCode));
     if(!match) match=LOCS.find(l=>l[0].toLowerCase().includes(query));
-    if(match){ void renderDatasetMatch(match); return; }
+    if(match){ await renderDatasetMatch(match); return; }
     let geo=lastGeoResult;
     if(!geo||!inputVal.toLowerCase().includes((geo.city||'').toLowerCase())) geo=await geocodeQuery(inputVal);
     setLastGeoResult(null);
     if(!geo){ setRpResult(<div style={{fontSize:'11px',color:'#3d5478',textAlign:'center',padding:'14px 0'}}>LOCATION NOT FOUND.<br/>Try city + state abbreviation, e.g. "Sweetwater TX".</div>); return; }
-    void renderGeocodedResult(geo);
+    await renderGeocodedResult(geo);
+    } catch (error) { setRpResult(<AssessmentError error={error}/>); }
+    finally { setRpBusy(false); }
   }
 
   async function renderDatasetMatch(match:any) {
@@ -3040,6 +3054,15 @@ export default function App() {
     return () => { delete window.__NETWORK_MAP_SIDEBAR_WORKSPACES__; };
   }, [currentMapToolsPanel, dockMapToolsPanel, selectSidebarWorkspace]);
 
+  useLayoutEffect(() => {
+    if (sidebarRef.current) sidebarRef.current.scrollTop = 0;
+  }, [sidebarWorkspace]);
+
+  useLayoutEffect(() => {
+    if (sidebarWorkspace !== 'providers' || !['coverage','radius'].includes(activeTool || '')) return;
+    sidebarRef.current?.querySelector<HTMLElement>('.tool-detail-section')?.scrollIntoView({block:'nearest'});
+  }, [activeTool, sidebarWorkspace]);
+
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER
   // ─────────────────────────────────────────────────────────────────────────
@@ -3055,7 +3078,7 @@ export default function App() {
       activeToolRef.current = nextTool;
       return nextTool;
     });
-    setMobileSidebarOpen(false);
+    if (tool !== 'coverage') setMobileSidebarOpen(false);
   };
   return (
     <div className="app-wrap">
@@ -3550,6 +3573,50 @@ export default function App() {
             </div>
           </section>
 
+          {activeTool === 'coverage' && (
+            <section className="sb-section command-section tool-detail-section">
+              <div className="rp-header">
+                <span className="rp-title">Coverage Request</span>
+                <button className="rp-close" onClick={()=>setActiveTool(activeTool === 'coverage' ? null : 'coverage')}>Close</button>
+              </div>
+              <div className="rp-field" style={{position:'relative'}}>
+                <label htmlFor="coverage-location">City, address, or ZIP</label>
+                <input
+                  id="coverage-location"
+                  disabled={rpBusy}
+                  className="rp-input"
+                  placeholder="e.g. Birmingham AL"
+                  value={rpCity}
+                  onChange={e=>handleCityInput(e.target.value)}
+                  onKeyDown={e=>e.key==='Enter'&&runLookup()}
+                />
+                {rpSuggestions.length>0&&(
+                  <div className="rp-suggestions">
+                    {rpSuggestions.map((loc,i)=>(
+                      <div key={i} className="rp-sug-item" onClick={()=>selectSuggestion(loc)}>
+                        <div className="rp-sug-main">{loc[0]}, {loc[1]}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="rp-field">
+                <label htmlFor="coverage-service">Exam or service type</label>
+                <select id="coverage-service" disabled={rpBusy} className="rp-select" value={rpExam} onChange={e=>setRpExam(e.target.value)}>
+                  {ALL_METRICS.map(m=><option key={m} value={m}>{MLBL[m]}</option>)}
+                </select>
+              </div>
+              <button className="rp-run-btn" disabled={rpBusy} onClick={runLookup}>{rpBusy?<LoaderCircle size={15}/>:<Activity size={15}/>}{rpBusy?'Assessing…':'Assess Coverage'}</button>
+              {rpResult}
+            </section>
+          )}
+          {activeTool === 'radius' && (
+            <section className="sb-section command-section tool-detail-section">
+              <div className="command-section-title"><Crosshair size={15}/><span>Radius Tool</span></div>
+              <p className="command-section-help">Click anywhere on the map to set the extraction center. The radius controls stay visible over the map.</p>
+            </section>
+          )}
+
           <section className="sb-section command-section provider-layers-section">
             <div className="phase1-section-label"><Layers3 size={13}/><span>Provider Layers</span><small>Off by default</small></div>
             <div className="workflow-layer-list">
@@ -3624,47 +3691,6 @@ export default function App() {
             </>}
           </section>
 
-          {activeTool === 'coverage' && (
-            <section className="sb-section command-section tool-detail-section">
-              <div className="rp-header">
-                <span className="rp-title">Coverage Request</span>
-                <button className="rp-close" onClick={()=>setActiveTool(activeTool === 'coverage' ? null : 'coverage')}>Close</button>
-              </div>
-              <div className="rp-field" style={{position:'relative'}}>
-                <label>City, address, or ZIP</label>
-                <input
-                  className="rp-input"
-                  placeholder="e.g. Birmingham AL"
-                  value={rpCity}
-                  onChange={e=>handleCityInput(e.target.value)}
-                  onKeyDown={e=>e.key==='Enter'&&runLookup()}
-                />
-                {rpSuggestions.length>0&&(
-                  <div className="rp-suggestions">
-                    {rpSuggestions.map((loc,i)=>(
-                      <div key={i} className="rp-sug-item" onClick={()=>selectSuggestion(loc)}>
-                        <div className="rp-sug-main">{loc[0]}, {loc[1]}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div className="rp-field">
-                <label>Exam or service type</label>
-                <select className="rp-select" value={rpExam} onChange={e=>setRpExam(e.target.value)}>
-                  {ALL_METRICS.map(m=><option key={m} value={m}>{MLBL[m]}</option>)}
-                </select>
-              </div>
-              <button className="rp-run-btn" onClick={runLookup}><Activity size={15}/>Assess Coverage</button>
-              {rpResult}
-            </section>
-          )}
-          {activeTool === 'radius' && (
-            <section className="sb-section command-section tool-detail-section">
-              <div className="command-section-title"><Crosshair size={15}/><span>Radius Tool</span></div>
-              <p className="command-section-help">Click anywhere on the map to set the extraction center. The radius controls stay visible over the map.</p>
-            </section>
-          )}
           </div>
         </aside>
 

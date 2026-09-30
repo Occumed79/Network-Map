@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { getProviderDatabaseProjects, getScoringPool } from "@workspace/db";
 import { burdenScore, calculateUnifiedAccessScore, scarcityScore, type ComponentInput } from "../lib/healthcareAccessScoring";
 
+import { populationEstimates, POPULATION_ESTIMATES_YEAR } from "../lib/censusPopulation";
+
 const router: IRouter = Router();
 const ACS_YEAR = 2024;
 const LOCAL_RADIUS_MILES = 50;
@@ -41,7 +43,7 @@ const FIPS_TO_STATE:Record<string,string>={"01":"AL","02":"AK","04":"AZ","05":"A
 //                       that some provider DBs did not contribute to the count
 type ProviderEvidence = { relevant:number; facilities:number; nearestMiles:number|null; nearestName:string|null; nearestLat:number|null; nearestLng:number|null; providerEvidenceAvailable:boolean; providerEvidenceComplete:boolean; successfulSources:number; failedSources:number };
 type AssessmentQuery = { lat:number; lng:number; service:string; countryCode:string; admin1?:string; countyFips?:string };
-type UsProfile = { countyFips:string; countyName:string; state:string; population:number; landSquareMiles:number; density:number; sourceYear:number };
+type UsProfile = { countyFips:string; countyName:string; state:string; population:number; landSquareMiles:number; density:number; sourceYear:number; populationSource?:string };
 type ShortageEvidence = { hpsaScore:number|null; hpsaDesignated:boolean|null; muaDesignated:boolean|null; facilityCount:number|null; sourceYear:number|null };
 const hrsaStateCache = new Map<string, { expires:number; hpsa:any[]; mua:any[] }>();
 
@@ -60,11 +62,14 @@ async function usProfile(query:AssessmentQuery):Promise<UsProfile|null>{
   const county=await resolveCounty(query).catch(()=>null);if(!county)return null;
   const key=process.env.CENSUS_DATA_API_KEY?`&key=${encodeURIComponent(process.env.CENSUS_DATA_API_KEY)}`:"";
   const census=await fetchJson(new URL(`https://api.census.gov/data/${ACS_YEAR}/acs/acs5?get=NAME,B01003_001E&for=county:${county.countyFips.slice(2)}&in=state:${county.countyFips.slice(0,2)}${key}`)).catch(()=>null);
-  const population=finite(census?.[1]?.[1]);if(population===null)return null;
+  const acsPopulation=finite(census?.[1]?.[1]);
+  const fallback=acsPopulation===null?(await populationEstimates().catch(()=>null))?.counties.get(county.countyFips):undefined;
+  const population=acsPopulation??fallback?.population??null;if(population===null)return null;
+  const populationSource=acsPopulation!==null?"U.S. Census ACS 5-year":"U.S. Census Population Estimates";
   const tiger=new URL("https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/tigerWMS_Current/MapServer/82/query");tiger.searchParams.set("where",`GEOID='${county.countyFips}'`);tiger.searchParams.set("outFields","AREALAND");tiger.searchParams.set("returnGeometry","false");tiger.searchParams.set("f","json");
   const areaMeters=finite((await fetchJson(tiger).catch(()=>null))?.features?.[0]?.attributes?.AREALAND);if(areaMeters===null)return null;
   const landSquareMiles=areaMeters/2_589_988.110336;
-  return {...county,countyName:String(census?.[1]?.[0]||county.countyName).split(",")[0],population,landSquareMiles,density:population/landSquareMiles,sourceYear:ACS_YEAR};
+  return {...county,countyName:String(census?.[1]?.[0]||fallback?.name||county.countyName).split(",")[0],population,landSquareMiles,density:population/landSquareMiles,sourceYear:acsPopulation!==null?ACS_YEAR:POPULATION_ESTIMATES_YEAR,populationSource};
 }
 // Fix #4: HRSA failures must produce null designation, not false.
 // Previously .catch(()=>[]) on the state-level fetch silently returned an empty array,
@@ -111,7 +116,8 @@ async function hrsaEvidence(profile:UsProfile):Promise<ShortageEvidence>{
 }
 async function providerEvidence(query:AssessmentQuery):Promise<ProviderEvidence>{
   const terms=SERVICE_TERMS[query.service]||[query.service]; const patterns=terms.map(term=>`%${term.toLowerCase()}%`);
-  const projects=getProviderDatabaseProjects();
+  let projects:ReturnType<typeof getProviderDatabaseProjects>;
+  try { projects=getProviderDatabaseProjects(); } catch { projects=[]; }
   // If no provider databases are configured at all, evidence is unavailable — not scarcity.
   if(!projects.length)return {relevant:0,facilities:0,nearestMiles:null,nearestName:null,nearestLat:null,nearestLng:null,providerEvidenceAvailable:false,providerEvidenceComplete:false,successfulSources:0,failedSources:0};
   const results=await Promise.allSettled(projects.map(({pool})=>pool.query(`WITH candidates AS (SELECT name,lat,lng,primary_provider_type,capability_tags,3959*acos(least(1,greatest(-1,cos(radians($1))*cos(radians(lat))*cos(radians(lng)-radians($2))+sin(radians($1))*sin(radians(lat))))) distance FROM public.provider_master_map_view WHERE lat BETWEEN $1-1 AND $1+1 AND lng BETWEEN $2-1.3 AND $2+1.3), relevant AS (SELECT * FROM candidates WHERE distance<=$4 AND (lower(coalesce(primary_provider_type,'')) LIKE ANY($3::text[]) OR lower(coalesce(array_to_string(capability_tags,' '),'')) LIKE ANY($3::text[]))) SELECT (SELECT count(*)::int FROM relevant) relevant,(SELECT count(*)::int FROM candidates WHERE distance<=$4 AND lower(coalesce(primary_provider_type,''))~'hospital|facility|clinic|urgent') facilities,(SELECT distance FROM relevant ORDER BY distance LIMIT 1) nearest_miles,(SELECT name FROM relevant ORDER BY distance LIMIT 1) nearest_name,(SELECT lat FROM relevant ORDER BY distance LIMIT 1) nearest_lat,(SELECT lng FROM relevant ORDER BY distance LIMIT 1) nearest_lng`,[query.lat,query.lng,patterns,LOCAL_RADIUS_MILES])));
@@ -152,7 +158,7 @@ function usInputs(profile:UsProfile,shortage:ShortageEvidence,evidence:ProviderE
     const confirmedZero=evidence.relevant===0&&evidence.providerEvidenceComplete;
     if(confirmedZero||evidence.relevant>0){
       const workforceScore=confirmedZero?5:Math.max(scarcityScore(evidence.relevant/population*100_000,120,10),shortage.hpsaScore===null?1:burdenScore(shortage.hpsaScore,0,26));
-      inputs.workforce={score:workforceScore,evidence:{relevantProviders:evidence.relevant,compatibleLocalPopulation:Math.round(population),providersPer100k:Number((evidence.relevant/population*100_000).toFixed(2)),hpsaScore:shortage.hpsaScore,hpsaDesignated:shortage.hpsaDesignated,observedScarcity:confirmedZero,partialSearch:!evidence.providerEvidenceComplete},sources:["Network Map provider registries","U.S. Census ACS 5-year",...(shortage.hpsaScore!==null?["HRSA HPSA"]:[])],year:profile.sourceYear};
+      inputs.workforce={score:workforceScore,evidence:{relevantProviders:evidence.relevant,compatibleLocalPopulation:Math.round(population),providersPer100k:Number((evidence.relevant/population*100_000).toFixed(2)),hpsaScore:shortage.hpsaScore,hpsaDesignated:shortage.hpsaDesignated,observedScarcity:confirmedZero,partialSearch:!evidence.providerEvidenceComplete},sources:["Network Map provider registries",profile.populationSource||"U.S. Census ACS 5-year",...(shortage.hpsaScore!==null?["HRSA HPSA"]:[])],year:profile.sourceYear};
       const coverageScore=confirmedZero?5:Math.max(scarcityScore(evidence.relevant,50,1),shortage.muaDesignated?4:1);
       inputs.coverage={score:coverageScore,evidence:{relevantProviders:evidence.relevant,muaDesignated:shortage.muaDesignated,serviceRadiusMiles:LOCAL_RADIUS_MILES,observedScarcity:confirmedZero},sources:["Network Map provider registries",...(shortage.muaDesignated!==null?["HRSA MUA/P"]:[])]};
     }
@@ -166,7 +172,7 @@ function usInputs(profile:UsProfile,shortage:ShortageEvidence,evidence:ProviderE
     const capacityScore=resolvedFacilities===0?5:scarcityScore(resolvedFacilities/population*100_000,20,1);
     inputs.capacity={score:capacityScore,evidence:{facilities:resolvedFacilities,facilitiesPer100k:Number((resolvedFacilities/population*100_000).toFixed(2)),observedScarcity:resolvedFacilities===0},sources:[hrsa_facilities!==null?"HRSA healthcare facilities":"Network Map provider registries"],year:shortage.sourceYear??profile.sourceYear};
   }
-  inputs.geographic={score:scarcityScore(profile.density,500,5),evidence:{populationDensity:profile.density,landSquareMiles:profile.landSquareMiles,ruralityProxy:"Census population density"},sources:["U.S. Census ACS 5-year","Census TIGER/Line"],year:profile.sourceYear};
+  inputs.geographic={score:scarcityScore(profile.density,500,5),evidence:{populationDensity:profile.density,landSquareMiles:profile.landSquareMiles,ruralityProxy:"Census population density"},sources:[profile.populationSource||"U.S. Census ACS 5-year","Census TIGER/Line"],year:profile.sourceYear};
   if(travel.minutes!==null)inputs.localAccess={score:burdenScore(travel.minutes,10,120),evidence:{nearestRelevantProviderMiles:evidence.nearestMiles,nearestRelevantProvider:evidence.nearestName,travelMinutes:travel.minutes},sources:[travel.source||"Network Map provider registries"]};
   return inputs as any;
 }
@@ -254,9 +260,12 @@ router.get("/scoring/us/states", async (req, res) => {
     const tigerRows = (await fetchJson(tigerUrl)).features || [];
     const stateAreas = new Map<string, number>(tigerRows.map((feature:any) => [String(feature.attributes?.STATE).padStart(2,"0"), Number(feature.attributes?.AREALAND) / 2_589_988.110336]));
     const key = process.env.CENSUS_DATA_API_KEY ? `&key=${encodeURIComponent(process.env.CENSUS_DATA_API_KEY)}` : "";
-    const census = await fetchJson(new URL(`https://api.census.gov/data/${ACS_YEAR}/acs/acs5?get=NAME,B01003_001E&for=state:*${key}`));
-    const populations = new Map<string,number|null>((census||[]).slice(1).map((row:any[]) => [String(row[2]).padStart(2,"0"), finite(row[1])] as [string,number|null]));
-    const stateProjects=getProviderDatabaseProjects();
+    const census = await fetchJson(new URL(`https://api.census.gov/data/${ACS_YEAR}/acs/acs5?get=NAME,B01003_001E&for=state:*${key}`)).catch(()=>null);
+    const estimateStates = census ? null : (await populationEstimates()).states;
+    const populationSource = census ? "U.S. Census ACS 5-year" : "U.S. Census Population Estimates";
+    const populations = estimateStates ? new Map<string,number|null>([...estimateStates].map(([state,row])=>[state,row.population])) : new Map<string,number|null>((census||[]).slice(1).map((row:any[]) => [String(row[2]).padStart(2,"0"), finite(row[1])] as [string,number|null]));
+    let stateProjects:ReturnType<typeof getProviderDatabaseProjects>;
+    try { stateProjects=getProviderDatabaseProjects(); } catch { stateProjects=[]; }
     let stateSucceededCount=0,stateFailedCount=0;
     const providerCounts = new Map<string,{relevant:number;facilities:number}>();
     if(stateProjects.length){
@@ -308,7 +317,7 @@ router.get("/scoring/us/states", async (req, res) => {
         }
       }
       const landArea=finite(stateAreas.get(fips));
-      if(landArea!==null){const density=population/landArea;inputs.geographic={score:scarcityScore(density,500,5),evidence:{populationDensity:density,landSquareMiles:landArea},sources:["U.S. Census ACS 5-year","Census TIGER/Line"],year:ACS_YEAR};}
+      if(landArea!==null){const density=population/landArea;inputs.geographic={score:scarcityScore(density,500,5),evidence:{populationDensity:density,landSquareMiles:landArea},sources:[populationSource,"Census TIGER/Line"],year:ACS_YEAR};}
       if(Object.keys(inputs).length){
         // Apply provider-source completeness to state scores the same way as point assessments.
         const stateCompleteness=(anyProjectSucceeded&&stateFailedCount>0)?stateSucceededCount/(stateSucceededCount+stateFailedCount):1;

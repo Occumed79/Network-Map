@@ -457,8 +457,11 @@ try {
   await saveRing.click();
   await radiusCard.getByText(/Ring 1/i).waitFor({ state: "visible", timeout: 5_000 });
 
-  await page.getByRole("tab", { name: /Explorer workspace/i }).click();
-  const explorer = page.locator(".provider-explorer-drawer.open:visible");
+  await page.getByRole("tab", { name: /Find workspace/i }).click();
+  const findPanel = page.locator("#sidebar-find-panel:visible");
+  await findPanel.waitFor({ state: "visible", timeout: 10_000 });
+  await findPanel.getByRole("button", { name: "Database", exact: true }).click();
+  const explorer = findPanel.locator(".find-submode-body");
   await explorer.waitFor({ state: "visible", timeout: 10_000 });
   await clickByText(page, /^Density$/i, explorer);
   await page.locator(".provider-map-status").waitFor({ state: "visible", timeout: 5_000 });
@@ -507,11 +510,12 @@ try {
   const radiusCenterAfterProviderClick = ((await radiusCard.textContent()) || "").match(/Center:\s*[-\d.]+,\s*[-\d.]+/)?.[0] || "";
   assert.equal(radiusCenterAfterProviderClick, radiusCenterBefore, "Provider clicks must not fall through into Radius map-click ownership");
 
-  await page.getByRole("tab", { name: /Finder workspace/i }).click();
-  await page.locator(".live-panel.open:visible").waitFor({ state: "visible", timeout: 10_000 });
+  await page.getByRole("tab", { name: /Find workspace/i }).click();
+  await findPanel.getByRole("button", { name: "Nearby", exact: true }).click();
+  await findPanel.locator(".find-submode-body").waitFor({ state: "visible", timeout: 10_000 });
   await mapCanvasClick(page, 0.52, 0.5, true);
   await page.getByText("CI Live Clinic").first().waitFor({ state: "visible", timeout: 15_000 });
-  await page.waitForFunction(() => /1 facilities from OSM/i.test(document.querySelector(".live-panel.open")?.textContent || ""), null, { timeout: 15_000 });
+  await page.waitForFunction(() => /1 facilities from OSM/i.test(document.querySelector("#sidebar-find-panel")?.textContent || ""), null, { timeout: 15_000 });
 
   assert.deepEqual(pageErrors, [], `Mapbox native tool acceptance saw page errors: ${pageErrors.join("; ")}`);
   console.log(`Mapbox native tool acceptance passed in ${browserName}: categorized providers, uncapped NACCHO pagination, radius, 2D/3D, density, hex, provider click ownership, and OSM Live Finder.`);

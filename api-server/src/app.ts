@@ -38,8 +38,13 @@ function snapshotPayload(body: unknown): Record<string, unknown> {
 }
 
 const requestDeadline: RequestHandler = (req, res, next) => {
-  req.setTimeout(REQUEST_DEADLINE_MS);
-  res.setTimeout(REQUEST_DEADLINE_MS, () => {
+  // A cold assessment resolves multiple authoritative sources. Keep its
+  // server deadline inside the client's 60-second budget, without extending
+  // deadlines for uploads, writes, or other API routes.
+  const deadline = req.method === "GET" && ["/api/scoring/assessment", "/api/scoring/us/states"].includes(req.path)
+    ? Math.max(REQUEST_DEADLINE_MS, 55_000) : REQUEST_DEADLINE_MS;
+  req.setTimeout(deadline);
+  res.setTimeout(deadline, () => {
     if (!res.headersSent) res.status(504).json({ error: "Request deadline exceeded.", code: "request_timeout" });
   });
   next();

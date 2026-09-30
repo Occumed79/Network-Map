@@ -61,13 +61,17 @@ async function resolveCounty(query:AssessmentQuery):Promise<{countyFips:string;c
 async function usProfile(query:AssessmentQuery):Promise<UsProfile|null>{
   const county=await resolveCounty(query).catch(()=>null);if(!county)return null;
   const key=process.env.CENSUS_DATA_API_KEY?`&key=${encodeURIComponent(process.env.CENSUS_DATA_API_KEY)}`:"";
-  const census=await fetchJson(new URL(`https://api.census.gov/data/${ACS_YEAR}/acs/acs5?get=NAME,B01003_001E&for=county:${county.countyFips.slice(2)}&in=state:${county.countyFips.slice(0,2)}${key}`)).catch(()=>null);
+  const censusPromise=key?fetchJson(new URL(`https://api.census.gov/data/${ACS_YEAR}/acs/acs5?get=NAME,B01003_001E&for=county:${county.countyFips.slice(2)}&in=state:${county.countyFips.slice(0,2)}${key}`)).catch(()=>null):Promise.resolve(null);
+  const tiger=new URL("https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/tigerWMS_Current/MapServer/82/query");tiger.searchParams.set("where",`GEOID='${county.countyFips}'`);tiger.searchParams.set("outFields","AREALAND");tiger.searchParams.set("returnGeometry","false");tiger.searchParams.set("f","json");
+  const [populationData,tigerData]=await Promise.all([
+    censusPromise.then(async(census)=>({census,fallback:finite(census?.[1]?.[1])===null?(await populationEstimates().catch(()=>null))?.counties.get(county.countyFips):undefined})),
+    fetchJson(tiger).catch(()=>null),
+  ]);
+  const {census,fallback}=populationData;
   const acsPopulation=finite(census?.[1]?.[1]);
-  const fallback=acsPopulation===null?(await populationEstimates().catch(()=>null))?.counties.get(county.countyFips):undefined;
   const population=acsPopulation??fallback?.population??null;if(population===null)return null;
   const populationSource=acsPopulation!==null?"U.S. Census ACS 5-year":"U.S. Census Population Estimates";
-  const tiger=new URL("https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/tigerWMS_Current/MapServer/82/query");tiger.searchParams.set("where",`GEOID='${county.countyFips}'`);tiger.searchParams.set("outFields","AREALAND");tiger.searchParams.set("returnGeometry","false");tiger.searchParams.set("f","json");
-  const areaMeters=finite((await fetchJson(tiger).catch(()=>null))?.features?.[0]?.attributes?.AREALAND);if(areaMeters===null)return null;
+  const areaMeters=finite(tigerData?.features?.[0]?.attributes?.AREALAND);if(areaMeters===null)return null;
   const landSquareMiles=areaMeters/2_589_988.110336;
   return {...county,countyName:String(census?.[1]?.[0]||fallback?.name||county.countyName).split(",")[0],population,landSquareMiles,density:population/landSquareMiles,sourceYear:acsPopulation!==null?ACS_YEAR:POPULATION_ESTIMATES_YEAR,populationSource};
 }
@@ -240,9 +244,18 @@ function applyProviderCompletenessToScore(
   return score;
 }
 async function buildAssessment(query:AssessmentQuery){
-  const evidence=await providerEvidence(query);const travel=await travelMinutes(query,evidence);let inputs:Record<string,ComponentInput>={};let population:number|null=null,density:number|null=null,rurality:number|null=null,geographyLevel="country",nationalBaselineFallback=false;let profile:UsProfile|null=null;
-  if(query.countryCode==="US"){profile=await usProfile(query);if(profile){population=profile.population;density=profile.density;geographyLevel="county";const shortage=await hrsaEvidence(profile);inputs=usInputs(profile,shortage,evidence,travel) as Record<string,ComponentInput>;}}
-  else{const available=await internationalRows(query);geographyLevel=available.level;nationalBaselineFallback=available.fallback;inputs=internationalInputs(available.rows,evidence,travel);const ruralRow=indicator(available.rows,["SP.RUR.TOTL.ZS"]),densityRow=indicator(available.rows,["EN.POP.DNST"]),popRow=indicator(available.rows,["SP.POP.TOTL"]);rurality=finite(ruralRow?.value);density=finite(densityRow?.value);population=finite(popRow?.value);}
+  const evidencePromise=providerEvidence(query);
+  const profilePromise=query.countryCode==="US"?usProfile(query):Promise.resolve(null);
+  const [evidence,travel,profile,shortage,available]=await Promise.all([
+    evidencePromise,
+    evidencePromise.then(evidence=>travelMinutes(query,evidence)),
+    profilePromise,
+    profilePromise.then(profile=>profile?hrsaEvidence(profile):null),
+    query.countryCode!=="US"?internationalRows(query):Promise.resolve(null),
+  ]);
+  let inputs:Record<string,ComponentInput>={};let population:number|null=null,density:number|null=null,rurality:number|null=null,geographyLevel="country",nationalBaselineFallback=false;
+  if(query.countryCode==="US"){if(profile&&shortage){population=profile.population;density=profile.density;geographyLevel="county";inputs=usInputs(profile,shortage,evidence,travel) as Record<string,ComponentInput>;}}
+  else if(available){geographyLevel=available.level;nationalBaselineFallback=available.fallback;inputs=internationalInputs(available.rows,evidence,travel);const ruralRow=indicator(available.rows,["SP.RUR.TOTL.ZS"]),densityRow=indicator(available.rows,["EN.POP.DNST"]),popRow=indicator(available.rows,["SP.POP.TOTL"]);rurality=finite(ruralRow?.value);density=finite(densityRow?.value);population=finite(popRow?.value);}
   // Fix #1 continued: propagate persistence errors (they are now thrown) so callers can log them.
   // The .catch logs + rethrows in persistInternationalScore, so we only suppress here to not
   // fail the HTTP response — the error is already logged with full context.
@@ -260,7 +273,7 @@ router.get("/scoring/us/states", async (req, res) => {
     const tigerRows = (await fetchJson(tigerUrl)).features || [];
     const stateAreas = new Map<string, number>(tigerRows.map((feature:any) => [String(feature.attributes?.STATE).padStart(2,"0"), Number(feature.attributes?.AREALAND) / 2_589_988.110336]));
     const key = process.env.CENSUS_DATA_API_KEY ? `&key=${encodeURIComponent(process.env.CENSUS_DATA_API_KEY)}` : "";
-    const census = await fetchJson(new URL(`https://api.census.gov/data/${ACS_YEAR}/acs/acs5?get=NAME,B01003_001E&for=state:*${key}`)).catch(()=>null);
+    const census = key ? await fetchJson(new URL(`https://api.census.gov/data/${ACS_YEAR}/acs/acs5?get=NAME,B01003_001E&for=state:*${key}`)).catch(()=>null) : null;
     const estimateStates = census ? null : (await populationEstimates()).states;
     const populationSource = census ? "U.S. Census ACS 5-year" : "U.S. Census Population Estimates";
     const populations = estimateStates ? new Map<string,number|null>([...estimateStates].map(([state,row])=>[state,row.population])) : new Map<string,number|null>((census||[]).slice(1).map((row:any[]) => [String(row[2]).padStart(2,"0"), finite(row[1])] as [string,number|null]));

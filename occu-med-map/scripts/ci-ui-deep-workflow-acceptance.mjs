@@ -211,46 +211,49 @@ async function assertUploadSuccess(page, writeMode) {
 }
 
 async function assertExplorerStates(page) {
-  const explorerTab = page.getByRole("tab", { name: /explorer/i });
-  await explorerTab.click();
-  await page.waitForTimeout(220);
-  const drawer = page.locator(".provider-explorer-drawer.open:visible");
-  await drawer.waitFor({ state: "visible", timeout: 10_000 });
-  const initialText = ((await drawer.textContent()) || "").replace(/\s+/g, " ").trim();
-  assert.ok(initialText.length > 30, "Explorer must render meaningful content instead of a blank panel");
-  assert.equal(await page.locator(".provider-explorer-drawer.open:visible").count(), 1, "Explorer must have one visible drawer");
+  const findTab = page.getByRole("tab", { name: /find/i });
+  await findTab.click();
+  await page.waitForTimeout(160);
+  const findPanel = page.locator("#sidebar-find-panel:visible");
+  await findPanel.waitFor({ state: "visible", timeout: 10_000 });
+  await findPanel.getByRole("button", { name: "Database", exact: true }).click();
+  await page.waitForTimeout(120);
+  const initialText = ((await findPanel.textContent()) || "").replace(/\s+/g, " ").trim();
+  assert.ok(/visualization|database scope|provider type/i.test(initialText), "Find → Database must render Provider Explorer controls");
 
-  const actionButtons = drawer.locator("button:visible");
-  assert.ok(await actionButtons.count() > 0, "Explorer must expose visible controls");
-  const statusLike = drawer.locator("[role='status'], .provider-explorer-status, [class*='status']");
+  const actionButtons = findPanel.locator("button:visible");
+  assert.ok(await actionButtons.count() > 0, "Find → Database must expose visible controls");
+  const statusLike = findPanel.locator("[role='status'], .provider-map-status, [class*='status']");
   if (await statusLike.count()) {
     const statusText = ((await statusLike.first().textContent()) || "").trim();
-    assert.ok(statusText.length > 0, "Explorer status surface must not be blank when present");
+    assert.ok(statusText.length > 0, "Database status surface must not be blank when present");
   }
 
   const providersTab = page.getByRole("tab", { name: /providers/i });
   await providersTab.click();
   await page.waitForTimeout(160);
-  assert.equal(await page.locator(".provider-explorer-drawer.open:visible").count(), 0, "Explorer must close when its workspace is no longer selected");
+  assert.equal(await page.locator("#sidebar-find-panel:visible").count(), 0, "Find must hide when Providers is selected");
 }
 
 async function assertFinderModeStates(page) {
-  const finderTab = page.getByRole("tab", { name: /finder/i });
-  await finderTab.click();
-  await page.waitForTimeout(200);
-  const finder = page.locator(".live-panel.open:visible");
-  await finder.waitFor({ state: "visible", timeout: 10_000 });
-  const liveText = ((await finder.textContent()) || "").toLowerCase();
-  assert.ok(/live places|live provider|source filters/.test(liveText), "Finder must render Live Places mode");
+  const findTab = page.getByRole("tab", { name: /find/i });
+  await findTab.click();
+  await page.waitForTimeout(160);
+  const findPanel = page.locator("#sidebar-find-panel:visible");
+  await findPanel.waitFor({ state: "visible", timeout: 10_000 });
 
-  const npiButton = page.locator(".unified-npi-tool:visible").first();
-  if (await npiButton.count()) {
-    await npiButton.click();
-    await page.waitForTimeout(160);
-    const npiText = ((await finder.textContent()) || "").toLowerCase();
-    assert.ok(/npi registry|u\.s\. provider registry|u\.s\. npi filters/.test(npiText), "NPI button must produce NPI presentation state");
-    assert.equal(await npiButton.getAttribute("aria-pressed"), "true", "NPI selected state must be exposed");
-  }
+  const nearbyButton = findPanel.getByRole("button", { name: "Nearby", exact: true });
+  await nearbyButton.click();
+  await page.waitForTimeout(120);
+  const nearbyText = ((await findPanel.textContent()) || "").toLowerCase();
+  assert.ok(/live source filters|double-click the map|nearby/.test(nearbyText), "Find → Nearby must render live discovery controls");
+
+  const npiButton = findPanel.getByRole("button", { name: "NPI", exact: true });
+  await npiButton.click();
+  await page.waitForTimeout(120);
+  const npiText = ((await findPanel.textContent()) || "").toLowerCase();
+  assert.ok(/npi|u\.s\. location|category/.test(npiText), "Find → NPI must render NPI presentation state");
+  assert.ok((await npiButton.getAttribute("class") || "").includes("active"), "NPI selected state must be exposed");
 }
 
 const browser = await chromium.launch({ headless: true });

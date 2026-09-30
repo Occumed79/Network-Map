@@ -77,7 +77,7 @@ const snapshot = await page.evaluate(() => ({
 }));
 mark("snapshot-returned", JSON.stringify(snapshot));
 
-for (const workspace of ["Providers", "Map Tools", "Finder", "Explorer", "Providers"]) {
+for (const workspace of ["Providers", "Map Tools", "Find", "Results", "Providers"]) {
   const tab = page.locator(".occumed-sidebar-workspace-tab").filter({ hasText: workspace }).first();
   mark("workspace-click-start", workspace);
   await tab.waitFor({ state: "visible" });

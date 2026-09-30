@@ -1,6 +1,6 @@
 import { registerRuntimeOwner } from "./runtimeControllerRegistry";
 
-type GuardedWorkspaceTab = "providers" | "mapTools" | "liveFinder" | "explorer" | "find" | "results";
+type GuardedWorkspaceTab = "providers" | "mapTools" | "find" | "results";
 
 type SidebarWorkspaceController = {
   getActiveTab?: () => GuardedWorkspaceTab;
@@ -23,11 +23,6 @@ declare global {
   }
 }
 
-const PANEL_SELECTORS: Partial<Record<GuardedWorkspaceTab, string>> = {
-  liveFinder: ".live-panel.open",
-  explorer: ".provider-explorer-drawer.open",
-};
-
 let auditTimers: number[] = [];
 let lastAudit: UiIntegrityResult | null = null;
 
@@ -39,11 +34,11 @@ function controller(): SidebarWorkspaceController | null {
 
 function currentTab(): GuardedWorkspaceTab {
   const reported = controller()?.getActiveTab?.();
-  if (reported === "providers" || reported === "mapTools" || reported === "liveFinder" || reported === "explorer" || reported === "find" || reported === "results") {
+  if (reported === "providers" || reported === "mapTools" || reported === "find" || reported === "results") {
     return reported;
   }
   const datasetTab = document.documentElement.dataset.occumedworkspace;
-  if (datasetTab === "mapTools" || datasetTab === "liveFinder" || datasetTab === "explorer" || datasetTab === "find" || datasetTab === "results") return datasetTab as GuardedWorkspaceTab;
+  if (datasetTab === "mapTools" || datasetTab === "find" || datasetTab === "results") return datasetTab as GuardedWorkspaceTab;
   return "providers";
 }
 
@@ -66,36 +61,18 @@ function panelFor(tab: GuardedWorkspaceTab): HTMLElement | null {
       ".occumed-sidebar-workspace-host > .occumed-map-tools-panel",
     );
   }
-  if (tab === "find") {
-    return document.querySelector<HTMLElement>("#sidebar-find-panel");
-  }
-  if (tab === "results") {
-    return document.querySelector<HTMLElement>("#sidebar-results-panel");
-  }
-  const selector = PANEL_SELECTORS[tab];
-  return selector ? document.querySelector<HTMLElement>(selector) : null;
+  if (tab === "find") return document.querySelector<HTMLElement>("#sidebar-find-panel");
+  return document.querySelector<HTMLElement>("#sidebar-results-panel");
 }
 
 function panelHasUsableContent(tab: GuardedWorkspaceTab): boolean {
-  const panels = tab === "providers"
-    ? Array.from(document.querySelectorAll<HTMLElement>(
-        ".sidebar.occumed-sidebar-workspace-scope > .occumed-sidebar-provider-content",
-      ))
-    : tab === "find"
-    ? Array.from(document.querySelectorAll<HTMLElement>("#sidebar-find-panel"))
-    : tab === "results"
-    ? Array.from(document.querySelectorAll<HTMLElement>("#sidebar-results-panel"))
-    : [panelFor(tab)].filter((panel): panel is HTMLElement => panel instanceof HTMLElement);
-  if (!panels.length) return false;
-  const text = panels.map((panel) => panel.textContent || "").join(" ").replace(/\s+/g, " ").trim();
-  const actionCount = panels.reduce((total, panel) => total + panel.querySelectorAll(
+  const panel = panelFor(tab);
+  if (!(panel instanceof HTMLElement)) return false;
+  const text = (panel.textContent || "").replace(/\s+/g, " ").trim();
+  const actionCount = panel.querySelectorAll(
     "button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)",
-  ).length, 0);
+  ).length;
   return text.length >= 24 && actionCount > 0;
-}
-
-function closeEnough(a: number, b: number, tolerance = 5): boolean {
-  return Math.abs(a - b) <= tolerance;
 }
 
 function auditLayout(): UiIntegrityResult {
@@ -125,34 +102,12 @@ function auditLayout(): UiIntegrityResult {
     if (mapRect.right < window.innerWidth - 18) failures.push("phantom-right-column");
     if (mapRect.left < sidebarRect.right + 4) failures.push("map-sidebar-overlap");
 
-    if (tab === "liveFinder" || tab === "explorer") {
-      const panel = panelFor(tab);
-      if (!elementIsVisible(panel)) {
-        failures.push(`${tab}-panel-hidden`);
-      } else {
-        const panelRect = panel.getBoundingClientRect();
-        if (!closeEnough(panelRect.left, sidebarRect.left)) failures.push(`${tab}-panel-left`);
-        if (!closeEnough(panelRect.width, sidebarRect.width)) failures.push(`${tab}-panel-width`);
-        if (!closeEnough(panelRect.top, tabsRect.bottom, 7)) failures.push(`${tab}-panel-top`);
-        if (!closeEnough(panelRect.bottom, sidebarRect.bottom, 7)) failures.push(`${tab}-panel-bottom`);
-        if (panel.scrollWidth > panel.clientWidth + 2) failures.push(`${tab}-horizontal-overflow`);
-      }
-    }
-    // find and results panels are inline sidebar content — no overlay geometry checks needed
-
     if (tab === "mapTools") {
       const tools = document.querySelector<HTMLElement>(".occumed-sidebar-workspace-host > .occumed-map-tools-panel");
       if (!elementIsVisible(tools)) failures.push("map-tools-hidden");
       else if (tools.scrollWidth > tools.clientWidth + 2) failures.push("map-tools-horizontal-overflow");
     }
   }
-
-  // Find is React-owned inline content; the legacy floating Finder overlay must
-  // remain hidden unless the legacy runtime tab is explicitly selected internally.
-  const inactiveLive = tab !== "liveFinder" && elementIsVisible(document.querySelector(".live-panel"));
-  const inactiveExplorer = tab !== "explorer" && elementIsVisible(document.querySelector(".provider-explorer-drawer"));
-  if (inactiveLive) failures.push("inactive-finder-visible");
-  if (inactiveExplorer) failures.push("inactive-explorer-visible");
 
   lastAudit = {
     tab,

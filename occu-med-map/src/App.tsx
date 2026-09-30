@@ -1066,7 +1066,9 @@ export default function App() {
   const [providerToolMode,setProviderToolMode] = useState<'live'|'npi'>('live');
   const [findMode, setFindMode] = useState<FindMode>('nearby');
   // Results workspace: persists across tab switches
-  const [resultsSource, setResultsSource] = useState<'nearby'|'npi'>('nearby');
+  const [resultsSource, setResultsSource] = useState<'nearby'|'npi'|'database'>('nearby');
+  const [databaseResults, setDatabaseResults] = useState<ProviderFeature[]>([]);
+  const [databaseResultsTotal, setDatabaseResultsTotal] = useState(0);
   // U.S.-only coverage diagnostics (population density, state fill, difficulty
   // legend/filter/distribution, 70mi ring). Off by default so the global map
   // stays a clean world viewer. Only shown when explicitly enabled.
@@ -1335,7 +1337,17 @@ export default function App() {
     const categoryLabel = npiCategory
       ? (NPI_CATEGORY_MAP[npiCategory]?.label || (npiCategory === 'custom' ? 'Custom NPI' : npiCategory))
       : 'NPI';
-    const rows = resultsSource === 'npi'
+    const rows = resultsSource === 'database'
+      ? databaseResults.map((provider) => ({
+          name: provider.name || '',
+          address: [provider.address, provider.city, provider.admin_area, provider.country, provider.postal_code].filter(Boolean).join(', '),
+          type: provider.clinic_type || (provider.services||[]).join(', ') || '',
+          distance_miles: Number.isFinite(provider.distance_miles ?? undefined) ? Number(provider.distance_miles).toFixed(1) : '',
+          phone: provider.phone || '',
+          website: provider.website || '',
+          source: provider.source || provider.source_kind || 'Database',
+        }))
+      : resultsSource === 'npi'
       ? npiResults.map((provider:any) => ({
           name: provider.name || '',
           address: provider.address || [provider.city, provider.state, provider.postalCode].filter(Boolean).join(', '),
@@ -2499,6 +2511,7 @@ export default function App() {
     categoryOverride?:string,
     selectedLocationLabel?:string,
     googlePlacesTrigger?:'address_search'|'live_finder_double_click'|'explicit_google',
+    forceRefresh=false,
   ) {
     const categoryForSearch = categoryOverride || liveBackendCategoryRef.current;
     const map=getActiveMapboxMap();
@@ -2530,87 +2543,93 @@ export default function App() {
     setNpiResults([]);
     setNpiError('');
     lastRadiusRef.current={lat,lng};
-    // Reverse geocode for display label. Await it once here; failures fall back to coordinates.
-    const cityState = await reverseGeocodeCityState(lat,lng).catch(()=>null);
-    setLiveLocation(selectedLocationLabel || cityState?.display || `${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-
+    setLiveLocation(selectedLocationLabel || `${lat.toFixed(4)}, ${lng.toFixed(4)}`);
     setLiveFinderSearchOverlay({lat,lng}, liveRadius);
 
     try {
-    const backendParams=new URLSearchParams({
-      lat:String(lat),
-      lng:String(lng),
-      radiusMiles:String(liveRadius),
-      category:categoryForSearch,
-    });
+      const backendParams=new URLSearchParams({
+        lat:String(lat),
+        lng:String(lng),
+        radiusMiles:String(liveRadius),
+        category:categoryForSearch,
+        ...(forceRefresh ? {forceRefresh:'true'} : {}),
+      });
 
-    const enhancedParams=new URLSearchParams({
-      lat:String(lat),
-      lng:String(lng),
-      radiusMiles:String(liveRadius),
-      category:categoryForSearch,
-      ...(cityState ? { city:cityState.city, state:cityState.state } : {}),
-      ...(googlePlacesTrigger ? { googlePlacesTrigger } : {}),
-    });
+      // Cache-aware ordering is intentional: when autosave already has a fresh
+      // result set, do not call Google Places / enhanced discovery at all.
+      // A cache miss (or explicit force refresh) falls through to enhanced search.
+      let backendData:any=null;
+      let enhancedData:any=null;
 
-    // Fire three sources in parallel:
-    // 1. Overpass/OSM (live-finder) — global map data
-    // 2. Enhanced search — Google Places + Universal Discovery (NPI, web evidence, AI extraction, geocoding)
-    const [backendResult, enhancedResult] = await Promise.allSettled([
-      fetch(`/api/live-finder/search?${backendParams.toString()}`,{signal:AbortSignal.timeout(30000)}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}),
-      fetch(`/api/enhanced-search?${enhancedParams.toString()}`,{signal:AbortSignal.timeout(45000)}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}).catch(()=>null),
-    ]);
+      try {
+        const response=await fetch(`/api/live-finder/search?${backendParams.toString()}`,{signal:AbortSignal.timeout(30000)});
+        if(!response.ok) throw new Error('HTTP '+response.status);
+        backendData=await response.json();
+      } catch {}
 
-    const backendData = backendResult.status === 'fulfilled' ? backendResult.value : null;
-    const enhancedData = enhancedResult.status === 'fulfilled' ? enhancedResult.value : null;
+      const autosaveHit=Boolean(backendData?.cacheHit) && !forceRefresh;
+      if(!autosaveHit) {
+        const cityState=await reverseGeocodeCityState(lat,lng).catch(()=>null);
+        setLiveLocation(selectedLocationLabel || cityState?.display || `${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+        const enhancedParams=new URLSearchParams({
+          lat:String(lat),
+          lng:String(lng),
+          radiusMiles:String(liveRadius),
+          category:categoryForSearch,
+          ...(cityState ? {city:cityState.city,state:cityState.state} : {}),
+          ...(googlePlacesTrigger ? {googlePlacesTrigger} : {}),
+        });
+        try {
+          const response=await fetch(`/api/enhanced-search?${enhancedParams.toString()}`,{signal:AbortSignal.timeout(45000)});
+          if(response.ok) enhancedData=await response.json();
+        } catch {}
+      }
 
-    if (!backendData && !enhancedData) {
-      throw new Error('All search sources failed');
-    }
+      if (!backendData && !enhancedData) {
+        throw new Error('All search sources failed');
+      }
 
-    // Merge results from both sources
-    const backendRaw:LiveFinderApiResult[] = backendData?.results ? Array.isArray(backendData.results) ? backendData.results : [] : [];
-    const enhancedRaw:LiveFinderApiResult[] = enhancedData?.results ? Array.isArray(enhancedData.results) ? enhancedData.results : [] : [];
+      const backendRaw:LiveFinderApiResult[] = backendData?.results ? Array.isArray(backendData.results) ? backendData.results : [] : [];
+      const enhancedRaw:LiveFinderApiResult[] = enhancedData?.results ? Array.isArray(enhancedData.results) ? enhancedData.results : [] : [];
 
-    const allRaw = [...backendRaw, ...enhancedRaw];
-    const merged = allRaw
-      .map((row:LiveFinderApiResult,index:number)=>normalizeLiveFinderResult(row,index,lat,lng))
-      .filter(isLiveFinderResultRow);
+      const allRaw = [...backendRaw, ...enhancedRaw];
+      const merged = allRaw
+        .map((row:LiveFinderApiResult,index:number)=>normalizeLiveFinderResult(row,index,lat,lng))
+        .filter(isLiveFinderResultRow);
 
-    // Dedupe by name + lat/lng proximity
-    const seen = new Set<string>();
-    const deduped = merged.filter(r => {
-      const key = `${r.name.toLowerCase().slice(0,30)}|${r.lat.toFixed(3)}|${r.lng.toFixed(3)}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    }).sort((a:LiveFinderResultRow,b:LiveFinderResultRow)=>a.dist-b.dist);
+      const seen = new Set<string>();
+      const deduped = merged.filter(r => {
+        const key = `${r.name.toLowerCase().slice(0,30)}|${r.lat.toFixed(3)}|${r.lng.toFixed(3)}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }).sort((a:LiveFinderResultRow,b:LiveFinderResultRow)=>a.dist-b.dist);
 
-    setLiveResults(deduped);
-    renderLiveMarkers(deduped);
-    setLiveHint('');
-    setLiveError('');
+      setLiveResults(deduped);
+      renderLiveMarkers(deduped);
+      setLiveHint('');
+      setLiveError('');
 
-    // Merge facets from both sources
-    const backendFacets = backendData?.facets && typeof backendData.facets === 'object' ? backendData.facets : {};
-    const enhancedFacets = enhancedData?.facets && typeof enhancedData.facets === 'object' ? enhancedData.facets : {};
-    const mergedFacets:Record<string,number> = {};
-    for (const [k,v] of Object.entries(backendFacets)) mergedFacets[k] = (mergedFacets[k]||0) + Number(v);
-    for (const [k,v] of Object.entries(enhancedFacets)) mergedFacets[k] = (mergedFacets[k]||0) + Number(v);
-    setLiveFacets(mergedFacets);
-    setLivePriorityCounts(backendData?.priorityCounts || null);
+      const backendFacets = backendData?.facets && typeof backendData.facets === 'object' ? backendData.facets : {};
+      const enhancedFacets = enhancedData?.facets && typeof enhancedData.facets === 'object' ? enhancedData.facets : {};
+      const mergedFacets:Record<string,number> = {};
+      for (const [k,v] of Object.entries(backendFacets)) mergedFacets[k] = (mergedFacets[k]||0) + Number(v);
+      for (const [k,v] of Object.entries(enhancedFacets)) mergedFacets[k] = (mergedFacets[k]||0) + Number(v);
+      setLiveFacets(mergedFacets);
+      setLivePriorityCounts(backendData?.priorityCounts || null);
 
-    const backendCount = backendRaw.length;
-    const enhancedCount = enhancedRaw.length;
-    const sourceSummary = enhancedData?.sourceSummary;
-    const sources:string[] = [];
-    if (backendCount > 0) sources.push('OSM');
-    if (sourceSummary?.googlePlaces > 0) sources.push('Google Places');
-    if (sourceSummary?.universalDiscovery > 0) sources.push('NPI+Web+AI');
-    const providerText = `${deduped.length} facilities from ${sources.join(' + ')}`;
-    const categoryText = categoryForSearch !== 'all' ? ` · Filter: ${categoryForSearch}` : '';
-    const savedText = sourceSummary?.savedToNeon ? ` · ${sourceSummary.savedToNeon} saved to DB` : '';
-    setLiveMirror(`${providerText}${categoryText}${savedText}`);
+      const backendCount = backendRaw.length;
+      const sourceSummary = enhancedData?.sourceSummary;
+      const sources:string[] = [];
+      if (autosaveHit && backendCount > 0) sources.push('Autosave cache');
+      else if (backendCount > 0) sources.push('OSM');
+      if (sourceSummary?.googlePlaces > 0) sources.push('Google Places');
+      if (sourceSummary?.universalDiscovery > 0) sources.push('NPI+Web+AI');
+      const providerText = `${deduped.length} facilities${sources.length?` from ${sources.join(' + ')}`:''}`;
+      const categoryText = categoryForSearch !== 'all' ? ` · Filter: ${categoryForSearch}` : '';
+      const savedText = sourceSummary?.savedToNeon ? ` · ${sourceSummary.savedToNeon} saved to DB` : '';
+      const cacheText = autosaveHit ? ' · external live calls avoided' : '';
+      setLiveMirror(`${providerText}${categoryText}${savedText}${cacheText}`);
     } catch(err) {
       console.warn('[LiveFinder] All search sources failed',err);
       setLiveHint('');
@@ -3360,6 +3379,12 @@ export default function App() {
                   <div className="provider-category-legend">{PROVIDER_CATEGORY_LEGEND.map(key=><span key={key}><i style={{background:PROVIDER_CATEGORY_STYLES[key].color}}/>{PROVIDER_CATEGORY_STYLES[key].label}</span>)}</div>
                 </details>
                 <div className="provider-map-status" role="status">{providerExplorerStatus}</div>
+                {databaseResults.length > 0 && (
+                  <button
+                    className="find-view-results-btn"
+                    onClick={()=>{setResultsSource('database');selectSidebarWorkspace('results');}}
+                  ><Download size={13}/>View {databaseResults.length} of {databaseResultsTotal.toLocaleString()} DB results</button>
+                )}
               </div>
             )}
           </div>
@@ -3375,10 +3400,12 @@ export default function App() {
             {/* Results action bar */}
             <div className="results-action-bar">
               <div className="results-action-bar-label">
-                {resultsSource === 'npi' ? 'NPI Registry' : 'Nearby'}
+                {resultsSource === 'npi' ? 'NPI Registry' : resultsSource === 'database' ? 'Database' : 'Nearby'}
                 {' · '}
                 <span style={{color:'#89d4fe'}}>
-                  {resultsSource === 'npi'
+                  {resultsSource === 'database'
+                    ? `${databaseResults.length} of ${databaseResultsTotal.toLocaleString()}`
+                    : resultsSource === 'npi'
                     ? npiResults.length
                     : filterAndSortLiveResults(liveResults).length} results
                 </span>
@@ -3386,26 +3413,27 @@ export default function App() {
               <div className="results-action-pills">
                 <button
                   className="results-action-pill"
-                  disabled={resultsSource === 'npi' || filterAndSortLiveResults(liveResults).length === 0}
+                  disabled={resultsSource === 'npi'}
                   title={resultsSource === 'npi' ? 'Provider Explorer comparison is not available for NPI-only results' : 'Compare stored providers with current live discovery'}
                   onClick={()=>void compareProviderExplorerArea(providerExplorerFilters)}
                 ><GitCompareArrows size={13}/>Compare</button>
                 <button
                   className="results-action-pill"
-                  disabled={resultsSource === 'npi' ? !npiCategory : !lastRadiusRef.current}
-                  title="Re-run the current provider search"
+                  disabled={resultsSource === 'database' ? false : resultsSource === 'npi' ? !npiCategory : !lastRadiusRef.current}
+                  title={resultsSource === 'database' ? 'Open Database browser to refresh results' : 'Re-run the current provider search'}
                   onClick={()=>{
-                    if(resultsSource === 'npi') {
+                    if(resultsSource === 'database') { setShowDatasetBrowser(true); }
+                    else if(resultsSource === 'npi') {
                       if(npiCategory === 'custom') void doCustomNpiSearch();
                       else if(npiCategory) void doNpiCategorySearch(npiCategory);
                     } else if(lastRadiusRef.current) {
-                      void doLiveSearch(lastRadiusRef.current.lat, lastRadiusRef.current.lng);
+                      void doLiveSearch(lastRadiusRef.current.lat, lastRadiusRef.current.lng, undefined, undefined, undefined, true);
                     }
                   }}
                 ><RefreshCw size={13}/>Refresh</button>
                 <button
                   className="results-action-pill"
-                  disabled={resultsSource === 'npi' ? npiResults.length === 0 : filterAndSortLiveResults(liveResults).length === 0}
+                  disabled={resultsSource === 'database' ? databaseResults.length === 0 : resultsSource === 'npi' ? npiResults.length === 0 : filterAndSortLiveResults(liveResults).length === 0}
                   title="Export the currently displayed provider results as CSV"
                   onClick={exportCurrentProviderResultsCsv}
                 ><Download size={13}/>Export</button>
@@ -3427,9 +3455,41 @@ export default function App() {
                   <div style={{fontSize:9,color:'#3d5478',marginTop:4}}>Use the <strong style={{color:'#89d4fe'}}>Find → NPI</strong> tab to search.</div>
                 </div>
               )}
+              {resultsSource === 'database' && databaseResults.length === 0 && (
+                <div className="results-empty">
+                  <div>No database results yet.</div>
+                  <div style={{fontSize:9,color:'#3d5478',marginTop:4}}>Use <strong style={{color:'#89d4fe'}}>Find → Database</strong> to query the provider database.</div>
+                </div>
+              )}
               {((resultsSource==='nearby'&&liveLoading)||(resultsSource==='npi'&&npiLoading)) && (
                 <div className="results-loading"><div className="lp-spin"/><span>Searching providers…</span></div>
               )}
+
+              {/* Database result cards */}
+              {resultsSource === 'database' && databaseResults.map((p)=>{
+                const gm=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([p.name,p.address,p.city,p.admin_area,p.country].filter(Boolean).join(' '))}`;
+                const saveKey=providerSaveKey(p);
+                const saveState=savedToMyClinics[saveKey];
+                const saveError=savedToMyClinicsErrors[saveKey];
+                return (
+                  <div key={p.id} className="result-card" onClick={()=>{ showProviderExplorerRowsOnMap([p], providerExplorerFilters); if(p.lat!=null&&p.lng!=null) getActiveMapboxMap()?.flyTo({center:[p.lng,p.lat],zoom:16,duration:700}); }}>
+                    <div className="result-card-header">
+                      <span className="result-card-name">{p.name}</span>
+                      {p.distance_miles!=null && <span className="result-card-dist">{Number(p.distance_miles).toFixed(1)} mi</span>}
+                    </div>
+                    <div className="result-card-addr">{[p.address,p.city,p.admin_area,p.country].filter(Boolean).join(', ') || 'Address unavailable'}</div>
+                    <div className="result-card-type" style={{color:'#A3C5D9'}}>{p.clinic_type || (p.services||[]).join(', ') || p.source}</div>
+                    <div style={{fontSize:8,color:'#2d4060',marginBottom:3}}>{p.source} · {p.source_kind} · {p.trust_tier}</div>
+                    <div className="result-card-actions">
+                      <button type="button" className="lp-act" disabled={saveState==='saving'||saveState==='saved'} onClick={e=>{e.stopPropagation();void saveLiveResultToMyClinics(p);}}>{saveState==='saving'?'Saving…':saveState==='saved'?'Saved':saveState==='error'?'Retry':'Save'}</button>
+                      {p.website&&<a href={p.website} target="_blank" rel="noopener" className="lp-act" onClick={e=>e.stopPropagation()}>Website</a>}
+                      {p.phone&&<a href={`tel:${p.phone}`} className="lp-act" onClick={e=>e.stopPropagation()}>Call</a>}
+                      <a href={gm} target="_blank" rel="noopener" className="lp-act" onClick={e=>e.stopPropagation()}>Directions</a>
+                    </div>
+                    {saveState==='error'&&saveError&&<div className="lp-save-error" role="alert">{saveError}</div>}
+                  </div>
+                );
+              })}
 
               {/* NPI results cards */}
               {resultsSource === 'npi' && npiCategory && npiResults.length > 0 && npiResults.map((p)=>{
@@ -3654,6 +3714,7 @@ export default function App() {
           sharedFilters={providerExplorerFilters}
           onFiltersChange={setProviderExplorerFilters}
           onOpenMatchingInDatabase={(filters)=>{ setProviderExplorerFilters(filters); setShowDatasetBrowser(true); }}
+          onRowsChange={(rows: ProviderFeature[], _filters: ProviderExplorerFilters, total: number)=>{ setDatabaseResults(rows); setDatabaseResultsTotal(total); }}
         />
 
         {showProviderExplorerDrawer && <button className="provider-drawer-backdrop" aria-label="Close Provider Explorer" onClick={()=>setShowProviderExplorerDrawer(false)}/>}

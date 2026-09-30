@@ -8,11 +8,12 @@ const baseUrl = process.env.NETWORK_MAP_CI_UI_URL || "http://127.0.0.1:4173";
 const mark = (stage, detail = "") => process.stdout.write(`POSTIDLE ${browserName} ${stage}${detail ? ` ${detail}` : ""}\n`);
 const json = (route, payload, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(payload) });
 
+// Phase-2 visible tabs: Providers | Map Tools | Find | Results
 const workspaces = [
   { tab: "providers", selector: ".sidebar > .occumed-sidebar-provider-content" },
   { tab: "mapTools", selector: ".occumed-sidebar-workspace-host > .occumed-map-tools-panel" },
-  { tab: "liveFinder", selector: ".live-panel.open" },
-  { tab: "explorer", selector: ".provider-explorer-drawer.open" },
+  { tab: "find", selector: "#sidebar-find-panel" },
+  { tab: "results", selector: "#sidebar-results-panel" },
 ];
 
 async function assertFourWorkspaceCycle(page, stage) {
@@ -55,8 +56,8 @@ async function assertFourWorkspaceCycle(page, stage) {
         actionCount,
         providerTool: document.body.dataset.providerTool || "",
         mapToolsDocked: tabName !== "mapTools" || Boolean(panels[0]?.closest(".occumed-sidebar-workspace-host")),
-        inactiveFinderHidden: tabName === "liveFinder" || !liveVisible,
-        inactiveExplorerHidden: tabName === "explorer" || !explorerVisible,
+        inactiveFinderHidden: !liveVisible,
+        inactiveExplorerHidden: !explorerVisible,
         separated: Boolean(sidebarRect && mapRect && mapRect.left >= sidebarRect.right + 4),
         audit: window.__NETWORK_MAP_UI_INTEGRITY__?.audit?.() || null,
         duplicateOwners: window.__NETWORK_MAP_RUNTIME_OWNERSHIP__?.snapshot?.().duplicateAttempts || [],

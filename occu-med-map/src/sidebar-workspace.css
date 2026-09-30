@@ -901,6 +901,58 @@ html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspac
 .sidebar.occumed-sidebar-workspace-scope .rp-city-meta,
 .sidebar.occumed-sidebar-workspace-scope .rp-alert { overflow-wrap: anywhere; line-height: 1.5; }
 
+/* Coverage is embedded in the dark sidebar; legacy floating-panel glass
+   colors must not override its labels or assessment evidence. */
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+  .tool-detail-section :is(.rp-title, .rp-city-name, .rp-scorecard) {
+  color: var(--workspace-text) !important;
+  text-shadow: none !important;
+}
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+  .tool-detail-section :is(.rp-field label, .rp-city-meta, .rp-score-name, .rp-rec) {
+  color: var(--workspace-muted) !important;
+  text-shadow: none !important;
+}
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+  .tool-detail-section :is(.rp-scorecard, .rp-alert, .rp-rec, .rp-suggestions) {
+  background: var(--workspace-panel-bg) !important;
+  border: 1px solid var(--workspace-border) !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+  .tool-detail-section .rp-scorecard {
+  padding: 10px;
+}
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+  .tool-detail-section .rp-scorecard > div:not(.rp-score-row) {
+  padding: 8px 0 !important;
+  font-size: 11px !important;
+  color: var(--workspace-muted) !important;
+  overflow-wrap: anywhere;
+}
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+  .tool-detail-section .rp-score-name {
+  white-space: normal;
+  overflow: visible;
+  font-size: 11px;
+  line-height: 1.4;
+}
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+  .tool-detail-section .rp-close {
+  flex: 0 0 auto;
+  width: auto !important;
+  min-width: 48px;
+  height: 30px;
+  padding: 4px 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope
+  .tool-detail-section .rp-field { margin-bottom: 8px; }
+
 /* ─── Sidebar sub-group label font cleanup ───────────────────────────────────
    unified-source-divider uses uppercase labels — override IBM Plex Mono/Inter
    in those selectors to use the new SF Pro font stack.

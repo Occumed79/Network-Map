@@ -307,7 +307,7 @@ router.get("/scoring/us/states", async (req, res) => {
         // Partial failure: zero may just mean the failed DB held that state's data.
         const confirmedZero=relevant===0&&allProjectsSucceeded;
         if(confirmedZero||relevant>0){
-          inputs.workforce={score:confirmedZero?5:scarcityScore(relevant/population*100000,120,10),evidence:{relevant,providersPer100k:Number((relevant/population*100000).toFixed(2)),observedScarcity:confirmedZero},sources:["Network Map provider registries","U.S. Census ACS 5-year"],year:ACS_YEAR};
+          inputs.workforce={score:confirmedZero?5:scarcityScore(relevant/population*100000,120,10),evidence:{relevant,providersPer100k:Number((relevant/population*100000).toFixed(2)),observedScarcity:confirmedZero},sources:["Network Map provider registries",populationSource],year:ACS_YEAR};
           inputs.coverage={score:confirmedZero?5:scarcityScore(relevant/population*100000,120,10),evidence:{relevant,observedScarcity:confirmedZero},sources:["Network Map provider registries"]};
         }
         // capacity: same rule — zero only confirmed scarcity when all DBs answered

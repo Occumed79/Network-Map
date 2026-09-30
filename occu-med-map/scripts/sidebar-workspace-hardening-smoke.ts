@@ -128,7 +128,7 @@ for (const control of [
   "Route starting location",
   "Route destination",
   "Luminous Density",
-  "Occ-Med",
+  "Database",
   "occupational_health_clinic",
 ]) {
   assert.match(uiAcceptance, new RegExp(control), `rendered UI acceptance must exercise ${control}`);

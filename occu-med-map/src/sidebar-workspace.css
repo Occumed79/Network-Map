@@ -19,8 +19,7 @@
   --workspace-layer-tabs: 3110;
 }
 
-html[data-occumed-workspace-ready="true"] body .app-wrap .app-body,
-html[data-occumed-workspace-ready="true"] body .app-wrap .app-body:has(.live-panel.open) {
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body {
   box-sizing: border-box !important;
   display: grid !important;
   grid-template-columns: var(--command-sidebar-width) minmax(0, 1fr) !important;
@@ -101,16 +100,6 @@ html[data-occumed-workspace-ready="true"] body .app-wrap .app-body .map-wrap :is
   height: 100% !important;
   min-width: 0 !important;
   min-height: 0 !important;
-}
-
-/* Floating Finder/Explorer panels never participate in application grid sizing. */
-html[data-occumed-workspace-ready="true"] body .app-wrap .app-body > :is(
-  .live-panel,
-  .provider-explorer-drawer,
-  .provider-drawer-backdrop
-) {
-  grid-column: auto !important;
-  grid-row: auto !important;
 }
 
 html[data-occumed-workspace-ready="true"] body .app-wrap .app-body .sidebar.occumed-sidebar-workspace-scope
@@ -288,69 +277,6 @@ html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body
   display: block !important;
 }
 
-/* Finder and Explorer are left-workspace overlays. They use the measured
-   sidebar rectangle and never reserve a right-side column. */
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body .live-panel.open,
-html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body .provider-explorer-drawer.open {
-  box-sizing: border-box !important;
-  position: fixed !important;
-  inset: var(--workspace-panel-top) auto var(--workspace-panel-bottom) var(--workspace-panel-left) !important;
-  display: flex !important;
-  width: var(--workspace-panel-width) !important;
-  min-width: var(--workspace-panel-width) !important;
-  max-width: var(--workspace-panel-width) !important;
-  height: auto !important;
-  min-height: 0 !important;
-  max-height: none !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  overflow: hidden !important;
-  opacity: 1 !important;
-  visibility: visible !important;
-  pointer-events: auto !important;
-  transform: none !important;
-  color: var(--workspace-text) !important;
-  background: var(--workspace-panel-bg) !important;
-  border: 1px solid var(--workspace-border) !important;
-  border-top: 0 !important;
-  border-radius: 0 0 14px 14px !important;
-  box-shadow: 10px 12px 30px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.035) !important;
-  backdrop-filter: blur(20px) saturate(140%) !important;
-  z-index: var(--workspace-layer-panel) !important;
-}
-
-html[data-occumedworkspace]:not([data-occumedworkspace="liveFinder"])[data-occumed-workspace-ready="true"] body .live-panel,
-html[data-occumedworkspace]:not([data-occumedworkspace="explorer"])[data-occumed-workspace-ready="true"] body .provider-explorer-drawer {
-  display: none !important;
-  visibility: hidden !important;
-  pointer-events: none !important;
-}
-
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body .live-panel.open .lp-inner,
-html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body .provider-explorer-drawer.open .provider-drawer-body {
-  box-sizing: border-box !important;
-  display: flex !important;
-  flex-direction: column !important;
-  width: 100% !important;
-  min-width: 0 !important;
-  max-width: 100% !important;
-  height: 100% !important;
-  min-height: 0 !important;
-  max-height: 100% !important;
-  padding: 10px !important;
-  overflow-x: hidden !important;
-  overflow-y: auto !important;
-  overscroll-behavior: contain !important;
-  scrollbar-gutter: stable !important;
-  color: var(--workspace-text) !important;
-  background: var(--workspace-panel-bg) !important;
-}
-
-html[data-occumed-workspace-ready="true"] body .provider-drawer-backdrop {
-  display: none !important;
-  pointer-events: none !important;
-}
-
 /* Docked Map Tools must remain a normal sidebar document flow element. */
 html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body
   .sidebar.occumed-sidebar-workspace-scope > .occumed-sidebar-workspace-host > .occumed-map-tools-panel {
@@ -425,11 +351,7 @@ html[data-occumedworkspace="mapTools"][data-occumed-workspace-ready="true"] body
 }
 
 /* Shared controls: same height, typography and selected-state treatment. */
-html[data-occumed-workspace-ready="true"] body :is(
-  .sidebar.occumed-sidebar-workspace-scope,
-  .live-panel,
-  .provider-explorer-drawer
-) :is(
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope :is(
   button,
   .mbtn,
   .vbtn,
@@ -453,11 +375,7 @@ html[data-occumed-workspace-ready="true"] body :is(
   transform: none !important;
 }
 
-html[data-occumed-workspace-ready="true"] body :is(
-  .sidebar.occumed-sidebar-workspace-scope,
-  .live-panel,
-  .provider-explorer-drawer
-) :is(
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope :is(
   button,
   .mbtn,
   .vbtn,
@@ -473,11 +391,7 @@ html[data-occumed-workspace-ready="true"] body :is(
   box-shadow: 0 0 12px rgba(40, 125, 164, 0.16) !important;
 }
 
-html[data-occumed-workspace-ready="true"] body .app-wrap .app-body :is(
-  .sidebar.occumed-sidebar-workspace-scope,
-  .live-panel,
-  .provider-explorer-drawer
-) :is(
+html[data-occumed-workspace-ready="true"] body .app-wrap .app-body .sidebar.occumed-sidebar-workspace-scope :is(
   button.active,
   button.on,
   button.pri,
@@ -495,11 +409,7 @@ html[data-occumed-workspace-ready="true"] body .app-wrap .app-body :is(
   box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 0 12px rgba(40, 125, 164, 0.18) !important;
 }
 
-html[data-occumed-workspace-ready="true"] body :is(
-  .sidebar.occumed-sidebar-workspace-scope,
-  .live-panel,
-  .provider-explorer-drawer
-) :is(
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope :is(
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
   select,
   textarea
@@ -516,20 +426,13 @@ html[data-occumed-workspace-ready="true"] body :is(
   opacity: 1 !important;
 }
 
-html[data-occumed-workspace-ready="true"] body :is(
-  .sidebar.occumed-sidebar-workspace-scope,
-  .live-panel,
-  .provider-explorer-drawer
-) :is(input, textarea)::placeholder {
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope :is(input, textarea)::placeholder {
   color: #829ead !important;
   opacity: 1 !important;
 }
 
 html[data-occumed-workspace-ready="true"] body :is(
   .occumed-map-tools-section,
-  .provider-drawer-section,
-  .live-panel .lp-item,
-  .live-panel .lp-controls > div,
   .sidebar.occumed-sidebar-workspace-scope .hero-card,
   .sidebar.occumed-sidebar-workspace-scope > .sb-section
 ) {
@@ -541,15 +444,10 @@ html[data-occumed-workspace-ready="true"] body :is(
   box-shadow: none !important;
 }
 
-html[data-occumed-workspace-ready="true"] body :is(
-  .sidebar.occumed-sidebar-workspace-scope,
-  .live-panel,
-  .provider-explorer-drawer
-) :is(
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope :is(
   small,
   .command-section-help,
   .workflow-layer-status,
-  .provider-drawer-section-title small,
   .provider-field-label,
   .occumed-provider-location-description,
   .occumed-mapbox-status
@@ -557,19 +455,11 @@ html[data-occumed-workspace-ready="true"] body :is(
   color: var(--workspace-muted) !important;
 }
 
-html[data-occumed-workspace-ready="true"] body :is(
-  .sidebar.occumed-sidebar-workspace-scope,
-  .live-panel,
-  .provider-explorer-drawer
-) * {
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope * {
   min-width: 0;
 }
 
-html[data-occumed-workspace-ready="true"] body :is(
-  .sidebar.occumed-sidebar-workspace-scope,
-  .live-panel,
-  .provider-explorer-drawer
-) :is(p, span, strong, small, label) {
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope :is(p, span, strong, small, label) {
   overflow-wrap: anywhere;
 }
 
@@ -586,8 +476,7 @@ html[data-occumed-workspace-ready="true"] body :is(
     --workspace-shell-padding: 0px;
   }
 
-  html[data-occumed-workspace-ready="true"] body .app-wrap .app-body,
-  html[data-occumed-workspace-ready="true"] body .app-wrap .app-body:has(.live-panel.open) {
+  html[data-occumed-workspace-ready="true"] body .app-wrap .app-body {
     grid-template-columns: minmax(0, 1fr) !important;
     padding: 0 !important;
   }
@@ -629,66 +518,13 @@ html[data-occumed-workspace-ready="true"] body :is(
     min-height: 92px !important;
   }
 
-  html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body .live-panel.open,
-  html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body .provider-explorer-drawer.open {
-    inset: var(--workspace-panel-top) 0 0 0 !important;
-    width: auto !important;
-    min-width: 0 !important;
-    max-width: none !important;
-    border-radius: 0 !important;
-  }
-}
-
-html[data-occumed-workspace-ready="true"] body
-  .provider-explorer-drawer .provider-drawer-header .rp-close,
-html[data-occumed-workspace-ready="true"] body
-  .live-panel .rp-header .rp-close {
-  box-sizing: border-box !important;
-  display: inline-flex !important;
-  flex: 0 0 auto !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: auto !important;
-  min-width: 62px !important;
-  max-width: none !important;
-  height: 30px !important;
-  min-height: 30px !important;
-  max-height: 30px !important;
-  margin: 0 !important;
-  padding: 0 10px !important;
-  overflow: visible !important;
-  color: var(--workspace-text) !important;
-  background: var(--workspace-control-bg) !important;
-  border: 1px solid rgba(72, 139, 174, 0.5) !important;
-  border-radius: 8px !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.04) !important;
-  font-size: 10px !important;
-  font-weight: 800 !important;
-  line-height: 1 !important;
-  letter-spacing: .02em !important;
-  text-align: center !important;
-  text-transform: none !important;
-  white-space: nowrap !important;
-  writing-mode: horizontal-tb !important;
-  text-orientation: mixed !important;
-  cursor: pointer !important;
-  pointer-events: auto !important;
-}
-
-html[data-occumed-workspace-ready="true"] body
-  .provider-explorer-drawer .provider-drawer-header .rp-close:hover:not(:disabled),
-html[data-occumed-workspace-ready="true"] body
-  .live-panel .rp-header .rp-close:hover:not(:disabled) {
-  color: #fff !important;
-  background: var(--workspace-control-hover) !important;
-  border-color: var(--workspace-border-strong) !important;
 }
 
 /* React keeps its last visualization mode selected internally so filters can
    refresh an explicitly chosen view. Until the user actually chooses a mode,
    do not visually present Density as enabled. */
 html[data-provider-explorer-visualization-active="false"] body
-  .provider-explorer-drawer .provider-visualization-grid button.active {
+  .sidebar.occumed-sidebar-workspace-scope .occumed-sidebar-find-content .provider-visualization-grid button.active {
   color: var(--workspace-text) !important;
   background: var(--workspace-control-bg) !important;
   border-color: rgba(72, 139, 174, 0.46) !important;
@@ -698,7 +534,7 @@ html[data-provider-explorer-visualization-active="false"] body
 /* Keep action targets usable at the desktop widths shown in production.
    Shared button rules may style them, but must not collapse them. */
 html[data-occumed-workspace-ready="true"] body
-  :is(.provider-explorer-drawer, .occumed-map-tools-panel, .live-panel)
+  :is(.sidebar.occumed-sidebar-workspace-scope, .occumed-map-tools-panel)
   button:not(.mapboxgl-ctrl button):not(:disabled) {
   pointer-events: auto !important;
 }
@@ -736,18 +572,10 @@ html[data-occumed-workspace-ready="true"] body .app-wrap .app-body {
 
 /* Phase 1 typography authority: all sidebar workspace UI uses the Apple/SF stack.
    Scope intentionally excludes map popups and generated report HTML. */
-html[data-occumed-workspace-ready="true"] body :is(
-  .sidebar.occumed-sidebar-workspace-scope,
-  .live-panel,
-  .provider-explorer-drawer
-) {
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope {
   font-family: var(--p1-font) !important;
 }
-html[data-occumed-workspace-ready="true"] body :is(
-  .sidebar.occumed-sidebar-workspace-scope,
-  .live-panel,
-  .provider-explorer-drawer
-) :is(button, input, select, textarea, label) {
+html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspace-scope :is(button, input, select, textarea, label) {
   font-family: var(--p1-font) !important;
 }
 
@@ -1274,189 +1102,6 @@ html[data-occumed-workspace-ready="true"] body
   font-size: 8.5px !important;
 }
 
-/* ─── Finder (live-panel) — navy glass language matching sidebar ────────────── */
-
-/* Override the light-glass live-finder-ux.css with the Phase 1 dark navy palette */
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body .live-panel.open {
-  background: linear-gradient(180deg, #07111d 0%, #050d16 100%) !important;
-  border: 1px solid rgba(163, 197, 217, 0.28) !important;
-  border-top: 0 !important;
-  box-shadow:
-    10px 12px 30px rgba(0, 0, 0, 0.34),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
-  backdrop-filter: blur(22px) saturate(130%) !important;
-  color: var(--workspace-text) !important;
-}
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
-  .live-panel.open .lp-inner {
-  color: var(--workspace-text) !important;
-  background: transparent !important;
-}
-
-/* Finder header / title — phase1-section-label treatment */
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
-  .live-panel .lp-title {
-  font-size: 10px !important;
-  font-weight: 860 !important;
-  letter-spacing: 0.09em !important;
-  color: var(--neon-c2) !important;
-  text-shadow: 0 0 8px rgba(163, 197, 217, 0.30) !important;
-  font-family: var(--p1-font) !important;
-}
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
-  .live-panel .analysis-panel-title small {
-  color: rgba(163, 197, 217, 0.58) !important;
-  font-family: var(--p1-font) !important;
-  font-size: 8.5px !important;
-}
-
-/* Finder panel header separator */
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
-  .live-panel .lp-panel-header {
-  border-bottom-color: rgba(163, 197, 217, 0.16) !important;
-}
-
-/* Finder inputs/selects */
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
-  .live-panel .rp-input,
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
-  .live-panel .rp-select,
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
-  .live-panel textarea,
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
-  .live-panel select {
-  color: #e7f5f9 !important;
-  background: #061522 !important;
-  border-color: rgba(72, 139, 174, 0.34) !important;
-  font-family: var(--p1-font) !important;
-}
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
-  .live-panel .rp-input::placeholder,
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
-  .live-panel textarea::placeholder {
-  color: #829ead !important;
-}
-
-/* Finder result items */
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
-  .live-panel .lp-item {
-  color: var(--workspace-text) !important;
-  background: var(--workspace-card-bg) !important;
-  border-color: rgba(72, 139, 174, 0.24) !important;
-  box-shadow: none !important;
-  backdrop-filter: none !important;
-}
-
-/* Finder chips */
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
-  .live-panel .lp-chip {
-  color: var(--workspace-text) !important;
-  background: var(--workspace-control-bg) !important;
-  border-color: rgba(72, 139, 174, 0.46) !important;
-}
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
-  .live-panel .lp-chip.on {
-  color: #ffffff !important;
-  background: linear-gradient(180deg, #123f5d, #08283f) !important;
-  border-color: rgba(113, 192, 224, 0.68) !important;
-}
-
-/* Finder empty state */
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
-  .live-panel .lp-empty.show {
-  background: var(--workspace-card-bg) !important;
-  border-color: rgba(72, 139, 174, 0.20) !important;
-  color: var(--workspace-muted) !important;
-}
-
-/* Finder label sub-groups (inline-style overrides via selectors) */
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
-  .live-panel .lp-name {
-  color: var(--workspace-text) !important;
-  font-family: var(--p1-font) !important;
-}
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
-  .live-panel .lp-addr,
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
-  .live-panel .lp-dist {
-  color: var(--workspace-muted) !important;
-}
-
-/* Finder close button */
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
-  .live-panel .rp-close {
-  color: var(--workspace-text) !important;
-  background: var(--workspace-control-bg) !important;
-  border-color: rgba(72, 139, 174, 0.50) !important;
-}
-
-/* ─── Explorer (provider-explorer-drawer) — navy glass matching sidebar ─────── */
-html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
-  .provider-explorer-drawer.open {
-  background: linear-gradient(180deg, #07111d 0%, #050d16 100%) !important;
-  border: 1px solid rgba(163, 197, 217, 0.28) !important;
-  border-top: 0 !important;
-  box-shadow:
-    10px 12px 30px rgba(0, 0, 0, 0.34),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
-  backdrop-filter: blur(22px) saturate(130%) !important;
-  color: var(--workspace-text) !important;
-}
-html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
-  .provider-explorer-drawer.open .provider-drawer-body {
-  color: var(--workspace-text) !important;
-  background: transparent !important;
-}
-
-/* Explorer header title — phase1-section-label treatment */
-html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
-  .provider-explorer-drawer .provider-drawer-title strong {
-  color: var(--neon-c1) !important;
-  font-size: 13px !important;
-  font-family: var(--p1-font) !important;
-  text-shadow: 0 0 10px rgba(163, 197, 217, 0.28) !important;
-}
-html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
-  .provider-explorer-drawer .provider-drawer-title small {
-  color: rgba(163, 197, 217, 0.62) !important;
-  font-family: var(--p1-font) !important;
-}
-
-/* Explorer section titles — phase1-section-label treatment */
-html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
-  .provider-explorer-drawer .provider-drawer-section-title span {
-  font-size: 9.5px !important;
-  font-weight: 860 !important;
-  letter-spacing: 0.08em !important;
-  color: var(--neon-c2) !important;
-  text-shadow: 0 0 8px rgba(163, 197, 217, 0.30) !important;
-  font-family: var(--p1-font) !important;
-}
-html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
-  .provider-explorer-drawer .provider-drawer-section-title small {
-  color: rgba(163, 197, 217, 0.58) !important;
-  font-family: var(--p1-font) !important;
-}
-
-/* Explorer section dividers */
-html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
-  .provider-explorer-drawer .provider-drawer-section {
-  border-bottom-color: rgba(163, 197, 217, 0.12) !important;
-}
-
-/* Explorer inputs */
-html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
-  .provider-explorer-drawer input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
-html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
-  .provider-explorer-drawer select,
-html[data-occumedworkspace="explorer"][data-occumed-workspace-ready="true"] body
-  .provider-explorer-drawer textarea {
-  color: #e7f5f9 !important;
-  background: #061522 !important;
-  border-color: rgba(72, 139, 174, 0.34) !important;
-  font-family: var(--p1-font) !important;
-}
-
 /* ─── Sidebar sub-group label font cleanup ───────────────────────────────────
    unified-source-divider uses uppercase labels — override IBM Plex Mono/Inter
    in those selectors to use the new SF Pro font stack.
@@ -1497,15 +1142,6 @@ html[data-occumed-workspace-ready="true"] body
   font-family: var(--p1-font) !important;
   font-size: 10px !important;
   font-weight: 820 !important;
-}
-
-/* Finder top-level group label inside lp-controls divs that are
-   used as section markers (inline-style letter-spacing elements).
-   We override font-family only — color is intentionally kept as-is
-   so the existing monospace accent remains for data-dense Finder content. */
-html[data-occumedworkspace="liveFinder"][data-occumed-workspace-ready="true"] body
-  .live-panel [style*="letter-spacing"] {
-  font-family: var(--p1-font) !important;
 }
 
 /* ── Mobile: floating menu button visible, search bar narrower ── */

@@ -11,6 +11,7 @@ export type RouteLayerIds = {
 type RoutePoint = [number, number];
 
 const activeAnimations = new WeakMap<mapboxgl.Map, () => void>();
+const pendingAnimations = new WeakMap<mapboxgl.Map, number>();
 
 function standardStyle(map: mapboxgl.Map): boolean {
   const style = map.getStyle() as mapboxgl.StyleSpecification & { imports?: Array<{ id?: string; url?: string }> };
@@ -94,10 +95,10 @@ export function installRouteHover(map: mapboxgl.Map, ids: RouteLayerIds): () => 
 }
 
 export function startRoutePulse(map: mapboxgl.Map, ids: RouteLayerIds): () => void {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return () => undefined;
   let frame = 0;
   let cycleStarted: number | null = null;
-  let routeSignature = "";
-  let lastPresenceCheck = 0;
+  let lastPresenceCheck = -Infinity;
   const draw = (now: number) => {
     if (!map.getLayer(ids.pulse)) {
       frame = requestAnimationFrame(draw);
@@ -106,21 +107,20 @@ export function startRoutePulse(map: mapboxgl.Map, ids: RouteLayerIds): () => vo
     if (now - lastPresenceCheck > 400) {
       lastPresenceCheck = now;
       const route = map.querySourceFeatures(ids.source, { filter: ["==", ["get", "role"], "route"] })[0];
-      const nextSignature = route ? JSON.stringify(route.geometry) : "";
-      if (nextSignature && nextSignature !== routeSignature) cycleStarted = now;
-      routeSignature = nextSignature;
+      if (route && cycleStarted === null) cycleStarted = now;
+      if (!route) {
+        cycleStarted = null;
+        map.setPaintProperty(ids.pulse, "line-opacity", 0);
+      }
     }
     if (cycleStarted === null) {
       frame = requestAnimationFrame(draw);
       return;
     }
-    const center = (now - cycleStarted) / 2400;
-    if (center >= 1) {
-      cycleStarted = null;
-      map.setPaintProperty(ids.pulse, "line-opacity", 0);
-      frame = requestAnimationFrame(draw);
-      return;
-    }
+    // Source features are tiled and may change shape as the camera moves.
+    // Track presence rather than a tile geometry signature, and keep the
+    // highlight traveling for as long as the selected route is displayed.
+    const center = ((now - cycleStarted) % 2400) / 2400;
     map.setPaintProperty(ids.pulse, "line-opacity", 1);
     map.setPaintProperty(ids.pulse, "line-gradient", [
       "interpolate", ["linear"], ["abs", ["-", ["line-progress"], center]],
@@ -145,10 +145,11 @@ function routeSampler(coordinates: RoutePoint[]): { at: (progress: number) => Ro
   for (let index = 1; index < coordinates.length; index += 1) {
     cumulative.push(cumulative[index - 1] + distance(coordinates[index - 1], coordinates[index]));
   }
-  const length = cumulative.at(-1) || 1;
+  const length = cumulative.at(-1) || 0;
   return {
     length,
     at(progress) {
+      if (!length) return coordinates[0];
       const target = Math.max(0, Math.min(1, progress)) * length;
       let index = 1;
       while (index < cumulative.length - 1 && cumulative[index] < target) index += 1;
@@ -192,14 +193,18 @@ export function enableDestinationBuildings(map: mapboxgl.Map): void {
 }
 
 export function travelAlongRoute(map: mapboxgl.Map, coordinates: RoutePoint[]): () => void {
-  activeAnimations.get(map)?.();
+  cancelRouteTravel(map);
   if (coordinates.length < 2 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return () => undefined;
   const sampler = routeSampler(coordinates);
+  if (!sampler.length) return () => undefined;
+  map.stop();
   const duration = Math.max(5200, Math.min(12000, 5200 + sampler.length * 180));
   const altitude = Math.max(220, Math.min(1400, 240 + sampler.length * 55));
   let frame = 0;
   let cancelled = false;
   const started = performance.now();
+  let lastFrame = started;
+  let bearing = map.getBearing();
   const interrupt = () => cancel();
   const events: Array<keyof HTMLElementEventMap> = ["pointerdown", "wheel", "touchstart", "keydown"];
   const cancel = () => {
@@ -216,10 +221,28 @@ export function travelAlongRoute(map: mapboxgl.Map, coordinates: RoutePoint[]): 
     const raw = Math.min(1, (now - started) / duration);
     const progress = raw < 0.5 ? 2 * raw * raw : 1 - Math.pow(-2 * raw + 2, 2) / 2;
     const point = sampler.at(progress);
+    const before = sampler.at(Math.max(0, progress - 0.012));
     const ahead = sampler.at(Math.min(1, progress + 0.012));
+    const dx = (ahead[0] - before[0]) * Math.cos(point[1] * Math.PI / 180);
+    const dy = ahead[1] - before[1];
+    if (dx || dy) {
+      const targetBearing = Math.atan2(dx, dy) * 180 / Math.PI;
+      const turn = (((targetBearing - bearing + 180) % 360 + 360) % 360) - 180;
+      bearing += turn * (1 - Math.exp(-Math.max(0, now - lastFrame) / 180));
+    }
+    lastFrame = now;
+    const pitch = 45 + progress * 20;
+    const position = mapboxgl.MercatorCoordinate.fromLngLat(point, altitude * (1 - progress * 0.68));
+    const trailingDistance = position.z * Math.tan(pitch * Math.PI / 180);
+    const heading = bearing * Math.PI / 180;
+    position.x -= Math.sin(heading) * trailingDistance;
+    position.y += Math.cos(heading) * trailingDistance;
     const camera = map.getFreeCameraOptions();
-    camera.position = mapboxgl.MercatorCoordinate.fromLngLat(point, altitude * (1 - progress * 0.68));
-    camera.lookAtPoint(ahead, [0, 0, 1]);
+    camera.position = position;
+    // Keep the route point centered while approaching from behind. Clamping
+    // a look-ahead point to the destination previously flattened the pitch
+    // to zero at arrival, hiding the requested 3D city view.
+    camera.lookAtPoint(point, [0, 0, 1]);
     map.setFreeCameraOptions(camera);
     if (raw < 1) frame = requestAnimationFrame(animate);
     else cancel();
@@ -230,5 +253,17 @@ export function travelAlongRoute(map: mapboxgl.Map, coordinates: RoutePoint[]): 
 }
 
 export function cancelRouteTravel(map: mapboxgl.Map): void {
+  const pending = pendingAnimations.get(map);
+  if (pending !== undefined) cancelAnimationFrame(pending);
+  pendingAnimations.delete(map);
   activeAnimations.get(map)?.();
+}
+
+export function scheduleRouteTravel(map: mapboxgl.Map, coordinates: RoutePoint[]): void {
+  cancelRouteTravel(map);
+  const frame = requestAnimationFrame(() => {
+    pendingAnimations.delete(map);
+    travelAlongRoute(map, coordinates);
+  });
+  pendingAnimations.set(map, frame);
 }

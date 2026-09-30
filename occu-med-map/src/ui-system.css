@@ -588,28 +588,55 @@ html[data-occumed-modal-open="true"] body {
 }
 
 .mapboxgl-popup-content {
-  color: var(--ui-text) !important;
-  background: linear-gradient(180deg, #0a1c2c, #061421) !important;
-  border-color: var(--ui-border) !important;
-  box-shadow: 0 18px 52px rgba(0,0,0,.48), inset 0 1px 0 rgba(255,255,255,.04) !important;
+  color: #183344 !important;
+  background: linear-gradient(145deg, rgba(255,255,255,.97), rgba(239,247,252,.94)) !important;
+  border-color: rgba(129,162,182,.45) !important;
+  box-shadow: 0 12px 32px rgba(30,57,76,.18), inset 0 1px 0 #fff !important;
 }
 
 .mapboxgl-popup-content,
-.mapboxgl-popup-content :is(div, span, strong, p) {
-  color: var(--ui-text) !important;
+.mapboxgl-popup-content :is(div, span, strong, p),
+.mapboxgl-popup-content :is(.pt, .pi, .pb, .pc, .psv, .pcn, .pcs) {
+  color: #183344 !important;
+  text-shadow: none !important;
 }
 
 .mapboxgl-popup-content a {
-  color: #8ed7f0 !important;
+  color: #075d86 !important;
 }
+.mapboxgl-popup-content a:hover { color: #034769 !important; }
+.mapboxgl-popup-content button {
+  color: #183344 !important;
+  border-color: rgba(129,162,182,.45) !important;
+  background: rgba(227,239,247,.9) !important;
+}
+.mapboxgl-popup .mapboxgl-popup-tip { background: transparent !important; }
 
 .mapboxgl-popup-close-button {
-  color: var(--ui-muted) !important;
+  color: #466477 !important;
 }
 
 .mapboxgl-popup-close-button:hover {
-  color: #ffffff !important;
+  color: #183344 !important;
+  background: rgba(41,93,124,.1) !important;
 }
+
+.mapboxgl-popup-content .pi { min-width: 0 !important; width: 100%; padding: 14px 16px; }
+.mapboxgl-popup-content :is(.ps, .psl, .pcl) {
+  color: #466477 !important;
+  font-size: 12px !important;
+  line-height: 1.5;
+  letter-spacing: .02em !important;
+  text-transform: none !important;
+}
+.mapboxgl-popup-anchor-bottom .mapboxgl-popup-tip,
+.mapboxgl-popup-anchor-bottom-left .mapboxgl-popup-tip,
+.mapboxgl-popup-anchor-bottom-right .mapboxgl-popup-tip { border-top-color: #eff7fc !important; }
+.mapboxgl-popup-anchor-top .mapboxgl-popup-tip,
+.mapboxgl-popup-anchor-top-left .mapboxgl-popup-tip,
+.mapboxgl-popup-anchor-top-right .mapboxgl-popup-tip { border-bottom-color: #f9fcfe !important; }
+.mapboxgl-popup-anchor-left .mapboxgl-popup-tip { border-right-color: #f4f9fd !important; }
+.mapboxgl-popup-anchor-right .mapboxgl-popup-tip { border-left-color: #f4f9fd !important; }
 
 /* migrated from pdf-preview-hardening.css */
 /* Report preview is a full application dialog, not a loose page overlay. */
@@ -765,3 +792,8 @@ html[data-occumed-modal-open="true"] body {
     min-height: 320px !important;
   }
 }
+
+.provider-registry-popup { font-family: Inter, sans-serif; font-size: 13px; line-height: 1.55; max-width: 320px; padding: 14px 16px; overflow-wrap: anywhere; }
+.provider-registry-popup-name { font-size: 16px; font-weight: 700; margin: 0 24px 4px 0; }
+.provider-registry-popup-source { font-size: 12px; margin-bottom: 8px; }
+.provider-registry-popup-row { margin: 6px 0; }

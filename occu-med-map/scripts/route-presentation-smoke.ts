@@ -14,8 +14,8 @@ assert.equal(packageJson.dependencies["mapbox-gl"], "^3.9.2", "route presentatio
 assert.match(runtime, /getFreeCameraOptions\(\)/, "route travel must use Mapbox FreeCamera");
 assert.match(runtime, /setFreeCameraOptions\(camera\)/, "route travel must update the FreeCamera along the route");
 assert.match(runtime, /MercatorCoordinate\.fromLngLat/, "route travel must use altitude-aware Mercator camera positions");
-assert.match(runtime, /lookAtPoint\(ahead/, "route travel must orient the camera toward the route ahead");
-assert.match(runtime, /activeAnimations\.get\(map\)\?\.\(\)/, "starting a route must cancel an earlier travel animation");
+assert.match(runtime, /lookAtPoint\(point/, "route travel must keep the current route point centered");
+assert.match(runtime, /cancelRouteTravel\(map\)/, "starting a route must cancel an earlier travel animation");
 assert.match(runtime, /pointerdown.*wheel.*touchstart.*keydown/s, "user input must interrupt route travel");
 assert.match(runtime, /feature-state.*hover/s, "route hover must use Mapbox feature state");
 assert.match(runtime, /show3dObjects/, "Mapbox Standard must enable its native 3D environment");
@@ -27,7 +27,7 @@ for (const [name, content] of [["Map Tools", mapTools], ["ETA", etaRoute]] as co
   assert.match(content, /ensureLuminousRouteLayers/, `${name} routes must use the shared luminous layer stack`);
   assert.match(content, /installRouteHover/, `${name} routes must install hover interaction`);
   assert.match(content, /startRoutePulse/, `${name} routes must animate the traveling highlight`);
-  assert.match(content, /travelAlongRoute/, `${name} route selection must start route travel`);
+  assert.match(content, /scheduleRouteTravel/, `${name} route selection must schedule cancellable route travel`);
 }
 
 console.log("Route presentation smoke test passed for luminous paths, hover, FreeCamera travel, and 3D buildings.");

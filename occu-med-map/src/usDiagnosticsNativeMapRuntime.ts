@@ -6,6 +6,7 @@ export type SavedRadiusOverlay = { id: number; lat: number; lng: number; radiusM
 export type AddressPinOverlay = { lat: number; lng: number; color: string; popupHtml: string; tooltipHtml?: string };
 
 const CHANNELS: Channel[] = ["states", "population", "cities", "timezones", "saved", "address"];
+const statePopups = new WeakMap<mapboxgl.Map, { popup: mapboxgl.Popup; postal: string }>();
 const collections: Record<Channel, GeoJSON.FeatureCollection> = {
   states: { type: "FeatureCollection", features: [] },
   population: { type: "FeatureCollection", features: [] },
@@ -106,6 +107,14 @@ function update(channel: Channel): void {
     try {
       ensureChannel(map, channel);
       (map.getSource(ids(channel).source) as mapboxgl.GeoJSONSource | undefined)?.setData(collections[channel]);
+      if (channel === "states") {
+        const selected = statePopups.get(map);
+        if (selected) {
+          const feature = collections.states.features.find(item => item.properties?.postal === selected.postal && item.properties?.popupHtml);
+          if (feature) selected.popup.setHTML(String(feature.properties?.popupHtml));
+          else { selected.popup.remove(); statePopups.delete(map); }
+        }
+      }
     } catch (error) {
       console.warn(`Native U.S. diagnostics ${channel} update failed`, error);
     }
@@ -240,6 +249,7 @@ registerMapboxMapInitializer({
   priority: 14,
   initialize: (map) => {
     let hoverPopup: mapboxgl.Popup | null = null;
+    let clickPopup: mapboxgl.Popup | null = null;
     const apply = () => CHANNELS.forEach((channel) => ensureChannel(map, channel));
     const click = (event: mapboxgl.MapMouseEvent) => {
       const feature = nearestFeature(map, event.point);
@@ -248,7 +258,16 @@ registerMapboxMapInitializer({
       if (event.originalEvent && typeof event.originalEvent === "object") {
         (event.originalEvent as unknown as Record<string, unknown>).__networkMapOverlayHandled = true;
       }
-      new mapboxgl.Popup({ closeButton: true, maxWidth: "340px" }).setLngLat(event.lngLat).setHTML(html).addTo(map);
+      clickPopup?.remove();
+      statePopups.delete(map);
+      clickPopup = new mapboxgl.Popup({ closeButton: true, maxWidth: "340px" }).setLngLat(event.lngLat).setHTML(html).addTo(map);
+      if (feature.source === ids("states").source && feature.properties?.postal) {
+        const popup = clickPopup;
+        statePopups.set(map, { popup, postal: String(feature.properties.postal) });
+        popup.on("close", () => {
+          if (statePopups.get(map)?.popup === popup) statePopups.delete(map);
+        });
+      }
     };
     const move = (event: mapboxgl.MapMouseEvent) => {
       const feature = nearestFeature(map, event.point);
@@ -278,6 +297,8 @@ registerMapboxMapInitializer({
       map.off("mousemove", move);
       map.getCanvas().removeEventListener("mouseleave", leave);
       hoverPopup?.remove();
+      clickPopup?.remove();
+      statePopups.delete(map);
     };
   },
 });

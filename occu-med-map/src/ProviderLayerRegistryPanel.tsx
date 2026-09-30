@@ -4,6 +4,7 @@ import { getActiveMapboxMap } from './dualMapEngineRuntime';
 import { fetchProviderLayer } from './providerLayerRequestRuntime';
 import { clearProviderDataset, renderProviderDataset } from './providerDatasetNativeMapRuntime';
 import { subscribeToSharedDomObserver } from './runtimeControllerRegistry';
+import { buildProviderRegistryPopup as providerPopup } from './providerRegistryPopup';
 import DynamicUploadedDatasetLayers from './DynamicUploadedDatasetLayers';
 import {
   PROVIDER_LAYER_CATEGORIES,
@@ -41,45 +42,6 @@ function initialState(): LayerStateMap {
   return Object.fromEntries(
     [...PROVIDER_LAYER_CATEGORIES, PUBLIC_HEALTH_LAYER].map((entry) => [entry.id, { ...EMPTY_LAYER_STATE }]),
   );
-}
-
-function escapeHtml(value: unknown): string {
-  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-  }[char] || char));
-}
-
-function safeHttpUrl(value: unknown): string | null {
-  if (typeof value !== 'string' || !value.trim()) return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null;
-  } catch {
-    return null;
-  }
-}
-
-function providerPopup(provider: any, layer: LayerDefinition): string {
-  const name = escapeHtml(provider?.name || provider?.clinic_name || layer.label);
-  const address = escapeHtml([
-    provider?.address || provider?.address_1,
-    provider?.city,
-    provider?.admin_area || provider?.state,
-    provider?.postal_code || provider?.zip,
-  ].filter(Boolean).join(', ') || 'Address unavailable');
-  const phone = typeof provider?.phone === 'string' && provider.phone.trim() ? provider.phone.trim() : '';
-  const website = safeHttpUrl(provider?.website);
-  const source = escapeHtml(provider?.source || provider?.data_source || layer.label);
-  const type = escapeHtml(provider?.clinic_type || provider?.providerType || provider?.category || '');
-  return `<div style="font-family:Inter,sans-serif;padding:10px 12px;max-width:290px;">
-    <div style="font-size:12px;font-weight:700;color:#e2f0ff;">${name}</div>
-    <div style="font-size:9px;color:#7dd3fc;letter-spacing:.06em;text-transform:uppercase;margin:2px 0 4px;">${escapeHtml(layer.label)}</div>
-    <div style="font-size:9px;color:#7f9dbb;margin-bottom:5px;">${address}</div>
-    ${type ? `<div style="font-size:8.5px;color:#a7c7e7;margin-bottom:4px;">${type}</div>` : ''}
-    ${phone ? `<div style="font-size:9px;margin-bottom:3px;"><a href="tel:${escapeHtml(phone)}">${escapeHtml(phone)}</a></div>` : ''}
-    ${website ? `<div style="font-size:9px;margin-bottom:3px;"><a href="${escapeHtml(website)}" target="_blank" rel="noreferrer">Website</a></div>` : ''}
-    <div style="font-size:8px;color:#64748b;margin-top:5px;border-top:1px solid rgba(255,255,255,.08);padding-top:4px;">${source}</div>
-  </div>`;
 }
 
 function layerStatus(state: LayerState): string {

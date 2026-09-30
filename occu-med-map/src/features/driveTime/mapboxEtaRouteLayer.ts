@@ -1,7 +1,7 @@
 import mapboxgl from "mapbox-gl";
 import { listenForEtaRoute } from "./etaRouteEvents";
 import type { EtaProviderRanking } from "./providerEtaTypes";
-import { ensureLuminousRouteLayers, installRouteHover, startRoutePulse, travelAlongRoute, type RouteLayerIds } from "../../routePresentationRuntime";
+import { cancelRouteTravel, ensureLuminousRouteLayers, installRouteHover, startRoutePulse, scheduleRouteTravel, type RouteLayerIds } from "../../routePresentationRuntime";
 
 const SOURCE_ID = "drive-time-eta-route";
 const LINE_LAYER_ID = "drive-time-eta-route-line";
@@ -75,15 +75,16 @@ export function installNativeEtaRouteLayer(map: mapboxgl.Map): () => void {
   };
   const draw = (row: EtaProviderRanking): void => {
     latest = routeCollection(row);
-    if (latest.features.length === 0) return;
+    cancelRouteTravel(map);
     ensureLayers(map, latest);
+    if (latest.features.length === 0) return;
     const line = latest.features.find((feature) => feature.geometry.type === "LineString");
     if (!line || line.geometry.type !== "LineString") return;
     const coordinates = line.geometry.coordinates as Array<[number, number]>;
     const bounds = new mapboxgl.LngLatBounds();
     coordinates.forEach((coordinate) => bounds.extend(coordinate));
     if (!bounds.isEmpty()) map.fitBounds(bounds, { padding: 38, duration: 700 });
-    requestAnimationFrame(() => travelAlongRoute(map, coordinates));
+    scheduleRouteTravel(map, coordinates);
   };
 
   map.on("style.load", apply);
@@ -95,5 +96,6 @@ export function installNativeEtaRouteLayer(map: mapboxgl.Map): () => void {
     map.off("style.load", apply);
     interactionCleanup?.();
     pulseCleanup?.();
+    cancelRouteTravel(map);
   };
 }

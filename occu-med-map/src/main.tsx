@@ -63,6 +63,7 @@ async function loadOptionalRuntimes(): Promise<void> {
     safeLoad("map performance telemetry", () => import("./mapPerformanceTelemetryRuntime")),
     safeLoad("technical diagnostics export", () => import("./technicalDiagnosticsExport")),
     safeLoad("U.S. diagnostics", () => import("./usDiagnosticsGate")),
+    safeLoad("My Pins", () => import("./myPinsRuntime")),
   ]);
   markOptionalRuntimesComplete();
 }

@@ -3,6 +3,7 @@ import { registerNetworkRequestMiddleware } from "./networkRequestPipelineRuntim
 const TOKEN_STORAGE_KEY = "network-map-admin-token";
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const PROTECTED_PREFIXES = [
+  "/api/my-clinics",
   "/api/provider-explorer",
   "/api/indexing",
   "/api/provider-sources/import",

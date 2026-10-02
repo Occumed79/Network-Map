@@ -1293,3 +1293,10 @@ html[data-occumed-workspace-ready="true"] body .sidebar.occumed-sidebar-workspac
     min-height: 92px !important;
   }
 }
+
+/* 3D Terrain (Map Tools section) */
+.terrain-section .terrain-exag { margin-top: 6px; }
+.terrain-section .terrain-exag button.active { outline: 1px solid currentColor; }
+.terrain-tilt { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 11px; }
+.terrain-tilt input[type="range"] { flex: 1 1 auto; min-width: 0; }
+.terrain-tilt-value { min-width: 32px; text-align: right; opacity: 0.8; }

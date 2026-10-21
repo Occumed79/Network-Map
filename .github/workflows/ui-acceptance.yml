@@ -70,6 +70,7 @@ jobs:
 
           NETWORK_MAP_CI_UI_URL=http://127.0.0.1:4173 node occu-med-map/scripts/landing-entry-smoke.mjs
           NETWORK_MAP_CI_UI_URL=http://127.0.0.1:4173 node occu-med-map/scripts/ci-ui-acceptance.mjs
+          NETWORK_MAP_CI_UI_URL=http://127.0.0.1:4173 node occu-med-map/scripts/ci-ui-deep-workflow-acceptance.mjs
 
       - name: Upload UI acceptance artifacts
         if: failure()
@@ -78,6 +79,7 @@ jobs:
           name: ui-acceptance-artifacts
           path: |
             occu-med-map/test-results/ui-acceptance
+            occu-med-map/test-results/ui-deep-workflow
             /tmp/network-map-vite.log
           if-no-files-found: ignore
           retention-days: 7

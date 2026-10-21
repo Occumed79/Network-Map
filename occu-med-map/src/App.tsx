@@ -68,6 +68,7 @@ import {
   setReferenceRadiusOverlay,
   type NativeLivePoint,
 } from './liveFinderNativeMapRuntime';
+import { fmtDist, metersToMiles, normalizeResultDistMiles } from './features/liveFinder/liveFinderDistance';
 import {
   clearProviderDataset,
   renderProviderDataset,
@@ -529,7 +530,6 @@ function haversine(lat1:number,lng1:number,lat2:number,lng2:number):number {
   const a=Math.sin(dL/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dN/2)**2;
   return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }
-function fmtDist(m:number):string { return m<1000?Math.round(m)+'m':((m/1609.34).toFixed(1)+' mi'); }
 // Describes the database query scope that produced a Results set.
 function databaseScopeLabel(filters:ProviderExplorerFilters):string {
   if (filters.useMapBounds) return 'Current map view';
@@ -1409,7 +1409,7 @@ export default function App() {
         if (facilitiesRaw.length) {
           setLiveResults(facilitiesRaw.map((r)=>({
             ...r,
-            dist: haversine(dropCenter.lat, dropCenter.lng, r.lat, r.lng),
+            dist: metersToMiles(haversine(dropCenter.lat, dropCenter.lng, r.lat, r.lng)),
           })));
         }
         facilities = buildFacilityRows(dropCenter, facilitiesRaw, dropFacilityType, CATS);
@@ -2471,14 +2471,13 @@ export default function App() {
     if(!Number.isFinite(la)||!Number.isFinite(lo)) return null;
     const tags=row.tags&&typeof row.tags==='object'?row.tags:{};
     const name=String(row.name||row.op||'Unnamed Facility');
-    const dist=Number(row.dist);
     return {
       id:row.id??`${name}-${la}-${lo}-${index}`,
       lat:la,
       lng:lo,
       name,
       cat:row.cat||classifyFacility(tags),
-      dist:Number.isFinite(dist)?dist:haversine(centerLat,centerLng,la,lo),
+      dist:normalizeResultDistMiles(row.dist,centerLat,centerLng,la,lo),
       addr:row.addr||'',
       phone:row.phone||'',
       website:row.website||'',

@@ -74,6 +74,8 @@ jobs:
         run: pnpm --filter @workspace/api-server test:p1-data
       - name: P2 map
         run: pnpm --filter @workspace/occu-med-map test:p2-map
+      - name: Live finder distance units
+        run: pnpm --filter @workspace/occu-med-map test:live-finder-distance-units
       - name: P3 NPI
         run: pnpm --filter @workspace/api-server test:p3-npi
       - name: Build frontend

@@ -8,7 +8,7 @@ export function haversine(lat1:number,lng1:number,lat2:number,lng2:number):numbe
   return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }
 
-export function fmtDist(m:number):string { return m<1000?Math.round(m)+'m':((m/1609.34).toFixed(1)+' mi'); }
+export { fmtDist } from '../liveFinder/liveFinderDistance';
 
 export function estimateCityPopulationByTier(tier:number, state:string) {
   const baseByTier:Record<number, number> = {1:900000, 2:250000, 3:75000, 4:20000};

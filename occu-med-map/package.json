@@ -46,7 +46,8 @@
     "test:provider-rendering-authority": "tsx scripts/provider-rendering-authority-smoke.ts",
     "test:map-architecture-authority": "tsx scripts/native-map-architecture-audit.ts",
     "test:healthcare-access-diagnostics": "tsx scripts/healthcare-access-diagnostics-smoke.ts",
-    "test:landing-entry": "node scripts/landing-entry-smoke.mjs"
+    "test:landing-entry": "node scripts/landing-entry-smoke.mjs",
+    "test:live-finder-distance-units": "tsx scripts/live-finder-distance-units-smoke.ts"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",

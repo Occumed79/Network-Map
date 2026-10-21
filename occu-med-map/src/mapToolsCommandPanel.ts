@@ -1,5 +1,9 @@
 import mapboxgl from "mapbox-gl";
-import { getActiveMapboxMap, getMapboxMapByMode, registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
+import { rankProvidersByEta } from "./features/driveTime/providerEtaEngine";
+import { getProviderEtaResult, setProviderEtaResult } from "./features/driveTime/providerEtaStore";
+import type { EtaProviderRanking, EtaRankingResult } from "./features/driveTime/providerEtaTypes";
+import { applyBasemapStyle, type BasemapStyle } from "./mapControlsBridgeRuntime";
+import { getActiveMapboxMap, getTrackedMapboxMaps, registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
 import { hasMapboxToken, mapboxDirections, mapboxGeocode, mapboxIsochrone, mapboxReverseGeocode } from "./mapboxServices";
 import { registerMapToolsPanel } from "./mapToolsPanelRegistry";
 import {
@@ -17,16 +21,18 @@ import {
 import { registerRuntimeOwner } from "./runtimeControllerRegistry";
 
 type Point = NativeMapToolsPoint;
-type RankedPin = Point & { name: string; driveMiles: number; driveMinutes: number; coordinates: Array<[number, number]> };
 
 let installed = false;
 let origin: Point | null = null;
 let densityEnabled = false;
 let statusNode: HTMLDivElement | null = null;
 let etaResultsNode: HTMLDivElement | null = null;
-let latestRankings: RankedPin[] = [];
+let latestRankings: EtaProviderRanking[] = [];
+let latestRankingResult: EtaRankingResult | null = null;
+let panelOwner: mapboxgl.Map | null = null;
+let removePanel: (() => void) | null = null;
 
-const basemaps = [
+const basemaps: Array<{ label: string; style: BasemapStyle }> = [
   { label: "Dark", style: "dark-v11" },
   { label: "Streets", style: "streets-v12" },
   { label: "Light", style: "light-v11" },
@@ -42,21 +48,10 @@ function activeMap(): mapboxgl.Map | null {
   return getActiveMapboxMap();
 }
 
-function updateBasemap(style: string): void {
-  const map = getMapboxMapByMode("2d");
-  if (!map) { setStatus("Mapbox 2D map is not ready yet."); return; }
-  map.setStyle(`mapbox://styles/mapbox/${style}`);
-  setStatus(`2D basemap: ${basemaps.find((item) => item.style === style)?.label || style}.`);
-}
-
-function milesBetween(a: Point, b: Point): number {
-  const radiusMiles = 3958.7613;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const lat1 = (a.lat * Math.PI) / 180;
-  const lat2 = (b.lat * Math.PI) / 180;
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return 2 * radiusMiles * Math.asin(Math.sqrt(h));
+// The map controls bridge is the single basemap owner: it restyles the 2D map
+// and the globe together, marks the active button, and reports progress.
+function updateBasemap(style: BasemapStyle): void {
+  void applyBasemapStyle(style);
 }
 
 function stripHtml(value: unknown): string {
@@ -73,7 +68,11 @@ function providerLayerIds(map: mapboxgl.Map): string[] {
     "live-finder-results-native",
     "provider-location-search-dots",
   ]);
-  return (map.getStyle()?.layers || [])
+  // getStyle() throws while a style swap is in flight; no provider layers
+  // are queryable then.
+  let layers: mapboxgl.LayerSpecification[] = [];
+  try { layers = map.getStyle()?.layers || []; } catch { return []; }
+  return layers
     .map((layer) => layer.id)
     .filter((id) => fixed.has(id) || (id.startsWith("provider-dataset-native-") && id.endsWith("-points")));
 }
@@ -107,7 +106,10 @@ function emitOriginChanged(): void {
   window.dispatchEvent(new CustomEvent("occumed:map-origin-changed", { detail: origin }));
 }
 
+// Publishes the Map Tools ranking to the shared ETA store that the Results
+// workspace reads for its per-provider drive-time badges.
 function emitEtaRankings(): void {
+  if (latestRankingResult) setProviderEtaResult(latestRankingResult);
   window.dispatchEvent(new CustomEvent("occumed:provider-eta-rankings", { detail: latestRankings }));
 }
 
@@ -139,7 +141,9 @@ async function searchPlace(input: HTMLInputElement): Promise<void> {
 function clearRoutes(): void {
   clearMapToolsRoute();
   clearMapToolsZones();
+  if (latestRankingResult && getProviderEtaResult() === latestRankingResult) setProviderEtaResult(null);
   latestRankings = [];
+  latestRankingResult = null;
   if (etaResultsNode) etaResultsNode.innerHTML = "";
   emitEtaRankings();
   setStatus("Routes and zones cleared.");
@@ -171,15 +175,7 @@ async function drawZones(): Promise<void> {
   }
 }
 
-function visibleMarkerCandidates(map: mapboxgl.Map, currentOrigin: Point) {
-  return visibleProviderPoints(map)
-    .map((point) => ({ ...point, straightMiles: milesBetween(currentOrigin, point) }))
-    .filter((point) => point.straightMiles >= 0.03 && point.straightMiles <= 250)
-    .sort((a, b) => a.straightMiles - b.straightMiles)
-    .slice(0, 8);
-}
-
-function renderRankings(rows: RankedPin[]): void {
+function renderRankings(rows: EtaProviderRanking[]): void {
   if (!etaResultsNode) return;
   etaResultsNode.innerHTML = "";
   rows.forEach((row, index) => {
@@ -193,7 +189,7 @@ function renderRankings(rows: RankedPin[]): void {
     const miles = document.createElement("em");
     miles.textContent = `${row.driveMiles.toFixed(1)} mi`;
     btn.append(name, mins, miles);
-    btn.addEventListener("click", () => { void drawRoute(row); });
+    btn.addEventListener("click", () => { void drawRoute({ lat: row.lat, lng: row.lng, label: row.name }); });
     etaResultsNode?.appendChild(btn);
   });
 }
@@ -202,18 +198,20 @@ async function rankVisiblePins(): Promise<void> {
   if (!origin) { setStatus("Set an origin first."); return; }
   const map = activeMap();
   if (!map) { setStatus("Map is not ready."); return; }
-  const candidates = visibleMarkerCandidates(map, origin);
-  if (candidates.length === 0) { setStatus("No visible provider pins found to rank."); return; }
-  setStatus(`Ranking ${candidates.length} visible pins by drive time...`);
-  const ranked: RankedPin[] = [];
-  for (const candidate of candidates) {
-    try {
-      const route = await mapboxDirections(origin, candidate, "driving-traffic");
-      ranked.push({ ...candidate, driveMiles: route.distanceMiles, driveMinutes: route.durationMinutes, coordinates: route.coordinates });
-    } catch {}
+  const rankingOrigin = { ...origin, label: origin.label || "Selected origin" };
+  const candidates = visibleProviderPoints(map).map((point, index) => ({ ...point, id: `map-tools:${index}` }));
+  const options = { maxCandidates: 8, maxRouteCalls: 8, maxStraightMiles: 250, routeProfile: "driving-traffic" as const };
+  setStatus(`Ranking visible pins by drive time...`);
+  let result: EtaRankingResult;
+  try {
+    result = await rankProvidersByEta(rankingOrigin, candidates, options);
+  } catch (err: any) {
+    setStatus(err?.message || "Drive-time ranking failed.");
+    return;
   }
-  ranked.sort((a, b) => a.driveMinutes - b.driveMinutes);
-  latestRankings = ranked.slice(0, 6);
+  if (result.attempted === 0) { setStatus("No visible provider pins found to rank."); return; }
+  latestRankings = result.rankings.slice(0, 6);
+  latestRankingResult = { ...result, rankings: latestRankings };
   renderRankings(latestRankings);
   emitEtaRankings();
   setStatus(`Ranked ${latestRankings.length} provider pins. Result cards updated.`);
@@ -332,6 +330,24 @@ function createPanel(map: mapboxgl.Map): () => void {
   };
 }
 
+// One Map Tools panel serves every map mode. It is mounted on the first map
+// that registers (2D or globe) and moves to a surviving map if its owner is
+// removed, e.g. when the 2D map fails to load and the globe is used instead.
+function mountPanel(map: mapboxgl.Map): void {
+  panelOwner = map;
+  removePanel = createPanel(map);
+  if (latestRankings.length) renderRankings(latestRankings);
+}
+
+function releasePanel(map: mapboxgl.Map): void {
+  if (panelOwner !== map) return;
+  removePanel?.();
+  panelOwner = null;
+  removePanel = null;
+  const next = getTrackedMapboxMaps().find((candidate) => candidate !== map);
+  if (next) mountPanel(next);
+}
+
 function installNativeEvents(): () => void {
   const onClick = async (rawEvent: Event) => {
     const detail = (rawEvent as CustomEvent<{ lat: number; lng: number; originalEvent?: MouseEvent }>).detail;
@@ -365,7 +381,10 @@ export function installMapToolsCommandPanel(): void {
   registerMapboxMapInitializer({
     id: "map-tools-command-panel-ui",
     priority: 40,
-    initialize: (map, context) => context.mode === "2d" ? createPanel(map) : undefined,
+    initialize: (map) => {
+      if (!panelOwner) mountPanel(map);
+      return () => releasePanel(map);
+    },
   });
 }
 

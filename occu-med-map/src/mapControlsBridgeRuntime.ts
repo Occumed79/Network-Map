@@ -2,7 +2,7 @@ import mapboxgl from "mapbox-gl";
 import { registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
 import { registerRuntimeOwner, subscribeToSharedDomObserver } from "./runtimeControllerRegistry";
 
-type BasemapStyle = "dark-v11" | "streets-v12" | "light-v11" | "outdoors-v12" | "satellite-streets-v12";
+export type BasemapStyle = "dark-v11" | "streets-v12" | "light-v11" | "outdoors-v12" | "satellite-streets-v12";
 
 const MAPBOX_STYLE_BY_LABEL: Record<string, BasemapStyle> = {
   dark: "dark-v11",
@@ -22,10 +22,14 @@ const LABEL_BY_STYLE: Record<BasemapStyle, string> = {
 
 const trackedMaps = new Set<mapboxgl.Map>();
 let selectedStyle: BasemapStyle = "streets-v12";
+let userSelectedStyle = false;
 let scanTimer: number | null = null;
 
 function registerMap(instance: mapboxgl.Map): () => void {
   trackedMaps.add(instance);
+  // A map created after a basemap choice (the globe is built on first use)
+  // starts on the same basemap as the map the user already styled.
+  if (userSelectedStyle) void switchStyle(instance, selectedStyle);
   return () => { trackedMaps.delete(instance); };
 }
 
@@ -61,9 +65,40 @@ function configureProjection(instance: mapboxgl.Map, globe: boolean): void {
 function finishStyleChange(instance: mapboxgl.Map, globe: boolean): void {
   configureProjection(instance, globe);
 }
+// Basemap progress belongs on the Map Tools panel's own status line, not on
+// the status lines of other sections (coverage, geographic focus).
 function setPanelStatus(text: string): void {
-  document.querySelectorAll<HTMLElement>(".occumed-mapbox-status").forEach((status) => {
+  document.querySelectorAll<HTMLElement>(".occumed-map-tools-panel > .occumed-mapbox-status").forEach((status) => {
     status.textContent = text;
+  });
+}
+
+// A full style rebuild ({ diff: false }) is required: Mapbox's diffing
+// setStyle path drops every runtime-added source and layer without firing
+// style.load, so overlay owners never restore them (and this wait would only
+// end on its timeout).
+function switchStyle(instance: mapboxgl.Map, style: BasemapStyle): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const globe = isGlobeMap(instance);
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      instance.off("style.load", finish);
+      finishStyleChange(instance, globe);
+      resolve();
+    };
+
+    try {
+      instance.once("style.load", finish);
+      // The typings mark the font options required, but Mapbox merges them
+      // with the map's current values; passing them would reset them.
+      instance.setStyle(mapStyleUri(style), { diff: false } as Parameters<mapboxgl.Map["setStyle"]>[1]);
+      window.setTimeout(finish, 8_000);
+    } catch (error) {
+      console.error(`Unable to switch to the ${LABEL_BY_STYLE[style]} basemap`, error);
+      finish();
+    }
   });
 }
 
@@ -77,8 +112,9 @@ function markStyleButtons(): void {
   });
 }
 
-async function applyBasemapStyle(style: BasemapStyle): Promise<void> {
+export async function applyBasemapStyle(style: BasemapStyle): Promise<void> {
   selectedStyle = style;
+  userSelectedStyle = true;
   markStyleButtons();
   const label = LABEL_BY_STYLE[style];
   setPanelStatus(`Switching to ${label} map…`);
@@ -89,36 +125,9 @@ async function applyBasemapStyle(style: BasemapStyle): Promise<void> {
     return;
   }
 
-  await Promise.allSettled(instances.map((instance) => new Promise<void>((resolve) => {
-    const globe = isGlobeMap(instance);
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      finishStyleChange(instance, globe);
-      resolve();
-    };
-
-    try {
-      instance.once("style.load", finish);
-      instance.setStyle(mapStyleUri(style));
-      window.setTimeout(finish, 8_000);
-    } catch (error) {
-      console.error(`Unable to switch to the ${label} basemap`, error);
-      finish();
-    }
-  })));
+  await Promise.allSettled(instances.map((instance) => switchStyle(instance, style)));
 
   setPanelStatus(`${label} map active.`);
-}
-
-function handleBasemapClick(event: Event): void {
-  const target = event.target instanceof Element ? event.target : null;
-  const button = target?.closest<HTMLButtonElement>(".occumed-map-tools-panel button");
-  if (!button) return;
-  const style = MAPBOX_STYLE_BY_LABEL[(button.textContent || "").trim().toLowerCase()];
-  if (!style) return;
-  void applyBasemapStyle(style);
 }
 
 function prepareMapToolsPanel(): void {
@@ -159,7 +168,6 @@ function installMapControlsBridge(): void {
     priority: 10,
     initialize: registerMap,
   });
-  document.addEventListener("click", handleBasemapClick, true);
   subscribeToSharedDomObserver("map-controls-bridge", (mutations) => {
     if (!mutations.some((mutation) => {
       const target = mutation.target instanceof Element ? mutation.target : null;

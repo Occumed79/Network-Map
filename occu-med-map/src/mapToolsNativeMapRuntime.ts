@@ -1,5 +1,6 @@
 import mapboxgl from "mapbox-gl";
-import { getActiveMapboxMap, getTrackedMapboxMaps, registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
+import turfBbox from "@turf/bbox";
+import { getActiveMapboxMap, getTrackedMapboxMaps, registerMapboxMapInitializer, runWhenStyleReady } from "./mapboxMapLifecycleRuntime";
 import { cancelRouteTravel, ensureLuminousRouteLayers, installRouteHover, startRoutePulse, scheduleRouteTravel, type RouteLayerIds } from "./routePresentationRuntime";
 
 export type NativeMapToolsPoint = { lat: number; lng: number; label?: string };
@@ -47,7 +48,6 @@ function luminousIds(ids: typeof IDS.route | typeof IDS.planner): RouteLayerIds 
 }
 
 function ensureLayers(map: mapboxgl.Map): void {
-  if (!map.isStyleLoaded()) return;
   sourceData(map, IDS.origin.source, collections.origin);
   sourceData(map, IDS.route.source, collections.route);
   sourceData(map, IDS.zones.source, collections.zones);
@@ -162,11 +162,10 @@ function ensureLayers(map: mapboxgl.Map): void {
 
 function update(channel: Channel): void {
   for (const map of getTrackedMapboxMaps()) {
-    if (!map.isStyleLoaded()) continue;
     try {
-      ensureLayers(map);
-      const sourceId = IDS[channel].source;
-      (map.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(collections[channel]);
+      // ensureLayers writes every channel's current collection, so a deferred
+      // replay after a style swap restores all Map Tools overlays at once.
+      runWhenStyleReady(map, "map-tools-native-overlays", () => ensureLayers(map));
     } catch (error) {
       console.warn(`Map Tools native ${channel} update failed`, error);
     }
@@ -275,23 +274,12 @@ export function fitActiveMapToRoute(coordinates: Array<[number, number]>, paddin
   if (!bounds.isEmpty()) map.fitBounds(bounds, { padding, duration: 700 });
 }
 
-function visitCoordinates(value: unknown, bounds: mapboxgl.LngLatBounds): void {
-  if (!Array.isArray(value)) return;
-  if (value.length >= 2 && typeof value[0] === "number" && typeof value[1] === "number") {
-    const lng = Number(value[0]);
-    const lat = Number(value[1]);
-    if (Number.isFinite(lng) && Number.isFinite(lat)) bounds.extend([lng, lat]);
-    return;
-  }
-  value.forEach((child) => visitCoordinates(child, bounds));
-}
-
 export function fitActiveMapToGeoJSON(data: GeoJSON.FeatureCollection | null, padding = 30): void {
   const map = getActiveMapboxMap();
-  if (!map || !data) return;
-  const bounds = new mapboxgl.LngLatBounds();
-  data.features.forEach((feature) => visitCoordinates((feature.geometry as any)?.coordinates, bounds));
-  if (!bounds.isEmpty()) map.fitBounds(bounds, { padding, duration: 700 });
+  if (!map || !data?.features?.length) return;
+  const [west, south, east, north] = turfBbox(data);
+  if (![west, south, east, north].every(Number.isFinite)) return;
+  map.fitBounds([[west, south], [east, north]], { padding, duration: 700 });
 }
 
 registerMapboxMapInitializer({
@@ -301,7 +289,7 @@ registerMapboxMapInitializer({
     const cleanups: Array<() => void> = [];
     let interactionsInstalled = false;
     const apply = () => {
-      ensureLayers(map);
+      runWhenStyleReady(map, "map-tools-native-overlays", () => ensureLayers(map));
       if (!interactionsInstalled) {
         interactionsInstalled = true;
         cleanups.push(
@@ -313,7 +301,7 @@ registerMapboxMapInitializer({
       }
     };
     map.on("style.load", apply);
-    if (map.isStyleLoaded()) queueMicrotask(apply);
+    queueMicrotask(apply);
     return () => {
       map.off("style.load", apply);
       cancelRouteTravel(map);

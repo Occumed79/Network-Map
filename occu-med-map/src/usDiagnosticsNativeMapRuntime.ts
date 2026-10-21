@@ -1,5 +1,5 @@
 import mapboxgl from "mapbox-gl";
-import { getTrackedMapboxMaps, registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
+import { getTrackedMapboxMaps, registerMapboxMapInitializer, runWhenStyleReady } from "./mapboxMapLifecycleRuntime";
 
 type Channel = "states" | "population" | "cities" | "timezones" | "saved" | "address";
 export type SavedRadiusOverlay = { id: number; lat: number; lng: number; radiusMiles: number; color: string; label: string };
@@ -32,7 +32,6 @@ function sourceData(map: mapboxgl.Map, channel: Channel): void {
 }
 
 function ensureChannel(map: mapboxgl.Map, channel: Channel): void {
-  if (!map.isStyleLoaded()) return;
   const channelIds = ids(channel);
   sourceData(map, channel);
 
@@ -103,10 +102,8 @@ function ensureChannel(map: mapboxgl.Map, channel: Channel): void {
 
 function update(channel: Channel): void {
   for (const map of getTrackedMapboxMaps()) {
-    if (!map.isStyleLoaded()) continue;
     try {
-      ensureChannel(map, channel);
-      (map.getSource(ids(channel).source) as mapboxgl.GeoJSONSource | undefined)?.setData(collections[channel]);
+      runWhenStyleReady(map, `us-diagnostics-${channel}`, () => ensureChannel(map, channel));
       if (channel === "states") {
         const selected = statePopups.get(map);
         if (selected) {
@@ -250,7 +247,7 @@ registerMapboxMapInitializer({
   initialize: (map) => {
     let hoverPopup: mapboxgl.Popup | null = null;
     let clickPopup: mapboxgl.Popup | null = null;
-    const apply = () => CHANNELS.forEach((channel) => ensureChannel(map, channel));
+    const apply = () => CHANNELS.forEach((channel) => runWhenStyleReady(map, `us-diagnostics-${channel}`, () => ensureChannel(map, channel)));
     const click = (event: mapboxgl.MapMouseEvent) => {
       const feature = nearestFeature(map, event.point);
       const html = String(feature?.properties?.popupHtml || "");
@@ -290,7 +287,7 @@ registerMapboxMapInitializer({
     map.on("click", click);
     map.on("mousemove", move);
     map.getCanvas().addEventListener("mouseleave", leave);
-    if (map.isStyleLoaded()) queueMicrotask(apply);
+    queueMicrotask(apply);
     return () => {
       map.off("style.load", apply);
       map.off("click", click);

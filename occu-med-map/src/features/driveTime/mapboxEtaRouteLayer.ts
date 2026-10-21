@@ -1,4 +1,5 @@
 import mapboxgl from "mapbox-gl";
+import { runWhenStyleReady } from "../../mapboxMapLifecycleRuntime";
 import { listenForEtaRoute } from "./etaRouteEvents";
 import type { EtaProviderRanking } from "./providerEtaTypes";
 import { cancelRouteTravel, ensureLuminousRouteLayers, installRouteHover, startRoutePulse, scheduleRouteTravel, type RouteLayerIds } from "../../routePresentationRuntime";
@@ -41,7 +42,6 @@ function routeCollection(row: EtaProviderRanking): GeoJSON.FeatureCollection {
 }
 
 function ensureLayers(map: mapboxgl.Map, collection: GeoJSON.FeatureCollection): void {
-  if (!map.getStyle()) return;
   const source = map.getSource(SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
   if (source) source.setData(collection);
   else map.addSource(SOURCE_ID, { type: "geojson", data: collection, generateId: true, lineMetrics: true });
@@ -68,15 +68,16 @@ export function installNativeEtaRouteLayer(map: mapboxgl.Map): () => void {
   let interactionCleanup: (() => void) | null = null;
   let pulseCleanup: (() => void) | null = null;
 
+  const writeLatest = () => runWhenStyleReady(map, "drive-time-eta-route", () => ensureLayers(map, latest));
   const apply = () => {
-    ensureLayers(map, latest);
+    writeLatest();
     interactionCleanup ||= installRouteHover(map, ROUTE_LAYERS);
     pulseCleanup ||= startRoutePulse(map, ROUTE_LAYERS);
   };
   const draw = (row: EtaProviderRanking): void => {
     latest = routeCollection(row);
     cancelRouteTravel(map);
-    ensureLayers(map, latest);
+    writeLatest();
     if (latest.features.length === 0) return;
     const line = latest.features.find((feature) => feature.geometry.type === "LineString");
     if (!line || line.geometry.type !== "LineString") return;
@@ -88,7 +89,7 @@ export function installNativeEtaRouteLayer(map: mapboxgl.Map): () => void {
   };
 
   map.on("style.load", apply);
-  if (map.isStyleLoaded()) queueMicrotask(apply);
+  queueMicrotask(apply);
   const unsubscribe = listenForEtaRoute(draw);
 
   return () => {

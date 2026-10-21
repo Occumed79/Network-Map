@@ -62,6 +62,8 @@ jobs:
         run: pnpm --filter @workspace/occu-med-map test:network-request-hardening
       - name: Mapbox lifecycle
         run: pnpm --filter @workspace/occu-med-map test:mapbox-lifecycle-hardening
+      - name: Map Tools engine regression smoke
+        run: pnpm --filter @workspace/occu-med-map test:map-tools-engine
       - name: Mapbox source pipeline
         run: pnpm --filter @workspace/occu-med-map test:mapbox-source-pipeline-hardening
       - name: Native map architecture authority

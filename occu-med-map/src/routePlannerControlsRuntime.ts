@@ -17,9 +17,12 @@ function currentMap(): mapboxgl.Map | null {
   return getActiveMapboxMap() || fallbackMap;
 }
 
+// The planner reports through the panel's own status line; other sections
+// (coverage, geographic focus) keep their status lines.
 function status(text: string): void {
-  const scope = activePanel || document;
-  scope.querySelectorAll<HTMLElement>(".occumed-mapbox-status").forEach((node) => { node.textContent = text; });
+  const node = activePanel?.querySelector<HTMLElement>(":scope > .occumed-mapbox-status")
+    || document.querySelector<HTMLElement>(".occumed-map-tools-panel > .occumed-mapbox-status");
+  if (node) node.textContent = text;
 }
 
 function inputFor(target: "from" | "to"): HTMLInputElement | null {

@@ -181,6 +181,50 @@ export function registerMapboxMapInitializer(initializer: MapboxMapInitializer):
   };
 }
 
+const STYLE_NOT_READY = /style is not done loading/i;
+const deferredStyleWork = new WeakMap<mapboxgl.Map, Map<string, () => void>>();
+
+export function isStyleNotReadyError(error: unknown): boolean {
+  return error instanceof Error && STYLE_NOT_READY.test(error.message);
+}
+
+/**
+ * Runs map style work (addSource/addLayer/setData) as soon as the style
+ * document allows it. Mapbox GL only needs the style document to accept
+ * sources and layers, whereas isStyleLoaded() stays false while any tile,
+ * sprite, or GeoJSON worker job is pending, so gating on it silently drops
+ * overlay updates during ordinary camera movement. Work refused because the
+ * style document is mid-load (initial load or setStyle) is replayed on the
+ * next style.load; a later request with the same key replaces a pending one.
+ */
+export function runWhenStyleReady(map: mapboxgl.Map, key: string, work: () => void): void {
+  try {
+    work();
+    deferredStyleWork.get(map)?.delete(key);
+    return;
+  } catch (error) {
+    if (!isStyleNotReadyError(error)) throw error;
+  }
+  let pending = deferredStyleWork.get(map);
+  if (!pending) {
+    pending = new Map();
+    deferredStyleWork.set(map, pending);
+    const queue = pending;
+    const flush = () => {
+      for (const [pendingKey, pendingWork] of [...queue]) {
+        queue.delete(pendingKey);
+        try {
+          runWhenStyleReady(map, pendingKey, pendingWork);
+        } catch (error) {
+          console.warn("Deferred Mapbox style work failed: " + pendingKey, error);
+        }
+      }
+    };
+    map.on("style.load", flush);
+  }
+  pending.set(key, work);
+}
+
 export function getTrackedMapboxMaps(): mapboxgl.Map[] {
   return [...maps.keys()];
 }

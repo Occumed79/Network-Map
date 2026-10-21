@@ -1,5 +1,7 @@
 import mapboxgl from "mapbox-gl";
-import { getActiveMapboxMap, getTrackedMapboxMaps, registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
+import turfBbox from "@turf/bbox";
+import turfCircle from "@turf/circle";
+import { getActiveMapboxMap, getTrackedMapboxMaps, registerMapboxMapInitializer, runWhenStyleReady } from "./mapboxMapLifecycleRuntime";
 import { registerMapToolsSection } from "./mapToolsPanelRegistry";
 import { registerRuntimeOwner } from "./runtimeControllerRegistry";
 
@@ -66,7 +68,11 @@ function providerLayerIds(map: mapboxgl.Map): string[] {
     "live-finder-results-native",
     "provider-location-search-dots",
   ]);
-  return (map.getStyle()?.layers || [])
+  // getStyle() throws while a style swap is in flight; no provider layers
+  // are queryable then.
+  let layers: mapboxgl.LayerSpecification[] = [];
+  try { layers = map.getStyle()?.layers || []; } catch { return []; }
+  return layers
     .map((layer) => layer.id)
     .filter((id) => fixed.has(id) || (id.startsWith("provider-dataset-native-") && id.endsWith("-points")))
     .filter((id) => Boolean(map.getLayer(id)));
@@ -79,31 +85,11 @@ function stripHtml(value: unknown): string {
 }
 
 function circleFeature(provider: ProviderSelection, miles: number): GeoJSON.Feature<GeoJSON.Polygon> {
-  const earthRadiusMiles = 3958.7613;
-  const angularDistance = miles / earthRadiusMiles;
-  const lat1 = provider.lat * Math.PI / 180;
-  const lng1 = provider.lng * Math.PI / 180;
-  const coordinates: Array<[number, number]> = [];
-
-  for (let index = 0; index <= 96; index += 1) {
-    const bearing = (index / 96) * Math.PI * 2;
-    const lat2 = Math.asin(
-      Math.sin(lat1) * Math.cos(angularDistance)
-      + Math.cos(lat1) * Math.sin(angularDistance) * Math.cos(bearing),
-    );
-    const lng2 = lng1 + Math.atan2(
-      Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(lat1),
-      Math.cos(angularDistance) - Math.sin(lat1) * Math.sin(lat2),
-    );
-    const lng = ((lng2 * 180 / Math.PI + 540) % 360) - 180;
-    coordinates.push([lng, lat2 * 180 / Math.PI]);
-  }
-
-  return {
-    type: "Feature",
-    geometry: { type: "Polygon", coordinates: [coordinates] },
+  return turfCircle([provider.lng, provider.lat], miles, {
+    units: "miles",
+    steps: 96,
     properties: { key: provider.key, name: provider.name, miles },
-  };
+  });
 }
 
 function coverageCollection(): GeoJSON.FeatureCollection {
@@ -128,7 +114,6 @@ function setSourceData(map: mapboxgl.Map, sourceId: string, data: GeoJSON.Featur
 }
 
 function ensureOverlayLayers(map: mapboxgl.Map): void {
-  if (!map.isStyleLoaded()) return;
   setSourceData(map, COVERAGE_SOURCE_ID, coverageCollection());
   setSourceData(map, BOUNDARY_SOURCE_ID, boundaryCollection());
 
@@ -173,11 +158,9 @@ function ensureOverlayLayers(map: mapboxgl.Map): void {
 
 function refreshOverlays(): void {
   for (const map of getTrackedMapboxMaps()) {
-    if (!map.isStyleLoaded()) continue;
     try {
-      ensureOverlayLayers(map);
-      (map.getSource(COVERAGE_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined)?.setData(coverageCollection());
-      (map.getSource(BOUNDARY_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined)?.setData(boundaryCollection());
+      // ensureOverlayLayers writes the current coverage and boundary data.
+      runWhenStyleReady(map, "map-coverage-geographic-focus", () => ensureOverlayLayers(map));
     } catch (error) {
       console.warn("Map coverage/geographic focus overlay update failed", error);
     }
@@ -224,7 +207,7 @@ function toggleProvider(provider: ProviderSelection): void {
 
 function bindMap(map: mapboxgl.Map): () => void {
   const apply = () => {
-    try { ensureOverlayLayers(map); } catch (error) { console.warn("Map coverage/geographic focus layer setup failed", error); }
+    try { runWhenStyleReady(map, "map-coverage-geographic-focus", () => ensureOverlayLayers(map)); } catch (error) { console.warn("Map coverage/geographic focus layer setup failed", error); }
   };
   const onClick = (event: mapboxgl.MapMouseEvent) => {
     if (!selectingProviders || radiusMiles === 0) return;
@@ -235,7 +218,7 @@ function bindMap(map: mapboxgl.Map): () => void {
   map.on("load", apply);
   map.on("style.load", apply);
   map.on("click", onClick);
-  if (map.isStyleLoaded()) queueMicrotask(apply);
+  queueMicrotask(apply);
 
   return () => {
     map.off("load", apply);
@@ -382,21 +365,12 @@ async function searchBoundaries(kind: BoundaryKind, query: string): Promise<Boun
   }).slice(0, 18);
 }
 
-function visitCoordinates(value: unknown, bounds: mapboxgl.LngLatBounds): void {
-  if (!Array.isArray(value)) return;
-  if (value.length >= 2 && typeof value[0] === "number" && typeof value[1] === "number") {
-    bounds.extend([value[0], value[1]]);
-    return;
-  }
-  value.forEach((child) => visitCoordinates(child, bounds));
-}
-
 function fitSelectedBoundaries(): void {
   const map = getActiveMapboxMap();
   if (!map || selectedBoundaries.size === 0) return;
-  const bounds = new mapboxgl.LngLatBounds();
-  for (const selection of selectedBoundaries.values()) visitCoordinates(selection.feature.geometry.coordinates, bounds);
-  if (!bounds.isEmpty()) map.fitBounds(bounds, { padding: 48, duration: 700, maxZoom: 11 });
+  const [west, south, east, north] = turfBbox(boundaryCollection());
+  if (![west, south, east, north].every(Number.isFinite)) return;
+  map.fitBounds([[west, south], [east, north]], { padding: 48, duration: 700, maxZoom: 11 });
 }
 
 function renderBoundarySelected(view: BoundaryView): void {

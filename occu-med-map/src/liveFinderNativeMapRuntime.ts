@@ -1,5 +1,5 @@
 import mapboxgl from "mapbox-gl";
-import { getTrackedMapboxMaps, registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
+import { getTrackedMapboxMaps, registerMapboxMapInitializer, runWhenStyleReady } from "./mapboxMapLifecycleRuntime";
 import { buildProviderPointFeature, ensureProviderPointLayer } from "./providerPointNativeRuntime";
 
 export type NativeLivePoint = {
@@ -151,7 +151,6 @@ function ensureAreaLayers(
 }
 
 function ensureLayers(map: mapboxgl.Map): void {
-  if (!map.isStyleLoaded()) return;
   ensureAreaLayers(map, IDS.drop, collections.drop);
   ensureAreaLayers(map, IDS.reference, collections.reference);
   ensureAreaLayers(map, IDS.search, collections.search);
@@ -172,11 +171,9 @@ function ensureLayers(map: mapboxgl.Map): void {
 
 function update(channel: Channel): void {
   for (const map of getTrackedMapboxMaps()) {
-    if (!map.isStyleLoaded()) continue;
     try {
-      ensureLayers(map);
-      const sourceId = IDS[channel].source;
-      (map.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined)?.setData(collections[channel]);
+      // ensureLayers writes every channel's current collection.
+      runWhenStyleReady(map, "live-finder-native-overlays", () => ensureLayers(map));
     } catch (error) {
       console.warn(`Native ${channel} overlay update failed`, error);
     }
@@ -283,16 +280,7 @@ registerMapboxMapInitializer({
   id: "live-finder-native-map",
   priority: 13,
   initialize: (map) => {
-    let styleRetryTimer = 0;
-    const apply = () => {
-      window.clearTimeout(styleRetryTimer);
-      styleRetryTimer = 0;
-      if (!map.isStyleLoaded()) {
-        styleRetryTimer = window.setTimeout(apply, 50);
-        return;
-      }
-      ensureLayers(map);
-    };
+    const apply = () => runWhenStyleReady(map, "live-finder-native-overlays", () => ensureLayers(map));
     const click = (event: mapboxgl.MapMouseEvent) => {
       const feature = featureAt(map, event.point);
       if (!feature) return;
@@ -310,7 +298,6 @@ registerMapboxMapInitializer({
     map.on("click", click);
     queueMicrotask(apply);
     return () => {
-      window.clearTimeout(styleRetryTimer);
       map.off("style.load", apply);
       map.off("load", apply);
       map.off("click", click);

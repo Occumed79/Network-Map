@@ -1,6 +1,6 @@
 import mapboxgl from "mapbox-gl";
 import { mapboxGeocode, type MapboxBounds, type MapboxPlace } from "./mapboxServices";
-import { registerMapboxMapInitializer } from "./mapboxMapLifecycleRuntime";
+import { registerMapboxMapInitializer, runWhenStyleReady } from "./mapboxMapLifecycleRuntime";
 import { registerMapToolsSection } from "./mapToolsPanelRegistry";
 import { buildProviderPointFeature, ensureProviderPointLayer } from "./providerPointNativeRuntime";
 import { normalizedProviderClickListener } from "./providerTypeNormalizationRuntime";
@@ -150,7 +150,6 @@ function bindInteractions(map: mapboxgl.Map): void {
 }
 
 function ensureLayer(map: mapboxgl.Map): void {
-  if (!map.isStyleLoaded()) return;
   ensureProviderPointLayer(map, {
     sourceId: SOURCE_ID,
     layerId: LAYER_ID,
@@ -177,9 +176,8 @@ function ensureLayer(map: mapboxgl.Map): void {
 function pushCollection(collection: ResultCollection): void {
   latestCollection = collection;
   for (const map of trackedMaps) {
-    ensureLayer(map);
-    const source = map.getSource(SOURCE_ID) as mapboxgl.GeoJSONSource | undefined;
-    source?.setData(collection);
+    // ensureLayer upserts the source with latestCollection.
+    runWhenStyleReady(map, "provider-location-finder", () => ensureLayer(map));
   }
 }
 

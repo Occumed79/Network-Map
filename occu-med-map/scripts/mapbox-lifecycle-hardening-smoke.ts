@@ -76,11 +76,30 @@ for (const [file, id, priority] of registeredInitializers) {
 }
 
 for (const file of [
-  "src/mapToolsNativeMapRuntime.ts",
   "src/phaseTwoNativeMapRuntime.ts",
 ] as const) {
   const content = source(file);
   assert.match(content, /isStyleLoaded\(\)/, `${file} must guard native overlay installation on style readiness`);
+  assert.doesNotMatch(content, /if \(!map\.getStyle\(\)\)/, `${file} must not call getStyle as a pre-style readiness guard`);
+}
+
+// isStyleLoaded() is false whenever any tile or GeoJSON job is pending, so
+// overlay owners that gate writes on it silently drop user actions during
+// ordinary camera movement. They must defer through runWhenStyleReady, which
+// only waits for the style document and replays refused work on style.load.
+assert.match(lifecycle, /export function runWhenStyleReady/, "the lifecycle runtime must own style-readiness deferral");
+assert.match(lifecycle, /map\.on\("style\.load", flush\)/, "deferred style work must replay on style.load");
+for (const file of [
+  "src/mapToolsNativeMapRuntime.ts",
+  "src/mapCoverageGeographicFocusRuntime.ts",
+  "src/providerLocationFinderRuntime.ts",
+  "src/liveFinderNativeMapRuntime.ts",
+  "src/usDiagnosticsNativeMapRuntime.ts",
+  "src/features/driveTime/mapboxEtaRouteLayer.ts",
+] as const) {
+  const content = source(file);
+  assert.match(content, /runWhenStyleReady\(/, `${file} must defer overlay writes through runWhenStyleReady`);
+  assert.doesNotMatch(content, /isStyleLoaded\(\)/, `${file} must not gate overlay writes on isStyleLoaded()`);
   assert.doesNotMatch(content, /if \(!map\.getStyle\(\)\)/, `${file} must not call getStyle as a pre-style readiness guard`);
 }
 

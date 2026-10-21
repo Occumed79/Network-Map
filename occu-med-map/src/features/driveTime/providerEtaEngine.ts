@@ -1,4 +1,5 @@
-import { mapboxDirections } from "../../mapboxServices";
+import turfDistance from "@turf/distance";
+import { mapboxDirections, mapboxMatrix, type MapboxMatrixCell } from "../../mapboxServices";
 import type { EtaOrigin, EtaProviderCandidate, EtaProviderRanking, EtaRankingOptions, EtaRankingResult } from "./providerEtaTypes";
 
 const DEFAULT_OPTIONS: Required<EtaRankingOptions> = {
@@ -9,13 +10,7 @@ const DEFAULT_OPTIONS: Required<EtaRankingOptions> = {
 };
 
 export function milesBetween(a: Pick<EtaOrigin, "lat" | "lng">, b: Pick<EtaOrigin, "lat" | "lng">): number {
-  const radiusMiles = 3958.7613;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const lat1 = (a.lat * Math.PI) / 180;
-  const lat2 = (b.lat * Math.PI) / 180;
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return 2 * radiusMiles * Math.asin(Math.sqrt(h));
+  return turfDistance([a.lng, a.lat], [b.lng, b.lat], { units: "miles" });
 }
 
 export function normalizeCandidateName(value: string): string {
@@ -47,6 +42,16 @@ export function prepareEtaCandidates(
     .slice(0, opts.maxCandidates);
 }
 
+// Directions fallback for when the Matrix API is unavailable to the token:
+// still one request per candidate, but issued concurrently rather than in
+// sequence.
+async function directionsCells(origin: EtaOrigin, candidates: EtaProviderCandidate[], profile: string): Promise<MapboxMatrixCell[]> {
+  const settled = await Promise.allSettled(candidates.map((candidate) => mapboxDirections(origin, candidate, profile)));
+  return settled.map((result) => result.status === "fulfilled"
+    ? { distanceMiles: result.value.distanceMiles, durationMinutes: result.value.durationMinutes }
+    : null);
+}
+
 export async function rankProvidersByEta(
   origin: EtaOrigin,
   candidates: EtaProviderCandidate[],
@@ -54,25 +59,36 @@ export async function rankProvidersByEta(
 ): Promise<EtaRankingResult> {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const prepared = prepareEtaCandidates(origin, candidates, opts).slice(0, opts.maxRouteCalls);
+  if (prepared.length === 0) return { origin, rankings: [], attempted: 0, failed: 0 };
+
+  // One Matrix API request returns every drive time; route geometry is
+  // fetched only for the row the user asks to see (see etaRouteEvents).
+  let cells: MapboxMatrixCell[];
+  try {
+    cells = await mapboxMatrix(origin, prepared, opts.routeProfile);
+  } catch (error) {
+    console.warn("Mapbox Matrix ranking failed; falling back to Directions", error);
+    cells = await directionsCells(origin, prepared, opts.routeProfile);
+  }
+
   const rankings: EtaProviderRanking[] = [];
   let failed = 0;
-
-  for (const candidate of prepared) {
-    try {
-      const route = await mapboxDirections(origin, candidate, opts.routeProfile);
-      rankings.push({
-        ...candidate,
-        rank: 0,
-        driveMiles: route.distanceMiles,
-        driveMinutes: route.durationMinutes,
-        routeCoordinates: route.coordinates,
-        originLabel: origin.label || `${origin.lat.toFixed(4)}, ${origin.lng.toFixed(4)}`,
-        routeProfile: opts.routeProfile,
-      });
-    } catch {
+  prepared.forEach((candidate, index) => {
+    const cell = cells[index];
+    if (!cell || !Number.isFinite(cell.durationMinutes)) {
       failed += 1;
+      return;
     }
-  }
+    rankings.push({
+      ...candidate,
+      rank: 0,
+      driveMiles: Number.isFinite(cell.distanceMiles) ? cell.distanceMiles : candidate.straightMiles || 0,
+      driveMinutes: cell.durationMinutes,
+      routeCoordinates: [],
+      originLabel: origin.label || `${origin.lat.toFixed(4)}, ${origin.lng.toFixed(4)}`,
+      routeProfile: opts.routeProfile,
+    });
+  });
 
   rankings.sort((a, b) => a.driveMinutes - b.driveMinutes);
   rankings.forEach((ranking, index) => {

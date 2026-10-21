@@ -397,8 +397,18 @@ function waitForMapReady(instance: mapboxgl.Map, label: string): Promise<void> {
     };
 
     const onReady = () => finish();
+    // Only a failure to load the style document itself is fatal. isStyleLoaded()
+    // stays false while tiles stream in, so it cannot tell a dead style from a
+    // transient tile error or a rejected overlay layer on a working map.
+    const styleDocumentLoaded = () => {
+      try {
+        return Boolean(instance.getStyle());
+      } catch {
+        return false;
+      }
+    };
     const onError = (event: mapboxgl.ErrorEvent) => {
-      if (instance.isStyleLoaded()) return;
+      if (styleDocumentLoaded()) return;
       finish(new Error(event?.error?.message || `${label} failed to load`));
     };
 

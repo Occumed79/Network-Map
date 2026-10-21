@@ -177,3 +177,47 @@ jobs:
         run: pnpm --filter @workspace/occu-med-map build
       - name: Run disposable API/write/rollback acceptance
         run: node api-server/scripts/ci-api-integration.mjs
+
+  map-tools:
+    name: chromium / Map Tools functional engines (2D, globe, globe-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Well-formed placeholder token: the official Mapbox SDK validates token
+      # structure. Every Mapbox request is mocked by the acceptance script.
+      VITE_MAPBOX_TOKEN: pk.eyJ1IjoiY2ktbmV0d29yay1tYXAiLCJhIjoiY2kifQ.ci-signature
+      VITE_MAPBOX_TOKEN_2: pk.eyJ1IjoiY2ktbmV0d29yay1tYXAiLCJhIjoiY2kifQ.ci-signature
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Build frontend
+        run: pnpm --filter @workspace/occu-med-map build
+      - name: Install browser
+        run: pnpm --filter @workspace/occu-med-map exec playwright install --with-deps chromium
+      - name: Start deterministic frontend preview
+        run: |
+          pnpm --filter @workspace/occu-med-map exec vite preview --config vite.config.ts --host 127.0.0.1 --port 4173 > /tmp/network-map-preview.log 2>&1 &
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:4173/ >/dev/null; then exit 0; fi
+            sleep 0.5
+          done
+          cat /tmp/network-map-preview.log
+          exit 1
+      - name: Run Map Tools engine acceptance
+        env:
+          NETWORK_MAP_CI_UI_URL: http://127.0.0.1:4173
+        shell: bash
+        run: timeout --signal=TERM --kill-after=10s 900s pnpm --filter @workspace/occu-med-map exec node scripts/ci-map-tools-engine-acceptance.mjs
+      - name: Upload Map Tools evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: map-tools-engine-acceptance
+          path: |
+            occu-med-map/test-results/map-tools-engine
+            /tmp/network-map-preview.log
+          if-no-files-found: ignore

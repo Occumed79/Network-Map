@@ -228,7 +228,7 @@ async function queryStored(pool: ReturnType<typeof getPool>, ctx: QueryContext, 
   if (mode === "density" || mode === "hex") return { providers: [] as ProviderFeature[], total };
   const offset = queryOffset ?? (page - 1) * limit;
   params.push(limit, offset);
-  const rows = (await queryWithStatementTimeout(pool, `${selectSql()} ${from} ${where} ORDER BY id ASC LIMIT ${params.length - 1} OFFSET ${params.length}`, params)).rows;
+  const rows = (await queryWithStatementTimeout(pool, `${selectSql()} ${from} ${where} ORDER BY id ASC LIMIT $${params.length - 1} OFFSET $${params.length}`, params)).rows;
   return { providers: normalizeRows(rows), total };
 }
 

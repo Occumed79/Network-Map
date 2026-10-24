@@ -62,6 +62,7 @@ const providerExplorerSource = fs.readFileSync(path.join(here, '../src/routes/pr
 assert.doesNotMatch(providerExplorerSource, /medical_providers/, 'Provider Explorer must never query the legacy medical_providers table');
 assert.doesNotMatch(providerExplorerSource, /detectProviderSchema/, 'Provider Explorer must not use the generic legacy-capable schema detector');
 assert.match(providerExplorerSource, /provider_master_map_view/, 'Provider Explorer stored inventory must use the canonical provider view');
+assert.doesNotMatch(providerExplorerSource, /(LIMIT|OFFSET) \$\{/, 'LIMIT/OFFSET must use $N bind placeholders, not interpolated parameter indexes');
 
 const mergedMyClinics = mergeMyClinicsLayerProviders(
   [{ name: 'Uploaded Clinic', lat: 34.05, lng: -118.24, source_id: 'upload:1' }],
